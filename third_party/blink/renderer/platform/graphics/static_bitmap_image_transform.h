@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_TRANSFORM_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_TRANSFORM_H_
 
+#include "third_party/blink/renderer/platform/graphics/flush_reason.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
@@ -34,10 +35,10 @@ class PLATFORM_EXPORT StaticBitmapImageTransform {
     // reinterpret the image as being sRGB).
     bool reinterpret_as_srgb = false;
 
-    // If this is set to a non-nullptr value, then convert the source to this
-    // color space. It's not clear what it means to set `dest_color_space` and
-    // also `reinterpret_as_srgb`, so any call with both parameters will CHECK.
-    sk_sp<SkColorSpace> dest_color_space;
+    // If this is set, then convert the source to this color space. It's not
+    // clear what it means to set `dest_color_space` and also
+    // `reinterpret_as_srgb`, so any call with both parameters will CHECK.
+    std::optional<gfx::ColorSpace> dest_color_space;
 
     // If false, then strip the orientation from teh imgae (and therefore
     // reinterpret the image as having the origin be the top-left).
@@ -55,27 +56,17 @@ class PLATFORM_EXPORT StaticBitmapImageTransform {
 
   // Apply the specified transform to the indcated image.
   static scoped_refptr<StaticBitmapImage> Apply(
-      FlushReason,
       scoped_refptr<StaticBitmapImage> image,
       const Params& params);
 
   // Create a copy of the input image, with a newly created backing.
   static scoped_refptr<StaticBitmapImage> Clone(
-      FlushReason,
       scoped_refptr<StaticBitmapImage> image);
-
-  // If `image` has unpremultiplied alpha, the multipl alpha. If `image` is
-  // opaque or already premultiplied, return `image.
-  static scoped_refptr<StaticBitmapImage> GetWithAlphaDisposition(
-      FlushReason,
-      scoped_refptr<StaticBitmapImage> image,
-      AlphaDisposition);
 
   // Convert `image` to the specified color space.
   static scoped_refptr<StaticBitmapImage> ConvertToColorSpace(
-      FlushReason,
       scoped_refptr<StaticBitmapImage> image,
-      sk_sp<SkColorSpace> color_space);
+      const gfx::ColorSpace& color_space);
 
  private:
   // Apply the specified transform by manipulating SkPixmaps in software. This
@@ -88,7 +79,6 @@ class PLATFORM_EXPORT StaticBitmapImageTransform {
   // Apply the specified transform by using a blit. The blit may be done on the
   // GPU or may be done in software. The result is always premultiplied.
   static scoped_refptr<StaticBitmapImage> ApplyWithBlit(
-      FlushReason,
       scoped_refptr<StaticBitmapImage> image,
       const Params& params);
 };

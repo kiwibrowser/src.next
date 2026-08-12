@@ -70,11 +70,17 @@
   <message name="IDS_SITE_SETTINGS_TYPE_CAMERA_PAN_TILT_ZOOM_WITH_COUNT" desc="The label used for the Camera PTZ site settings controls, in addition to the number of real cameras.">
     Camera use &amp; movement (<ph name="CAMERAS_COUNT">$1<ex>1</ex></ph>)
   </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL" desc="The label used for the Captured Surface Control site settings controls.">
+    Scrolling and zooming shared tabs
+  </message>
   <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL_MID_SENTENCE" desc="The label used for the Captured Surface Control site settings controls when used mid-sentence.">
-    scrolling &amp; zooming
+    scrolling and zooming shared tabs
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL_SHARED_TABS" desc="The label used for the main menu in Captured Surface Control site settings controls.">
     Shared tabs
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL_SHARED_TABS_MID_SENTENCE" desc="The label used for the main menu in Captured Surface Control settings controls when used mid-sentence.">
+    shared tabs
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL_SUB_MENU" desc="The label used for the sub menu in Captured Surface Control site settings controls.">
     Scrolling &amp; zooming
@@ -116,7 +122,7 @@
     javascript
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_JAVASCRIPT_OPTIMIZER" desc="The label for the JavaScript optimizer site settings controls.">
-    V8 optimizer
+    JavaScript optimization &amp; security
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_LOCATION" desc="The label used for geolocation site settings controls." meaning="Geolocation">
     Location
@@ -138,6 +144,12 @@
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_MIDI_SYSEX_MID_SENTENCE" desc="The label used for system exclusive messages for MIDI devices site settings controls when used mid-sentence.">
     MIDI device control &amp; reprogram
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_MOTION_AND_LIGHT_SENSORS" desc="The label used for the motion sensor (accelerometer, gyroscope, magnetometer) site settings controls.">
+    Motion and light sensors
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_MOTION_AND_LIGHT_SENSORS_MID_SENTENCE" desc="The label used for the motion sensor (accelerometer, gyroscope, magnetometer) site settings controls when used mid-sentence.">
+    motion and light sensors
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_MOTION_SENSORS" desc="The label used for the motion sensor (accelerometer, gyroscope, magnetometer) site settings controls.">
     Motion sensors
@@ -168,12 +180,6 @@
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_PROTECTED_MEDIA_ID_MID_SENTENCE" desc="The label used for the protected media identifier site setting that controls content controlled by DRM (e.g. paid subscriptions) when used mid-sentence. Protected content refers to DRM-controlled content. IDs is short for identifiers; use abbreviation to avoid truncation.">
     protected content IDs
-  </message>
-  <message name="IDS_SITE_SETTINGS_TYPE_SENSORS" desc="The label used for the sensor site settings controls. Sensors are motion and light sensors, specifically accelerometers, gyroscope, magnetometers, and ambient-light sensors.">
-    Motion or light sensors
-  </message>
-  <message name="IDS_SITE_SETTINGS_TYPE_SENSORS_MID_SENTENCE" desc="The label used for the sensor site settings controls when used mid-sentence. Sensors are motion and light sensors, specifically accelerometers, gyroscope, magnetometers, and ambient-light sensors.">
-    motion or light sensors
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_SOUND" desc="The label used for the sound site settings controls.">
     Sound
@@ -206,6 +212,27 @@
   <message name="IDS_SITE_SETTINGS_TYPE_FILE_SYSTEM_ACCESS_WRITE_MID_SENTENCE" desc="The label used for the File System Access write site settings controls when used mid-sentence. The write permission determines whether sites are allowed to save to the original file that was selected by the user through the File System Access API.">
     file editing
   </message>
+
+  <message name="IDS_SITE_SETTINGS_TYPE_LOCAL_NETWORK" desc="The label used for the local network site settings controls.">
+    Local network
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_LOCAL_NETWORK_MID_SENTENCE" desc="The label used for the local network site settings controls when used mid-sentence.">
+    local network
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_LOOPBACK_NETWORK" desc="The label used for the loopback network site settings controls.">
+    Apps on device
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_LOOPBACK_NETWORK_MID_SENTENCE" desc="The label used for the loopback network site settings controls when used mid-sentence.">
+    apps on device
+  </message>
+
+  <message name="IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT" desc="The label used for the window management site settings controls.">
+    Window management
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT_MID_SENTENCE" desc="The label used for the window management site settings controls when used mid-sentence.">
+    window management
+  </message>
+
   <!-- Site Settings desktop-only -->
   <if expr="not is_android">
   <message name="IDS_SITE_SETTINGS_TYPE_FONT_ACCESS" desc="The label used for the local font access site settings controls.">
@@ -239,10 +266,10 @@
     insecure content
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_KEYBOARD_LOCK" desc="The label used for the keyboard lock site settings controls.">
-    Keyboard lock and use
+    Keyboard override
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_KEYBOARD_LOCK_MID_SENTENCE" desc="The label used for the keyboard lock site settings controls when used mid-sentence, e.g. 'Automatically blocked keyboard lock and use'.">
-    keyboard lock and use
+    keyboard override
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_PAYMENT_HANDLER" desc="The label used for the payment handler site settings controls.">
     Payment handlers
@@ -265,6 +292,11 @@
   <message name="IDS_SITE_SETTINGS_TYPE_SERIAL_PORTS_MID_SENTENCE" desc="The label used for the serial ports site settings controls when used mid-sentence.">
     serial ports
   </message>
+<if expr="is_chromeos">
+  <message name="IDS_SITE_SETTINGS_TYPE_SMART_CARD_READERS" desc="The label used for the smart card readers site settings controls.">
+    Smart card readers
+  </message>
+</if>
   <message name="IDS_SITE_SETTINGS_TYPE_ZOOM_LEVELS" desc="The label used for the zoom levels site settings controls.">
     Zoom levels
   </message>
@@ -272,22 +304,16 @@
     zoom levels
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_WEB_APP_INSTALLATION" desc="The label used for the web app installation site settings controls.">
-    Web applications
+    Web app installations
   </message>
-  <message name="IDS_SITE_SETTINGS_TYPE_WEB_APP_INSTALLATION_MID_SENTENCE" desc="The label used for the web app installation site settings controls when used mid-sentence. 'apps' is being used as an acceptable abbreviation of 'applications'.">
-    web applications
+  <message name="IDS_SITE_SETTINGS_TYPE_WEB_APP_INSTALLATION_MID_SENTENCE" desc="The label used for the web app installation site settings controls when used mid-sentence.">
+    web app installations
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_WEB_PRINTING" desc="The label used for the web printing site settings controls.">
     Advanced printer features
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_WEB_PRINTING_MID_SENTENCE" desc="The label used for the web printing site settings controls when used mid-sentence.">
     advanced printer features
-  </message>
-  <message name="IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT" desc="The label used for the window management site settings controls.">
-    Window management
-  </message>
-  <message name="IDS_SITE_SETTINGS_TYPE_WINDOW_MANAGEMENT_MID_SENTENCE" desc="The label used for the window management site settings controls when used mid-sentence.">
-    window management
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_PERFORMANCE" desc="The label used for the performance site settings controls.">
     Performance

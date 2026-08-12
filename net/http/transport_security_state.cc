@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/http/transport_security_state.h"
 
 #include <algorithm>
@@ -20,7 +15,7 @@
 
 #include "base/base64.h"
 #include "base/build_time.h"
-#include "base/containers/contains.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -36,10 +31,10 @@
 #include "base/values.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "crypto/hash.h"
 #include "crypto/sha2.h"
 #include "net/base/features.h"
 #include "net/base/hash_value.h"
-#include "net/base/host_port_pair.h"
 #include "net/base/url_util.h"
 #include "net/cert/ct_policy_status.h"
 #include "net/cert/x509_certificate.h"
@@ -70,19 +65,14 @@ TransportSecurityState::HashedHost HashHost(
 
 // Returns true if the intersection of |a| and |b| is not empty. If either
 // |a| or |b| is empty, returns false.
-bool HashesIntersect(const HashValueVector& a, const HashValueVector& b) {
-  for (const auto& hash : a) {
-    if (base::Contains(b, hash))
+bool HashesIntersect(const absl::flat_hash_set<SHA256HashValue>& a,
+                     const std::vector<SHA256HashValue>& b) {
+  for (const auto& hash : b) {
+    if (a.contains(hash)) {
       return true;
+    }
   }
   return false;
-}
-
-bool AddHash(const char* sha256_hash, HashValueVector* out) {
-  HashValue hash(HASH_VALUE_SHA256);
-  memcpy(hash.data(), sha256_hash, hash.size());
-  out->push_back(hash);
-  return true;
 }
 
 // Converts |hostname| from dotted form ("www.google.com") to the form
@@ -112,14 +102,11 @@ std::vector<uint8_t> CanonicalizeHost(std::string_view host) {
 // PreloadResult is the result of resolving a specific name in the preloaded
 // data.
 struct PreloadResult {
-  uint32_t pinset_id = 0;
   // hostname_offset contains the number of bytes from the start of the given
   // hostname where the name of the matching entry starts.
   size_t hostname_offset = 0;
   bool sts_include_subdomains = false;
-  bool pkp_include_subdomains = false;
   bool force_https = false;
-  bool has_pins = false;
 };
 
 using extras::PreloadDecoder;
@@ -151,18 +138,8 @@ class HSTSPreloadDecoder : public extras::PreloadDecoder {
       tmp.sts_include_subdomains = true;
     } else {
       if (!reader->Next(&tmp.sts_include_subdomains) ||
-          !reader->Next(&tmp.force_https) || !reader->Next(&tmp.has_pins)) {
+          !reader->Next(&tmp.force_https)) {
         return false;
-      }
-
-      tmp.pkp_include_subdomains = tmp.sts_include_subdomains;
-
-      if (tmp.has_pins) {
-        if (!reader->Read(4, &tmp.pinset_id) ||
-            (!tmp.sts_include_subdomains &&
-             !reader->Next(&tmp.pkp_include_subdomains))) {
-          return false;
-        }
       }
     }
 
@@ -170,7 +147,7 @@ class HSTSPreloadDecoder : public extras::PreloadDecoder {
 
     if (current_search_offset == 0 ||
         search[current_search_offset - 1] == '.') {
-      *out_found = tmp.sts_include_subdomains || tmp.pkp_include_subdomains;
+      *out_found = tmp.sts_include_subdomains;
 
       result_ = tmp;
 
@@ -190,10 +167,11 @@ class HSTSPreloadDecoder : public extras::PreloadDecoder {
   PreloadResult result_;
 };
 
-bool DecodeHSTSPreload(const std::string& search_hostname, PreloadResult* out) {
+bool DecodeHSTSPreload(std::string_view search_hostname, PreloadResult* out) {
 #if !BUILDFLAG(INCLUDE_TRANSPORT_SECURITY_STATE_PRELOAD_LIST)
-  if (g_hsts_source == nullptr)
+  if (g_hsts_source == nullptr) {
     return false;
+  }
 #endif
   bool found = false;
 
@@ -203,33 +181,32 @@ bool DecodeHSTSPreload(const std::string& search_hostname, PreloadResult* out) {
     return false;
   }
   // Normalize any trailing '.' used for DNS suffix searches.
-  std::string hostname = search_hostname;
-  size_t trailing_dot_found = hostname.find_last_not_of('.');
-  if (trailing_dot_found != std::string::npos) {
-    hostname.erase(trailing_dot_found + 1);
-  } else {
-    hostname.clear();
+  size_t trailing_dot_found = search_hostname.find_last_not_of('.');
+  if (trailing_dot_found == std::string::npos) {
+    return false;
   }
+  search_hostname.remove_suffix(search_hostname.size() - trailing_dot_found -
+                                1);
 
   // |hostname| has already undergone IDN conversion, so should be
   // entirely A-Labels. The preload data is entirely normalized to
   // lower case.
-  hostname = base::ToLowerASCII(hostname);
+  std::string hostname = base::ToLowerASCII(search_hostname);
   if (hostname.empty()) {
     return false;
   }
 
   HSTSPreloadDecoder decoder(
-      g_hsts_source->huffman_tree, g_hsts_source->huffman_tree_size,
-      g_hsts_source->preloaded_data, g_hsts_source->preloaded_bits,
-      g_hsts_source->root_position);
+      g_hsts_source->huffman_tree, g_hsts_source->preloaded_data,
+      g_hsts_source->preloaded_bits, g_hsts_source->root_position);
   if (!decoder.Decode(hostname, &found)) {
     DCHECK(false) << "Internal error in DecodeHSTSPreload for hostname "
                   << hostname;
     return false;
   }
-  if (found)
+  if (found) {
     *out = decoder.result();
+  }
   return found;
 }
 
@@ -260,16 +237,16 @@ TransportSecurityState::TransportSecurityState(
 
 // Both HSTS and HPKP cause fatal SSL errors, so return true if a
 // host has either.
-bool TransportSecurityState::ShouldSSLErrorsBeFatal(const std::string& host) {
+bool TransportSecurityState::ShouldSSLErrorsBeFatal(std::string_view host) {
   STSState unused_sts;
   PKPState unused_pkp;
   return GetSTSState(host, &unused_sts) || GetPKPState(host, &unused_pkp);
 }
 
-base::Value::Dict TransportSecurityState::NetLogUpgradeToSSLParam(
-    const std::string& host) {
+base::DictValue TransportSecurityState::NetLogUpgradeToSSLParam(
+    std::string_view host) {
   STSState sts_state;
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("host", host);
   dict.Set("get_sts_state_result", GetSTSState(host, &sts_state));
   dict.Set("should_upgrade_to_ssl", sts_state.ShouldUpgradeToSSL());
@@ -279,11 +256,20 @@ base::Value::Dict TransportSecurityState::NetLogUpgradeToSSLParam(
 }
 
 SSLUpgradeDecision TransportSecurityState::GetSSLUpgradeDecision(
-    const std::string& host,
+    std::string_view host,
+    bool is_top_level_nav,
     const NetLogWithSource& net_log) {
   net_log.AddEvent(
       NetLogEventType::TRANSPORT_SECURITY_STATE_SHOULD_UPGRADE_TO_SSL,
       [&] { return NetLogUpgradeToSSLParam(host); });
+
+  // Only top level navigations should be upgraded when
+  // kHstsTopLevelNavigationsOnly is enabled.
+  if (!is_top_level_nav &&
+      base::FeatureList::IsEnabled(features::kHstsTopLevelNavigationsOnly)) {
+    return SSLUpgradeDecision::kNoUpgrade;
+  }
+
   STSState sts_state;
   // Check the dynamic list first (removing the entry if expired).
   if (GetDynamicSTSState(host, &sts_state)) {
@@ -311,70 +297,51 @@ SSLUpgradeDecision TransportSecurityState::GetSSLUpgradeDecision(
 }
 
 bool TransportSecurityState::ShouldUpgradeToSSL(
-    const std::string& host,
+    std::string_view host,
+    bool is_top_level_nav,
     const NetLogWithSource& net_log) {
-  return GetSSLUpgradeDecision(host, net_log) != SSLUpgradeDecision::kNoUpgrade;
+  return GetSSLUpgradeDecision(host, is_top_level_nav, net_log) !=
+         SSLUpgradeDecision::kNoUpgrade;
 }
 
 TransportSecurityState::PKPStatus TransportSecurityState::CheckPublicKeyPins(
-    const HostPortPair& host_port_pair,
+    std::string_view host,
     bool is_issued_by_known_root,
-    const HashValueVector& public_key_hashes) {
+    const std::vector<SHA256HashValue>& public_key_hashes) {
   // Perform pin validation only if the server actually has public key pins.
-  if (!HasPublicKeyPins(host_port_pair.host())) {
+  if (!HasPublicKeyPins(host)) {
     return PKPStatus::OK;
   }
 
-  return CheckPublicKeyPinsImpl(host_port_pair, is_issued_by_known_root,
+  return CheckPublicKeyPinsImpl(host, is_issued_by_known_root,
                                 public_key_hashes);
 }
 
-bool TransportSecurityState::HasPublicKeyPins(const std::string& host) {
+bool TransportSecurityState::HasPublicKeyPins(std::string_view host) {
   PKPState pkp_state;
   return GetPKPState(host, &pkp_state) && pkp_state.HasPublicKeyPins();
 }
 
-TransportSecurityState::CTRequirementsStatus
-TransportSecurityState::CheckCTRequirements(
-    const HostPortPair& host_port_pair,
+ct::CTRequirementsStatus TransportSecurityState::CheckCTRequirements(
+    std::string_view host,
     bool is_issued_by_known_root,
-    const HashValueVector& public_key_hashes,
+    const std::vector<SHA256HashValue>& public_key_hashes,
     const X509Certificate* validated_certificate_chain,
     ct::CTPolicyCompliance policy_compliance) {
-  using CTRequirementLevel = RequireCTDelegate::CTRequirementLevel;
-
   // If CT is emergency disabled, we don't require CT for any host.
   if (ct_emergency_disable_) {
-    return CT_NOT_REQUIRED;
+    return ct::CTRequirementsStatus::CT_NOT_REQUIRED;
   }
 
-  // CT is not required if the certificate does not chain to a publicly
-  // trusted root certificate.
-  if (!is_issued_by_known_root) {
-    return CT_NOT_REQUIRED;
+  // If CT is disabled, the delegate will be null. Don't require CT for any
+  // host.
+  if (!require_ct_delegate_) {
+    return ct::CTRequirementsStatus::CT_NOT_REQUIRED;
   }
 
-  // A connection is considered compliant if it has sufficient SCTs or if the
-  // build is outdated. Other statuses are not considered compliant; this
-  // includes COMPLIANCE_DETAILS_NOT_AVAILABLE because compliance must have been
-  // evaluated in order to determine that the connection is compliant.
-  bool complies =
-      (policy_compliance ==
-           ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS ||
-       policy_compliance == ct::CTPolicyCompliance::CT_POLICY_BUILD_NOT_TIMELY);
-
-  CTRequirementLevel ct_required = CTRequirementLevel::NOT_REQUIRED;
-  if (require_ct_delegate_) {
-    // Allow the delegate to override the CT requirement state.
-    ct_required = require_ct_delegate_->IsCTRequiredForHost(
-        host_port_pair.host(), validated_certificate_chain, public_key_hashes);
-  }
-  switch (ct_required) {
-    case CTRequirementLevel::REQUIRED:
-      return complies ? CT_REQUIREMENTS_MET : CT_REQUIREMENTS_NOT_MET;
-    case CTRequirementLevel::NOT_REQUIRED:
-      return CT_NOT_REQUIRED;
-  }
+  return RequireCTDelegate::CheckCTRequirements(
+      require_ct_delegate_.get(), host, is_issued_by_known_root,
+      public_key_hashes, validated_certificate_chain, policy_compliance);
 }
 
 void TransportSecurityState::SetDelegate(
@@ -383,9 +350,10 @@ void TransportSecurityState::SetDelegate(
   delegate_ = delegate;
 }
 
-void TransportSecurityState::SetRequireCTDelegate(RequireCTDelegate* delegate) {
+void TransportSecurityState::SetRequireCTDelegate(
+    scoped_refptr<RequireCTDelegate> delegate) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  require_ct_delegate_ = delegate;
+  require_ct_delegate_ = std::move(delegate);
 }
 
 void TransportSecurityState::UpdatePinList(
@@ -394,31 +362,42 @@ void TransportSecurityState::UpdatePinList(
     base::Time update_time) {
   pinsets_ = pinsets;
   key_pins_list_last_update_time_ = update_time;
-  host_pins_.emplace();
-  std::map<std::string, PinSet const*> pinset_names_map;
-  for (const auto& pinset : pinsets_) {
-    pinset_names_map[pinset.name()] = &pinset;
-  }
+  auto pinset_names_map = base::MakeFlatMap<std::string_view, const PinSet*>(
+      pinsets_, /*comp=*/{},
+      [](const auto& pinset) -> std::pair<std::string_view, const PinSet*> {
+        return {pinset.name(), &pinset};
+      });
+
+  // host_pins_ is populated once here and only read afterward via find(), so
+  // flat_map (a sorted vector) is preferred over std::map for reduced
+  // per-entry allocation overhead and better cache locality on lookups.
+  // Duplicate hostnames do not occur in the component-delivered pin list.
+  std::vector<std::pair<std::string, std::pair<const PinSet*, bool>>> entries;
+  entries.reserve(host_pins.size());
   for (const auto& pin : host_pins) {
-    if (!base::Contains(pinset_names_map, pin.pinset_name_)) {
+    auto it = pinset_names_map.find(pin.pinset_name_);
+    if (it == pinset_names_map.end()) {
       // This should never happen, but if the component is bad and missing an
       // entry, we will ignore that particular pin.
       continue;
     }
-    host_pins_.value()[pin.hostname_] =
-        std::pair(pinset_names_map[pin.pinset_name_], pin.include_subdomains_);
+    entries.emplace_back(
+        pin.hostname_,
+        std::pair(it->second, pin.include_subdomains_));
   }
+  host_pins_.emplace(std::move(entries));
 }
 
 void TransportSecurityState::AddHSTSInternal(
     std::string_view host,
     TransportSecurityState::STSState::UpgradeMode upgrade_mode,
-    const base::Time& expiry,
+    base::Time expiry,
     bool include_subdomains) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   const std::vector<uint8_t> canonicalized_host = CanonicalizeHost(host);
-  if (canonicalized_host.empty())
+  if (canonicalized_host.empty()) {
     return;
+  }
 
   STSState sts_state;
   // No need to store |sts_state.domain| since it is redundant.
@@ -441,14 +420,15 @@ void TransportSecurityState::AddHSTSInternal(
 }
 
 void TransportSecurityState::AddHPKPInternal(std::string_view host,
-                                             const base::Time& last_observed,
-                                             const base::Time& expiry,
+                                             base::Time last_observed,
+                                             base::Time expiry,
                                              bool include_subdomains,
                                              const HashValueVector& hashes) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   const std::vector<uint8_t> canonicalized_host = CanonicalizeHost(host);
-  if (canonicalized_host.empty())
+  if (canonicalized_host.empty()) {
     return;
+  }
 
   PKPState pkp_state;
   // No need to store |pkp_state.domain| since it is redundant.
@@ -456,7 +436,11 @@ void TransportSecurityState::AddHPKPInternal(std::string_view host,
   pkp_state.last_observed = last_observed;
   pkp_state.expiry = expiry;
   pkp_state.include_subdomains = include_subdomains;
-  pkp_state.spki_hashes = hashes;
+  for (const auto& hash : hashes) {
+    if (hash.tag() == HASH_VALUE_SHA256) {
+      pkp_state.spki_hashes.insert(hash.sha256hashvalue());
+    }
+  }
 
   // Only store new state when HPKP is explicitly enabled. If it is
   // disabled, remove the state from the enabled hosts.
@@ -476,27 +460,28 @@ void TransportSecurityState::
 }
 
 TransportSecurityState::PKPStatus TransportSecurityState::CheckPins(
-    const HostPortPair& host_port_pair,
     bool is_issued_by_known_root,
     const TransportSecurityState::PKPState& pkp_state,
-    const HashValueVector& hashes) {
+    const std::vector<SHA256HashValue>& hashes) {
   if (pkp_state.CheckPublicKeyPins(hashes)) {
     return PKPStatus::OK;
   }
 
   // Don't report violations for certificates that chain to local roots.
-  if (!is_issued_by_known_root && enable_pkp_bypass_for_local_trust_anchors_)
+  if (!is_issued_by_known_root && enable_pkp_bypass_for_local_trust_anchors_) {
     return PKPStatus::BYPASSED;
+  }
 
   return PKPStatus::VIOLATED;
 }
 
-bool TransportSecurityState::DeleteDynamicDataForHost(const std::string& host) {
+bool TransportSecurityState::DeleteDynamicDataForHost(std::string_view host) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   const std::vector<uint8_t> canonicalized_host = CanonicalizeHost(host);
-  if (canonicalized_host.empty())
+  if (canonicalized_host.empty()) {
     return false;
+  }
 
   const HashedHost hashed_host = HashHost(canonicalized_host);
   bool deleted = false;
@@ -512,8 +497,9 @@ bool TransportSecurityState::DeleteDynamicDataForHost(const std::string& host) {
     deleted = true;
   }
 
-  if (deleted)
+  if (deleted) {
     DirtyNotify();
+  }
   return deleted;
 }
 
@@ -554,10 +540,11 @@ void TransportSecurityState::DeleteAllDynamicDataBetween(
     ++pkp_iterator;
   }
 
-  if (dirtied && delegate_)
+  if (dirtied && delegate_) {
     delegate_->WriteNow(this, std::move(callback));
-  else
+  } else {
     std::move(callback).Run();
+  }
 }
 
 TransportSecurityState::~TransportSecurityState() {
@@ -567,8 +554,9 @@ TransportSecurityState::~TransportSecurityState() {
 void TransportSecurityState::DirtyNotify() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (delegate_)
+  if (delegate_) {
     delegate_->StateIsDirty(this);
+  }
 }
 
 bool TransportSecurityState::AddHSTSHeader(std::string_view host,
@@ -595,14 +583,14 @@ bool TransportSecurityState::AddHSTSHeader(std::string_view host,
 }
 
 void TransportSecurityState::AddHSTS(std::string_view host,
-                                     const base::Time& expiry,
+                                     base::Time expiry,
                                      bool include_subdomains) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   AddHSTSInternal(host, STSState::MODE_FORCE_HTTPS, expiry, include_subdomains);
 }
 
 void TransportSecurityState::AddHPKP(std::string_view host,
-                                     const base::Time& expiry,
+                                     base::Time expiry,
                                      bool include_subdomains,
                                      const HashValueVector& hashes) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -629,24 +617,25 @@ bool TransportSecurityState::IsBuildTimely() {
 
 TransportSecurityState::PKPStatus
 TransportSecurityState::CheckPublicKeyPinsImpl(
-    const HostPortPair& host_port_pair,
+    std::string_view host,
     bool is_issued_by_known_root,
-    const HashValueVector& hashes) {
+    const std::vector<SHA256HashValue>& hashes) {
   PKPState pkp_state;
-  bool found_state = GetPKPState(host_port_pair.host(), &pkp_state);
+  bool found_state = GetPKPState(host, &pkp_state);
 
   // HasPublicKeyPins should have returned true in order for this method to have
   // been called.
   DCHECK(found_state);
-  return CheckPins(host_port_pair, is_issued_by_known_root, pkp_state, hashes);
+  return CheckPins(is_issued_by_known_root, pkp_state, hashes);
 }
 
-bool TransportSecurityState::GetStaticSTSState(const std::string& host,
+bool TransportSecurityState::GetStaticSTSState(std::string_view host,
                                                STSState* sts_result) const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (!IsBuildTimely())
+  if (!IsBuildTimely()) {
     return false;
+  }
 
   PreloadResult result;
   if (DecodeHSTSPreload(host, &result) &&
@@ -662,7 +651,7 @@ bool TransportSecurityState::GetStaticSTSState(const std::string& host,
   return false;
 }
 
-bool TransportSecurityState::GetStaticPKPState(const std::string& host,
+bool TransportSecurityState::GetStaticPKPState(std::string_view host,
                                                PKPState* pkp_result) const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -671,23 +660,23 @@ bool TransportSecurityState::GetStaticPKPState(const std::string& host,
     return false;
   }
 
-  PreloadResult result;
-  if (host_pins_.has_value()) {
-    // Ensure that |host| is a valid hostname before processing.
-    if (CanonicalizeHost(host).empty()) {
-      return false;
-    }
-    // Normalize any trailing '.' used for DNS suffix searches.
-    std::string normalized_host = host;
-    size_t trailing_dot_found = normalized_host.find_last_not_of('.');
-    if (trailing_dot_found == std::string::npos) {
-      // Hostname is either empty or all dots
-      return false;
-    }
-    normalized_host.erase(trailing_dot_found + 1);
-    normalized_host = base::ToLowerASCII(normalized_host);
+  // Ensure that |host| is a valid hostname before processing.
+  if (CanonicalizeHost(host).empty()) {
+    return false;
+  }
+  // Normalize any trailing '.' used for DNS suffix searches.
+  size_t trailing_dot_found = host.find_last_not_of('.');
+  if (trailing_dot_found == std::string::npos) {
+    // Hostname is either empty or all dots
+    return false;
+  }
+  host.remove_suffix(host.size() - trailing_dot_found - 1);
+  std::string normalized_host = base::ToLowerASCII(host);
 
-    std::string_view search_hostname = normalized_host;
+  std::string_view search_hostname = normalized_host;
+
+  // Use component updater supplied PKP data if available:
+  if (host_pins_.has_value()) {
     while (true) {
       auto iter = host_pins_->find(search_hostname);
       // Only consider this a match if either include_subdomains is set, or
@@ -699,20 +688,10 @@ bool TransportSecurityState::GetStaticPKPState(const std::string& host,
         pkp_result->include_subdomains = iter->second.second;
         const PinSet* pinset = iter->second.first;
         for (const auto& hash : pinset->static_spki_hashes()) {
-          // If the update is malformed, it's preferable to skip the hash than
-          // crash.
-          if (hash.size() == 32) {
-            AddHash(reinterpret_cast<const char*>(hash.data()),
-                    &pkp_result->spki_hashes);
-          }
+          pkp_result->spki_hashes.insert(hash);
         }
         for (const auto& hash : pinset->bad_static_spki_hashes()) {
-          // If the update is malformed, it's preferable to skip the hash than
-          // crash.
-          if (hash.size() == 32) {
-            AddHash(reinterpret_cast<const char*>(hash.data()),
-                    &pkp_result->bad_spki_hashes);
-          }
+          pkp_result->bad_spki_hashes.insert(hash);
         }
         return true;
       }
@@ -726,63 +705,73 @@ bool TransportSecurityState::GetStaticPKPState(const std::string& host,
       // subdomains.
       search_hostname = search_hostname.substr(dot_pos + 1);
     }
-  } else if (DecodeHSTSPreload(host, &result) && result.has_pins) {
-    if (result.pinset_id >= g_hsts_source->pinsets_count)
-      return false;
-
-    pkp_result->domain = host.substr(result.hostname_offset);
-    pkp_result->include_subdomains = result.pkp_include_subdomains;
-    pkp_result->last_observed = base::GetBuildTime();
-
-    const TransportSecurityStateSource::Pinset* pinset =
-        &g_hsts_source->pinsets[result.pinset_id];
-
-    if (pinset->accepted_pins) {
-      const char* const* sha256_hash = pinset->accepted_pins;
-      while (*sha256_hash) {
-        AddHash(*sha256_hash, &pkp_result->spki_hashes);
-        sha256_hash++;
-      }
-    }
-    if (pinset->rejected_pins) {
-      const char* const* sha256_hash = pinset->rejected_pins;
-      while (*sha256_hash) {
-        AddHash(*sha256_hash, &pkp_result->bad_spki_hashes);
-        sha256_hash++;
-      }
-    }
-    return true;
   }
 
-  return false;
+  // Otherwise, use the compiled-in PKP data:
+  // TODO(crbug.com/497882860): this loop duplicates some (but not exactly)
+  // logic from the above while loop but operating on a different type. Think
+  // about if there is a better way to structure this.
+  while (true) {
+    const TransportSecurityStateSource::HostPin* pin =
+        g_hsts_source->find_host_pin(search_hostname);
+    // Only consider this a match if either include_subdomains is set, or
+    // this is an exact match of the full hostname.
+    if (pin &&
+        (pin->include_subdomains || search_hostname == normalized_host)) {
+      pkp_result->domain = std::string(search_hostname);
+      // TODO(crbug.com/497882860): using GetBuildTime() here matches the
+      // pre-existing behavior of this code, but shouldn't this be
+      // kPinsListTimestamp? Don't know if anything actually cares.
+      pkp_result->last_observed = base::GetBuildTime();
+      pkp_result->include_subdomains = pin->include_subdomains;
+      for (const SHA256HashValue* hash : pin->pinset->accepted_pins) {
+        pkp_result->spki_hashes.insert(*hash);
+      }
+      for (const SHA256HashValue* hash : pin->pinset->rejected_pins) {
+        pkp_result->bad_spki_hashes.insert(*hash);
+      }
+      return true;
+    }
+    auto dot_pos = search_hostname.find(".");
+    if (dot_pos == std::string::npos) {
+      // If this was not a match, and there are no more dots in the string,
+      // there are no more domains to try.
+      return false;
+    }
+    // Try again in case this is a subdomain of a pinned domain that includes
+    // subdomains.
+    search_hostname = search_hostname.substr(dot_pos + 1);
+  }
 }
 
-bool TransportSecurityState::GetSTSState(const std::string& host,
+bool TransportSecurityState::GetSTSState(std::string_view host,
                                          STSState* result) {
   return GetDynamicSTSState(host, result) || GetStaticSTSState(host, result);
 }
 
-bool TransportSecurityState::GetPKPState(const std::string& host,
+bool TransportSecurityState::GetPKPState(std::string_view host,
                                          PKPState* result) {
   return GetDynamicPKPState(host, result) || GetStaticPKPState(host, result);
 }
 
-bool TransportSecurityState::GetDynamicSTSState(const std::string& host,
+bool TransportSecurityState::GetDynamicSTSState(std::string_view host,
                                                 STSState* result) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   const std::vector<uint8_t> canonicalized_host = CanonicalizeHost(host);
-  if (canonicalized_host.empty())
+  if (canonicalized_host.empty()) {
     return false;
+  }
 
   base::Time current_time(base::Time::Now());
 
   for (size_t i = 0; canonicalized_host[i]; i += canonicalized_host[i] + 1) {
     base::span<const uint8_t> host_sub_chunk =
-        base::make_span(canonicalized_host).subspan(i);
+        base::span(canonicalized_host).subspan(i);
     auto j = enabled_sts_hosts_.find(HashHost(host_sub_chunk));
-    if (j == enabled_sts_hosts_.end())
+    if (j == enabled_sts_hosts_.end()) {
       continue;
+    }
 
     // If the entry is invalid, drop it.
     if (current_time > j->second.expiry) {
@@ -796,8 +785,9 @@ bool TransportSecurityState::GetDynamicSTSState(const std::string& host,
     if (i == 0 || j->second.include_subdomains) {
       std::optional<std::string> dotted_name =
           dns_names_util::NetworkToDottedName(host_sub_chunk);
-      if (!dotted_name)
+      if (!dotted_name) {
         return false;
+      }
 
       *result = j->second;
       result->domain = std::move(dotted_name).value();
@@ -808,22 +798,24 @@ bool TransportSecurityState::GetDynamicSTSState(const std::string& host,
   return false;
 }
 
-bool TransportSecurityState::GetDynamicPKPState(const std::string& host,
+bool TransportSecurityState::GetDynamicPKPState(std::string_view host,
                                                 PKPState* result) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   const std::vector<uint8_t> canonicalized_host = CanonicalizeHost(host);
-  if (canonicalized_host.empty())
+  if (canonicalized_host.empty()) {
     return false;
+  }
 
   base::Time current_time(base::Time::Now());
 
   for (size_t i = 0; canonicalized_host[i]; i += canonicalized_host[i] + 1) {
     base::span<const uint8_t> host_sub_chunk =
-        base::make_span(canonicalized_host).subspan(i);
+        base::span(canonicalized_host).subspan(i);
     auto j = enabled_pkp_hosts_.find(HashHost(host_sub_chunk));
-    if (j == enabled_pkp_hosts_.end())
+    if (j == enabled_pkp_hosts_.end()) {
       continue;
+    }
 
     // If the entry is invalid, drop it.
     if (current_time > j->second.expiry) {
@@ -842,8 +834,9 @@ bool TransportSecurityState::GetDynamicPKPState(const std::string& host,
     if (i == 0 || j->second.include_subdomains) {
       std::optional<std::string> dotted_name =
           dns_names_util::NetworkToDottedName(host_sub_chunk);
-      if (!dotted_name)
+      if (!dotted_name) {
         return false;
+      }
 
       *result = j->second;
       result->domain = std::move(dotted_name).value();
@@ -887,8 +880,8 @@ TransportSecurityState::PKPState::~PKPState() = default;
 
 TransportSecurityState::PinSet::PinSet(
     std::string name,
-    std::vector<std::vector<uint8_t>> static_spki_hashes,
-    std::vector<std::vector<uint8_t>> bad_static_spki_hashes)
+    std::vector<SHA256HashValue> static_spki_hashes,
+    std::vector<SHA256HashValue> bad_static_spki_hashes)
     : name_(std::move(name)),
       static_spki_hashes_(std::move(static_spki_hashes)),
       bad_static_spki_hashes_(std::move(bad_static_spki_hashes)) {}
@@ -904,7 +897,7 @@ TransportSecurityState::PinSetInfo::PinSetInfo(std::string hostname,
       include_subdomains_(std::move(include_subdomains)) {}
 
 bool TransportSecurityState::PKPState::CheckPublicKeyPins(
-    const HashValueVector& hashes) const {
+    const std::vector<SHA256HashValue>& hashes) const {
   // Validate that hashes is not empty. By the time this code is called (in
   // production), that should never happen, but it's good to be defensive.
   // And, hashes *can* be empty in some test scenarios.
@@ -917,8 +910,9 @@ bool TransportSecurityState::PKPState::CheckPublicKeyPins(
   }
 
   // If there are no pins, then any valid chain is acceptable.
-  if (spki_hashes.empty())
+  if (spki_hashes.empty()) {
     return true;
+  }
 
   if (HashesIntersect(spki_hashes, hashes)) {
     return true;
@@ -928,7 +922,7 @@ bool TransportSecurityState::PKPState::CheckPublicKeyPins(
 }
 
 bool TransportSecurityState::PKPState::HasPublicKeyPins() const {
-  return spki_hashes.size() > 0 || bad_spki_hashes.size() > 0;
+  return !spki_hashes.empty() || !bad_spki_hashes.empty();
 }
 
 bool TransportSecurityState::IsStaticPKPListTimely() const {

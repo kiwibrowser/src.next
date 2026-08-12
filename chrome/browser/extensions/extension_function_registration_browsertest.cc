@@ -1,0 +1,75 @@
+// Copyright 2018 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include <algorithm>
+
+#include "base/one_shot_event.h"
+#include "base/strings/string_util.h"
+#include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/profiles/profile.h"
+#include "content/public/test/browser_test.h"
+#include "extensions/browser/extension_function_registry.h"
+#include "extensions/browser/extension_system.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+namespace extensions {
+
+using ExtensionFunctionRegistrationTest = ExtensionBrowserTest;
+
+// Test that all functions are registered with unique names, histogram values,
+// and factories. This is a browser test (rather than a unit test) to (help)
+// ensure that all the optional factories and services are indeed instantiated.
+IN_PROC_BROWSER_TEST_F(ExtensionFunctionRegistrationTest,
+                       CheckForDuplicateEntries) {
+  // Verify the ExtensionSystem is ready (and thus all extension functions
+  // registered) before checking.
+  base::RunLoop run_loop;
+  ExtensionSystem::Get(profile())->ready().Post(FROM_HERE,
+                                                run_loop.QuitClosure());
+  run_loop.Run();
+
+  const ExtensionFunctionRegistry::FactoryMap& factories =
+      ExtensionFunctionRegistry::GetInstance().GetFactoriesForTesting();
+  // Sanity check: Many, many functions should have been registered.
+#if BUILDFLAG(IS_ANDROID)
+  // Android has fewer supported APIs than Win/Mac/Linux.
+  EXPECT_GT(factories.size(), 400u);
+#else
+  EXPECT_GT(factories.size(), 500u);
+#endif
+
+  std::set<std::string> seen_names;
+  std::map<functions::HistogramValue, std::string> seen_histograms;
+
+  for (const auto& key_value : factories) {
+    const ExtensionFunctionRegistry::FactoryEntry& entry = key_value.second;
+    SCOPED_TRACE(entry.function_name_);
+    EXPECT_TRUE(seen_names.insert(entry.function_name_).second);
+    // NOTE: We explicitly don't check the factory here. On certain platforms
+    // with enough compiler optimization, the templated factories are re-used
+    // for different functions.
+    // EXPECT_TRUE(seen_factories.insert(entry.factory_).second);
+
+    // The chrome.test API uses an "unknown" histogram value, but should be the
+    // only API that does.
+    if (entry.histogram_value_ == functions::UNKNOWN) {
+      EXPECT_TRUE(base::StartsWith(entry.function_name_, "test.",
+                                   base::CompareCase::SENSITIVE));
+    } else {
+      bool is_success =
+          seen_histograms.emplace(entry.histogram_value_, entry.function_name_)
+              .second;
+      if (!is_success) {
+        ADD_FAILURE() << "Histogram " << entry.function_name_ << " with value "
+                      << entry.histogram_value_
+                      << " already exists with another name - "
+                      << seen_histograms.find(entry.histogram_value_)->second;
+      }
+    }
+  }
+}
+
+}  // namespace extensions

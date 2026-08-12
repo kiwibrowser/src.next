@@ -59,7 +59,7 @@ int FileStream::Context::Read(IOBuffer* in_buf,
       base::BindOnce(&Context::ReadFileImpl, base::Unretained(this), buf,
                      buf_len),
       base::BindOnce(&Context::OnAsyncCompleted, base::Unretained(this),
-                     IntToInt64(std::move(callback))));
+                     std::move(callback)));
   DCHECK(posted);
 
   async_in_progress_ = true;
@@ -77,7 +77,7 @@ int FileStream::Context::Write(IOBuffer* in_buf,
       base::BindOnce(&Context::WriteFileImpl, base::Unretained(this), buf,
                      buf_len),
       base::BindOnce(&Context::OnAsyncCompleted, base::Unretained(this),
-                     IntToInt64(std::move(callback))));
+                     std::move(callback)));
   DCHECK(posted);
 
   async_in_progress_ = true;
@@ -100,7 +100,7 @@ FileStream::Context::IOResult FileStream::Context::ReadFileImpl(
     scoped_refptr<IOBuffer> buf,
     int buf_len) {
   std::optional<size_t> res = file_.ReadAtCurrentPosNoBestEffort(
-      buf->span().first(base::checked_cast<size_t>(buf_len)));
+      buf->first(base::checked_cast<size_t>(buf_len)));
   if (!res.has_value()) {
     return IOResult::FromOSError(errno);
   }
@@ -111,7 +111,7 @@ FileStream::Context::IOResult FileStream::Context::WriteFileImpl(
     scoped_refptr<IOBuffer> buf,
     int buf_len) {
   std::optional<size_t> res = file_.WriteAtCurrentPosNoBestEffort(
-      buf->span().first(base::checked_cast<size_t>(buf_len)));
+      buf->first(base::checked_cast<size_t>(buf_len)));
   if (!res.has_value()) {
     return IOResult::FromOSError(errno);
   }

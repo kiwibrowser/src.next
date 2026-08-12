@@ -19,7 +19,6 @@ static const size_t kMaxDigestSize = 64;
 typedef Vector<uint8_t, kMaxDigestSize> DigestValue;
 
 enum HashAlgorithm {
-  kHashAlgorithmSha1,
   kHashAlgorithmSha256,
   kHashAlgorithmSha384,
   kHashAlgorithmSha512
@@ -46,7 +45,7 @@ class PLATFORM_EXPORT Digestor {
   // set. This object cannot be reused; do not update it after Finish.
   bool Update(base::span<const uint8_t>);
   bool UpdateUtf8(const String&,
-                  WTF::UTF8ConversionMode = WTF::kLenientUTF8Conversion);
+                  Utf8ConversionMode = Utf8ConversionMode::kLenient);
   bool Finish(DigestValue&);
 
  private:

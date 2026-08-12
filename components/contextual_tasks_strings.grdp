@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<grit-part>
+  <!-- Contextual Tasks -->
+  <message name ="IDS_CONTEXTUAL_TASKS_CONTEXTUAL_TASKS_TITLE" desc="The title of contextual tasks.">
+    Browse with AI
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_CUSTOMIZE_CHROME_LABEL" desc="The label shown in the Customize Chrome settings menu to pin Contextual Tasks to the toolbar.">
+    Google Search AI Mode
+  </message>
+  <message name ="IDS_CONTEXTUAL_TASKS_ENTRY_POINT_TOOLTIP" desc="The tooltip text used for contextual task entry points.">
+    Browse with AI
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_AI_MODE_TITLE" desc="The title shown in the location bar and tab for AI Mode before a thread title is available.">
+    AI Mode
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_MENU_OPEN_IN_NEW_TAB" desc="The 'Open in new tab' option in the 3-dot menu.">
+    Open in new tab
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_MENU_MY_ACTIVITY" desc="The 'My Activity' option in the 3-dot menu.">
+    My Activity
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_MENU_HELP" desc="The 'Help' option in the 3-dot menu.">
+    Help
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SOURCES_MENU_TITLE" desc="Title shown on the context management popup in the side panel to show the list of context user has shared with the current thread.">
+    Shared tabs and files
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_TITLE" desc="Title of the tool tip shown on the first run experience of the contextual task page.">
+    Ask questions about this tab with AI Mode
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_SHORT_TITLE" desc="Shortened title of the tool tip shown on the first run experience of the contextual task page.">
+    Ask questions about this tab
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_DESCRIPTION" desc="Description of the tool tip shown on the first run experience of the contextual task page.">
+    When tabs are shared, their contents and URLs are sent to Google.
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_LEARN_MORE" desc="Learn more clickable span shown on the first run experience of the contextual task page.">
+    Learn more about AI and privacy
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_ACCEPT_BUTTON" desc="Accept button shown on the first run experience of the contextual task page.">
+    Got it
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_CONTINUE_THREAD_MESSAGE" desc="Text on the side panel to ask user whether they want to continue the current thread.">
+    Continue this thread?
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_REOPEN_TABS_BUTTON_TEXT" desc="Text on the side panel to confirm that user want to continue the current thread and reopen tabs.">
+    Reopen tabs
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_CONTEXT_MENU_MOST_RECENT_TABS" desc="Section header in the compose box context menu for the most recent tabs.">
+    Most recent tabs
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_CONTEXT_MENU_GEMINI_MODELS" desc="Section header in the compose box context menu for Gemini models.">
+    Gemini 3 models
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SIDE_PANEL_NEW_THREAD_TOOL_TIP" desc="Tool tip text displayed on the create thread button on the side panel to create a new contextual task.">
+    New thread
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SIDE_PANEL_HISTORY_TOOL_TIP" desc="Tool tip text displayed on the history button on the side panel to show history threads.">
+    AI Mode history
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SIDE_PANEL_CONTEXT_TOOL_TIP" desc="Tool tip text displayed on the context button on the side panel to show tabs and files context attached to the current thread.">
+    Tabs and files
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SIDE_PANEL_MORE_OPTIONS_TOOL_TIP" desc="Tool tip text displayed on the 3-dot overflow menu button on the side panel to allow user to list more options for contextual tasks.">
+    More options
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_SIDE_PANEL_CLOSE_TOOL_TIP" desc="Tool tip text displayed on the close button on the side panel to allow user to close the side panel.">
+    Close side panel
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_TOOLBAR_CLOSE_TAB_TOOL_TIP" desc="Tool tip text displayed close tab button on the toolbar to close the active tab and expand the side panel to be the active tab.">
+    Close website
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_TITLE" desc="Title of the error dialog shown when an oAuth error occurs.">
+    Something went wrong
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_BODY" desc="Body of the error dialog shown when an oAuth error occurs.">
+    There was an error. Try again.
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_RELOAD_BUTTON" desc="Reload button shown on the oAuth error dialog.">
+    Reload
+  </message>
+
+  <!-- AI Mode Strings -->
+  <message name="IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE"
+    desc="Title for the AI Mode zero state welcome message in the Lens tab. The first placeholder is the user's given name.">
+    Hi <ph name="USER_NAME">$1<ex>Josh</ex></ph>, what's on your mind?
+  </message>
+
+  <message name="IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE_WITHOUT_NAME"
+    desc="Title for the AI Mode zero state welcome message in the Lens tab.">
+    What's on your mind?
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_COMPOSEBOX_PLACEHOLDER_TEXT" desc="Placeholder text shown on the compose box of the contextual task page.">
+    Ask anything
+  </message>
+  <message name="IDS_CONTEXTUAL_TASKS_THREAD_CLOSED" desc="Text shown on the snackbar after closing the contextual tasks sheet." formatter_data="android_java">
+    Thread closed
+  </message>
+</grit-part>

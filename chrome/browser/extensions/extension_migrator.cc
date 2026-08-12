@@ -11,8 +11,11 @@
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -24,12 +27,12 @@ ExtensionMigrator::ExtensionMigrator(Profile* profile,
 ExtensionMigrator::~ExtensionMigrator() = default;
 
 void ExtensionMigrator::StartLoading() {
-  auto prefs = base::Value::Dict();
+  auto prefs = base::DictValue();
 
   const bool should_have_extension =
       IsAppPresent(old_id_) || IsAppPresent(new_id_);
   if (should_have_extension) {
-    base::Value::Dict entry;
+    base::DictValue entry;
     entry.Set(ExternalProviderImpl::kExternalUpdateUrl,
               extension_urls::GetWebstoreUpdateUrl().spec());
 
@@ -45,7 +48,7 @@ bool ExtensionMigrator::IsAppPresent(const std::string& app_id) {
 
   // If the extension was previously force-installed by policy, don't migrate it
   // or keep it installed. This prevents the extension getting stuck in a
-  // "non-uninstallable" state. crbug.com/1416682
+  // "non-uninstallable" state. crbug.com/40893640
   return extension && !Manifest::IsPolicyLocation(extension->location());
 }
 

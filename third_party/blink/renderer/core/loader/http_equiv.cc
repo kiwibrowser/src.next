@@ -6,6 +6,7 @@
 
 #include "services/network/public/mojom/content_security_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
+#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/scriptable_document_parser.h"
@@ -17,7 +18,6 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
-#include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -36,32 +36,32 @@ void HttpEquiv::Process(Document& document,
   DCHECK(!equiv.IsNull());
   DCHECK(!content.IsNull());
 
-  if (EqualIgnoringASCIICase(equiv, "default-style")) {
+  if (EqualIgnoringAsciiCase(equiv, "default-style")) {
     ProcessHttpEquivDefaultStyle(document, content);
-  } else if (EqualIgnoringASCIICase(equiv, "refresh")) {
+  } else if (EqualIgnoringAsciiCase(equiv, "refresh")) {
     ProcessHttpEquivRefresh(document.domWindow(), content, element);
-  } else if (EqualIgnoringASCIICase(equiv, "set-cookie")) {
+  } else if (EqualIgnoringAsciiCase(equiv, "set-cookie")) {
     ProcessHttpEquivSetCookie(document, content, element);
-  } else if (EqualIgnoringASCIICase(equiv, "content-language")) {
+  } else if (EqualIgnoringAsciiCase(equiv, "content-language")) {
     document.SetContentLanguage(content);
-  } else if (EqualIgnoringASCIICase(equiv, "x-dns-prefetch-control")) {
+  } else if (EqualIgnoringAsciiCase(equiv, "x-dns-prefetch-control")) {
     document.ParseDNSPrefetchControlHeader(content);
-  } else if (EqualIgnoringASCIICase(equiv, "x-frame-options")) {
+  } else if (EqualIgnoringAsciiCase(equiv, "x-frame-options")) {
     document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         mojom::ConsoleMessageSource::kSecurity,
         mojom::ConsoleMessageLevel::kError,
         "X-Frame-Options may only be set via an HTTP header sent along with a "
         "document. It may not be set inside <meta>."));
-  } else if (EqualIgnoringASCIICase(equiv, http_names::kAcceptCH)) {
+  } else if (EqualIgnoringAsciiCase(equiv, http_names::kAcceptCH)) {
     HTMLMetaElement::ProcessMetaCH(document, content,
                                    network::MetaCHType::HttpEquivAcceptCH,
                                    /*is_doc_preloader=*/false, is_sync_parser);
-  } else if (EqualIgnoringASCIICase(equiv, http_names::kDelegateCH)) {
+  } else if (EqualIgnoringAsciiCase(equiv, http_names::kDelegateCH)) {
     HTMLMetaElement::ProcessMetaCH(document, content,
                                    network::MetaCHType::HttpEquivDelegateCH,
                                    /*is_doc_preloader=*/false, is_sync_parser);
-  } else if (EqualIgnoringASCIICase(equiv, "content-security-policy") ||
-             EqualIgnoringASCIICase(equiv,
+  } else if (EqualIgnoringAsciiCase(equiv, "content-security-policy") ||
+             EqualIgnoringAsciiCase(equiv,
                                     "content-security-policy-report-only")) {
     if (in_document_head_element) {
       ProcessHttpEquivContentSecurityPolicy(document.domWindow(), equiv,
@@ -69,7 +69,7 @@ void HttpEquiv::Process(Document& document,
     } else if (auto* window = document.domWindow()) {
       window->GetContentSecurityPolicy()->ReportMetaOutsideHead(content);
     }
-  } else if (EqualIgnoringASCIICase(equiv, http_names::kOriginTrial)) {
+  } else if (EqualIgnoringAsciiCase(equiv, http_names::kOriginTrial)) {
     if (in_document_head_element) {
       ProcessHttpEquivOriginTrial(document.domWindow(), content);
     }
@@ -84,7 +84,7 @@ void HttpEquiv::ProcessHttpEquivContentSecurityPolicy(
     return;
   if (window->GetFrame()->GetSettings()->GetBypassCSP())
     return;
-  if (EqualIgnoringASCIICase(equiv, "content-security-policy")) {
+  if (EqualIgnoringAsciiCase(equiv, "content-security-policy")) {
     Vector<network::mojom::blink::ContentSecurityPolicyPtr> parsed =
         ParseContentSecurityPolicies(
             content, network::mojom::blink::ContentSecurityPolicyType::kEnforce,
@@ -92,7 +92,7 @@ void HttpEquiv::ProcessHttpEquivContentSecurityPolicy(
             *(window->GetSecurityOrigin()));
     window->GetContentSecurityPolicy()->AddPolicies(mojo::Clone(parsed));
     window->GetPolicyContainer()->AddContentSecurityPolicies(std::move(parsed));
-  } else if (EqualIgnoringASCIICase(equiv,
+  } else if (EqualIgnoringAsciiCase(equiv,
                                     "content-security-policy-report-only")) {
     window->GetContentSecurityPolicy()->ReportReportOnlyInMeta(content);
   } else {
@@ -117,7 +117,7 @@ void HttpEquiv::ProcessHttpEquivOriginTrial(LocalDOMWindow* window,
   // NOTE: The external script origin is not considered security-critical. See
   // the comment thread in the design doc for details:
   // https://docs.google.com/document/d/1xALH9W7rWmX0FpjudhDeS2TNTEOXuPn4Tlc9VmuPdHA/edit?disco=AAAAJyG8StI
-  Vector<String> candidate_scripts = GetScriptUrlsFromCurrentStack(
+  Vector<String> candidate_scripts = CaptureScriptUrlsFromCurrentStack(
       window->GetIsolate(), /*unique_url_count=*/3);
   Vector<scoped_refptr<SecurityOrigin>> external_origins;
   for (const String& external_script : candidate_scripts) {
@@ -145,7 +145,7 @@ void HttpEquiv::ProcessHttpEquivRefresh(LocalDOMWindow* window,
   UseCounter::Count(window, WebFeature::kMetaRefresh);
   if (!window->GetContentSecurityPolicy()->AllowInline(
           ContentSecurityPolicy::InlineType::kScript, element, "" /* content */,
-          "" /* nonce */, NullURL(), OrdinalNumber::First(),
+          "" /* nonce */, NullUrl(), OrdinalNumber::First(),
           ReportingDisposition::kSuppressReporting)) {
     UseCounter::Count(window,
                       WebFeature::kMetaRefreshWhenCSPBlocksInlineScript);
@@ -161,8 +161,8 @@ void HttpEquiv::ProcessHttpEquivSetCookie(Document& document,
   document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
       mojom::ConsoleMessageSource::kSecurity,
       mojom::ConsoleMessageLevel::kError,
-      String::Format("Blocked setting the `%s` cookie from a `<meta>` tag.",
-                     content.Utf8().c_str())));
+      StrCat({"Blocked setting the `", content,
+              "` cookie from a `<meta>` tag."})));
 }
 
 }  // namespace blink

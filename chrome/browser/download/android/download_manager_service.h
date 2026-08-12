@@ -23,7 +23,7 @@
 #include "components/download/public/common/in_progress_download_manager.h"
 #include "content/public/browser/download_manager.h"
 
-using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 class Profile;
 class ProfileKey;
@@ -60,88 +60,68 @@ class DownloadManagerService
   // Called to Initialize this object. If |is_profile_added| is false,
   // it means only a minimal browser is launched. OnProfileAdded() will
   // be called later when the profile is added.
-  void Init(JNIEnv* env, jobject obj, bool is_profile_added);
+  void Init(JNIEnv* env,
+            const base::android::JavaRef<jobject>& obj,
+            bool is_profile_added);
 
   // Called when the profile is added to the ProfileManager and fully
   // initialized.
-  void OnProfileAdded(JNIEnv* env, jobject obj, Profile* profile);
+  void OnProfileAdded(JNIEnv* env, Profile* profile);
 
   void OnProfileAdded(Profile* profile);
-
-  // Called to handle subsequent steps, after a download was determined as a OMA
-  // download type.
-  void HandleOMADownload(download::DownloadItem* download,
-                         int64_t system_download_id);
 
   // Called to open a given download item.
   void OpenDownload(download::DownloadItem* download, int source);
 
   // Called to open a download item whose GUID is equal to |jdownload_guid|.
   void OpenDownload(JNIEnv* env,
-                    jobject obj,
-                    std::string& download_guid,
-                    const JavaParamRef<jobject>& j_profile_key,
-                    jint source);
+                    const std::string& download_guid,
+                    const JavaRef<jobject>& j_profile_key,
+                    int32_t source);
 
   // Called to resume downloading the item that has GUID equal to
   // |jdownload_guid|..
   void ResumeDownload(JNIEnv* env,
-                      jobject obj,
-                      std::string& download_guid,
-                      const JavaParamRef<jobject>& j_profile_key);
+                      const std::string& download_guid,
+                      const JavaRef<jobject>& j_profile_key);
 
   // Called to cancel a download item that has GUID equal to |jdownload_guid|.
   // If the DownloadItem is not yet created, retry after a while.
   void CancelDownload(JNIEnv* env,
-                      jobject obj,
-                      std::string& download_guid,
-                      const JavaParamRef<jobject>& j_profile_key);
+                      const std::string& download_guid,
+                      const JavaRef<jobject>& j_profile_key);
 
   // Called to pause a download item that has GUID equal to |jdownload_guid|.
   // If the DownloadItem is not yet created, do nothing as it is already paused.
   void PauseDownload(JNIEnv* env,
-                     jobject obj,
-                     std::string& download_guid,
-                     const JavaParamRef<jobject>& j_profile_key);
+                     const std::string& download_guid,
+                     const JavaRef<jobject>& j_profile_key);
 
   // Called to remove a download item that has GUID equal to |jdownload_guid|.
   void RemoveDownload(JNIEnv* env,
-                      jobject obj,
-                      std::string& download_guid,
-                      const JavaParamRef<jobject>& j_profile_key);
+                      const std::string& download_guid,
+                      const JavaRef<jobject>& j_profile_key);
 
   // Called to rename a download item that has GUID equal to |id|.
   void RenameDownload(JNIEnv* env,
-                      const JavaParamRef<jobject>& obj,
-                      std::string& id,
-                      std::string& name,
-                      const JavaParamRef<jobject>& callback,
-                      const JavaParamRef<jobject>& j_profile_key);
+                      const std::string& id,
+                      const std::string& name,
+                      const JavaRef<jobject>& callback,
+                      const JavaRef<jobject>& j_profile_key);
 
   // Returns whether or not the given download can be opened by the browser.
   bool IsDownloadOpenableInBrowser(JNIEnv* env,
-                                   jobject obj,
-                                   const JavaParamRef<jstring>& jdownload_guid,
-                                   const JavaParamRef<jobject>& j_profile_key);
+                                   const JavaRef<jstring>& jdownload_guid,
+                                   const JavaRef<jobject>& j_profile_key);
 
   // Called to request that the DownloadManagerService return data about all
   // downloads in the user's history.
-  void GetAllDownloads(JNIEnv* env,
-                       const JavaParamRef<jobject>& obj,
-                       const JavaParamRef<jobject>& j_profile_key);
-
-  // Called to check if the files associated with any downloads have been
-  // removed by an external action.
-  void CheckForExternallyRemovedDownloads(
-      JNIEnv* env,
-      const JavaParamRef<jobject>& obj,
-      const JavaParamRef<jobject>& j_profile_key);
+  void GetAllDownloads(JNIEnv* env, const JavaRef<jobject>& j_profile_key);
 
   // Called to update the last access time associated with a download.
   void UpdateLastAccessTime(JNIEnv* env,
-                            const JavaParamRef<jobject>& obj,
-                            std::string& download_guid,
-                            const JavaParamRef<jobject>& j_profile_key);
+                            const std::string& download_guid,
+                            const JavaRef<jobject>& j_profile_key);
 
   // AllDownloadEventNotifier::Observer methods.
   void OnDownloadsInitialized(
@@ -165,10 +145,9 @@ class DownloadManagerService
   // Called by the java code to create and insert an interrupted download to
   // |in_progress_manager_| for testing purpose.
   void CreateInterruptedDownloadForTest(JNIEnv* env,
-                                        jobject obj,
-                                        std::string& url,
-                                        std::string& download_guid,
-                                        std::string& target_path);
+                                        const std::string& url,
+                                        const std::string& download_guid,
+                                        const std::string& target_path);
 
   // Retrives the in-progress manager and give up the ownership.
   std::unique_ptr<download::InProgressDownloadManager>
@@ -181,9 +160,8 @@ class DownloadManagerService
   // Helper method to record the interrupt reason UMA for the first background
   // download.
   void RecordFirstBackgroundInterruptReason(JNIEnv* env,
-                                            const JavaParamRef<jobject>& obj,
-                                            std::string& download_guid,
-                                            jboolean download_started);
+                                            const std::string& download_guid,
+                                            bool download_started);
 
   // Open the download page the given profile, and the source of the opening
   // action is |download_open_source|.

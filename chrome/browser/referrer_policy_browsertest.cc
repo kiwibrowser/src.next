@@ -9,11 +9,11 @@
 #include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/to_string.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/system_network_context_manager.h"
@@ -207,10 +207,8 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
         std::string("/referrer_policy/referrer-policy-start.html?") +
         "policy=" + content::ReferrerPolicyToString(referrer_policy) +
         "&redirect=" + redirect_url.spec() + "&link=" +
-        ((button == blink::WebMouseEvent::Button::kNoButton &&
-          renderer_or_browser_initiated == RENDERER_INITIATED)
-             ? "false"
-             : "true") +
+        base::ToString(!(button == blink::WebMouseEvent::Button::kNoButton &&
+                         renderer_or_browser_initiated == RENDERER_INITIATED)) +
         "&target=" + (link_type == LINK_WITH_TARGET_BLANK ? "_blank" : "");
 
     auto* start_test_server = start_protocol == START_ON_HTTPS
@@ -411,13 +409,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsMiddleClickTargetBlankOrigin) {
 }
 
 // Context menu, from HTTP to HTTP.
-// TODO(crbug.com/40804570): Flaky on Lacros.
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#define MAYBE_ContextMenuOrigin DISABLED_ContextMenuOrigin
-#else
-#define MAYBE_ContextMenuOrigin ContextMenuOrigin
-#endif
-IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuOrigin) {
+IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, ContextMenuOrigin) {
   ContextMenuNotificationObserver context_menu_observer(
       IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest(
@@ -427,8 +419,8 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuOrigin) {
 }
 
 // Context menu, from HTTPS to HTTP.
-// TODO(crbug.com/40803947): Fix flakiness on Linux and Lacros then reenable.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+// TODO(crbug.com/40803947): Fix flakiness on Linux then reenable.
+#if BUILDFLAG(IS_LINUX)
 #define MAYBE_HttpsContextMenuOrigin DISABLED_HttpsContextMenuOrigin
 #else
 #define MAYBE_HttpsContextMenuOrigin HttpsContextMenuOrigin
@@ -536,8 +528,8 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest,
 }
 
 // Context menu, from HTTP to HTTP via server redirect.
-// TODO(crbug.com/40803947): Fix flakiness on Linux and Lacros then reenable.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+// TODO(crbug.com/40803947): Fix flakiness on Linux then reenable.
+#if BUILDFLAG(IS_LINUX)
 #define MAYBE_ContextMenuRedirect DISABLED_ContextMenuRedirect
 #else
 #define MAYBE_ContextMenuRedirect ContextMenuRedirect
@@ -553,13 +545,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_ContextMenuRedirect) {
 }
 
 // Context menu, from HTTPS to HTTP via server redirect.
-// TODO(crbug.com/40804570): Flaky on Lacros.
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#define MAYBE_HttpsContextMenuRedirect DISABLED_HttpsContextMenuRedirect
-#else
-#define MAYBE_HttpsContextMenuRedirect HttpsContextMenuRedirect
-#endif
-IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MAYBE_HttpsContextMenuRedirect) {
+IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsContextMenuRedirect) {
   ContextMenuNotificationObserver context_menu_observer(
       IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   RunReferrerTest(network::mojom::ReferrerPolicy::kOrigin, START_ON_HTTPS,
@@ -770,9 +756,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest,
 
 // Parameters for testing functionality imposing ad-hoc restrictions
 // on the behavior of referrers, for instance absolute caps like
-// "never send referrers" (as of writing, features::kNoReferrers)
-// or "on cross-origin requests, never send more than the initiator's
-// origin" (features::kCapReferrerToOriginOnCrossOrigin).
+// "never send referrers" (as of writing, features::kNoReferrers).
 //
 // These tests assume a default policy of no-referrer-when-downgrade.
 struct ReferrerOverrideParams {
@@ -803,27 +787,6 @@ struct ReferrerOverrideParams {
      .same_origin_subresource = ReferrerPolicyTest::EXPECT_EMPTY_REFERRER,
      .same_origin_to_cross_origin_subresource_redirect =
          ReferrerPolicyTest::EXPECT_EMPTY_REFERRER},
-    {
-        .feature_to_enable = net::features::kCapReferrerToOriginOnCrossOrigin,
-        .baseline_policy = network::mojom::ReferrerPolicy::kAlways,
-        // Applying the cap doesn't change the "referrer policy"
-        // attribute of a request
-        .expected_policy = network::mojom::ReferrerPolicy::kAlways,
-        .same_origin_nav = ReferrerPolicyTest::EXPECT_FULL_REFERRER,
-        .cross_origin_nav = ReferrerPolicyTest::EXPECT_ORIGIN_AS_REFERRER,
-        .cross_origin_downgrade_nav =
-            ReferrerPolicyTest::EXPECT_ORIGIN_AS_REFERRER,
-        .same_origin_to_cross_origin_redirect =
-            ReferrerPolicyTest::EXPECT_ORIGIN_AS_REFERRER,
-        // Referrer policies get applied to whatever the current referrer is:
-        // in the case of a cross-origin -> same-origin redirect, we already
-        // will have truncated the referrer to the initiating origin
-        .cross_origin_to_same_origin_redirect =
-            ReferrerPolicyTest::EXPECT_ORIGIN_AS_REFERRER,
-        .same_origin_subresource = ReferrerPolicyTest::EXPECT_FULL_REFERRER,
-        .same_origin_to_cross_origin_subresource_redirect =
-            ReferrerPolicyTest::EXPECT_ORIGIN_AS_REFERRER,
-    },
     {
         .baseline_policy = network::mojom::ReferrerPolicy::kDefault,
         // kDefault gets resolved into a concrete policy when making requests
@@ -1004,58 +967,3 @@ IN_PROC_BROWSER_TEST_P(ReferrerOverrideTest,
       GetParam().same_origin_to_cross_origin_subresource_redirect);
 }
 
-// Most of the functionality of the referrer-cap flag is covered by
-// ReferrerOverrideTest; these couple additional tests test the flag's
-// interaction with other referrer policies
-class ReferrerPolicyCapReferrerToOriginOnCrossOriginTest
-    : public ReferrerPolicyTest {
- public:
-  ReferrerPolicyCapReferrerToOriginOnCrossOriginTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        net::features::kCapReferrerToOriginOnCrossOrigin);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-// Test that capping referrer granularity at origin on cross-origin requests
-// correctly defers to a more restrictive referrer policy on a
-// cross-origin navigation.
-IN_PROC_BROWSER_TEST_F(ReferrerPolicyCapReferrerToOriginOnCrossOriginTest,
-                       HonorsMoreRestrictivePolicyOnNavigation) {
-  RunReferrerTest(network::mojom::ReferrerPolicy::kSameOrigin, START_ON_HTTPS,
-                  REGULAR_LINK, NO_REDIRECT /*direct navigation x-origin*/,
-                  WindowOpenDisposition::CURRENT_TAB,
-                  blink::WebMouseEvent::Button::kLeft, EXPECT_EMPTY_REFERRER);
-}
-
-// Test that capping referrer granularity at origin on cross-origin requests
-// correctly defers to a more restrictive referrer policy on a
-// cross-origin redirect.
-IN_PROC_BROWSER_TEST_F(ReferrerPolicyCapReferrerToOriginOnCrossOriginTest,
-                       HonorsMoreRestrictivePolicyOnRedirect) {
-  RunReferrerTest(network::mojom::ReferrerPolicy::kStrictOrigin, START_ON_HTTPS,
-                  REGULAR_LINK, SERVER_REDIRECT_FROM_HTTPS_TO_HTTP,
-                  WindowOpenDisposition::CURRENT_TAB,
-                  blink::WebMouseEvent::Button::kLeft, EXPECT_EMPTY_REFERRER);
-}
-
-// Test that, when the cross-origin referrer cap is on but we also have the
-// "no referrers at all" pref set, we send no referrer at all on cross-origin
-// requests.
-IN_PROC_BROWSER_TEST_F(ReferrerPolicyCapReferrerToOriginOnCrossOriginTest,
-                       RespectsNoReferrerPref) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kEnableReferrers, false);
-  browser()
-      ->profile()
-      ->GetDefaultStoragePartition()
-      ->FlushNetworkInterfaceForTesting();
-  RunReferrerTest(network::mojom::ReferrerPolicy::kAlways, START_ON_HTTPS,
-                  REGULAR_LINK, NO_REDIRECT, WindowOpenDisposition::CURRENT_TAB,
-                  blink::WebMouseEvent::Button::kLeft, EXPECT_EMPTY_REFERRER,
-                  // when the pref is set, the renderer sets the referrer policy
-                  // to the kNever on outgoing requests at the same time
-                  // it removes referrers
-                  network::mojom::ReferrerPolicy::kNever);
-}

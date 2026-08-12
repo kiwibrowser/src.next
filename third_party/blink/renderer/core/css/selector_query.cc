@@ -29,6 +29,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/check_pseudo_has_cache_scope.h"
@@ -36,6 +37,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_selector_parser.h"
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/selector_checker.h"
+#include "third_party/blink/renderer/core/css/selector_filter.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -62,8 +64,7 @@ SelectorQuery::QueryStats SelectorQuery::LastQueryStats() {
   return CurrentQueryStats();
 }
 
-#define QUERY_STATS_INCREMENT(name) \
-  (void)(CurrentQueryStats().total_count++, CurrentQueryStats().name++);
+#define QUERY_STATS_INCREMENT(name) (void)(CurrentQueryStats().name++);
 #define QUERY_STATS_RESET() (void)(CurrentQueryStats() = {});
 
 #else
@@ -98,13 +99,16 @@ struct AllElementsSelectorQueryTrait {
   }
 };
 
-inline bool SelectorMatches(const CSSSelector& selector,
+inline bool SelectorMatches(const CSSSelector* selector,
                             Element& element,
                             const ContainerNode& root_node,
                             const SelectorChecker& checker) {
+  QUERY_STATS_INCREMENT(recheck_selector);
+
   SelectorChecker::SelectorCheckingContext context(&element);
-  context.selector = &selector;
+  context.selector = selector;
   context.scope = &root_node;
+  context.tree_scope = &root_node.GetTreeScope();
   return checker.Match(context);
 }
 
@@ -112,14 +116,20 @@ bool SelectorQuery::Matches(Element& target_element) const {
   QUERY_STATS_RESET();
   CheckPseudoHasCacheScope check_pseudo_has_cache_scope(
       &target_element.GetDocument(), /*within_selector_checking=*/false);
-  return SelectorListMatches(target_element, target_element);
+  if (compounds_.size() == 1 && !need_full_check_ && !compounds_[0].nth_child) {
+    FillMissingData(target_element);
+    return MatchCompound(target_element, compounds_[0], kUnknownSiblingIndex,
+                         IsA<HTMLDocument>(target_element.GetDocument()));
+  } else {
+    return SelectorListMatches(target_element, target_element);
+  }
 }
 
 Element* SelectorQuery::Closest(Element& target_element) const {
   QUERY_STATS_RESET();
   CheckPseudoHasCacheScope check_pseudo_has_cache_scope(
       &target_element.GetDocument(), /*within_selector_checking=*/false);
-  if (selectors_.empty()) {
+  if (selector_start_offsets_.empty()) {
     return nullptr;
   }
 
@@ -152,28 +162,6 @@ Element* SelectorQuery::QueryFirst(ContainerNode& root_node) const {
   return matched_element;
 }
 
-template <typename SelectorQueryTrait>
-static void CollectElementsByClassName(
-    ContainerNode& root_node,
-    const AtomicString& class_name,
-    const CSSSelector* selector,
-    typename SelectorQueryTrait::OutputType& output) {
-  SelectorChecker checker(SelectorChecker::kQueryingRules);
-  for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
-    QUERY_STATS_INCREMENT(fast_class);
-    if (!element.HasClassName(class_name)) {
-      continue;
-    }
-    if (selector && !SelectorMatches(*selector, element, root_node, checker)) {
-      continue;
-    }
-    SelectorQueryTrait::AppendElement(output, element);
-    if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
-      return;
-    }
-  }
-}
-
 inline bool MatchesTagName(const QualifiedName& tag_name,
                            const Element& element) {
   if (tag_name == AnyQName()) {
@@ -192,23 +180,6 @@ inline bool MatchesTagName(const QualifiedName& tag_name,
   return false;
 }
 
-template <typename SelectorQueryTrait>
-static void CollectElementsByTagName(
-    ContainerNode& root_node,
-    const QualifiedName& tag_name,
-    typename SelectorQueryTrait::OutputType& output) {
-  DCHECK_EQ(tag_name.NamespaceURI(), g_star_atom);
-  for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
-    QUERY_STATS_INCREMENT(fast_tag_name);
-    if (MatchesTagName(tag_name, element)) {
-      SelectorQueryTrait::AppendElement(output, element);
-      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
-        return;
-      }
-    }
-  }
-}
-
 // TODO(sesse): Reduce the duplication against SelectorChecker.
 static bool AttributeValueMatchesExact(const Attribute& attribute_item,
                                        const AtomicString& selector_value,
@@ -218,193 +189,22 @@ static bool AttributeValueMatchesExact(const Attribute& attribute_item,
     return false;
   }
   return selector_value == value ||
-         (case_insensitive && EqualIgnoringASCIICase(selector_value, value));
+         (case_insensitive && EqualIgnoringAsciiCase(selector_value, value));
 }
 
-// SynchronizeAttribute() is rather expensive to call. We can determine ahead of
-// time if it's needed. The exact set needed for svg is rather large, so this
-// errors on the side of caution.
-static bool NeedsSynchronizeAttribute(const QualifiedName& qname,
-                                      bool is_html_doc) {
-  // Assume any known name needs synchronization.
-  if (qname.IsDefinedName()) {
-    return true;
-  }
-  const QualifiedName local_qname(qname.LocalName());
-  if (local_qname.IsDefinedName()) {
-    return true;
-  }
-  // HTML elements in an html doc use the lower case name.
-  if (!is_html_doc || qname.LocalName().IsLowerASCII()) {
-    return false;
-  }
-  const QualifiedName lower_local_qname(qname.LocalName().LowerASCII());
-  return lower_local_qname.IsDefinedName();
-}
-
-template <typename SelectorQueryTrait>
-static void CollectElementsByAttributeExact(
-    ContainerNode& root_node,
-    const CSSSelector& selector,
-    typename SelectorQueryTrait::OutputType& output) {
-  const QualifiedName& selector_attr = selector.Attribute();
-  const AtomicString& selector_value = selector.Value();
-  const bool is_html_doc = IsA<HTMLDocument>(root_node.GetDocument());
-  // Legacy dictates that values of some attributes should be compared in
-  // a case-insensitive manner regardless of whether the case insensitive
-  // flag is set or not (but an explicit case sensitive flag will override
-  // that, by causing LegacyCaseInsensitiveMatch() never to be set).
-  const bool case_insensitive =
-      selector.AttributeMatch() ==
-          CSSSelector::AttributeMatchType::kCaseInsensitive ||
-      (selector.LegacyCaseInsensitiveMatch() && is_html_doc);
-  const bool needs_synchronize_attribute =
-      NeedsSynchronizeAttribute(selector_attr, is_html_doc);
-
-  for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
-    QUERY_STATS_INCREMENT(fast_scan);
-    if (needs_synchronize_attribute) {
-      // Synchronize the attribute in case it is lazy-computed.
-      // Currently all lazy properties have a null namespace, so only pass
-      // localName().
-      element.SynchronizeAttribute(selector_attr.LocalName());
-    }
-    AttributeCollection attributes = element.AttributesWithoutUpdate();
-    for (const auto& attribute_item : attributes) {
-      if (!attribute_item.Matches(selector_attr)) {
-        if (element.IsHTMLElement() || !is_html_doc) {
-          continue;
-        }
-        // Non-html attributes in html documents are normalized to their camel-
-        // cased version during parsing if applicable. Yet, attribute selectors
-        // are lower-cased for selectors in html documents. Compare the selector
-        // and the attribute local name insensitively to e.g. allow matching SVG
-        // attributes like viewBox.
-        //
-        // NOTE: If changing this behavior, be sure to also update the bucketing
-        // in ElementRuleCollector::CollectMatchingRules() accordingly.
-        if (!attribute_item.MatchesCaseInsensitive(selector_attr)) {
-          continue;
-        }
-      }
-
-      if (AttributeValueMatchesExact(attribute_item, selector_value,
-                                     case_insensitive)) {
-        SelectorQueryTrait::AppendElement(output, element);
-        if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
-          return;
-        }
-        break;
-      }
-
-      if (selector_attr.NamespaceURI() != g_star_atom) {
-        break;
-      }
-    }
-  }
-}
-
-inline bool AncestorHasClassName(ContainerNode& root_node,
-                                 const AtomicString& class_name) {
-  auto* root_node_element = DynamicTo<Element>(root_node);
-  if (!root_node_element) {
-    return false;
-  }
-
-  for (auto* element = root_node_element; element;
-       element = element->parentElement()) {
-    if (element->HasClassName(class_name)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-template <typename SelectorQueryTrait>
-void SelectorQuery::FindTraverseRootsAndExecute(
-    ContainerNode& root_node,
-    typename SelectorQueryTrait::OutputType& output) const {
-  // We need to return the matches in document order. To use id lookup while
-  // there is possiblity of multiple matches we would need to sort the
-  // results. For now, just traverse the document in that case.
-  DCHECK_EQ(selectors_.size(), 1u);
-
-  bool is_rightmost_selector = true;
-  bool is_affected_by_sibling_combinator = false;
-
-  for (const CSSSelector* selector = selectors_[0]; selector;
-       selector = selector->NextSimpleSelector()) {
-    if (!is_affected_by_sibling_combinator &&
-        selector->Match() == CSSSelector::kClass) {
-      if (is_rightmost_selector) {
-        CollectElementsByClassName<SelectorQueryTrait>(
-            root_node, selector->Value(), selectors_[0], output);
-        return;
-      }
-      // Since there exists some ancestor element which has the class name, we
-      // need to see all children of rootNode.
-      if (AncestorHasClassName(root_node, selector->Value())) {
-        break;
-      }
-
-      const AtomicString& class_name = selector->Value();
-      Element* element = ElementTraversal::FirstWithin(root_node);
-      while (element) {
-        QUERY_STATS_INCREMENT(fast_class);
-        if (element->HasClassName(class_name)) {
-          ExecuteForTraverseRoot<SelectorQueryTrait>(*element, root_node,
-                                                     output);
-          if (SelectorQueryTrait::kShouldOnlyMatchFirstElement &&
-              !SelectorQueryTrait::IsEmpty(output)) {
-            return;
-          }
-          element =
-              ElementTraversal::NextSkippingChildren(*element, &root_node);
-        } else {
-          element = ElementTraversal::Next(*element, &root_node);
-        }
-      }
-      return;
-    }
-
-    if (selector->Relation() == CSSSelector::kSubSelector) {
-      continue;
-    }
-    is_rightmost_selector = false;
-    is_affected_by_sibling_combinator =
-        selector->Relation() == CSSSelector::kDirectAdjacent ||
-        selector->Relation() == CSSSelector::kIndirectAdjacent;
-  }
-
-  ExecuteForTraverseRoot<SelectorQueryTrait>(root_node, root_node, output);
-}
-
-template <typename SelectorQueryTrait>
-void SelectorQuery::ExecuteForTraverseRoot(
-    ContainerNode& traverse_root,
-    ContainerNode& root_node,
-    typename SelectorQueryTrait::OutputType& output) const {
-  DCHECK_EQ(selectors_.size(), 1u);
-
-  const CSSSelector& selector = *selectors_[0];
-  SelectorChecker checker(SelectorChecker::kQueryingRules);
-
-  for (Element& element : ElementTraversal::DescendantsOf(traverse_root)) {
-    QUERY_STATS_INCREMENT(fast_scan);
-    if (SelectorMatches(selector, element, root_node, checker)) {
-      SelectorQueryTrait::AppendElement(output, element);
-      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
-        return;
-      }
-    }
-  }
+static Element::AttributesToExcludeHashesFor ExclusionPolicy(
+    const ContainerNode& root_node) {
+  return IsA<HTMLDocument>(root_node.GetDocument())
+             ? Element::kExcludeAllLazilySynchronizedAttributes
+             : Element::kExcludeLowercaseLazilySynchronizedAttributes;
 }
 
 bool SelectorQuery::SelectorListMatches(ContainerNode& root_node,
                                         Element& element) const {
   SelectorChecker checker(SelectorChecker::kQueryingRules);
-  for (auto* const selector : selectors_) {
-    if (SelectorMatches(*selector, element, root_node, checker)) {
+  for (unsigned offset : selector_start_offsets_) {
+    if (SelectorMatches(UNSAFE_TODO(selector_list_->First() + offset), element,
+                        root_node, checker)) {
       return true;
     }
   }
@@ -427,171 +227,714 @@ void SelectorQuery::ExecuteSlow(
   }
 }
 
-template <typename SelectorQueryTrait>
-void SelectorQuery::ExecuteWithId(
-    ContainerNode& root_node,
-    typename SelectorQueryTrait::OutputType& output) const {
-  DCHECK_EQ(selectors_.size(), 1u);
-  DCHECK(!root_node.GetDocument().InQuirksMode());
-
-  const CSSSelector& first_selector = *selectors_[0];
-  DCHECK(root_node.IsInTreeScope());
-  const TreeScope& scope = root_node.GetTreeScope();
-  SelectorChecker checker(SelectorChecker::kQueryingRules);
-
-  if (scope.ContainsMultipleElementsWithId(selector_id_)) {
-    // We don't currently handle cases where there's multiple elements with the
-    // id and it's not in the rightmost selector.
-    if (!selector_id_is_rightmost_) {
-      FindTraverseRootsAndExecute<SelectorQueryTrait>(root_node, output);
-      return;
+bool SelectorQuery::MatchCompound(const Element& element,
+                                  const SelectorQuery::Compound& compound,
+                                  unsigned sibling_idx,
+                                  bool is_html_doc) {
+  if (compound.id_needed) {
+    QUERY_STATS_INCREMENT(check_id);
+    if (!element.HasID() ||
+        element.IdForStyleResolution() != compound.id_needed) {
+      return false;
     }
-    const auto& elements = scope.GetAllElementsById(selector_id_);
-    for (const auto& element : elements) {
-      if (!element->IsDescendantOf(&root_node)) {
-        continue;
-      }
-      QUERY_STATS_INCREMENT(fast_id);
-      if (SelectorMatches(first_selector, *element, root_node, checker)) {
-        SelectorQueryTrait::AppendElement(output, *element);
-        if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
-          return;
+  }
+  if (!compound.tag_needed.IsNull()) {
+    QUERY_STATS_INCREMENT(check_tag);
+    if (!MatchesTagName(compound.tag_needed, element)) {
+      return false;
+    }
+  }
+  if (compound.class_needed) {
+    QUERY_STATS_INCREMENT(check_class);
+    if (!element.HasClassName(compound.class_needed)) {
+      return false;
+    }
+  }
+  if (!compound.attr_needed.IsNull()) {
+    QUERY_STATS_INCREMENT(check_attr);
+    if (compound.needs_synchronize_attribute) {
+      // Synchronize the attribute in case it is lazy-computed.
+      // Currently all lazy properties have a null namespace, so only pass
+      // localName().
+      element.SynchronizeAttribute(compound.attr_needed.LocalName());
+    }
+    AttributeCollection attributes = element.AttributesWithoutUpdate();
+    bool match_attr = false;
+    for (const auto& attribute_item : attributes) {
+      if (!attribute_item.Matches(compound.attr_needed)) {
+        if (element.IsHTMLElement() || !is_html_doc) {
+          continue;
+        }
+        // Non-HTML attributes in HTML documents are normalized to their camel-
+        // cased version during parsing if applicable. Yet, attribute selectors
+        // are lower-cased for selectors in HTML documents. Compare the selector
+        // and the attribute local name insensitively to e.g. allow matching SVG
+        // attributes like viewBox.
+        //
+        // NOTE: If changing this behavior, be sure to also update the bucketing
+        // in ElementRuleCollector::CollectMatchingRules() accordingly.
+        if (!attribute_item.MatchesCaseInsensitive(compound.attr_needed)) {
+          continue;
         }
       }
+      if (AttributeValueMatchesExact(attribute_item, compound.attr_value,
+                                     compound.attr_case_insensitive)) {
+        match_attr = true;
+        break;
+      }
+      if (compound.attr_needed.NamespaceURI() != g_star_atom) {
+        break;
+      }
     }
-    return;
+    if (!match_attr) {
+      return false;
+    }
   }
 
-  Element* element = scope.getElementById(selector_id_);
-  if (!element) {
-    return;
-  }
-  if (selector_id_is_rightmost_) {
-    if (!element->IsDescendantOf(&root_node)) {
-      return;
-    }
-    QUERY_STATS_INCREMENT(fast_id);
-    if (SelectorMatches(first_selector, *element, root_node, checker)) {
-      SelectorQueryTrait::AppendElement(output, *element);
-    }
-    return;
-  }
-  ContainerNode* start = &root_node;
-  if (element->IsDescendantOf(&root_node)) {
-    start = element;
-    if (selector_id_affected_by_sibling_combinator_) {
-      start = start->parentNode();
+  if (compound.nth_child && !(sibling_idx & kUnknownSiblingIndex)) {
+    QUERY_STATS_INCREMENT(check_nth_child);
+    if (compound.nth_child != sibling_idx) {
+      return false;
     }
   }
-  if (!start) {
-    return;
+
+  return true;
+}
+
+unsigned SelectorQuery::FirstCompoundNotSeenBeforeRoot(
+    const ContainerNode& root_node,
+    unsigned from_idx,
+    unsigned to_idx,
+    bool is_html_doc,
+    bool horizontally) const {
+  if (from_idx == to_idx) {
+    return from_idx;
   }
-  QUERY_STATS_INCREMENT(fast_id);
-  ExecuteForTraverseRoot<SelectorQueryTrait>(*start, root_node, output);
+
+  base::span<const Compound> earlier_compounds =
+      base::span(compounds_).subspan(from_idx, to_idx - from_idx);
+
+  // Reset the flags.
+  unsigned num_unmatched_compounds = 0;
+  for (const Compound& compound : earlier_compounds) {
+    if (!horizontally && compound.next_compound_is_horizontal) {
+      // We don't search to the left, only straight upwards, so we take
+      // every sibling as already found.
+      compound.seen_before_root = true;
+    } else {
+      compound.seen_before_root = false;
+      ++num_unmatched_compounds;
+    }
+  }
+
+  for (const Node* node = horizontally ? root_node.previousSibling()
+                                       : root_node.parentNode();
+       node && num_unmatched_compounds;
+       node = horizontally ? node->previousSibling() : node->parentNode()) {
+    const Element* element = DynamicTo<Element>(node);
+    if (!element) {
+      continue;
+    }
+
+    for (const Compound& compound : earlier_compounds) {
+      if (compound.seen_before_root) {
+        // Already matched, don't bother.
+        continue;
+      }
+
+      if (MatchCompound(*element, compound, kUnknownSiblingIndex,
+                        is_html_doc)) {
+        compound.seen_before_root = true;
+        --num_unmatched_compounds;
+      }
+    }
+  }
+
+  for (unsigned i = from_idx; i < to_idx; ++i) {
+    if (!compounds_[i].seen_before_root) {
+      return i;
+    }
+  }
+  return to_idx;
+}
+
+// When we go downwards, we may need to go back in the list of compounds
+// if we have sibling selectors; e.g., for a + b > c, if we've matched a
+// but not b (compound_idx=1), going down will reset us back to compound_idx=0.
+// Only when matching both a and b (compound_idx=2), and then going down will
+// actually allow us to keep compound_idx=2 in the subtree. If we look for
+// further siblings of b, we will again have resets to compound_idx=0 for
+// children (until we match b on some other element).
+unsigned SelectorQuery::FindStartOfLevel(unsigned compound_idx) const {
+  unsigned first_compound_idx_this_level = compound_idx;
+  while (first_compound_idx_this_level > 0 &&
+         compounds_[first_compound_idx_this_level - 1]
+             .next_compound_is_horizontal) {
+    --first_compound_idx_this_level;
+  }
+  return first_compound_idx_this_level;
 }
 
 template <typename SelectorQueryTrait>
 void SelectorQuery::Execute(
     ContainerNode& root_node,
     typename SelectorQueryTrait::OutputType& output) const {
-  if (selectors_.empty()) {
+  if (selector_start_offsets_.empty()) {
     return;
-  }
-
-  if (use_slow_scan_) {
+  } else if (selector_start_offsets_.size() > 1) {
     ExecuteSlow<SelectorQueryTrait>(root_node, output);
     return;
   }
 
-  DCHECK_EQ(selectors_.size(), 1u);
+  CHECK_EQ(selector_start_offsets_.size(), 1u);
 
-  // In quirks mode getElementById("a") is case sensitive and should only
-  // match elements with lowercase id "a", but querySelector is case-insensitive
-  // so querySelector("#a") == querySelector("#A"), which means we can only use
-  // the id fast path when we're in a standards mode document.
-  if (selector_id_ && root_node.IsInTreeScope() &&
-      !root_node.GetDocument().InQuirksMode()) {
-    ExecuteWithId<SelectorQueryTrait>(root_node, output);
-    return;
-  }
+  FillMissingData(root_node);
 
-  const CSSSelector& first_selector = *selectors_[0];
-  if (!first_selector.NextSimpleSelector()) {
-    // Fast path for querySelector*('.foo'), and querySelector*('div').
-    switch (first_selector.Match()) {
-      case CSSSelector::kClass:
-        CollectElementsByClassName<SelectorQueryTrait>(
-            root_node, first_selector.Value(), nullptr, output);
-        return;
-      case CSSSelector::kTag:
-        if (first_selector.TagQName().NamespaceURI() == g_star_atom) {
-          CollectElementsByTagName<SelectorQueryTrait>(
-              root_node, first_selector.TagQName(), output);
-          return;
+  // Find out which compounds we've already seen above us and
+  // must skip (although note that if we see only some siblings
+  // of a level above us, we've effectively matched none of that
+  // level).
+  const bool is_html_doc = IsA<HTMLDocument>(root_node.GetDocument());
+  const unsigned subject_compound_idx = compounds_.size() - 1;
+  unsigned start_compound_idx = FirstCompoundNotSeenBeforeRoot(
+      root_node,
+      /*from_idx=*/0, /*to_idx=*/FindStartOfLevel(subject_compound_idx),
+      is_html_doc,
+      /*horizontally=*/false);
+  start_compound_idx = FindStartOfLevel(start_compound_idx);
+
+  // Similarly to the left of us, although note that unlike upwards,
+  // this state change can actually be temporary; if we match some siblings
+  // and then go down a level without matching the rest, we go back
+  // to the start of the level.
+  start_compound_idx = FirstCompoundNotSeenBeforeRoot(
+      root_node, /*from_idx=*/start_compound_idx,
+      /*to_idx=*/subject_compound_idx, is_html_doc,
+      /*horizontally=*/true);
+
+  // NOTE: If we only skip one level/compound, and it's a descendant/indirect
+  // adjacent selector, then we could probably avoid need_full_check. For now,
+  // we don't bother.
+  const bool need_full_check = need_full_check_ || start_compound_idx > 0;
+
+  SelectorChecker checker(SelectorChecker::kQueryingRules);
+
+  // Now go and see if any of the remaining compounds contain an ID selector.
+  // The DOM maintains special structures to locate IDs quickly, so this is
+  // our preferred acceleration if available; if there are multiple ID
+  // selectors, we pick the one on the lowest level in the (fairly reasonable)
+  // hope that this contains the smallest subtree to look in.
+  //
+  // Note that we don't do this for compounds we've already matched,
+  // since that will make us do at least one search from _above_ the root node,
+  // which usually is more of a deoptimization.
+  //
+  // NOTE: In quirks mode, getElementById("a") is case-sensitive and
+  // should only match elements with lowercase id "a", but querySelector
+  // is case-insensitive, so querySelector("#a") == querySelector("#A"),
+  // which means we can only use the ID fast path when we're in a
+  // standards-mode document.
+  //
+  // TODO(sesse): We could re-check the discarded compounds to reject candidates
+  // here more quickly (but it may not be worth it compared to just doing normal
+  // selector checking).
+  if (last_compound_with_id_selector_ >= static_cast<int>(start_compound_idx) &&
+      root_node.IsInTreeScope() && !root_node.GetDocument().InQuirksMode()) {
+    const TreeScope& scope = root_node.GetTreeScope();
+    const Compound& compound = compounds_[last_compound_with_id_selector_];
+    const AtomicString& id =
+        compound.id_needed ? compound.id_needed : compound.attr_value;
+    // The element with the given ID must be part of the match;
+    // if we don't immediately match it (i.e., we stay at the current
+    // compound, or even go backwards), we can drop the rest of the tree.
+    for (unsigned i = 0; i < compounds_.size(); ++i) {
+      compounds_[i].valid_for_progress =
+          (static_cast<int>(i) > last_compound_with_id_selector_);
+    }
+
+    // Returns true if we are to stop the search.
+    auto match = [&](Element* element) -> bool {
+      if (!element) {
+        return false;
+      }
+      QUERY_STATS_INCREMENT(fast_id_roots);
+      if (element != &root_node && !element->IsDescendantOf(&root_node)) {
+        return false;
+      }
+      return ExecuteSearch<SelectorQueryTrait>(
+          *element, root_node, &compounds_[last_compound_with_id_selector_],
+          kUnknownSiblingIndex,
+          need_full_check || last_compound_with_id_selector_ > 0, is_html_doc,
+          checker, output);
+    };
+    if (scope.ContainsMultipleElementsWithId(id) &&
+        last_compound_with_id_selector_ !=
+            static_cast<int>(compounds_.size() - 1)) {
+      // We need to avoid duplicates; if we have a structure where multiple
+      // elements share the same ID, and some of those are children of each
+      // other, we cannot blindly traverse the subtrees below each of them. If
+      // we're in querySelectorAll(), this matters for correctness, and even if
+      // we're in querySelector(), it's a potential performance trap to keep
+      // scanning the same subtree over and over again. (If we only have a
+      // single compound, it's not an issue, as we're never moving beyond the
+      // initial element in that case.)
+      //
+      // We could have solved this by skipping directly to the subject and
+      // cutting off the search when we see a descendant with the right ID, but
+      // it's not worth it; we already have enough complexity.
+    } else if (scope.ContainsMultipleElementsWithId(id)) {
+      for (Element* element : scope.GetAllElementsById(id)) {
+        if (match(element)) {
+          break;
         }
-        // querySelector*() doesn't allow namespace prefix resolution and
-        // throws before we get here, but we still may have selectors for
-        // elements without a namespace.
-        DCHECK_EQ(first_selector.TagQName().NamespaceURI(), g_null_atom);
-        break;
-      case CSSSelector::kAttributeExact:
-        if (RuntimeEnabledFeatures::FastPathSingleSelectorExactMatchEnabled()) {
-          CollectElementsByAttributeExact<SelectorQueryTrait>(
-              root_node, first_selector, output);
-          return;
-        }
-        break;
-      default:
-        break;  // If we need another fast path, add here.
+      }
+      return;
+    } else {
+      match(scope.getElementById(id));
+      return;
     }
   }
 
-  FindTraverseRootsAndExecute<SelectorQueryTrait>(root_node, output);
+  // OK, there are no ID selectors anywhere, so do the normal matching.
+  for (const Compound& compound : compounds_) {
+    compound.valid_for_progress = true;
+  }
+  const Compound* start_compound = &compounds_[start_compound_idx];
+  if (start_compound->simple_traversal_from_here) {
+    Element* first_child = ElementTraversal::FirstChild(root_node);
+    if (first_child) {
+      ExecuteSearchSingleCompound<SelectorQueryTrait>(
+          root_node, *first_child, root_node, start_compound, need_full_check,
+          is_html_doc, checker, output);
+    }
+  } else {
+    ExecuteSearch<SelectorQueryTrait>(root_node, root_node, start_compound,
+                                      kUnknownSiblingIndex, need_full_check,
+                                      is_html_doc, checker, output);
+  }
 }
 
-std::unique_ptr<SelectorQuery> SelectorQuery::Adopt(
-    CSSSelectorList* selector_list) {
-  return base::WrapUnique(new SelectorQuery(selector_list));
+template <typename SelectorQueryTrait>
+bool SelectorQuery::ExecuteSearchSingleCompound(
+    ContainerNode& root_node,
+    Element& first_interesting_child,
+    const ContainerNode& scope,
+    const Compound* compound,
+    bool need_full_check,
+    bool is_html_doc,
+    SelectorChecker& checker,
+    typename SelectorQueryTrait::OutputType& output) const {
+  DCHECK(compound->simple_traversal_from_here);
+  const Element::TinyBloomFilter selector_filter = compound->selector_filter;
+
+  if (IsA<Element>(root_node) &&
+      !To<Element>(root_node).CouldMatchFilter(selector_filter)) {
+    // Neither this nor any of its children could match this query,
+    // so we can exit early.
+    QUERY_STATS_INCREMENT(skipped_subtree);
+    return false;
+  }
+
+  for (Element* element = &first_interesting_child; element;) {
+    if (!element->CouldMatchFilter(selector_filter)) {
+      QUERY_STATS_INCREMENT(skipped_subtree);
+    } else {
+      QUERY_STATS_INCREMENT(elements_seen);
+      if (MatchCompound(*element, *compound, kUnknownSiblingIndex,
+                        is_html_doc) &&
+          (!need_full_check ||
+           SelectorMatches(OnlySelector(), *element, scope, checker))) {
+        SelectorQueryTrait::AppendElement(output, *element);
+        if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
+          return true;
+        }
+      }
+      Element* child = ElementTraversal::FirstChild(*element);
+      if (child) {
+        element = child;
+        continue;
+      }
+    }
+    Element* sibling = ElementTraversal::NextSibling(*element);
+    if (sibling) {
+      element = sibling;
+    } else {
+      for (Node& parent : NodeTraversal::AncestorsOf(*element)) {
+        if (parent == &root_node) {
+          return false;
+        }
+        sibling = ElementTraversal::NextSibling(parent);
+        if (sibling) {
+          element = sibling;
+          break;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+template <typename SelectorQueryTrait, bool is_top_level>
+bool SelectorQuery::ExecuteSearch(
+    ContainerNode& root_node,
+    const ContainerNode& scope,
+    const Compound* start_compound,
+    unsigned sibling_idx,
+    bool need_full_check,
+    bool is_html_doc,
+    SelectorChecker& checker,
+    typename SelectorQueryTrait::OutputType& output) const {
+  if (is_top_level && IsA<Element>(root_node) &&
+      !To<Element>(root_node).CouldMatchFilter(
+          start_compound->selector_filter)) {
+    // Neither this nor any of its children could match this query,
+    // so we can exit early.
+    QUERY_STATS_INCREMENT(skipped_subtree);
+    return false;
+  }
+
+  ContainerNode* node = &root_node;
+  const Compound* compound = start_compound;
+
+  for (;;) {  // Termination condition within loop.
+    Element* element = DynamicTo<Element>(node);
+
+    if (element) {
+      QUERY_STATS_INCREMENT(elements_seen);
+    }
+
+    const Compound* compound_for_children;
+    const Compound* compound_for_siblings;
+    const bool match =
+        !(compound->is_subject && node == &scope) &&
+        ((compound->skip_for_shadow_root && IsA<ShadowRoot>(node)) ||
+         (element &&
+          MatchCompound(*element, *compound, sibling_idx, is_html_doc)));
+    if (match) {
+      if (compound->nth_child && !(sibling_idx & kUnknownSiblingIndex)) {
+        // This compound required :nth-child(), but we don't know
+        // our element index, so we need a full recheck.
+        // (This can only happen on the root node, so it's fine
+        // that this is kept for all nodes in the rest of the tree.
+        // There are some edge cases involving sibling selectors
+        // where the flag would get wrongly stuck, but that's fine.)
+        need_full_check = true;
+      }
+      if (compound->is_subject) {
+        // We've matched all compounds, so this may be the actual matching
+        // element. If needed, run the full selector checker to make sure.
+        if (element &&
+            (!need_full_check ||
+             SelectorMatches(OnlySelector(), *element, scope, checker))) {
+          // We actually matched.
+          SelectorQueryTrait::AppendElement(output, *element);
+          if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
+            return true;
+          }
+        }
+      }
+      compound_for_children = compound->next_compound_for_children_on_match;
+      compound_for_siblings = compound->next_compound_for_siblings_on_match;
+    } else {
+      compound_for_children = compound->next_compound_for_children_on_mismatch;
+      compound_for_siblings = compound;
+    }
+
+    // We're going to descend to the first (interesting) child of this node,
+    // but if we have more (interesting) siblings, we need to remember them for
+    // later traversal.
+    Element* first_child = ElementTraversal::FirstChild(*node);
+    Element* next_sibling =
+        node == &scope ? nullptr : ElementTraversal::NextSibling(*node);
+
+    if (is_top_level) {
+      if (!compound_for_siblings->valid_for_progress) {
+        next_sibling = nullptr;
+      }
+      if (!compound_for_children->valid_for_progress) {
+        first_child = nullptr;
+      }
+    } else {
+      DCHECK(compound_for_siblings->valid_for_progress);
+      DCHECK(compound_for_children->valid_for_progress);
+    }
+
+    // Skip uninteresting children and siblings; we don't have to go through
+    // the entire loop for them.
+    unsigned first_child_sibling_idx = 1;
+    unsigned next_sibling_idx = sibling_idx + 1;
+    while (first_child && !first_child->CouldMatchFilter(
+                              compound_for_children->selector_filter)) {
+      QUERY_STATS_INCREMENT(skipped_subtree);
+      first_child = ElementTraversal::NextSibling(*first_child);
+      ++first_child_sibling_idx;
+    }
+    while (next_sibling && !next_sibling->CouldMatchFilter(
+                               compound_for_siblings->selector_filter)) {
+      QUERY_STATS_INCREMENT(skipped_subtree);
+      next_sibling = ElementTraversal::NextSibling(*next_sibling);
+      ++next_sibling_idx;
+    }
+
+    if (first_child && compound_for_children->simple_traversal_from_here) {
+      if (ExecuteSearchSingleCompound<SelectorQueryTrait>(
+              *node, *first_child, scope, compound_for_children,
+              need_full_check, is_html_doc, checker, output)) {
+        return true;
+      }
+      first_child = nullptr;
+    }
+
+    // Navigate to the first child if we can, the next sibling if not,
+    // and back to earlier-unvisited sublings if we have neither.
+    // (This is similar to ElementTraversal::Next(), except that we skip
+    // uninteresting elements and reset our compound data/sibling index
+    // on backtracking.)
+    if (next_sibling) {
+      if (first_child) {
+        // We can go both down and right, and we want to follow
+        // both paths. We could do this either via explicit recursion
+        // or storing the state in a HeapVector, and the former measured
+        // better (probably because of Oilpan barriers).
+        if (ExecuteSearch<SelectorQueryTrait, /*is_top_level=*/false>(
+                *first_child, scope, compound_for_children,
+                first_child_sibling_idx, need_full_check, is_html_doc, checker,
+                output)) {
+          return true;
+        }
+      }
+      node = next_sibling;
+      compound = compound_for_siblings;
+      sibling_idx = next_sibling_idx;
+    } else if (first_child) {
+      node = first_child;
+      compound = compound_for_children;
+      sibling_idx = first_child_sibling_idx;
+    } else {
+      // We're done.
+      return false;
+    }
+  }
 }
 
 SelectorQuery::SelectorQuery(CSSSelectorList* selector_list)
-    : selector_list_(selector_list),
-      selector_id_is_rightmost_(true),
-      selector_id_affected_by_sibling_combinator_(false),
-      use_slow_scan_(true) {
-  selectors_.ReserveInitialCapacity(selector_list_->ComputeLength());
-  for (const CSSSelector* selector = selector_list_->First(); selector;
+    : selector_list_(selector_list) {
+  const CSSSelector* base = selector_list_->First();
+  for (const CSSSelector* selector = base; selector;
        selector = CSSSelectorList::Next(*selector)) {
     if (selector->MatchesPseudoElement()) {
       continue;
     }
-    selectors_.UncheckedAppend(selector);
+    selector_start_offsets_.push_back(selector - base);
   }
 
-  if (selectors_.size() == 1) {
-    use_slow_scan_ = false;
-    for (const CSSSelector* current = selectors_[0]; current;
-         current = current->NextSimpleSelector()) {
-      if (current->Match() == CSSSelector::kId) {
-        selector_id_ = current->Value();
+  if (selector_start_offsets_.size() == 1) {
+    BuildCompounds(OnlySelector());
+  }
+}
+
+void SelectorQuery::BuildCompounds(const CSSSelector* first_selector) {
+  Compound current_compound;
+
+  compounds_.clear();
+  need_full_check_ = false;
+  last_compound_with_id_selector_ = -1;
+  Element::TinyBloomFilter selector_filter_this_level = 0;
+
+  for (const CSSSelector* current = first_selector; current;
+       current = current->NextSimpleSelector()) {
+    // See if we can satisfy this simple selector using one of the quick
+    // checks that we do.
+    switch (current->Match()) {
+      case CSSSelector::kClass:
+        if (current_compound.class_needed.IsNull()) {
+          current_compound.class_needed = current->Value();
+        } else {
+          need_full_check_ = true;
+        }
         break;
-      }
-      // We only use the fast path when in standards mode where #id selectors
-      // are case sensitive, so we need the same behavior for [id=value].
-      if (current->Match() == CSSSelector::kAttributeExact &&
-          current->Attribute() == html_names::kIdAttr &&
-          current->AttributeMatch() ==
-              CSSSelector::AttributeMatchType::kCaseSensitive) {
-        selector_id_ = current->Value();
+
+      case CSSSelector::kUniversalTag:
+        if (current->TagQName().NamespaceURI() != g_star_atom) {
+          // We don't check namespaces.
+          need_full_check_ = true;
+        }
         break;
+
+      case CSSSelector::kTag:
+        if (current_compound.tag_needed.IsNull()) {
+          current_compound.tag_needed = current->TagQName();
+          if (current->TagQName().NamespaceURI() != g_star_atom) {
+            // We don't check namespaces.
+            need_full_check_ = true;
+          }
+        } else {
+          need_full_check_ = true;
+        }
+        break;
+
+      case CSSSelector::kAttributeExact:
+        if (current_compound.attr_needed.IsNull()) {
+          current_compound.attr_needed = current->Attribute();
+          current_compound.attr_value = current->Value();
+          current_compound.match_type_case_insensitive =
+              current->AttributeMatch() ==
+              CSSSelector::AttributeMatchType::kCaseInsensitive;
+          current_compound.legacy_case_insensitive =
+              current->LegacyCaseInsensitiveMatch();
+        } else {
+          need_full_check_ = true;
+        }
+        break;
+
+      case CSSSelector::kId:
+        if (current_compound.id_needed.IsNull()) {
+          current_compound.id_needed = current->Value();
+        } else {
+          need_full_check_ = true;
+        }
+        break;
+
+      case CSSSelector::kPseudoClass:
+        if (current->GetPseudoType() == CSSSelector::kPseudoNthChild &&
+            !current->SelectorList() && current->NthAValue() == 0 &&
+            current->NthBValue() > 0 && !current_compound.nth_child) {
+          // b == 0 collides with the "no :nth-child()" sentinel (see
+          // Compound::nth_child); only b > 0 is safe on the fast path.
+          // TODO(sesse): Consider supporting aN + b, not just b.
+          current_compound.nth_child = current->NthBValue();
+        } else if (current->GetPseudoType() == CSSSelector::kPseudoFirstChild &&
+                   !current_compound.nth_child) {
+          current_compound.nth_child = 1;
+        } else {
+          need_full_check_ = true;
+        }
+        break;
+
+      default:
+        need_full_check_ = true;
+        break;
+    }
+
+    // TODO(sesse): If we have :has(), we could probably get bits from it here
+    // (we cannot easily in normal selector checking, since we need to scan the
+    // entire subtree to set kAffectedByHas invalidation bits anyway).
+    SelectorFilter::CollectSingleSelectorIdentifierHashes(
+        current, Element::kExcludeAllLazilySynchronizedAttributes,
+        current_compound.selector_filter);
+    selector_filter_this_level |= current_compound.selector_filter;
+
+    // See if we are switching compounds.
+    if (!current->IsLastInComplexSelector() &&
+        current->Relation() != CSSSelector::kSubSelector) {
+      compounds_.push_back(std::move(current_compound));
+      current_compound = Compound();
+
+      if (current->Relation() == CSSSelector::kDirectAdjacent ||
+          current->Relation() == CSSSelector::kIndirectAdjacent) {
+        current_compound.next_compound_is_horizontal = true;
+      } else {
+        current_compound.selector_filter = selector_filter_this_level;
+        selector_filter_this_level = 0;
       }
-      if (current->Relation() == CSSSelector::kSubSelector) {
-        continue;
+
+      if (current->Relation() == CSSSelector::kDirectAdjacent ||
+          current->Relation() == CSSSelector::kChild) {
+        // Since we are relaxing the combinator to a more permissive one,
+        // we need to re-run SelectorChecker after finding a match.
+        //
+        // NOTE: If these combinators become very important to us, it is
+        // possible to do an accurate check by making the state machine
+        // non-deterministic, i.e., after a match we could choose to either
+        // move to the next state or pretend it's a non-match (and then
+        // require actual direct adjacency, of course). For now, we're fine
+        // with the simpler version.
+        need_full_check_ = true;
       }
-      selector_id_is_rightmost_ = false;
-      selector_id_affected_by_sibling_combinator_ =
-          current->Relation() == CSSSelector::kDirectAdjacent ||
-          current->Relation() == CSSSelector::kIndirectAdjacent;
+    }
+  }
+
+  // TODO(sesse): If we have a sibling selector in the topmost compound,
+  // it could be advantageous to use the final selector_filter_this_level
+  // value to check that the _parent_ element has the required subtree bits.
+
+  compounds_.push_back(std::move(current_compound));
+  std::reverse(compounds_.begin(), compounds_.end());
+
+  for (Compound& compound : compounds_) {
+    if (compound.id_needed || !compound.tag_needed.IsNull() ||
+        compound.class_needed || !compound.attr_needed.IsNull()) {
+      compound.skip_for_shadow_root = false;
+    }
+  }
+
+  for (unsigned compound_idx = compounds_.size(); compound_idx-- > 0;) {
+    const Compound& compound = compounds_[compound_idx];
+    // NOTE: compound.attr_case_insensitive has not been set yet,
+    // so we use a more conservative test.
+    if (compound.id_needed || (compound.attr_needed == html_names::kIdAttr &&
+                               !compound.match_type_case_insensitive &&
+                               !compound.legacy_case_insensitive)) {
+      last_compound_with_id_selector_ = compound_idx;
+      break;
+    }
+  }
+
+  for (unsigned compound_idx = 0; compound_idx < compounds_.size();
+       ++compound_idx) {
+    Compound& compound = compounds_[compound_idx];
+
+    // Defaults.
+    compound.next_compound_for_siblings_on_match = &compound;
+    compound.next_compound_for_children_on_mismatch =
+        compound.next_compound_for_children_on_match =
+            &compounds_[FindStartOfLevel(compound_idx)];
+
+    if (compound_idx == compounds_.size() - 1) {
+      // We cannot progress past the subject.
+    } else {
+      if (compound.next_compound_is_horizontal) {
+        compound.next_compound_for_siblings_on_match =
+            &compounds_[compound_idx + 1];
+      } else {
+        compound.next_compound_for_children_on_match =
+            &compounds_[compound_idx + 1];
+      }
+    }
+  }
+
+  Compound& subject_compound = compounds_[compounds_.size() - 1];
+  subject_compound.is_subject = true;
+
+  // If we get to the subject and cannot ever go backwards from there
+  // (i.e., it is not related to a sibling combinator), and we don't
+  // care about the index in the DOM, we can do with a simpler,
+  // more direct search without any recursion.
+  subject_compound.simple_traversal_from_here =
+      (subject_compound.next_compound_for_children_on_mismatch ==
+       &subject_compound) &&
+      !subject_compound.nth_child;
+}
+
+// Fill in attribute data that we can only fill in when we know the document.
+void SelectorQuery::FillMissingData(const ContainerNode& root_node) const {
+  const bool is_html_doc = IsA<HTMLDocument>(root_node.GetDocument());
+  for (const Compound& compound : compounds_) {
+    if (!compound.attr_needed.IsNull()) {
+      // Legacy dictates that values of some attributes should be compared
+      // in a case-insensitive manner regardless of whether the case
+      // insensitive flag is set or not (but an explicit case sensitive flag
+      // will override that, by causing LegacyCaseInsensitiveMatch() never
+      // to be set).
+      compound.attr_case_insensitive =
+          compound.match_type_case_insensitive ||
+          (compound.legacy_case_insensitive && is_html_doc);
+
+      // SynchronizeAttribute() is rather expensive to call. We can
+      // determine ahead of time if it's needed.
+      compound.needs_synchronize_attribute = Element::IsExcludedAttribute(
+          compound.attr_needed, ExclusionPolicy(root_node));
     }
   }
 }
@@ -605,23 +948,22 @@ SelectorQuery* SelectorQueryCache::Add(const AtomicString& selectors,
     return nullptr;
   }
 
-  HashMap<AtomicString, std::unique_ptr<SelectorQuery>>::iterator it =
-      entries_.find(selectors);
+  auto it = entries_.find(selectors);
   if (it != entries_.end()) {
-    return it->value.get();
+    return it->value.Get();
   }
 
   HeapVector<CSSSelector> arena;
   base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
       MakeGarbageCollected<CSSParserContext>(
           document, document.BaseURL(), true /* origin_clean */, Referrer()),
-      CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr,
-      /*is_within_scope=*/false, nullptr, selectors, arena);
+      CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr, nullptr,
+      selectors, arena);
 
   if (selector_vector.empty()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
-        "'" + selectors + "' is not a valid selector.");
+        StrCat({"'", selectors, "' is not a valid selector."}));
     return nullptr;
   }
 
@@ -633,12 +975,52 @@ SelectorQuery* SelectorQueryCache::Add(const AtomicString& selectors,
     entries_.erase(entries_.begin());
   }
 
-  return entries_.insert(selectors, SelectorQuery::Adopt(selector_list))
-      .stored_value->value.get();
+  return entries_
+      .insert(selectors, MakeGarbageCollected<SelectorQuery>(selector_list))
+      .stored_value->value.Get();
 }
 
 void SelectorQueryCache::Invalidate() {
   entries_.clear();
+}
+
+std::ostream& operator<<(std::ostream& stream,
+                         const SelectorQuery::QueryStats& stats) {
+  if (stats == SelectorQuery::QueryStats()) {
+    return stream << "(empty)";
+  } else {
+    if (stats.elements_seen) {
+      stream << ".elements_seen = " << stats.elements_seen << ", ";
+    }
+    if (stats.fast_id_roots) {
+      stream << ".fast_id_roots = " << stats.fast_id_roots << ", ";
+    }
+    if (stats.check_id) {
+      stream << ".check_id = " << stats.check_id << ", ";
+    }
+    if (stats.check_tag) {
+      stream << ".check_tag = " << stats.check_tag << ", ";
+    }
+    if (stats.check_class) {
+      stream << ".check_class = " << stats.check_class << ", ";
+    }
+    if (stats.check_attr) {
+      stream << ".check_attr = " << stats.check_attr << ", ";
+    }
+    if (stats.check_nth_child) {
+      stream << ".check_nth_child = " << stats.check_nth_child << ", ";
+    }
+    if (stats.recheck_selector) {
+      stream << ".recheck_selector = " << stats.recheck_selector << ", ";
+    }
+    if (stats.slow_scan) {
+      stream << ".slow_scan = " << stats.slow_scan << ", ";
+    }
+    if (stats.skipped_subtree) {
+      stream << ".skipped_subtree = " << stats.skipped_subtree << ", ";
+    }
+    return stream;
+  }
 }
 
 }  // namespace blink

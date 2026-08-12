@@ -2,35 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "extensions/browser/offscreen_document_host.h"
-#include "extensions/common/mojom/context_type.mojom.h"
-
 #include "base/test/bind.h"
 #include "base/test/values_test_util.h"
-#include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/child_process_id.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/background_script_executor.h"
 #include "extensions/browser/extension_host_registry.h"
+#include "extensions/browser/offscreen_document_host.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_map.h"
 #include "extensions/browser/script_result_queue.h"
 #include "extensions/browser/view_type_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/mojom/context_type.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window_testing.h"
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -43,13 +46,10 @@ class OffscreenDocumentBrowserTest : public ExtensionApiTest {
   std::unique_ptr<OffscreenDocumentHost> CreateOffscreenDocument(
       const Extension& extension,
       const GURL& url) {
-    scoped_refptr<content::SiteInstance> site_instance =
-        ProcessManager::Get(profile())->GetSiteInstanceForURL(url);
-
     content::TestNavigationObserver navigation_observer(url);
     navigation_observer.StartWatchingNewWebContents();
-    auto offscreen_document = std::make_unique<OffscreenDocumentHost>(
-        extension, site_instance.get(), url);
+    auto offscreen_document =
+        std::make_unique<OffscreenDocumentHost>(extension, profile(), url);
     offscreen_document->CreateRendererSoon();
     navigation_observer.Wait();
     EXPECT_TRUE(navigation_observer.last_navigation_succeeded());
@@ -100,7 +100,8 @@ IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
   EXPECT_EQ(offscreen_url, contents->GetLastCommittedURL());
   // - The offscreen document should be, well, offscreen; it should not be
   //   contained within any Browser window.
-  EXPECT_EQ(nullptr, chrome::FindBrowserWithTab(contents));
+  EXPECT_EQ(nullptr, GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(
+                         contents));
   // - The view type should be correctly set (it should not be considered a
   //   background page, tab, or other type of view).
   EXPECT_EQ(mojom::ViewType::kOffscreenDocument,
@@ -108,7 +109,7 @@ IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
   EXPECT_EQ(mojom::ViewType::kOffscreenDocument, GetViewType(contents));
   // The offscreen document should be marked as never composited, excluding it
   // from certain a11y considerations.
-  EXPECT_TRUE(contents->GetDelegate()->IsNeverComposited(contents));
+  EXPECT_TRUE(contents->IsNeverComposited());
 
   {
     // Check the registration in the ProcessManager: the offscreen document
@@ -165,10 +166,9 @@ IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
     // Check that the offscreen document runs in the same process as other
     // extension frames. Do this by comparing it to another extension page in
     // a tab.
-    ASSERT_TRUE(ui_test_utils::NavigateToURL(
-        browser(), extension->GetResourceURL("other.html")));
-    content::WebContents* tab_contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
+    content::WebContents* tab_contents = GetActiveWebContents();
+    ASSERT_TRUE(
+        NavigateToURL(tab_contents, extension->GetResourceURL("other.html")));
     EXPECT_EQ(tab_contents->GetPrimaryMainFrame()->GetProcess(),
               contents->GetPrimaryMainFrame()->GetProcess());
   }
@@ -485,7 +485,10 @@ IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
   }
 }
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 // Tests attaching and detaching a devtools window to the offscreen document.
+// TODO(crbug.com/503451649): Enable on desktop Android when it supports
+// devtools in a window.
 IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
                        AttachingDevToolsInspector) {
   ASSERT_TRUE(StartEmbeddedTestServer());
@@ -517,6 +520,7 @@ IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest,
   DevToolsWindowTesting::CloseDevToolsWindowSync(dev_tools_window);
   EXPECT_FALSE(DevToolsWindow::GetInstanceForInspectedWebContents(contents));
 }
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 // Tests that navigation is disallowed in offscreen documents.
 IN_PROC_BROWSER_TEST_F(OffscreenDocumentBrowserTest, NavigationIsDisallowed) {

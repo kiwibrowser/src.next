@@ -2,106 +2,133 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "base/base64.h"
 
 #include <string_view>
 
+#include "base/compiler_specific.h"
+#include "base/features.h"
 #include "base/numerics/checked_math.h"
 #include "base/strings/escape.h"
 #include "base/test/gtest_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/modp_b64/modp_b64.h"
 
 namespace base {
 
-TEST(Base64Test, Basic) {
+class Base64Test : public testing::TestWithParam<bool> {
+ public:
+  Base64Test() = default;
+  Base64Test(const Base64Test&) = delete;
+  Base64Test& operator=(const Base64Test&) = delete;
+  ~Base64Test() override = default;
+
+  void SetUp() override {
+    feature_list_.InitWithFeatureState(features::kSimdutfBase64Encode,
+                                       GetParam());
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+TEST_P(Base64Test, Basic) {
   const std::string kText = "hello world";
   const std::string kBase64Text = "aGVsbG8gd29ybGQ=";
-
-  std::string decoded;
-  bool ok;
 
   std::string encoded = Base64Encode(kText);
   EXPECT_EQ(kBase64Text, encoded);
 
-  ok = Base64Decode(encoded, &decoded);
+  std::string decoded;
+  bool ok = Base64Decode(encoded, &decoded);
   EXPECT_TRUE(ok);
   EXPECT_EQ(kText, decoded);
 }
 
-TEST(Base64Test, Forgiving) {
+TEST_P(Base64Test, ForgivingAndStrictDecode) {
   struct {
     const char* in;
 
     // nullptr indicates a decode failure.
-    const char* expected_out;
+    const char* expected_out_forgiving;
+    const char* expected_out_strict;
   } kTestCases[] = {
       // Failures that should apply in all decoding modes:
       //
       // - Characters not in the base64 alphabet
-      {"abc&", nullptr},
-      {"ab-d", nullptr},
+      {"abc&", nullptr, nullptr},
+      {"ab-d", nullptr, nullptr},
       // - input len % 4 == 1
-      {"abcde", nullptr},
-      {"a", nullptr},
+      {"abcde", nullptr, nullptr},
+      {"a", nullptr, nullptr},
 
       // Invalid padding causes failure if kForgiving is set.
-      {"abcd=", nullptr},
-      {"abcd==", nullptr},
-      {"abcd===", nullptr},
-      {"abcd====", nullptr},
-      {"abcd==============", nullptr},
-      {"=", nullptr},
-      {"====", nullptr},
+      {"abcd=", nullptr, nullptr},
+      {"abcd==", nullptr, nullptr},
+      {"abcd===", nullptr, nullptr},
+      {"abcd====", nullptr, nullptr},
+      {"abcd==============", nullptr, nullptr},
+      {"abcde===", nullptr, nullptr},
+      {"=", nullptr, nullptr},
+      {"====", nullptr, nullptr},
 
       // Otherwise, inputs that are multiples of 4 always succeed, this matches
       // kStrict mode.
-      {"abcd", "i\xB7\x1D"},
-      {"abc=", "i\xB7"},
-      {"abcdefgh", "i\xB7\x1Dy\xF8!"},
+      {"abcd", "i\xB7\x1D", "i\xB7\x1D"},
+      {"abc=", "i\xB7", "i\xB7"},
+      {"abcdefgh", "i\xB7\x1Dy\xF8!", "i\xB7\x1Dy\xF8!"},
 
       // kForgiving mode allows for omitting padding (to a multiple of 4) if
       // len % 4 != 1.
-      {"abcdef", "i\xB7\x1Dy"},
-      {"abc", "i\xB7"},
-      {"ab", "i"},
+      {"abcdef", "i\xB7\x1Dy", nullptr},
+      {"abc", "i\xB7", nullptr},
+      {"ab", "i", nullptr},
 
       // Whitespace should be allowed if kForgiving is set, matching
       // https://infra.spec.whatwg.org/#ascii-whitespace:
       // ASCII whitespace is U+0009 TAB '\t', U+000A LF '\n', U+000C FF '\f',
       // U+000D CR '\r', or U+0020 SPACE ' '.
-      {" a bcd", "i\xB7\x1D"},
-      {"ab\t\tc=", "i\xB7"},
-      {"ab c\ndefgh", "i\xB7\x1Dy\xF8!"},
-      {"a\tb\nc\f d\r", "i\xB7\x1D"},
+      {" a bcd", "i\xB7\x1D", nullptr},
+      {"ab\t\tc=", "i\xB7", nullptr},
+      {"ab c\ndefgh", "i\xB7\x1Dy\xF8!", nullptr},
+      {"a\tb\nc\f d\r", "i\xB7\x1D", nullptr},
+      {"this should fail", "\xB6\x18\xAC\xB2\x1A.\x95\xD7\xDA\x8A", nullptr},
 
       // U+000B VT '\v' is _not_ valid whitespace to be stripped.
-      {"ab\vcd", nullptr},
+      {"ab\vcd", nullptr, nullptr},
 
       // Empty string should yield an empty result.
-      {"", ""},
+      {"", "", ""},
   };
   for (const auto& test_case : kTestCases) {
     SCOPED_TRACE(::testing::Message()
-                 << EscapeAllExceptUnreserved(test_case.in));
+                 << "Forgiving: " << EscapeAllExceptUnreserved(test_case.in));
     std::string output;
     bool success =
         Base64Decode(test_case.in, &output, Base64DecodePolicy::kForgiving);
-    bool expected_success = test_case.expected_out != nullptr;
+    bool expected_success = test_case.expected_out_forgiving != nullptr;
     EXPECT_EQ(success, expected_success);
     if (expected_success) {
-      EXPECT_EQ(output, test_case.expected_out);
+      EXPECT_EQ(output, test_case.expected_out_forgiving);
+    }
+  }
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "Strict: " << EscapeAllExceptUnreserved(test_case.in));
+    std::string output;
+    bool success =
+        Base64Decode(test_case.in, &output, Base64DecodePolicy::kStrict);
+    bool expected_success = test_case.expected_out_strict != nullptr;
+    EXPECT_EQ(success, expected_success);
+    if (expected_success) {
+      EXPECT_EQ(output, test_case.expected_out_strict);
     }
   }
 }
 
-TEST(Base64Test, Binary) {
+TEST_P(Base64Test, Binary) {
   const uint8_t kData[] = {0x00, 0x01, 0xFE, 0xFF};
 
   std::string binary_encoded = Base64Encode(kData);
@@ -122,7 +149,7 @@ TEST(Base64Test, Binary) {
   EXPECT_EQ(encoded_with_prefix, "PREFIX" + binary_encoded);
 }
 
-TEST(Base64Test, InPlace) {
+TEST_P(Base64Test, InPlace) {
   const std::string kText = "hello world";
   const std::string kBase64Text = "aGVsbG8gd29ybGQ=";
 
@@ -134,7 +161,7 @@ TEST(Base64Test, InPlace) {
   EXPECT_EQ(text, kText);
 }
 
-TEST(Base64Test, Overflow) {
+TEST_P(Base64Test, Overflow) {
   // `Base64Encode` makes the input larger, which means inputs whose base64
   // output overflows `size_t`. Actually allocating a span of this size will
   // likely fail, but we test it with a fake span and assume a correct
@@ -144,7 +171,7 @@ TEST(Base64Test, Overflow) {
   // crash. This test is only meaningful because `EXPECT_CHECK_DEATH` looks for
   // a `CHECK`-based failure.
   uint8_t b;
-  auto large_span = base::make_span(&b, MODP_B64_MAX_INPUT_LEN + 1);
+  auto large_span = UNSAFE_TODO(span(&b, MODP_B64_MAX_INPUT_LEN + 1));
   EXPECT_CHECK_DEATH(Base64Encode(large_span));
 
   std::string output = "PREFIX";
@@ -155,5 +182,7 @@ TEST(Base64Test, Overflow) {
   base::CheckedNumeric<size_t> max_len = MODP_B64_MAX_INPUT_LEN;
   EXPECT_TRUE(modp_b64_encode_data_len(max_len).IsValid());
 }
+
+INSTANTIATE_TEST_SUITE_P(All, Base64Test, testing::Bool());
 
 }  // namespace base

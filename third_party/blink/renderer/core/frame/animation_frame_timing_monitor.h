@@ -5,11 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ANIMATION_FRAME_TIMING_MONITOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ANIMATION_FRAME_TIMING_MONITOR_H_
 
+#include <variant>
+
 #include "base/task/sequence_manager/task_time_observer.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/timing/animation_frame_timing_info.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
@@ -20,6 +21,11 @@ class TimeTicks;
 }
 
 namespace blink {
+
+// When enabled, long-animation-frame events will always include the sourceURL,
+// regardless of protocol. This is useful during development when using `file:`
+// URLs or custom protocols defined by embedders.
+CORE_EXPORT BASE_DECLARE_FEATURE(kAlwaysLogLOAFURL);
 
 class LocalFrame;
 
@@ -33,7 +39,6 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
  public:
   class Client {
    public:
-    virtual void ReportLongAnimationFrameTiming(AnimationFrameTimingInfo*) = 0;
     virtual void ReportLongTaskTiming(base::TimeTicks start,
                                       base::TimeTicks end,
                                       ExecutionContext* context) = 0;
@@ -49,13 +54,16 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
 
   ~AnimationFrameTimingMonitor() override = default;
 
-  virtual void Trace(Visitor*) const;
+  void Trace(Visitor*) const;
 
   void Shutdown();
 
-  void BeginMainFrame(LocalDOMWindow& local_root_window);
+  void BeginMainFrame(LocalDOMWindow& local_root_window,
+                      viz::BeginFrameId frame_id);
   void WillPerformStyleAndLayoutCalculation();
-  void DidBeginMainFrame(LocalDOMWindow& local_root_window);
+  AnimationFrameTimingInfo* RecordRenderingUpdateEndTime(
+      LocalDOMWindow& local_root_window,
+      base::TimeTicks);
   void OnTaskCompleted(base::TimeTicks start_time,
                        base::TimeTicks end_time,
                        LocalFrame* frame);
@@ -73,7 +81,7 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
                          bool resolving,
                          const char* class_like,
                          std::variant<const char*, String> property_like,
-                         const String& script_url);
+                         LazySourceLocation* location);
   void Will(const probe::EvaluateScriptBlock&);
   void Did(const probe::EvaluateScriptBlock& probe_data) {
     PopScriptEntryPoint(&probe_data.script_state, &probe_data);
@@ -93,6 +101,10 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
   void Did(const probe::InvokeCallback& probe_data) {
     PopScriptEntryPoint(&probe_data.script_state, &probe_data);
   }
+  void Will(const probe::FrameRelatedTask& probe) { probe.CaptureStartTime(); }
+  void Did(const probe::FrameRelatedTask& probe);
+  void Will(const probe::UserEntryPoint&);
+  void Did(const probe::UserEntryPoint&);
   void Will(const probe::InvokeEventHandler&);
   void Did(const probe::InvokeEventHandler&);
   void WillRunJavaScriptDialog();
@@ -103,6 +115,7 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
  private:
   Member<AnimationFrameTimingInfo> current_frame_timing_info_;
   HeapVector<Member<ScriptTimingInfo>> current_scripts_;
+  viz::BeginFrameId current_begin_frame_id_;
   struct PendingScriptInfo {
     ScriptTimingInfo::InvokerType invoker_type;
     base::TimeTicks start_time;
@@ -110,6 +123,10 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
     base::TimeTicks execution_start_time;
     base::TimeDelta style_duration;
     base::TimeDelta layout_duration;
+    // Tracks style duration accumulated during layout (e.g. from container
+    // query style recalc). This is subtracted from layout_duration when the
+    // outermost layout scope ends to avoid double-counting.
+    base::TimeDelta style_duration_during_layout;
     base::TimeDelta pause_duration;
     int layout_depth = 0;
     const char* class_like_name = nullptr;
@@ -121,6 +138,10 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
       ScriptState* script_state,
       const probe::ProbeBase* probe,
       base::TimeTicks end_time = base::TimeTicks());
+  ScriptTimingInfo* PopScriptEntryPointInternal(
+      ExecutionContext* context,
+      base::TimeTicks end_time,
+      const PendingScriptInfo& script_info);
 
   bool PushScriptEntryPoint(ScriptState*);
 
@@ -135,6 +156,7 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
   void ApplyTaskDuration(base::TimeDelta task_duration);
 
   std::optional<PendingScriptInfo> pending_script_info_;
+  HashMap<size_t, PendingScriptInfo> user_entry_points_;
   Client& client_;
 
   enum class State {
@@ -157,10 +179,21 @@ class CORE_EXPORT AnimationFrameTimingMonitor final
   base::TimeTicks current_task_start_;
   base::TimeDelta total_blocking_time_excluding_longest_task_;
   base::TimeDelta longest_task_duration_;
+  base::TimeDelta render_style_duration_;
+  base::TimeDelta render_layout_duration_;
+  // Tracks style duration accumulated during render-phase layout (e.g. from
+  // container query style recalc). Subtracted from render_layout_duration_
+  // when the outermost layout scope ends.
+  base::TimeDelta render_style_duration_during_layout_;
+  int render_layout_depth_ = 0;
   bool did_pause_ = false;
   bool did_see_ui_events_ = false;
   WeakMember<LocalFrame> frame_handling_input_;
   bool multiple_focused_frames_in_same_task_ = false;
+
+  WeakMember<LocalDOMWindow> task_attributed_window_;
+  bool task_has_multiple_attributed_windows_ = false;
+  bool task_longtask_reported_ = false;
 
   unsigned entry_point_depth_ = 0;
 

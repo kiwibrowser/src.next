@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
@@ -33,8 +34,10 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/dom/xml_document.h"
+#include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
+#include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/html/html_title_element.h"
 #include "third_party/blink/renderer/core/html/plugin_document.h"
 #include "third_party/blink/renderer/core/html/text_document.h"
@@ -42,10 +45,27 @@
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
+
+namespace {
+template <typename CharType>
+bool IsValidDoctypeName(const base::span<const CharType>& characters) {
+  // https://github.com/whatwg/dom/pull/1079
+  // A string is a valid doctype name if it does not contain ASCII whitespace,
+  // U+0000 NULL, or U+003E (>).
+  for (unsigned i = 0; i < characters.size(); i++) {
+    if (!characters[i] || characters[i] == '>' ||
+        IsAsciiSpaceWhatwg(characters[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
 
 DOMImplementation::DOMImplementation(Document& document)
     : document_(document) {}
@@ -55,10 +75,16 @@ DocumentType* DOMImplementation::createDocumentType(
     const String& public_id,
     const String& system_id,
     ExceptionState& exception_state) {
-  AtomicString prefix, local_name;
-  if (!Document::ParseQualifiedName(qualified_name, prefix, local_name,
-                                    exception_state))
+  if (!VisitCharacters(qualified_name,
+                       [](auto chars) { return IsValidDoctypeName(chars); })) {
+    StringBuilder message;
+    message.Append("The provided doctype name ('");
+    message.Append(qualified_name);
+    message.Append("') contains an invalid character.");
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidCharacterError,
+                                      message.ReleaseString());
     return nullptr;
+  }
   if (!document_->GetExecutionContext())
     return nullptr;
 
@@ -101,21 +127,42 @@ XMLDocument* DOMImplementation::createDocument(
 }
 
 Document* DOMImplementation::createHTMLDocument(const String& title) {
+  TRACE_EVENT("blink", "DOMImplementation::createHTMLDocument");
   DocumentInit init =
       DocumentInit::Create()
           .WithExecutionContext(document_->GetExecutionContext())
           .WithAgent(document_->GetAgent());
   auto* d = MakeGarbageCollected<HTMLDocument>(init);
   d->setAllowDeclarativeShadowRoots(false);
-  d->open();
-  d->write("<!doctype html><html><head></head><body></body></html>");
-  if (!title.IsNull()) {
-    HTMLHeadElement* head_element = d->head();
-    DCHECK(head_element);
-    auto* title_element = MakeGarbageCollected<HTMLTitleElement>(*d);
-    head_element->AppendChild(title_element);
-    title_element->AppendChild(d->createTextNode(title), ASSERT_NO_EXCEPTION);
+
+  if (RuntimeEnabledFeatures::CreateHTMLDocumentReadyStateEnabled()) {
+    auto* html_element = MakeGarbageCollected<HTMLHtmlElement>(*d);
+    auto* head_element = MakeGarbageCollected<HTMLHeadElement>(*d);
+    html_element->AppendChild(head_element);
+
+    if (!title.IsNull()) {
+      auto* title_element = MakeGarbageCollected<HTMLTitleElement>(*d);
+      title_element->AppendChild(d->createTextNode(title), ASSERT_NO_EXCEPTION);
+      head_element->AppendChild(title_element);
+    }
+
+    auto* body_element = MakeGarbageCollected<HTMLBodyElement>(*d);
+    html_element->AppendChild(body_element);
+
+    d->AppendChild(MakeGarbageCollected<DocumentType>(d, "html", "", ""));
+    d->AppendChild(html_element);
+  } else {
+    d->open();
+    d->write("<!doctype html><html><head></head><body></body></html>");
+    if (!title.IsNull()) {
+      HTMLHeadElement* head_element = d->head();
+      DCHECK(head_element);
+      auto* title_element = MakeGarbageCollected<HTMLTitleElement>(*d);
+      head_element->AppendChild(title_element);
+      title_element->AppendChild(d->createTextNode(title), ASSERT_NO_EXCEPTION);
+    }
   }
+
   return d;
 }
 

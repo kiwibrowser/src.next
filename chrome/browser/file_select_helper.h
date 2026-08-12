@@ -5,17 +5,17 @@
 #ifndef CHROME_BROWSER_FILE_SELECT_HELPER_H_
 #define CHROME_BROWSER_FILE_SELECT_HELPER_H_
 
-#include <map>
 #include <memory>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/enterprise/buildflags/buildflags.h"
 #include "components/enterprise/common/files_scan_data.h"
-#include "components/safe_browsing/buildflags.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/directory_lister.h"
@@ -28,10 +28,15 @@
 
 class Profile;
 class ScopedDisallowPictureInPicture;
+class ScopedTuckPictureInPicture;
 
 namespace content {
 class FileSelectListener;
 class WebContents;
+}
+
+namespace tabs {
+class TabInterface;
 }
 
 namespace ui {
@@ -77,6 +82,7 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
   friend class base::DeleteHelper<FileSelectHelper>;
   friend class FileSelectHelperContactsAndroid;
   friend class FileSelectHelperTest;
+  friend class FileSelectHelperChromeOSTest;
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
 
@@ -112,6 +118,10 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, GetFileTypesFromAcceptType);
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, MultipleFileExtensionsForMime);
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, ConfirmationDialog);
+  FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest,
+                           WebContentsDestroyedDuringAsyncFileProcessing);
+  FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest,
+                           EnumerateDirectory_TabDeactivated);
   FRIEND_TEST_ALL_PREFIXES(policy::DlpFilesControllerAshBrowserTest,
                            FilesUploadCallerPassed);
 
@@ -124,16 +134,6 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
   void GetFileTypesInThreadPool(blink::mojom::FileChooserParamsPtr params);
   void GetSanitizedFilenameOnUIThread(
       blink::mojom::FileChooserParamsPtr params);
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-  // Safe Browsing checks are only applied when `params->mode` is
-  // `kSave`, which is only for PPAPI requests.
-  void CheckDownloadRequestWithSafeBrowsing(
-      const base::FilePath& default_path,
-      blink::mojom::FileChooserParamsPtr params);
-  void ProceedWithSafeBrowsingVerdict(const base::FilePath& default_path,
-                                      blink::mojom::FileChooserParamsPtr params,
-                                      bool allowed_by_safe_browsing);
-#endif
   void RunFileChooserOnUIThread(const base::FilePath& default_path,
                                 blink::mojom::FileChooserParamsPtr params);
 
@@ -152,6 +152,9 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
                               content::RenderFrameHost* new_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void WebContentsDestroyed() override;
+
+  void InitLifecycleObserver(content::WebContents* web_contents);
+  void OnTabDeactivated(tabs::TabInterface* tab);
 
   void EnumerateDirectoryImpl(
       content::WebContents* tab,
@@ -231,6 +234,11 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
   // Checks to see if scans are required for the specified files.
   void PerformContentAnalysisIfNeeded(
       std::vector<blink::mojom::FileChooserFileInfoPtr> list);
+
+  // Helper to resolve virtual file system paths to local Fusebox paths on
+  // ChromeOS.
+  base::FilePath MaybeSubstituteFuseboxFilePath(
+      const blink::mojom::FileSystemFileInfo& file_system_info);
 
 #if BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
   // Callback used to receive the results of a content analysis scan.
@@ -327,18 +335,25 @@ class FileSelectHelper : public base::RefCountedThreadSafe<
   // these files when they are no longer needed.
   std::vector<base::FilePath> temporary_files_;
 
+  // Tracks whether the initial reference (added in RunFileChooser or
+  // EnumerateDirectoryImpl) has been released.
+  scoped_refptr<FileSelectHelper> self_ptr_;
+
   // Set to false in unit tests since there is no WebContents.
   bool abort_on_missing_web_contents_in_tests_ = true;
+
+  base::CallbackListSubscription tab_deactivated_subscription_;
 
 #if !BUILDFLAG(IS_ANDROID)
   // When not null, this prevents picture-in-picture windows from opening.
   std::unique_ptr<ScopedDisallowPictureInPicture>
       scoped_disallow_picture_in_picture_;
+
+  // When not null, this tucks picture-in-picture windows out of the way.
+  std::unique_ptr<ScopedTuckPictureInPicture> scoped_tuck_picture_in_picture_;
 #endif  // !BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
   base::WeakPtrFactory<FileSelectHelper> weak_ptr_factory_{this};
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 #endif  // CHROME_BROWSER_FILE_SELECT_HELPER_H_

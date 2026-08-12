@@ -1,6 +1,6 @@
 <!doctype html>
 <html dir="$i18n{textdirection}" lang="$i18n{language}"
-    class="loading $i18n{loadTimeClasses}">
+    class="loading $i18n{loadTimeClasses}" $i18n{webuiRefresh2026} $i18n{roundedIconsAttribute}>
 <head>
   <meta charset="utf8">
   <meta name="color-scheme" content="light dark">
@@ -36,6 +36,10 @@
       margin: 0;
       overflow: hidden;
       width: 100%;
+    }
+
+    html[webui-refresh-2026] {
+      background: var(--color-webui-page-background);
     }
   </style>
   <script type="module" src="extensions.js"></script>

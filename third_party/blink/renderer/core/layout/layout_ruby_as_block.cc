@@ -36,10 +36,12 @@ void LayoutRubyAsBlock::AddChild(LayoutObject* child,
   inline_ruby->AddChild(child, before_child);
 }
 
-void LayoutRubyAsBlock::StyleDidChange(StyleDifference diff,
-                                       const ComputedStyle* old_style) {
+void LayoutRubyAsBlock::StyleDidChange(
+    StyleDifference diff,
+    const ComputedStyle* old_style,
+    const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
-  LayoutBlockFlow::StyleDidChange(diff, old_style);
+  LayoutBlockFlow::StyleDidChange(diff, old_style, style_change_context);
   PropagateStyleToAnonymousChildren();
 
   // Because LayoutInline::AnonymousHasStylePropagationOverride() returns
@@ -52,11 +54,6 @@ void LayoutRubyAsBlock::StyleDidChange(StyleDifference diff,
     UpdateAnonymousChildStyle(inline_ruby, new_style_builder);
     inline_ruby->SetStyle(new_style_builder.TakeStyle());
   }
-}
-
-void LayoutRubyAsBlock::RemoveLeftoverAnonymousBlock(LayoutBlock*) {
-  NOT_DESTROYED();
-  NOTREACHED();
 }
 
 }  // namespace blink

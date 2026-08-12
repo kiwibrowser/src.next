@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "base/pickle.h"
 
 #include <algorithm>
@@ -18,12 +13,139 @@
 #include <type_traits>
 
 #include "base/bits.h"
+#include "base/check.h"
+#include "base/check_op.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/containers/span_reader.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/numerics/safe_math.h"
 #include "build/build_config.h"
 
 namespace base {
+
+namespace {
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           uint8_t& result) {
+  return reader.ReadU8NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           uint16_t& result) {
+  return reader.ReadU16NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           uint32_t& result) {
+  return reader.ReadU32NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           uint64_t& result) {
+  return reader.ReadU64NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           int32_t& result) {
+  return reader.ReadI32NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           int64_t& result) {
+  return reader.ReadI64NativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           float& result) {
+  return reader.ReadFloatNativeEndian(result);
+}
+
+[[nodiscard]] inline bool ReadNativeEndian(SpanReader<const uint8_t>& reader,
+                                           double& result) {
+  return reader.ReadDoubleNativeEndian(result);
+}
+
+// Advances `reader` after having read `bytes_read` bytes so that the next read
+// occurs with `uint32_t` alignment.
+void AlignAfterRead(SpanReader<const uint8_t>& reader,
+                    const size_t bytes_read) {
+  const size_t aligned_size = bits::AlignUp(bytes_read, sizeof(uint32_t));
+  const size_t diff = aligned_size - bytes_read;
+
+  const size_t skip = std::min(diff, reader.remaining());
+
+  const bool ok = reader.Skip(skip).has_value();
+  // Success should be guaranteed by the `std::min()`.
+  DCHECK(ok);
+}
+
+void SkipToEnd(SpanReader<const uint8_t>& reader) {
+  // It is tempting to replace this with `reader = SpanReader<const uint8_t>();`
+  // but that causes subsequent zero-sized reads to receive a nullptr instead of
+  // a non-nullptr.
+
+  const bool ok = reader.Skip(reader.remaining()).has_value();
+  DCHECK(ok);
+}
+
+template <typename T>
+[[nodiscard]] bool ReadBuiltinTypeAndAlign(SpanReader<const uint8_t>& reader,
+                                           T* result) {
+  if (!ReadNativeEndian(reader, *result)) {
+    SkipToEnd(reader);
+    return false;
+  }
+
+  AlignAfterRead(reader, sizeof(T));
+  return true;
+}
+
+[[nodiscard]] bool ReadLengthAndAlign(SpanReader<const uint8_t>& reader,
+                                      size_t* result) {
+  // `SpanReader` does not expose methods for reading machine-sized types, but
+  // the rest of this class assumes this to be true already.
+  static_assert(sizeof(int) == sizeof(int32_t));
+
+  int result_int;
+  if (!ReadBuiltinTypeAndAlign(reader, &result_int)) {
+    return false;
+  }
+
+  if (result_int < 0) {
+    SkipToEnd(reader);
+    return false;
+  }
+
+  *result = static_cast<size_t>(result_int);
+  return true;
+}
+
+[[nodiscard]] bool ReadBytesAndAlign(SpanReader<const uint8_t>& reader,
+                                     const size_t num_bytes,
+                                     span<const uint8_t>& result) {
+  if (!reader.ReadInto(num_bytes, result)) {
+    SkipToEnd(reader);
+    return false;
+  }
+
+  AlignAfterRead(reader, num_bytes);
+  return true;
+}
+
+// This supports bytes but not arbitrary types because the start of the data
+// doesn't necessarily correspond to a suitably aligned pointer.
+[[nodiscard]] bool ReadLengthDelimitedArrayAndAlign(
+    SpanReader<const uint8_t>& reader,
+    span<const uint8_t>& result) {
+  size_t len;
+  if (!ReadLengthAndAlign(reader, &len)) {
+    return false;
+  }
+  return ReadBytesAndAlign(reader, len, result);
+}
+
+}  // namespace
 
 // static
 const size_t Pickle::kPayloadUnit = 64;
@@ -31,67 +153,40 @@ const size_t Pickle::kPayloadUnit = 64;
 static const size_t kCapacityReadOnly = static_cast<size_t>(-1);
 
 PickleIterator::PickleIterator(const Pickle& pickle)
-    : payload_(pickle.payload()),
-      read_index_(0),
-      end_index_(pickle.payload_size()) {}
+    : reader_(pickle.payload_bytes()) {}
 
-template <typename Type>
-inline bool PickleIterator::ReadBuiltinType(Type* result) {
-  static_assert(
-      std::is_integral_v<Type> && !std::is_same_v<Type, bool>,
-      "This method is only safe with to use with types without padding bits.");
-  const char* read_from = GetReadPointerAndAdvance<Type>();
-  if (!read_from)
-    return false;
-  memcpy(result, read_from, sizeof(*result));
-  return true;
-}
-
-inline void PickleIterator::Advance(size_t size) {
-  size_t aligned_size = bits::AlignUp(size, sizeof(uint32_t));
-  if (end_index_ - read_index_ < aligned_size) {
-    read_index_ = end_index_;
-  } else {
-    read_index_ += aligned_size;
+PickleIterator PickleIterator::WithData(span<const uint8_t> data) {
+  if (data.size() < sizeof(Pickle::Header)) {
+    return PickleIterator();
   }
-}
+  // Make a copy of the header instead of dereferencing `data` with
+  // reinterpret_cast in case the memory is not aligned, which would lead to
+  // Undefined Behavior. This scenario should be rare as in most cases memory
+  // allocations are aligned, but it is not guaranteed by this API which accepts
+  // arbitrary spans.
+  Pickle::Header header;
+  byte_span_from_ref(header).copy_from_nonoverlapping(
+      data.first(sizeof(header)));
 
-template <typename Type>
-inline const char* PickleIterator::GetReadPointerAndAdvance() {
-  if (sizeof(Type) > end_index_ - read_index_) {
-    read_index_ = end_index_;
-    return nullptr;
+  if (header.payload_size > data.size() - sizeof(Pickle::Header)) {
+    return PickleIterator();
   }
-  const char* current_read_ptr = payload_ + read_index_;
-  Advance(sizeof(Type));
-  return current_read_ptr;
-}
-
-const char* PickleIterator::GetReadPointerAndAdvance(size_t num_bytes) {
-  if (num_bytes > end_index_ - read_index_) {
-    read_index_ = end_index_;
-    return nullptr;
+  const size_t header_size = data.size() - header.payload_size;
+  if (header_size != bits::AlignUp(header_size, sizeof(uint32_t))) {
+    return PickleIterator();
   }
-  const char* current_read_ptr = payload_ + read_index_;
-  Advance(num_bytes);
-  return current_read_ptr;
-}
+  DCHECK_GE(header_size, sizeof(Pickle::Header));
 
-inline const char* PickleIterator::GetReadPointerAndAdvance(
-    size_t num_elements,
-    size_t size_element) {
-  // Check for size_t overflow.
-  size_t num_bytes;
-  if (!CheckMul(num_elements, size_element).AssignIfValid(&num_bytes))
-    return nullptr;
-  return GetReadPointerAndAdvance(num_bytes);
+  PickleIterator iter;
+  iter.reader_ = SpanReader(data.subspan(header_size));
+  return iter;
 }
 
 bool PickleIterator::ReadBool(bool* result) {
-  // Not all bit patterns are valid bools. Avoid undefined behavior by reading a
-  // type with no padding bits, then converting to bool.
+  // Not all bit patterns are valid bools. Avoid undefined behavior by reading
+  // a type with no padding bits, then converting to bool.
   uint8_t v;
-  if (!ReadBuiltinType(&v)) {
+  if (!ReadBuiltinTypeAndAlign(reader_, &v)) {
     return false;
   }
   *result = v != 0;
@@ -99,136 +194,137 @@ bool PickleIterator::ReadBool(bool* result) {
 }
 
 bool PickleIterator::ReadInt(int* result) {
-  return ReadBuiltinType(result);
+  // `SpanReader` does not expose methods for reading machine-sized types, but
+  // the rest of this class assumes this to be true already.
+  static_assert(sizeof(int) == sizeof(int32_t));
+
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadLong(long* result) {
   // Always read long as a 64-bit value to ensure compatibility between 32-bit
   // and 64-bit processes.
   int64_t result_int64 = 0;
-  if (!ReadBuiltinType(&result_int64))
+  if (!ReadInt64(&result_int64)) {
     return false;
-  if (!IsValueInRangeForNumericType<long>(result_int64))
+  }
+  if (!IsValueInRangeForNumericType<long>(result_int64)) {
+    SkipToEnd(reader_);
     return false;
+  }
   *result = static_cast<long>(result_int64);
   return true;
 }
 
+bool PickleIterator::ReadLength(size_t* result) {
+  return ReadLengthAndAlign(reader_, result);
+}
+
 bool PickleIterator::ReadUInt16(uint16_t* result) {
-  return ReadBuiltinType(result);
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadUInt32(uint32_t* result) {
-  return ReadBuiltinType(result);
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadInt64(int64_t* result) {
-  return ReadBuiltinType(result);
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadUInt64(uint64_t* result) {
-  return ReadBuiltinType(result);
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadFloat(float* result) {
-  // crbug.com/315213
-  // The source data may not be properly aligned, and unaligned float reads
-  // cause SIGBUS on some ARM platforms, so force using memcpy to copy the data
-  // into the result.
-  const char* read_from = GetReadPointerAndAdvance<float>();
-  if (!read_from)
-    return false;
-  memcpy(result, read_from, sizeof(*result));
-  return true;
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadDouble(double* result) {
-  // crbug.com/315213
-  // The source data may not be properly aligned, and unaligned double reads
-  // cause SIGBUS on some ARM platforms, so force using memcpy to copy the data
-  // into the result.
-  const char* read_from = GetReadPointerAndAdvance<double>();
-  if (!read_from)
-    return false;
-  memcpy(result, read_from, sizeof(*result));
-  return true;
+  return ReadBuiltinTypeAndAlign(reader_, result);
 }
 
 bool PickleIterator::ReadString(std::string* result) {
-  size_t len;
-  if (!ReadLength(&len))
+  std::string_view view;
+  if (!ReadStringPiece(&view)) {
     return false;
-  const char* read_from = GetReadPointerAndAdvance(len);
-  if (!read_from)
-    return false;
-
-  result->assign(read_from, len);
+  }
+  result->assign(view);
   return true;
 }
 
 bool PickleIterator::ReadStringPiece(std::string_view* result) {
-  size_t len;
-  if (!ReadLength(&len))
+  span<const uint8_t> bytes;
+  if (!ReadLengthDelimitedArrayAndAlign(reader_, bytes)) {
     return false;
-  const char* read_from = GetReadPointerAndAdvance(len);
-  if (!read_from)
-    return false;
-
-  *result = std::string_view(read_from, len);
+  }
+  span<const char> chars = as_chars(bytes);
+  *result = std::string_view(chars.data(), chars.size());
   return true;
 }
 
 bool PickleIterator::ReadString16(std::u16string* result) {
   size_t len;
-  if (!ReadLength(&len))
+  if (!ReadLength(&len)) {
     return false;
-  const char* read_from = GetReadPointerAndAdvance(len, sizeof(char16_t));
-  if (!read_from)
-    return false;
+  }
 
-  result->assign(reinterpret_cast<const char16_t*>(read_from), len);
+  size_t num_bytes;
+  if (!CheckMul(len, sizeof(char16_t)).AssignIfValid(&num_bytes)) {
+    // It doesn't seem possible for this branch to be taken currently:
+    // `len` is limited to
+    // `std::numeric_limits<int>::max()`, which is then cast to a `size_t`,
+    // meaning that multiplying that value by `sizeof(char16_t) == 2` does not
+    // overflow. If there were ever a method like
+    // `ReadChar16(const char16_t* data, size_t length)` where the length may
+    // exceed `INT_MAX`, then the overflow would be possible. In any case, the
+    // checked multiplication is good for future-proofing.
+    SkipToEnd(reader_);
+    return false;
+  }
+
+  span<const uint8_t> bytes;
+  if (!ReadBytesAndAlign(reader_, num_bytes, bytes)) {
+    return false;
+  }
+
+  // This is necessary because it is not safe to reinterpret_cast the data
+  // pointer for use with `std::u16string::assign()`, as the pointer may not
+  // have the proper alignment to avoid undefined behavior.
+  result->resize_and_overwrite(len, [&](char16_t* p, size_t n) {
+    // SAFETY: `resize_and_overwrite` ensures `p` points to `n` elements.
+    as_writable_bytes(UNSAFE_BUFFERS(span(p, n)))
+        .copy_from_nonoverlapping(bytes);
+    return n;
+  });
+
   return true;
 }
 
-bool PickleIterator::ReadStringPiece16(std::u16string_view* result) {
-  size_t len;
-  if (!ReadLength(&len))
-    return false;
-  const char* read_from = GetReadPointerAndAdvance(len, sizeof(char16_t));
-  if (!read_from)
-    return false;
-
-  *result =
-      std::u16string_view(reinterpret_cast<const char16_t*>(read_from), len);
-  return true;
-}
-
-bool PickleIterator::ReadData(const char** data, size_t* length) {
-  *length = 0;
-  *data = nullptr;
-
-  if (!ReadLength(length))
-    return false;
-
-  return ReadBytes(data, *length);
-}
-
-std::optional<base::span<const uint8_t>> PickleIterator::ReadData() {
-  const char* ptr;
-  size_t length;
-
-  if (!ReadData(&ptr, &length))
+std::optional<span<const uint8_t>> PickleIterator::ReadData() {
+  span<const uint8_t> bytes;
+  if (!ReadLengthDelimitedArrayAndAlign(reader_, bytes)) {
     return std::nullopt;
-
-  return base::as_bytes(base::make_span(ptr, length));
+  }
+  return bytes;
 }
 
 bool PickleIterator::ReadBytes(const char** data, size_t length) {
-  const char* read_from = GetReadPointerAndAdvance(length);
-  if (!read_from)
+  span<const uint8_t> bytes;
+  if (!ReadBytesAndAlign(reader_, length, bytes)) {
     return false;
-  *data = read_from;
+  }
+  *data = as_chars(bytes).data();
   return true;
+}
+
+[[nodiscard]] std::optional<span<const uint8_t>> PickleIterator::ReadBytes(
+    size_t length) {
+  span<const uint8_t> bytes;
+  if (!ReadBytesAndAlign(reader_, length, bytes)) {
+    return std::nullopt;
+  }
+  return bytes;
 }
 
 Pickle::Attachment::Attachment() = default;
@@ -303,13 +399,15 @@ Pickle::Pickle(const Pickle& other)
       write_offset_(other.write_offset_) {
   if (other.header_) {
     Resize(other.header_->payload_size);
-    memcpy(header_, other.header_, header_size_ + other.header_->payload_size);
+    UNSAFE_TODO(memcpy(header_, other.header_,
+                       header_size_ + other.header_->payload_size));
   }
 }
 
 Pickle::~Pickle() {
-  if (capacity_after_header_ != kCapacityReadOnly)
+  if (capacity_after_header_ != kCapacityReadOnly) {
     free(header_);
+  }
 }
 
 Pickle& Pickle::operator=(const Pickle& other) {
@@ -327,8 +425,8 @@ Pickle& Pickle::operator=(const Pickle& other) {
   }
   if (other.header_) {
     Resize(other.header_->payload_size);
-    memcpy(header_, other.header_,
-           other.header_size_ + other.header_->payload_size);
+    UNSAFE_TODO(memcpy(header_, other.header_,
+                       other.header_size_ + other.header_->payload_size));
     write_offset_ = other.write_offset_;
   }
   return *this;
@@ -340,11 +438,11 @@ void Pickle::WriteString(std::string_view value) {
 
 void Pickle::WriteString16(std::u16string_view value) {
   WriteInt(checked_cast<int>(value.size()));
-  WriteBytes(value.data(), value.size() * sizeof(char16_t));
+  WriteBytes(as_byte_span(value));
 }
 
 void Pickle::WriteData(const char* data, size_t length) {
-  WriteData(as_bytes(span(data, length)));
+  WriteData(as_bytes(UNSAFE_TODO(span(data, length))));
 }
 
 void Pickle::WriteData(std::string_view data) {
@@ -354,10 +452,6 @@ void Pickle::WriteData(std::string_view data) {
 void Pickle::WriteData(base::span<const uint8_t> data) {
   WriteInt(checked_cast<int>(data.size()));
   WriteBytes(data);
-}
-
-void Pickle::WriteBytes(const void* data, size_t length) {
-  WriteBytesCommon(make_span(static_cast<const uint8_t*>(data), length));
 }
 
 void Pickle::WriteBytes(span<const uint8_t> data) {
@@ -372,8 +466,9 @@ void Pickle::Reserve(size_t length) {
 #endif
   DCHECK_LE(write_offset_, std::numeric_limits<uint32_t>::max() - data_len);
   size_t new_size = write_offset_ + data_len;
-  if (new_size > capacity_after_header_)
+  if (new_size > capacity_after_header_) {
     Resize(capacity_after_header_ * 2 + new_size);
+  }
 }
 
 bool Pickle::WriteAttachment(scoped_refptr<Attachment> attachment) {
@@ -400,28 +495,24 @@ void Pickle::Resize(size_t new_capacity) {
 void* Pickle::ClaimBytes(size_t num_bytes) {
   void* p = ClaimUninitializedBytesInternal(num_bytes);
   CHECK(p);
-  memset(p, 0, num_bytes);
+  UNSAFE_TODO(memset(p, 0, num_bytes));
   return p;
 }
 
 size_t Pickle::GetTotalAllocatedSize() const {
-  if (capacity_after_header_ == kCapacityReadOnly)
+  if (capacity_after_header_ == kCapacityReadOnly) {
     return 0;
+  }
   return header_size_ + capacity_after_header_;
 }
 
-// static
-const char* Pickle::FindNext(size_t header_size,
-                             const char* start,
-                             const char* end) {
-  size_t pickle_size = 0;
-  if (!PeekNext(header_size, start, end, &pickle_size))
-    return nullptr;
-
-  if (pickle_size > static_cast<size_t>(end - start))
-    return nullptr;
-
-  return start + pickle_size;
+span<uint8_t> Pickle::AsWritableBytes() {
+  CHECK(header_);
+  CHECK_NE(kCapacityReadOnly, capacity_after_header_)
+      << "oops: pickle is readonly";
+  // SAFETY: `header_` always points to at least `size()` valid bytes if
+  // non-null, and otherwise `size()` returns zero.
+  return UNSAFE_BUFFERS(span(reinterpret_cast<uint8_t*>(header_), size()));
 }
 
 // static
@@ -434,12 +525,14 @@ bool Pickle::PeekNext(size_t header_size,
   DCHECK_LE(header_size, static_cast<size_t>(kPayloadUnit));
 
   size_t length = static_cast<size_t>(end - start);
-  if (length < sizeof(Header))
+  if (length < sizeof(Header)) {
     return false;
+  }
 
   const Header* hdr = reinterpret_cast<const Header*>(start);
-  if (length < header_size)
+  if (length < header_size) {
     return false;
+  }
 
   // If payload_size causes an overflow, we return maximum possible
   // pickle size to indicate that.
@@ -449,7 +542,8 @@ bool Pickle::PeekNext(size_t header_size,
 
 template <size_t length>
 void Pickle::WriteBytesStatic(const void* data) {
-  WriteBytesCommon(make_span(static_cast<const uint8_t*>(data), length));
+  WriteBytesCommon(
+      UNSAFE_TODO(span(static_cast<const uint8_t*>(data), length)));
 }
 
 template void Pickle::WriteBytesStatic<2>(const void* data);
@@ -476,8 +570,10 @@ inline void* Pickle::ClaimUninitializedBytesInternal(size_t length) {
     Resize(std::max(new_capacity, new_size));
   }
 
-  char* write = mutable_payload() + write_offset_;
-  std::fill(write + length, write + data_len, 0);  // Always initialize padding
+  char* write = UNSAFE_TODO(reinterpret_cast<char*>(header_) + header_size_ +
+                            write_offset_);
+  std::fill(UNSAFE_TODO(write + length), UNSAFE_TODO(write + data_len),
+            0);  // Always initialize padding
   header_->payload_size = static_cast<uint32_t>(new_size);
   write_offset_ = new_size;
   return write;
@@ -488,7 +584,8 @@ inline void Pickle::WriteBytesCommon(span<const uint8_t> data) {
       << "oops: pickle is readonly";
   MSAN_CHECK_MEM_IS_INITIALIZED(data.data(), data.size());
   void* write = ClaimUninitializedBytesInternal(data.size());
-  std::copy(data.data(), data.data() + data.size(), static_cast<char*>(write));
+  std::copy(data.data(), UNSAFE_TODO(data.data() + data.size()),
+            static_cast<char*>(write));
 }
 
 }  // namespace base

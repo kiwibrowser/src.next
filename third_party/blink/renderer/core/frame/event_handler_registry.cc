@@ -116,7 +116,6 @@ void EventHandlerRegistry::UpdateEventHandlerTargets(
       targets->insert(target);
       return;
     case kRemove:
-      DCHECK(targets->Contains(target));
       targets->erase(target);
       return;
     case kRemoveAll:
@@ -177,7 +176,7 @@ void EventHandlerRegistry::DidRemoveEventHandler(
   UpdateEventHandlerInternal(kRemove, handler_class, &target);
 }
 
-void EventHandlerRegistry::DidMoveIntoPage(EventTarget& target) {
+void EventHandlerRegistry::DidMoveIntoLocalRoot(EventTarget& target) {
   if (!target.HasEventListeners())
     return;
 
@@ -199,7 +198,7 @@ void EventHandlerRegistry::DidMoveIntoPage(EventTarget& target) {
   }
 }
 
-void EventHandlerRegistry::DidMoveOutOfPage(EventTarget& target) {
+void EventHandlerRegistry::DidMoveOutOfLocalRoot(EventTarget& target) {
   DidRemoveAllEventHandlers(target);
 }
 
@@ -385,7 +384,7 @@ void EventHandlerRegistry::CheckConsistency(
   const EventTargetSet* targets = &targets_[handler_class];
   for (const auto& event_target : *targets) {
     if (Node* node = event_target.key->ToNode()) {
-      // See the header file comment for |documentDetached| if either of these
+      // See the header file comment for `DocumentDetached()` if either of these
       // assertions fails.
       DCHECK(node->GetDocument().GetPage());
       DCHECK_EQ(frame_, &node->GetDocument().GetFrame()->LocalFrameRoot());

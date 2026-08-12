@@ -4,10 +4,11 @@
 
 #include "extensions/browser/url_loader_factory_manager.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
-#include "base/ranges/algorithm.h"
+#include "base/feature_list.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/extension_registry.h"
@@ -20,7 +21,6 @@
 #include "extensions/common/manifest_handlers/permissions_parser.h"
 #include "extensions/common/mojom/host_id.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "extensions/common/script_constants.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -40,24 +40,11 @@ enum class FactoryUser {
   kExtensionProcess,
 };
 
-bool DoContentScriptsDependOnRelaxedOrbOrCors(const Extension& extension) {
-  // Content scripts injected by Chrome Apps (e.g. into <webview> tag) need to
-  // run with relaxed ORB.
-  //
-  // TODO(crbug.com/40158699): Remove this exception once Chrome Platform
-  // Apps are gone.
-  if (extension.is_platform_app())
-    return true;
-
-  // Content scripts are not granted an ability to relax ORB and/or CORS.
-  return false;
-}
-
 bool DoExtensionPermissionsCoverHttpOrHttpsOrigins(
     const PermissionSet& permissions) {
   // Looking at explicit (rather than effective) hosts results in stricter
   // checks that better match ORB/CORS behavior.
-  return base::ranges::any_of(
+  return std::ranges::any_of(
       permissions.explicit_hosts(), [](const URLPattern& permission) {
         return permission.MatchesScheme(url::kHttpScheme) ||
                permission.MatchesScheme(url::kHttpsScheme);
@@ -68,8 +55,9 @@ bool DoExtensionPermissionsCoverHttpOrHttpsOrigins(const Extension& extension) {
   // Extension with an ActiveTab permission can later gain permission to access
   // any http origin (once the ActiveTab permission is activated).
   const PermissionsData* permissions = extension.permissions_data();
-  if (permissions->HasAPIPermission(mojom::APIPermissionID::kActiveTab))
+  if (permissions->HasAPIPermission(mojom::APIPermissionID::kActiveTab)) {
     return true;
+  }
 
   // Optional extension permissions to http origins may be granted later.
   //
@@ -100,15 +88,16 @@ bool DoExtensionPermissionsCoverHttpOrHttpsOrigins(const Extension& extension) {
 // attention to the `isolated_world_origin` from content scripts, and using
 // SecFetchSiteValue::kNoOrigin from extensions).
 bool ShouldRelaxCors(const Extension& extension, FactoryUser factory_user) {
-  if (!DoExtensionPermissionsCoverHttpOrHttpsOrigins(extension))
-    return false;
-
-  switch (factory_user) {
-    case FactoryUser::kContentScript:
-      return DoContentScriptsDependOnRelaxedOrbOrCors(extension);
-    case FactoryUser::kExtensionProcess:
-      return true;
+  // TODO(crbug.com/40158699): Remove this exception once Chrome Platform
+  // Apps are gone.  This should also consequently allow removing of
+  // `isolated_world_origin` and related code.
+  if (factory_user == FactoryUser::kContentScript &&
+      extension.is_platform_app() &&
+      DoExtensionPermissionsCoverHttpOrHttpsOrigins(extension)) {
+    return true;
   }
+
+  return false;
 }
 
 bool ShouldCreateSeparateFactoryForContentScripts(const Extension& extension) {
@@ -116,25 +105,34 @@ bool ShouldCreateSeparateFactoryForContentScripts(const Extension& extension) {
 }
 
 void OverrideFactoryParams(const Extension& extension,
+                           bool is_for_service_worker,
                            FactoryUser factory_user,
                            network::mojom::URLLoaderFactoryParams* params) {
-  if (!ShouldRelaxCors(extension, factory_user))
-    return;
+  if (is_for_service_worker) {
+    CHECK_EQ(factory_user, FactoryUser::kExtensionProcess);
+    params->ignore_factory_reset = true;
+  }
 
-  params->is_orb_enabled = false;
-  switch (factory_user) {
-    case FactoryUser::kContentScript:
+  if (factory_user == FactoryUser::kExtensionProcess) {
+    // Indicate that request are initiated by an extension (aka
+    // non-webby-initiator).  This will allow CORS and ORB implementations
+    // to consult `OriginAccessList` for extension-origin-specific permissions.
+    // This is safe, because we know that this `URLLoaderFactory` will be passed
+    // to a renderer process that only hosts extensions.
+    params->unsafe_non_webby_initiator = true;
+  }
+
+  if (ShouldRelaxCors(extension, factory_user)) {
+    params->is_orb_enabled = false;
+    if (factory_user == FactoryUser::kContentScript) {
       // Requests from content scripts set
       // network::ResourceRequest::isolated_world_origin to the origin of the
       // extension.  This field of ResourceRequest is normally ignored, but by
       // setting `ignore_isolated_world_origin` to false below, we ensure that
-      // OOR-CORS will use the extension origin when checking if content script
-      // requests should bypass CORS.
+      // OOR-CORS will use the extension origin when checking if content
+      // script requests should bypass CORS.
       params->ignore_isolated_world_origin = false;
-      break;
-    case FactoryUser::kExtensionProcess:
-      params->unsafe_non_webby_initiator = true;
-      break;
+    }
   }
 }
 
@@ -156,13 +154,15 @@ void URLLoaderFactoryManager::WillInjectContentScriptsWhenNavigationCommits(
     const std::vector<const Extension*>& extensions) {
   // Same-document navigations do not send URLLoaderFactories to the renderer
   // process.
-  if (navigation->IsSameDocument())
+  if (navigation->IsSameDocument()) {
     return;
+  }
 
   std::vector<url::Origin> initiators_requiring_separate_factory;
   for (const Extension* extension : extensions) {
-    if (!ShouldCreateSeparateFactoryForContentScripts(*extension))
+    if (!ShouldCreateSeparateFactoryForContentScripts(*extension)) {
       continue;
+    }
 
     initiators_requiring_separate_factory.push_back(extension->origin());
   }
@@ -184,8 +184,9 @@ void URLLoaderFactoryManager::WillProgrammaticallyInjectContentScript(
     base::PassKey<ScriptInjectionTracker> pass_key,
     content::RenderFrameHost* frame,
     const Extension& extension) {
-  if (!ShouldCreateSeparateFactoryForContentScripts(extension))
+  if (!ShouldCreateSeparateFactoryForContentScripts(extension)) {
     return;
+  }
 
   // When WillExecuteCode runs, the frame already received the initial
   // URLLoaderFactoryBundle - therefore we need to request a separate push
@@ -205,6 +206,7 @@ void URLLoaderFactoryManager::OverrideURLLoaderFactoryParams(
     content::BrowserContext* browser_context,
     const url::Origin& origin,
     bool is_for_isolated_world,
+    bool is_for_service_worker,
     network::mojom::URLLoaderFactoryParams* factory_params) {
   const ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context);
   DCHECK(registry);  // CreateFactory shouldn't happen during shutdown.
@@ -216,8 +218,9 @@ void URLLoaderFactoryManager::OverrideURLLoaderFactoryParams(
       origin.GetTupleOrPrecursorTupleIfOpaque();
 
   // Don't change factory params for something that is not an extension.
-  if (precursor_origin.scheme() != kExtensionScheme)
+  if (precursor_origin.scheme() != kExtensionScheme) {
     return;
+  }
 
   // Find the |extension| associated with |initiator_origin|.
   const Extension* extension =
@@ -234,7 +237,8 @@ void URLLoaderFactoryManager::OverrideURLLoaderFactoryParams(
   FactoryUser factory_user = is_for_isolated_world
                                  ? FactoryUser::kContentScript
                                  : FactoryUser::kExtensionProcess;
-  OverrideFactoryParams(*extension, factory_user, factory_params);
+  OverrideFactoryParams(*extension, is_for_service_worker, factory_user,
+                        factory_params);
 }
 
 }  // namespace extensions

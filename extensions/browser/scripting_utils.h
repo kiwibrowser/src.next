@@ -7,21 +7,54 @@
 
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_forward.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/browser/extension_user_script_loader.h"
+#include "extensions/browser/script_executor.h"
+#include "extensions/common/api/scripts_internal.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/common/user_script.h"
+#include "extensions/common/utils/content_script_utils.h"
 
 namespace content {
 class BrowserContext;
 }  // namespace content
 
 namespace extensions::scripting {
+
+// Details specifying the target into which to inject the script.
+struct InjectionTarget {
+  InjectionTarget();
+  InjectionTarget(InjectionTarget&& other);
+  ~InjectionTarget();
+
+  // Whether the script should inject into all frames within the tab.
+  std::optional<bool> all_frames;
+  // The IDs of specific documentIds to inject into.
+  std::optional<std::vector<std::string>> document_ids;
+  // The IDs of specific frames to inject into.
+  std::optional<std::vector<int>> frame_ids;
+  // The ID of the tab into which to inject.
+  int tab_id;
+};
+
+// Details specifying the read file (either CSS or JS) for the script to be
+// injected.
+struct InjectedFileSource {
+  InjectedFileSource(std::string file_name, std::string data);
+  InjectedFileSource(InjectedFileSource&&);
+  ~InjectedFileSource();
+
+  std::string file_name;
+  std::string data;
+};
+
+using ResourcesLoadedCallback =
+    base::OnceCallback<void(std::vector<InjectedFileSource>,
+                            std::optional<std::string>)>;
 
 // Appends the prefix corresponding to the dynamic script `source` to
 // `script_id`.
@@ -57,8 +90,8 @@ std::set<std::string> CreateDynamicScriptIds(
 
     std::string new_script_id =
         scripting::AddPrefixToDynamicScriptId(script.id, source);
-    if (base::Contains(existing_script_ids, new_script_id) ||
-        base::Contains(new_script_ids, new_script_id)) {
+    if (existing_script_ids.contains(new_script_id) ||
+        new_script_ids.contains(new_script_id)) {
       *error = ErrorUtils::FormatErrorMessage("Duplicate script ID '*'",
                                               script.id.c_str());
       return std::set<std::string>();
@@ -115,7 +148,7 @@ UserScriptList UpdateScripts(
   UserScriptList parsed_scripts;
   parsed_scripts.reserve(scripts_to_update.size());
   for (Script& new_script : scripts_to_update) {
-    CHECK(base::Contains(loaded_scripts_metadata, new_script.id));
+    CHECK(loaded_scripts_metadata.contains(new_script.id));
     Script& existent_script = loaded_scripts_metadata[new_script.id];
 
     // Note: `new_script` and `existent_script` may be unsafe to use after this.
@@ -173,6 +206,56 @@ using ValidateScriptsResult =
 ValidateScriptsResult ValidateParsedScriptsOnFileThread(
     ExtensionResource::SymlinkPolicy symlink_policy,
     UserScriptList scripts);
+
+// Returns true if the `permissions` allow for injection into the given `frame`.
+// If false, populates `error`.
+bool HasPermissionToInjectIntoFrame(const PermissionsData& permissions,
+                                    int tab_id,
+                                    content::RenderFrameHost* frame,
+                                    std::string* error);
+
+// Returns whether the `target` can be accessed with the given `permissions`.
+// If the target can be accessed, populates `script_executor_out`,
+// `frame_scope_out`, and `frame_ids_out` with the appropriate values;
+// if the target cannot be accessed, populates `error_out`.
+bool CanAccessTarget(const PermissionsData& permissions,
+                     const scripting::InjectionTarget& target,
+                     content::BrowserContext* browser_context,
+                     bool include_incognito_information,
+                     ScriptExecutor** script_executor_out,
+                     ScriptExecutor::FrameScope* frame_scope_out,
+                     std::set<int>* frame_ids_out,
+                     std::string* error_out);
+
+// Checks the specified `files` for validity, and attempts to load and localize
+// them, invoking `callback` with the result. Returns true on success; on
+// failure, populates `error_out`.
+bool CheckAndLoadFiles(std::vector<std::string> files,
+                       script_parsing::ContentScriptType resources_type,
+                       const Extension& extension,
+                       bool requires_localization,
+                       ResourcesLoadedCallback callback,
+                       std::string* error_out);
+
+// Checks `files` and populates `resources_out` with the appropriate extension
+// resource. Returns true on success; on failure, populates `error_out`.
+bool GetFileResources(const std::vector<std::string>& files,
+                      script_parsing::ContentScriptType resources_type,
+                      const Extension& extension,
+                      std::vector<ExtensionResource>* resources_out,
+                      std::string* error_out);
+
+// Executes script with `sources` in the frames identified by `frame_ids`
+void ExecuteScript(const ExtensionId& extension_id,
+                   std::vector<mojom::JSSourcePtr> sources,
+                   mojom::ExecutionWorld execution_world,
+                   const std::optional<std::string>& world_id,
+                   ScriptExecutor* script_executor,
+                   ScriptExecutor::FrameScope frame_scope,
+                   std::set<int> frame_ids,
+                   bool inject_immediately,
+                   bool user_gesture,
+                   ScriptExecutor::ScriptFinishedCallback callback);
 
 }  // namespace extensions::scripting
 

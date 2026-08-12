@@ -30,11 +30,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_BASIC_SHAPE_VALUES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_BASIC_SHAPE_VALUES_H_
 
-#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
+#include "third_party/blink/renderer/platform/geometry/path_types.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -57,6 +56,12 @@ class CSSBasicShapeCircleValue final : public CSSValue {
   void SetCenterX(CSSValue* center_x) { center_x_ = center_x; }
   void SetCenterY(CSSValue* center_y) { center_y_ = center_y; }
   void SetRadius(CSSValue* radius) { radius_ = radius; }
+
+  bool HasRandomFunctions() const {
+    return (center_x_ && center_x_->HasRandomFunctions()) ||
+           (center_y_ && center_y_->HasRandomFunctions()) ||
+           (radius_ && radius_->HasRandomFunctions());
+  }
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
@@ -84,6 +89,13 @@ class CSSBasicShapeEllipseValue final : public CSSValue {
   void SetRadiusX(CSSValue* radius_x) { radius_x_ = radius_x; }
   void SetRadiusY(CSSValue* radius_y) { radius_y_ = radius_y; }
 
+  bool HasRandomFunctions() const {
+    return (center_x_ && center_x_->HasRandomFunctions()) ||
+           (center_y_ && center_y_->HasRandomFunctions()) ||
+           (radius_x_ && radius_x_->HasRandomFunctions()) ||
+           (radius_y_ && radius_y_->HasRandomFunctions());
+  }
+
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
@@ -95,8 +107,7 @@ class CSSBasicShapeEllipseValue final : public CSSValue {
 
 class CSSBasicShapePolygonValue final : public CSSValue {
  public:
-  CSSBasicShapePolygonValue()
-      : CSSValue(kBasicShapePolygonClass), wind_rule_(RULE_NONZERO) {}
+  CSSBasicShapePolygonValue() : CSSValue(kBasicShapePolygonClass) {}
 
   void AppendPoint(CSSPrimitiveValue* x, CSSPrimitiveValue* y) {
     values_.push_back(x);
@@ -112,29 +123,54 @@ class CSSBasicShapePolygonValue final : public CSSValue {
   const HeapVector<Member<CSSPrimitiveValue>>& Values() const {
     return values_;
   }
+  CSSPrimitiveValue* RoundingRadius() const { return rounding_radius_.Get(); }
 
   // TODO(sashab): Remove this and pass it as an argument in the constructor.
   void SetWindRule(WindRule w) { wind_rule_ = w; }
   WindRule GetWindRule() const { return wind_rule_; }
+  void SetRoundingRadius(CSSPrimitiveValue* rounding_radius) {
+    rounding_radius_ = rounding_radius;
+  }
 
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapePolygonValue&) const;
+
+  bool HasRandomFunctions() const {
+    if (rounding_radius_ && rounding_radius_->HasRandomFunctions()) {
+      return true;
+    }
+    for (const CSSPrimitiveValue* value : values_) {
+      if (value && value->HasRandomFunctions()) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   HeapVector<Member<CSSPrimitiveValue>> values_;
-  WindRule wind_rule_;
+  Member<CSSPrimitiveValue> rounding_radius_;
+  WindRule wind_rule_ = RULE_NONZERO;
 };
 
 class CSSBasicShapeInsetValue final : public CSSValue {
  public:
-  CSSBasicShapeInsetValue() : CSSValue(kBasicShapeInsetClass) {}
+  CSSBasicShapeInsetValue(const CSSValue& top,
+                          const CSSValue& right,
+                          const CSSValue& bottom,
+                          const CSSValue& left)
+      : CSSValue(kBasicShapeInsetClass),
+        top_(top),
+        right_(right),
+        bottom_(bottom),
+        left_(left) {}
 
-  CSSValue* Top() const { return top_.Get(); }
-  CSSValue* Right() const { return right_.Get(); }
-  CSSValue* Bottom() const { return bottom_.Get(); }
-  CSSValue* Left() const { return left_.Get(); }
+  const CSSValue& Top() const { return *top_; }
+  const CSSValue& Right() const { return *right_; }
+  const CSSValue& Bottom() const { return *bottom_; }
+  const CSSValue& Left() const { return *left_; }
 
   CSSValuePair* TopLeftRadius() const { return top_left_radius_.Get(); }
   CSSValuePair* TopRightRadius() const { return top_right_radius_.Get(); }
@@ -142,35 +178,6 @@ class CSSBasicShapeInsetValue final : public CSSValue {
   CSSValuePair* BottomLeftRadius() const { return bottom_left_radius_.Get(); }
 
   // TODO(sashab): Remove these and pass them as arguments in the constructor.
-  void SetTop(CSSValue* top) { top_ = top; }
-  void SetRight(CSSValue* right) { right_ = right; }
-  void SetBottom(CSSValue* bottom) { bottom_ = bottom; }
-  void SetLeft(CSSValue* left) { left_ = left; }
-
-  void UpdateShapeSize4Values(CSSValue* top,
-                              CSSValue* right,
-                              CSSValue* bottom,
-                              CSSValue* left) {
-    SetTop(top);
-    SetRight(right);
-    SetBottom(bottom);
-    SetLeft(left);
-  }
-
-  void UpdateShapeSize1Value(CSSValue* value1) {
-    UpdateShapeSize4Values(value1, value1, value1, value1);
-  }
-
-  void UpdateShapeSize2Values(CSSValue* value1, CSSValue* value2) {
-    UpdateShapeSize4Values(value1, value2, value1, value2);
-  }
-
-  void UpdateShapeSize3Values(CSSValue* value1,
-                              CSSValue* value2,
-                              CSSValue* value3) {
-    UpdateShapeSize4Values(value1, value2, value3, value2);
-  }
-
   void SetTopLeftRadius(CSSValuePair* radius) { top_left_radius_ = radius; }
   void SetTopRightRadius(CSSValuePair* radius) { top_right_radius_ = radius; }
   void SetBottomRightRadius(CSSValuePair* radius) {
@@ -183,13 +190,25 @@ class CSSBasicShapeInsetValue final : public CSSValue {
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapeInsetValue&) const;
 
+  bool HasRandomFunctions() const {
+    return (top_ && top_->HasRandomFunctions()) ||
+           (right_ && right_->HasRandomFunctions()) ||
+           (bottom_ && bottom_->HasRandomFunctions()) ||
+           (left_ && left_->HasRandomFunctions()) ||
+           (top_left_radius_ && top_left_radius_->HasRandomFunctions()) ||
+           (top_right_radius_ && top_right_radius_->HasRandomFunctions()) ||
+           (bottom_right_radius_ &&
+            bottom_right_radius_->HasRandomFunctions()) ||
+           (bottom_left_radius_ && bottom_left_radius_->HasRandomFunctions());
+  }
+
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
-  Member<CSSValue> top_;
-  Member<CSSValue> right_;
-  Member<CSSValue> bottom_;
-  Member<CSSValue> left_;
+  Member<const CSSValue> top_;
+  Member<const CSSValue> right_;
+  Member<const CSSValue> bottom_;
+  Member<const CSSValue> left_;
 
   Member<CSSValuePair> top_left_radius_;
   Member<CSSValuePair> top_right_radius_;
@@ -199,10 +218,10 @@ class CSSBasicShapeInsetValue final : public CSSValue {
 
 class CSSBasicShapeRectValue final : public CSSValue {
  public:
-  CSSBasicShapeRectValue(CSSValue* top,
-                         CSSValue* right,
-                         CSSValue* bottom,
-                         CSSValue* left)
+  CSSBasicShapeRectValue(const CSSValue& top,
+                         const CSSValue& right,
+                         const CSSValue& bottom,
+                         const CSSValue& left)
       : CSSValue(kBasicShapeRectClass),
         top_(top),
         right_(right),
@@ -211,10 +230,10 @@ class CSSBasicShapeRectValue final : public CSSValue {
     Validate();
   }
 
-  CSSValue* Top() const { return top_.Get(); }
-  CSSValue* Right() const { return right_.Get(); }
-  CSSValue* Bottom() const { return bottom_.Get(); }
-  CSSValue* Left() const { return left_.Get(); }
+  const CSSValue& Top() const { return *top_; }
+  const CSSValue& Right() const { return *right_; }
+  const CSSValue& Bottom() const { return *bottom_; }
+  const CSSValue& Left() const { return *left_; }
 
   CSSValuePair* TopLeftRadius() const { return top_left_radius_.Get(); }
   CSSValuePair* TopRightRadius() const { return top_right_radius_.Get(); }
@@ -233,15 +252,27 @@ class CSSBasicShapeRectValue final : public CSSValue {
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapeRectValue&) const;
 
+  bool HasRandomFunctions() const {
+    return (top_ && top_->HasRandomFunctions()) ||
+           (right_ && right_->HasRandomFunctions()) ||
+           (bottom_ && bottom_->HasRandomFunctions()) ||
+           (left_ && left_->HasRandomFunctions()) ||
+           (top_left_radius_ && top_left_radius_->HasRandomFunctions()) ||
+           (top_right_radius_ && top_right_radius_->HasRandomFunctions()) ||
+           (bottom_right_radius_ &&
+            bottom_right_radius_->HasRandomFunctions()) ||
+           (bottom_left_radius_ && bottom_left_radius_->HasRandomFunctions());
+  }
+
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   void Validate() const;
 
-  Member<CSSValue> top_;
-  Member<CSSValue> right_;
-  Member<CSSValue> bottom_;
-  Member<CSSValue> left_;
+  Member<const CSSValue> top_;
+  Member<const CSSValue> right_;
+  Member<const CSSValue> bottom_;
+  Member<const CSSValue> left_;
 
   Member<CSSValuePair> top_left_radius_;
   Member<CSSValuePair> top_right_radius_;
@@ -251,10 +282,10 @@ class CSSBasicShapeRectValue final : public CSSValue {
 
 class CSSBasicShapeXYWHValue final : public CSSValue {
  public:
-  CSSBasicShapeXYWHValue(CSSPrimitiveValue* x,
-                         CSSPrimitiveValue* y,
-                         CSSPrimitiveValue* width,
-                         CSSPrimitiveValue* height)
+  CSSBasicShapeXYWHValue(const CSSPrimitiveValue& x,
+                         const CSSPrimitiveValue& y,
+                         const CSSPrimitiveValue& width,
+                         const CSSPrimitiveValue& height)
       : CSSValue(kBasicShapeXYWHClass),
         x_(x),
         y_(y),
@@ -263,10 +294,10 @@ class CSSBasicShapeXYWHValue final : public CSSValue {
     Validate();
   }
 
-  CSSPrimitiveValue* X() const { return x_.Get(); }
-  CSSPrimitiveValue* Y() const { return y_.Get(); }
-  CSSPrimitiveValue* Width() const { return width_.Get(); }
-  CSSPrimitiveValue* Height() const { return height_.Get(); }
+  const CSSPrimitiveValue& X() const { return *x_; }
+  const CSSPrimitiveValue& Y() const { return *y_; }
+  const CSSPrimitiveValue& Width() const { return *width_; }
+  const CSSPrimitiveValue& Height() const { return *height_; }
 
   CSSValuePair* TopLeftRadius() const { return top_left_radius_.Get(); }
   CSSValuePair* TopRightRadius() const { return top_right_radius_.Get(); }
@@ -285,15 +316,27 @@ class CSSBasicShapeXYWHValue final : public CSSValue {
   String CustomCSSText() const;
   bool Equals(const CSSBasicShapeXYWHValue&) const;
 
+  bool HasRandomFunctions() const {
+    return (x_ && x_->HasRandomFunctions()) ||
+           (y_ && y_->HasRandomFunctions()) ||
+           (width_ && width_->HasRandomFunctions()) ||
+           (height_ && height_->HasRandomFunctions()) ||
+           (top_left_radius_ && top_left_radius_->HasRandomFunctions()) ||
+           (top_right_radius_ && top_right_radius_->HasRandomFunctions()) ||
+           (bottom_right_radius_ &&
+            bottom_right_radius_->HasRandomFunctions()) ||
+           (bottom_left_radius_ && bottom_left_radius_->HasRandomFunctions());
+  }
+
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   void Validate() const;
 
-  Member<CSSPrimitiveValue> x_;
-  Member<CSSPrimitiveValue> y_;
-  Member<CSSPrimitiveValue> width_;
-  Member<CSSPrimitiveValue> height_;
+  Member<const CSSPrimitiveValue> x_;
+  Member<const CSSPrimitiveValue> y_;
+  Member<const CSSPrimitiveValue> width_;
+  Member<const CSSPrimitiveValue> height_;
 
   Member<CSSValuePair> top_left_radius_;
   Member<CSSValuePair> top_right_radius_;

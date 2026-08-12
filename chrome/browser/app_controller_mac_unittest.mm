@@ -21,12 +21,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/platform_test.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -367,9 +367,6 @@ TEST_F(AppControllerKeyEquivalentTest, UpdateMenuItemsForBrowserWindow) {
 // browser window.
 TEST_F(AppControllerKeyEquivalentTest,
        UpdateMenuItemsForBrowserWindowDescendant) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kImmersiveFullscreen);
-
   // Set up the browser window.
   const NSRect kContentRect = NSMakeRect(0.0, 0.0, 10.0, 10.0);
   NSWindow* browser_window =

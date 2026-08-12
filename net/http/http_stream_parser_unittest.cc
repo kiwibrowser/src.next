@@ -2,29 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/http/http_stream_parser.h"
 
 #include <stdint.h>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "base/byte_size.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/run_loop.h"
+#include "base/strings/string_view_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "net/base/chunked_upload_data_stream.h"
@@ -154,7 +153,7 @@ TEST(HttpStreamParser, DataReadErrorSynchronous) {
   EXPECT_EQ(0u, progress.size());
   EXPECT_EQ(0u, progress.position());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 TEST(HttpStreamParser, DataReadErrorAsynchronous) {
@@ -198,7 +197,7 @@ TEST(HttpStreamParser, DataReadErrorAsynchronous) {
 
   EXPECT_THAT(callback.GetResult(result), IsError(ERR_FAILED));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 class InitAsyncUploadDataStream : public ChunkedUploadDataStream {
@@ -282,6 +281,39 @@ TEST(HttpStreamParser, InitAsynchronousUploadDataStream) {
   EXPECT_EQ(0u, progress.size());
   EXPECT_EQ(0u, progress.position());
 }
+
+class BufferSizeCheckingUploadDataStream : public UploadDataStream {
+ public:
+  explicit BufferSizeCheckingUploadDataStream(std::string_view data)
+      : UploadDataStream(false, 0), data_(data) {}
+
+  BufferSizeCheckingUploadDataStream(
+      const BufferSizeCheckingUploadDataStream&) = delete;
+  BufferSizeCheckingUploadDataStream& operator=(
+      const BufferSizeCheckingUploadDataStream&) = delete;
+
+  bool IsInMemory() const override { return true; }
+
+ private:
+  int InitInternal(const NetLogWithSource& net_log) override {
+    SetSize(data_.size());
+    return OK;
+  }
+  int ReadInternal(IOBuffer* buf, int buf_len) override {
+    EXPECT_GT(buf_len, 1);
+    EXPECT_EQ(buf_len, static_cast<int>(data_.size() - offset_));
+    int bytes_to_copy =
+        std::min(buf_len, static_cast<int>(data_.size() - offset_));
+    std::copy(data_.begin() + offset_, data_.begin() + offset_ + bytes_to_copy,
+              buf->data());
+    offset_ += bytes_to_copy;
+    return bytes_to_copy;
+  }
+  void ResetInternal() override { offset_ = 0; }
+
+  const std::string data_;
+  int offset_ = 0;
+};
 
 // The empty payload is how the last chunk is encoded.
 TEST(HttpStreamParser, EncodeChunk_EmptyPayload) {
@@ -455,7 +487,7 @@ TEST(HttpStreamParser, SentBytesNoHeaders) {
                                    TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 TEST(HttpStreamParser, SentBytesWithHeaders) {
@@ -486,7 +518,7 @@ TEST(HttpStreamParser, SentBytesWithHeaders) {
                                    TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 TEST(HttpStreamParser, SentBytesWithHeadersMultiWrite) {
@@ -517,7 +549,7 @@ TEST(HttpStreamParser, SentBytesWithHeadersMultiWrite) {
                                    TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 TEST(HttpStreamParser, SentBytesWithErrorWritingHeaders) {
@@ -548,7 +580,7 @@ TEST(HttpStreamParser, SentBytesWithErrorWritingHeaders) {
                                TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 }
 
 TEST(HttpStreamParser, SentBytesPost) {
@@ -584,11 +616,43 @@ TEST(HttpStreamParser, SentBytesPost) {
                                    TRAFFIC_ANNOTATION_FOR_TESTS, &response,
                                    callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 
   UploadProgress progress = upload_data_stream.GetUploadProgress();
   EXPECT_EQ(12u, progress.size());
   EXPECT_EQ(12u, progress.position());
+}
+
+TEST(HttpStreamParser, MergedUploadDataStreamNotReadOneByteAtATime) {
+  MockWrite writes[] = {
+      MockWrite(SYNCHRONOUS, 0,
+                "POST / HTTP/1.1\r\n"
+                "Content-Length: 12\r\n\r\n"
+                "hello world!"),
+  };
+
+  SequencedSocketData data(base::span<MockRead>(), writes);
+  std::unique_ptr<StreamSocket> stream_socket = CreateConnectedSocket(&data);
+
+  BufferSizeCheckingUploadDataStream upload_data_stream("hello world!");
+  ASSERT_THAT(upload_data_stream.Init(TestCompletionCallback().callback(),
+                                      NetLogWithSource()),
+              IsOk());
+
+  scoped_refptr<GrowableIOBuffer> read_buffer =
+      base::MakeRefCounted<GrowableIOBuffer>();
+  HttpStreamParser parser(stream_socket.get(), false /* is_reused */,
+                          GURL("http://localhost"), "POST", &upload_data_stream,
+                          read_buffer.get(), NetLogWithSource());
+
+  HttpRequestHeaders headers;
+  headers.SetHeader("Content-Length", "12");
+
+  HttpResponseInfo response;
+  TestCompletionCallback callback;
+  EXPECT_EQ(OK, parser.SendRequest("POST / HTTP/1.1\r\n", headers,
+                                   TRAFFIC_ANNOTATION_FOR_TESTS, &response,
+                                   callback.callback()));
 }
 
 TEST(HttpStreamParser, SentBytesChunkedPostError) {
@@ -634,7 +698,7 @@ TEST(HttpStreamParser, SentBytesChunkedPostError) {
   upload_data_stream.AppendData(base::byte_span_from_cstring(kChunk), false);
   EXPECT_THAT(callback.WaitForResult(), IsError(ERR_FAILED));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
 
   UploadProgress progress = upload_data_stream.GetUploadProgress();
   EXPECT_EQ(0u, progress.size());
@@ -714,8 +778,8 @@ TEST(HttpStreamParser, AsyncSingleChunkAndAsyncSocket) {
                                     callback.callback()));
   ASSERT_EQ(kBodySize, callback.WaitForResult());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 // Test to ensure the HttpStreamParser state machine does not get confused
@@ -786,8 +850,8 @@ TEST(HttpStreamParser, SyncSingleChunkAndAsyncSocket) {
                                     callback.callback()));
   ASSERT_EQ(kBodySize, callback.WaitForResult());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 // Test to ensure the HttpStreamParser state machine does not get confused
@@ -886,8 +950,8 @@ TEST(HttpStreamParser, AsyncChunkAndAsyncSocketWithMultipleChunks) {
                                     callback.callback()));
   ASSERT_EQ(kBodySize, callback.WaitForResult());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 // Test to ensure the HttpStreamParser state machine does not get confused
@@ -963,8 +1027,8 @@ TEST(HttpStreamParser, AsyncEmptyChunkedUpload) {
                                     callback.callback()));
   ASSERT_EQ(kBodySize, callback.WaitForResult());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 // Test to ensure the HttpStreamParser state machine does not get confused
@@ -1034,8 +1098,8 @@ TEST(HttpStreamParser, SyncEmptyChunkedUpload) {
                                     callback.callback()));
   ASSERT_EQ(kBodySize, callback.WaitForResult());
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 TEST(HttpStreamParser, TruncatedHeaders) {
@@ -1069,14 +1133,14 @@ TEST(HttpStreamParser, TruncatedHeaders) {
     MockRead(SYNCHRONOUS, 0, 2),  // EOF
   };
 
-  base::span<MockRead> reads[] = {
+  auto reads = std::to_array<base::span<MockRead>>({
       truncated_status_reads,
       truncated_after_status_reads,
       truncated_in_header_reads,
       truncated_after_header_reads,
       truncated_after_final_newline_reads,
       not_truncated_reads,
-  };
+  });
 
   MockWrite writes[] = {
     MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n"),
@@ -1117,20 +1181,20 @@ TEST(HttpStreamParser, TruncatedHeaders) {
                                        &response_info, callback.callback()));
 
       int rv = parser.ReadResponseHeaders(callback.callback());
-      EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
+      EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
       if (i == std::size(reads) - 1) {
         EXPECT_THAT(rv, IsOk());
         EXPECT_TRUE(response_info.headers.get());
-        EXPECT_EQ(CountReadBytes(reads[i]), parser.received_bytes());
+        EXPECT_EQ(CountReadByteSize(reads[i]), parser.received_bytes());
       } else {
         if (protocol == HTTP) {
           EXPECT_THAT(rv, IsError(ERR_CONNECTION_CLOSED));
           EXPECT_TRUE(response_info.headers.get());
-          EXPECT_EQ(CountReadBytes(reads[i]), parser.received_bytes());
+          EXPECT_EQ(CountReadByteSize(reads[i]), parser.received_bytes());
         } else {
           EXPECT_THAT(rv, IsError(ERR_RESPONSE_HEADERS_TRUNCATED));
           EXPECT_FALSE(response_info.headers.get());
-          EXPECT_EQ(0, parser.received_bytes());
+          EXPECT_EQ(base::ByteSize(0), parser.received_bytes());
         }
       }
     }
@@ -1179,9 +1243,9 @@ TEST(HttpStreamParser, WebSocket101Response) {
   EXPECT_EQ("a fake websocket frame",
             base::as_string_view(read_buffer->everything()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads) -
-                static_cast<int64_t>(strlen("a fake websocket frame")),
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads) -
+                base::ByteSize(strlen("a fake websocket frame")),
             parser.received_bytes());
 }
 
@@ -1205,20 +1269,20 @@ class SimpleGetRunner {
     int offset = read_buffer_->offset();
     read_buffer_->SetCapacity(offset + data.size());
     auto span = base::as_byte_span(data);
-    read_buffer_->everything().subspan(offset, span.size()).copy_from(span);
+    read_buffer_->everything()
+        .subspan(base::checked_cast<size_t>(offset), span.size())
+        .copy_from(span);
     read_buffer_->set_offset(offset + span.size());
   }
 
   // The data used to back |string_piece| must stay alive until all mock data
   // has been read.
   void AddRead(std::string_view string_piece) {
-    reads_.emplace_back(SYNCHRONOUS, string_piece.data(), string_piece.length(),
-                        sequence_number_++);
+    reads_.emplace_back(SYNCHRONOUS, sequence_number_++, string_piece);
   }
 
   void AddAsyncRead(std::string_view string_piece) {
-    reads_.emplace_back(ASYNC, string_piece.data(), string_piece.length(),
-                        sequence_number_++);
+    reads_.emplace_back(ASYNC, sequence_number_++, string_piece);
   }
 
   void SetupParserAndSendRequest() {
@@ -1245,11 +1309,11 @@ class SimpleGetRunner {
 
   void ReadHeaders() { ReadHeadersExpectingError(OK); }
 
-  std::string ReadBody(int user_buf_len, int* read_lengths) {
+  std::string ReadBody(int user_buf_len, base::span<int> read_lengths) {
     TestCompletionCallback callback;
     auto buffer = base::MakeRefCounted<IOBufferWithSize>(user_buf_len);
     int rv;
-    int i = 0;
+    size_t i = 0;
     std::string body;
     while (true) {
       rv = parser_->ReadResponseBody(
@@ -1260,11 +1324,12 @@ class SimpleGetRunner {
         i++;
         EXPECT_EQ(read_lengths[i], rv);
       }
-      if (rv > 0)
-        body.append(buffer->data(), rv);
-      i++;
-      if (rv <= 0)
+      if (rv > 0) {
+        body.append(base::as_string_view(buffer->first(rv)));
+      } else {
         return body;
+      }
+      i++;
     }
   }
 
@@ -1329,11 +1394,11 @@ TEST(HttpStreamParser, Http09PortTests) {
     EXPECT_EQ("HTTP/0.9 200 OK",
               get_runner.response_info()->headers->GetStatusLine());
 
-    EXPECT_EQ(0, get_runner.parser()->received_bytes());
+    EXPECT_EQ(base::ByteSize(0), get_runner.parser()->received_bytes());
     int read_lengths[] = {static_cast<int>(kResponse.size()), 0};
     get_runner.ReadBody(kResponse.size(), read_lengths);
-    EXPECT_EQ(kResponse.size(),
-              static_cast<size_t>(get_runner.parser()->received_bytes()));
+    EXPECT_EQ(base::ByteSize(kResponse.size()),
+              get_runner.parser()->received_bytes());
     EXPECT_EQ(HttpConnectionInfo::kHTTP0_9,
               get_runner.response_info()->connection_info);
   }
@@ -1354,11 +1419,11 @@ TEST(HttpStreamParser, Http09PortTests) {
     EXPECT_EQ("HTTP/0.9 200 OK",
               get_runner.response_info()->headers->GetStatusLine());
 
-    EXPECT_EQ(0, get_runner.parser()->received_bytes());
+    EXPECT_EQ(base::ByteSize(0), get_runner.parser()->received_bytes());
     int read_lengths[] = {static_cast<int>(kShoutcastResponse.size()), 0};
     get_runner.ReadBody(kShoutcastResponse.size(), read_lengths);
-    EXPECT_EQ(kShoutcastResponse.size(),
-              static_cast<size_t>(get_runner.parser()->received_bytes()));
+    EXPECT_EQ(base::ByteSize(kShoutcastResponse.size()),
+              get_runner.parser()->received_bytes());
     EXPECT_EQ(HttpConnectionInfo::kHTTP0_9,
               get_runner.response_info()->connection_info);
   }
@@ -1465,12 +1530,12 @@ TEST(HttpStreamParser, ReceivedBytesNormal) {
   get_runner.AddRead(response);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  int64_t headers_size = headers.size();
+  base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int body_size = body.size();
   int read_lengths[] = {body_size, 0};
   get_runner.ReadBody(body_size, read_lengths);
-  int64_t response_size = response.size();
+  base::ByteSize response_size(response.size());
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(HttpConnectionInfo::kHTTP1_0,
             get_runner.response_info()->connection_info);
@@ -1490,13 +1555,13 @@ TEST(HttpStreamParser, ReceivedBytesExcludesNextResponse) {
   get_runner.AddRead(data);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  EXPECT_EQ(39, get_runner.parser()->received_bytes());
-  int64_t headers_size = headers.size();
+  EXPECT_EQ(base::ByteSize(39), get_runner.parser()->received_bytes());
+  base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int body_size = body.size();
   int read_lengths[] = {body_size, 0};
   get_runner.ReadBody(body_size, read_lengths);
-  int64_t response_size = response.size();
+  base::ByteSize response_size(response.size());
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_EQ(HttpConnectionInfo::kHTTP1_1,
@@ -1527,12 +1592,12 @@ TEST(HttpStreamParser, ReceivedBytesMultiReadExcludesNextResponse) {
   get_runner.AddRead(response_end);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  int64_t headers_size = headers.size();
+  base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int body_end_size = body_end.size();
   int read_lengths[] = {body_start_size, body_end_size, 0};
   get_runner.ReadBody(body_start_size, read_lengths);
-  int64_t response_size = response_start.size() + body_end_size;
+  base::ByteSize response_size(response_start.size() + body_end_size);
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1549,7 +1614,7 @@ TEST(HttpStreamParser, ReceivedBytesMultiReadExcludesExtraData) {
   const std::string body_end = "abcd";
   const int body_end_size = body_end.size();
   const std::string body = body_start + body_end;
-  const int body_size = body.size();
+  const base::ByteSize body_size(body.size());
   const std::string extra_data = "HTTP/1.1 200 OK\r\n\r\nFOO";
   const std::string read_data = body + extra_data;
 
@@ -1558,11 +1623,11 @@ TEST(HttpStreamParser, ReceivedBytesMultiReadExcludesExtraData) {
   get_runner.AddRead(read_data);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  const int headers_size = headers.size();
+  const base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int read_lengths[] = {body_start_size, body_end_size, 0};
   get_runner.ReadBody(body_start_size, read_lengths);
-  const int response_size = headers_size + body_size;
+  const base::ByteSize response_size = headers_size + body_size;
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1581,7 +1646,7 @@ TEST(HttpStreamParser, ReceivedBytesAsyncMultiReadExcludesExtraData) {
   const std::string body_end = "abcd";
   const int body_end_size = body_end.size();
   const std::string body = body_start + body_end;
-  const int body_size = body.size();
+  const base::ByteSize body_size(body.size());
   const std::string extra_data = "HTTP/1.1 200 OK\r\n\r\nFOO";
   const std::string read_data = body_end + extra_data;
 
@@ -1591,11 +1656,11 @@ TEST(HttpStreamParser, ReceivedBytesAsyncMultiReadExcludesExtraData) {
   get_runner.AddAsyncRead(read_data);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  const int headers_size = headers.size();
+  const base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
-  int read_lengths[] = {body_start_size, -1, body_end_size, 0};
+  int read_lengths[] = {body_start_size, ERR_IO_PENDING, body_end_size, 0};
   get_runner.ReadBody(body_start_size, read_lengths);
-  const int response_size = headers_size + body_size;
+  const base::ByteSize response_size = headers_size + body_size;
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1615,11 +1680,12 @@ TEST(HttpStreamParser, ReceivedBytesExcludesExtraDataLargeBuffer) {
   get_runner.AddRead(response);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  const int headers_size = headers.size();
+  const base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int read_lengths[] = {body_size, 0};
   get_runner.ReadBody(response_size, read_lengths);
-  const int actual_response_size = headers_size + body_size;
+  const base::ByteSize actual_response_size =
+      headers_size + base::ByteSize(body.size());
   EXPECT_EQ(actual_response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1630,7 +1696,7 @@ TEST(HttpStreamParser, ReceivedBytesExcludesExtraDataSmallBuffer) {
       "HTTP/1.1 200 OK\r\n"
       "Content-Length: 36\r\n\r\n";
   const std::string body = std::string(36, '#');
-  const int body_size = body.size();
+  const base::ByteSize body_size(body.size());
   const std::string extra_data = std::string(14, '!');
   const std::string response = headers + body + extra_data;
 
@@ -1638,11 +1704,11 @@ TEST(HttpStreamParser, ReceivedBytesExcludesExtraDataSmallBuffer) {
   get_runner.AddRead(response);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  const int headers_size = headers.size();
+  const base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int read_lengths[] = {10, 10, 10, 6, 0};
   get_runner.ReadBody(10, read_lengths);
-  const int actual_response_size = headers_size + body_size;
+  const base::ByteSize actual_response_size = headers_size + body_size;
   EXPECT_EQ(actual_response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1664,12 +1730,12 @@ TEST(HttpStreamParser, ReceivedBytesFromReadBufExcludesNextResponse) {
   get_runner.AddInitialData(data);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  int64_t headers_size = headers.size();
+  base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int body_size = body.size();
   int read_lengths[] = {body_size, 0};
   get_runner.ReadBody(body_size, read_lengths);
-  int64_t response_size = response.size();
+  base::ByteSize response_size(response.size());
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
   EXPECT_FALSE(get_runner.parser()->CanReuseConnection());
@@ -1680,7 +1746,7 @@ TEST(HttpStreamParser, ReceivedBytesFromReadBufExcludesNextResponse) {
 TEST(HttpStreamParser, ReceivedBytesUseReadBuf) {
   std::string buffer = "HTTP/1.1 200 OK\r\n";
   std::string remaining_headers = "Content-Length: 7\r\n\r\n";
-  int64_t headers_size = buffer.size() + remaining_headers.size();
+  base::ByteSize headers_size(buffer.size() + remaining_headers.size());
   std::string body = "content";
   std::string response = remaining_headers + body;
 
@@ -1693,7 +1759,8 @@ TEST(HttpStreamParser, ReceivedBytesUseReadBuf) {
   int body_size = body.size();
   int read_lengths[] = {body_size, 0};
   get_runner.ReadBody(body_size, read_lengths);
-  EXPECT_EQ(headers_size + body_size, get_runner.parser()->received_bytes());
+  EXPECT_EQ(headers_size + base::ByteSize(body.size()),
+            get_runner.parser()->received_bytes());
   EXPECT_EQ(0, get_runner.read_buffer()->offset());
 }
 
@@ -1715,7 +1782,7 @@ TEST(HttpStreamParser, ReceivedBytesChunkedTransferExcludesNextResponse) {
   get_runner.ReadHeaders();
   int read_lengths[] = {4, 3, 6, 2, 6, 0};
   get_runner.ReadBody(7, read_lengths);
-  int64_t response_size = response.size();
+  base::ByteSize response_size(response.size());
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
   int64_t next_response_size = next_response.size();
   EXPECT_EQ(next_response_size, get_runner.read_buffer()->offset());
@@ -1743,11 +1810,11 @@ TEST(HttpStreamParser, ReceivedBytesMultipleReads) {
     get_runner.AddRead(block);
   get_runner.SetupParserAndSendRequest();
   get_runner.ReadHeaders();
-  int64_t headers_size = headers.size();
+  base::ByteSize headers_size(headers.size());
   EXPECT_EQ(headers_size, get_runner.parser()->received_bytes());
   int read_lengths[] = {1, 4, 4, 4, 4, 4, 4, 4, 4, 0};
   get_runner.ReadBody(receive_length + 1, read_lengths);
-  int64_t response_size = response.size();
+  base::ByteSize response_size(response.size());
   EXPECT_EQ(response_size, get_runner.parser()->received_bytes());
 }
 
@@ -1759,21 +1826,22 @@ TEST(HttpStreamParser, NonInformationalResponseStart) {
 
   std::string response_headers1 = "HTTP/1.1 200 OK\r\n";
   std::string response_headers2 = "Content-Length: 7\r\n\r\n";
-  int64_t response_headers_size =
-      response_headers1.size() + response_headers2.size();
+  base::ByteSize response_headers_size(response_headers1.size() +
+                                       response_headers2.size());
 
   std::string response_body = "content";
-  int64_t response_size = response_headers_size + response_body.size();
+  base::ByteSize response_size =
+      response_headers_size + base::ByteSize(response_body.size());
 
   MockWrite writes[] = {MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n")};
 
   MockRead reads[] = {
       // Add pauses between header fragments so that the test runner can advance
       // the mock clock to test timing information.
-      MockRead(ASYNC, 1, response_headers1.c_str()),
+      MockRead(ASYNC, 1, response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 2),
-      MockRead(ASYNC, 3, response_headers2.c_str()),
-      MockRead(ASYNC, 4, response_body.c_str()),
+      MockRead(ASYNC, 3, response_headers2),
+      MockRead(ASYNC, 4, response_body),
   };
 
   // Set up the sequenced socket data.
@@ -1839,16 +1907,17 @@ TEST(HttpStreamParser, NonInformationalResponseStartWithoutBody) {
 
   std::string response_headers1 = "HTTP/1.1 200 OK\r\n";
   std::string response_headers2 = "Content-Length: 0\r\n\r\n";
-  int64_t response_size = response_headers1.size() + response_headers2.size();
+  base::ByteSize response_size(response_headers1.size() +
+                               response_headers2.size());
 
   MockWrite writes[] = {MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n")};
 
   MockRead reads[] = {
       // Add pauses between header fragments so that the test runner can advance
       // the mock clock to test timing information.
-      MockRead(ASYNC, 1, response_headers1.c_str()),
+      MockRead(ASYNC, 1, response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 2),
-      MockRead(ASYNC, 3, response_headers2.c_str()),
+      MockRead(ASYNC, 3, response_headers2),
   };
 
   // Set up the sequenced socket data.
@@ -1909,17 +1978,18 @@ TEST(HttpStreamParser, ReceivedBytesIncludesContinueHeader) {
 
   std::string status100_response_headers1 = "HTTP/1.1 100 ";
   std::string status100_response_headers2 = "Continue\r\n\r\n";
-  int64_t status100_response_headers_size =
-      status100_response_headers1.size() + status100_response_headers2.size();
+  base::ByteSize status100_response_headers_size(
+      status100_response_headers1.size() + status100_response_headers2.size());
 
   std::string response_headers1 = "HTTP/1.1 200 OK\r\n";
   std::string response_headers2 = "Content-Length: 7\r\n\r\n";
-  int64_t response_headers_size =
-      response_headers1.size() + response_headers2.size();
+  base::ByteSize response_headers_size(response_headers1.size() +
+                                       response_headers2.size());
 
   std::string response_body = "content";
-  int64_t response_size = status100_response_headers_size +
-                          response_headers_size + response_body.size();
+  base::ByteSize response_size = status100_response_headers_size +
+                                 response_headers_size +
+                                 base::ByteSize(response_body.size());
 
   MockWrite writes[] = {MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n")};
 
@@ -1928,16 +1998,16 @@ TEST(HttpStreamParser, ReceivedBytesIncludesContinueHeader) {
       // the mock clock to test timing information.
 
       // 100 response headers.
-      MockRead(ASYNC, 1, status100_response_headers1.c_str()),
+      MockRead(ASYNC, 1, status100_response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 2),
-      MockRead(ASYNC, 3, status100_response_headers2.c_str()),
+      MockRead(ASYNC, 3, status100_response_headers2),
       MockRead(ASYNC, ERR_IO_PENDING, 4),
 
       // 200 response headers and body.
-      MockRead(ASYNC, 5, response_headers1.c_str()),
+      MockRead(ASYNC, 5, response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 6),
-      MockRead(ASYNC, 7, response_headers2.c_str()),
-      MockRead(ASYNC, 8, response_body.c_str()),
+      MockRead(ASYNC, 7, response_headers2),
+      MockRead(ASYNC, 8, response_body),
   };
 
   // Set up the sequenced socket data.
@@ -2040,18 +2110,19 @@ TEST(HttpStreamParser, EarlyHints) {
       "Link: </style.css>; rel=preload; as=style\r\n";
   std::string status103_response_headers3 =
       "Link: </script.js>; rel=preload; as=script\r\n\r\n";
-  int64_t status103_response_headers_size = status103_response_headers1.size() +
-                                            status103_response_headers2.size() +
-                                            status103_response_headers3.size();
+  base::ByteSize status103_response_headers_size(
+      status103_response_headers1.size() + status103_response_headers2.size() +
+      status103_response_headers3.size());
 
   std::string response_headers1 = "HTTP/1.1 200 OK\r\n";
   std::string response_headers2 = "Content-Length: 7\r\n\r\n";
-  int64_t response_headers_size =
-      response_headers1.size() + response_headers2.size();
+  base::ByteSize response_headers_size(response_headers1.size() +
+                                       response_headers2.size());
 
   std::string response_body = "content";
-  int64_t response_size = status103_response_headers_size +
-                          response_headers_size + response_body.size();
+  base::ByteSize response_size = status103_response_headers_size +
+                                 response_headers_size +
+                                 base::ByteSize(response_body.size());
 
   MockWrite writes[] = {MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n")};
 
@@ -2060,18 +2131,18 @@ TEST(HttpStreamParser, EarlyHints) {
       // the mock clock to test timing information.
 
       // 103 Early Hints response headers.
-      MockRead(ASYNC, 1, status103_response_headers1.c_str()),
+      MockRead(ASYNC, 1, status103_response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 2),
-      MockRead(ASYNC, 3, status103_response_headers2.c_str()),
+      MockRead(ASYNC, 3, status103_response_headers2),
       MockRead(ASYNC, ERR_IO_PENDING, 4),
-      MockRead(ASYNC, 5, status103_response_headers3.c_str()),
+      MockRead(ASYNC, 5, status103_response_headers3),
       MockRead(ASYNC, ERR_IO_PENDING, 6),
 
       // 200 response headers and body.
-      MockRead(ASYNC, 7, response_headers1.c_str()),
+      MockRead(ASYNC, 7, response_headers1),
       MockRead(ASYNC, ERR_IO_PENDING, 8),
-      MockRead(ASYNC, 9, response_headers2.c_str()),
-      MockRead(ASYNC, 10, response_body.c_str()),
+      MockRead(ASYNC, 9, response_headers2),
+      MockRead(ASYNC, 10, response_body),
   };
 
   // Set up the sequenced socket data.
@@ -2179,13 +2250,14 @@ TEST(HttpStreamParser, MixedResponseHeaders) {
   std::string status100_response_headers = "HTTP/1.1 100 ";
   std::string mixed_response_headers = "Continue\r\n\r\nHTTP/1.1 200 OK\r\n";
   std::string response_headers = "Content-Length: 7\r\n\r\n";
-  int64_t status100_response_headers_size =
-      status100_response_headers.size() + 12;
-  int64_t response_headers_size = response_headers.size() + 17;
+  base::ByteSize status100_response_headers_size(
+      status100_response_headers.size() + 12);
+  base::ByteSize response_headers_size(response_headers.size() + 17);
 
   std::string response_body = "content";
-  int64_t response_size = status100_response_headers_size +
-                          response_headers_size + response_body.size();
+  base::ByteSize response_size = status100_response_headers_size +
+                                 response_headers_size +
+                                 base::ByteSize(response_body.size());
 
   MockWrite writes[] = {MockWrite(SYNCHRONOUS, 0, "GET / HTTP/1.1\r\n\r\n")};
 
@@ -2194,16 +2266,16 @@ TEST(HttpStreamParser, MixedResponseHeaders) {
       // the mock clock to test timing information.
 
       // 100 response headers.
-      MockRead(ASYNC, 1, status100_response_headers.c_str()),
+      MockRead(ASYNC, 1, status100_response_headers),
       MockRead(ASYNC, ERR_IO_PENDING, 2),
 
       // Mixed response headers.
-      MockRead(ASYNC, 3, mixed_response_headers.c_str()),
+      MockRead(ASYNC, 3, mixed_response_headers),
       MockRead(ASYNC, ERR_IO_PENDING, 4),
 
       // 200 response headers and body.
-      MockRead(ASYNC, 5, response_headers.c_str()),
-      MockRead(ASYNC, 6, response_body.c_str()),
+      MockRead(ASYNC, 5, response_headers),
+      MockRead(ASYNC, 6, response_body),
   };
 
   // Set up the sequenced socket data.
@@ -2351,8 +2423,8 @@ TEST(HttpStreamParser, ReadAfterUnownedObjectsDestroyed) {
   ASSERT_EQ(kBodySize, parser.ReadResponseBody(body_buffer.get(), kBodySize,
                                                callback.callback()));
 
-  EXPECT_EQ(CountWriteBytes(writes), parser.sent_bytes());
-  EXPECT_EQ(CountReadBytes(reads), parser.received_bytes());
+  EXPECT_EQ(CountWriteByteSize(writes), parser.sent_bytes());
+  EXPECT_EQ(CountReadByteSize(reads), parser.received_bytes());
 }
 
 // Case where one byte is received at a time.

@@ -38,12 +38,15 @@
 #include "third_party/blink/renderer/core/frame/remote_dom_window.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/core/url/dom_origin.h"
 #include "third_party/blink/renderer/core/url/dom_url_utils_read_only.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_activity_logger.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 
 namespace blink {
 
@@ -75,6 +78,7 @@ v8::Local<v8::Value> Location::Wrap(ScriptState* script_state) {
 
 void Location::Trace(Visitor* visitor) const {
   visitor->Trace(dom_window_);
+  visitor->Trace(ancestor_origins_list_);
   ScriptWrappable::Trace(visitor);
 }
 
@@ -83,7 +87,7 @@ inline const KURL& Location::Url() const {
   if (!url.IsValid()) {
     // Use "about:blank" while the page is still loading (before we have a
     // frame).
-    return BlankURL();
+    return BlankUrl();
   }
 
   return url;
@@ -121,16 +125,25 @@ String Location::origin() const {
   return DOMURLUtilsReadOnly::origin(Url());
 }
 
-DOMStringList* Location::ancestorOrigins() const {
-  auto* origins = MakeGarbageCollected<DOMStringList>();
-  if (!IsAttached())
-    return origins;
-  for (Frame* frame = dom_window_->GetFrame()->Tree().Parent(); frame;
-       frame = frame->Tree().Parent()) {
-    origins->Append(
-        frame->GetSecurityContext()->GetSecurityOrigin()->ToString());
+DOMStringList* Location::ancestorOrigins() {
+  if (!IsAttached()) {
+    if (!ancestor_origins_list_ || !ancestor_origins_list_->IsEmpty() ||
+        !RuntimeEnabledFeatures::AncestorOriginsStoredOnDocumentEnabled()) {
+      ancestor_origins_list_ = MakeGarbageCollected<DOMStringList>();
+    }
+    return ancestor_origins_list_.Get();
   }
-  return origins;
+
+  if (!ancestor_origins_list_ ||
+      !RuntimeEnabledFeatures::AncestorOriginsStoredOnDocumentEnabled()) {
+    ancestor_origins_list_ = MakeGarbageCollected<DOMStringList>();
+    for (Frame* frame = dom_window_->GetFrame()->Tree().Parent(); frame;
+         frame = frame->Tree().Parent()) {
+      ancestor_origins_list_->Append(
+          frame->GetSecurityContext()->GetSecurityOrigin()->ToString());
+    }
+  }
+  return ancestor_origins_list_.Get();
 }
 
 String Location::toString() const {
@@ -156,7 +169,7 @@ void Location::setProtocol(v8::Isolate* isolate,
   if (!url.SetProtocol(protocol)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
-        "'" + protocol + "' is an invalid protocol.");
+        StrCat({"'", protocol, "' is an invalid protocol."}));
     return;
   }
 
@@ -216,7 +229,7 @@ void Location::setHash(v8::Isolate* isolate,
   String old_fragment_identifier = url.FragmentIdentifier().ToString();
   String new_fragment_identifier = hash;
   if (hash[0] == '#')
-    new_fragment_identifier = hash.Substring(1);
+    new_fragment_identifier = hash.substr(1);
   url.SetFragmentIdentifier(new_fragment_identifier);
   // Note that by parsing the URL and *then* comparing fragments, we are
   // comparing fragments post-canonicalization, and so this handles the
@@ -281,15 +294,27 @@ void Location::SetLocation(const String& url,
                                                  completed_url)) {
     if (exception_state) {
       exception_state->ThrowSecurityError(
-          "The current window does not have permission to navigate the target "
-          "frame to '" +
-          url + "'.");
+          StrCat({"The current window does not have permission to navigate the "
+                  "target frame to '",
+                  completed_url.GetString(), "'."}));
     }
     return;
   }
+  if (!incumbent_window->GetFrame()->IsDescendantOf(dom_window_->GetFrame()) &&
+      dom_window_->GetFrame()->Parent() &&
+      !incumbent_window->GetSecurityOrigin()->IsSameOriginWith(
+          dom_window_->GetFrame()
+              ->Parent()
+              ->GetSecurityContext()
+              ->GetSecurityOrigin())) {
+    UseCounter::Count(
+        incumbent_window,
+        WebFeature::kNonParentOriginInitiatedNavigationOfSubframe);
+  }
   if (exception_state && !completed_url.IsValid()) {
-    exception_state->ThrowDOMException(DOMExceptionCode::kSyntaxError,
-                                       "'" + url + "' is not a valid URL.");
+    exception_state->ThrowDOMException(
+        DOMExceptionCode::kSyntaxError,
+        StrCat({"'", completed_url.GetString(), "' is not a valid URL."}));
     return;
   }
 

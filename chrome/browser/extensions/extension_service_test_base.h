@@ -18,7 +18,6 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_service.h"
@@ -26,14 +25,19 @@
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/sandboxed_unpacker.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/app_mode/kiosk_chrome_app_manager.h"
+#include "chrome/browser/ash/app_mode/kiosk_cryptohome_remover.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
 #include "components/user_manager/scoped_user_manager.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 class Profile;
 class TestingProfile;
@@ -49,6 +53,7 @@ class TestingPrefServiceSyncable;
 
 namespace extensions {
 
+class ExtensionRegistrar;
 class ExtensionRegistry;
 class ExtensionService;
 
@@ -77,7 +82,16 @@ class ExtensionServiceTestBase : public testing::Test {
     bool profile_is_supervised = false;
     bool profile_is_guest = false;
     bool enable_bookmark_model = false;
+
+    // If true, force desktop bookmarks behavior. This is currently only used
+    // for desktop Android.
+    // TODO(crbug.com/509156770): Remove this once DeviceInfo returns the
+    // correct value for is_desktop on desktop Android for tests.
+    bool force_desktop_bookmark_behavior = false;
     bool enable_install_limiter = false;
+    // If true, a TestSyncService is created and used instead of a
+    // default SyncService.
+    bool use_test_sync_service = false;
 
     TestingProfile::TestingFactories testing_factories;
 
@@ -123,14 +137,14 @@ class ExtensionServiceTestBase : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  // Initialize an ExtensionService according to the given |params|.
+  // Initialize an ExtensionService according to the given `params`.
   virtual void InitializeExtensionService(ExtensionServiceInitParams params);
 
   // Whether MV2 extensions should be allowed. Defaults to true.
   virtual bool ShouldAllowMV2Extensions();
 
   // Initialize an empty ExtensionService using a production, on-disk pref file.
-  // See documentation for |prefs_content|.
+  // See documentation for `prefs_content`.
   void InitializeEmptyExtensionService();
 
   // Initialize an ExtensionService with a few already-installed extensions.
@@ -161,12 +175,16 @@ class ExtensionServiceTestBase : public testing::Test {
 
   content::BrowserContext* browser_context();
   Profile* profile();
+  TestingProfile* testing_profile();
+
+  void DeleteProfile();
 
   // Turn on/off the guest session on the main profile.
   void SetGuestSessionOnProfile(bool guest_sesion);
 
   sync_preferences::TestingPrefServiceSyncable* testing_pref_service();
   ExtensionService* service() { return service_; }
+  ExtensionRegistrar* registrar() { return registrar_; }
   ExtensionRegistry* registry() { return registry_; }
   const base::FilePath& extensions_install_dir() const {
     return extensions_install_dir_;
@@ -190,14 +208,19 @@ class ExtensionServiceTestBase : public testing::Test {
   }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
+ private:
+  void CreateExtensionService(bool is_first_run,
+                              bool autoupdate_enabled,
+                              bool extensions_enabled,
+                              bool enable_install_limiter);
+
   // If a test uses a feature list, it should be destroyed after
-  // |task_environment_|, to avoid tsan data races between the ScopedFeatureList
+  // `task_environment_`, to avoid tsan data races between the ScopedFeatureList
   // destructor, and any tasks running on different threads that check if a
   // feature is enabled. ~BrowserTaskEnvironment will make sure those tasks
-  // finish before |feature_list_| is destroyed.
+  // finish before `feature_list_` is destroyed.
   base::test::ScopedFeatureList feature_list_;
 
- private:
   // Must be declared before anything that may make use of the
   // directory so as to ensure files are closed before cleanup.
   base::ScopedTempDir temp_dir_;
@@ -217,43 +240,37 @@ class ExtensionServiceTestBase : public testing::Test {
   // policies.
   std::unique_ptr<policy::PolicyService> policy_service_;
 
- protected:
-  // It's unfortunate that these are exposed to subclasses (rather than used
-  // through the accessor methods above), but too many tests already use them
-  // directly.
+  // chrome/test/data/extensions/
+  base::FilePath data_dir_;
+
+  content::InProcessUtilityThreadHelper in_process_utility_thread_helper_;
+
+  bool is_setup_called_ = false;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  ash::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
+  std::unique_ptr<ash::KioskCryptohomeRemover> kiosk_cryptohome_remover_;
+  std::unique_ptr<ash::KioskChromeAppManager> kiosk_chrome_app_manager_;
+  user_manager::ScopedUserManager user_manager_;
+#endif
 
   // The associated testing profile.
   std::unique_ptr<TestingProfile> profile_;
-
-  // The ExtensionService, whose lifetime is managed by |profile|'s
-  // ExtensionSystem.
-  raw_ptr<ExtensionService, DanglingUntriaged> service_;
-  ScopedTestingLocalState testing_local_state_;
-
- private:
-  void CreateExtensionService(bool is_first_run,
-                              bool autoupdate_enabled,
-                              bool extensions_enabled,
-                              bool enable_install_limiter);
 
   // The directory into which extensions are installed.
   base::FilePath extensions_install_dir_;
   // The directory into which unpacked extensions are installed.
   base::FilePath unpacked_install_dir_;
 
-  // chrome/test/data/extensions/
-  base::FilePath data_dir_;
-
-  content::InProcessUtilityThreadHelper in_process_utility_thread_helper_;
+  // The ExtensionService, whose lifetime is managed by `profile`'s
+  // ExtensionSystem.
+  raw_ptr<ExtensionService> service_ = nullptr;
 
   // The associated ExtensionRegistry, for convenience.
-  raw_ptr<extensions::ExtensionRegistry, DanglingUntriaged> registry_;
+  raw_ptr<ExtensionRegistry> registry_ = nullptr;
 
-#if BUILDFLAG(IS_CHROMEOS)
-  ash::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
-  std::unique_ptr<ash::KioskChromeAppManager> kiosk_chrome_app_manager_;
-  user_manager::ScopedUserManager user_manager_;
-#endif
+  // The associated ExtensionRegistrar, for convenience.
+  raw_ptr<ExtensionRegistrar> registrar_ = nullptr;
 
   // An override that ignores CRX3 publisher signatures.
   SandboxedUnpacker::ScopedVerifierFormatOverrideForTest

@@ -12,8 +12,8 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
-#include "third_party/blink/renderer/core/html/lazy_load_image_observer.h"
 #include "third_party/blink/renderer/core/html/loading_attribute.h"
+#include "third_party/blink/renderer/core/html/media/lazy_load_media_observer.h"
 
 namespace blink {
 
@@ -31,21 +31,21 @@ Document* GetRootDocumentOrNull(Node* node) {
 // static
 void LazyImageHelper::StartMonitoring(Element* element) {
   if (Document* document = GetRootDocumentOrNull(element)) {
-    document->EnsureLazyLoadImageObserver().StartMonitoringNearViewport(
+    document->EnsureLazyLoadMediaObserver().StartMonitoringNearViewport(
         document, element);
   }
 }
 
 void LazyImageHelper::StopMonitoring(Element* element) {
   if (Document* document = GetRootDocumentOrNull(element)) {
-    document->EnsureLazyLoadImageObserver().StopMonitoring(element);
+    document->EnsureLazyLoadMediaObserver().StopMonitoring(element);
   }
 }
 
 // static
 bool LazyImageHelper::LoadAllImagesAndBlockLoadEvent(Document& document) {
   if (Document* root_document = GetRootDocumentOrNull(&document)) {
-    return root_document->EnsureLazyLoadImageObserver()
+    return root_document->EnsureLazyLoadMediaObserver()
         .LoadAllImagesAndBlockLoadEvent(document);
   }
   return false;

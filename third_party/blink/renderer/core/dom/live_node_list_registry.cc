@@ -4,9 +4,8 @@
 
 #include "third_party/blink/renderer/core/dom/live_node_list_registry.h"
 
-#include "base/containers/contains.h"
-#include "base/not_fatal_until.h"
-#include "base/ranges/algorithm.h"
+#include <algorithm>
+
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/live_node_list_base.h"
 
@@ -18,7 +17,7 @@ static_assert(kNumNodeListInvalidationTypes <= sizeof(unsigned) * 8,
 void LiveNodeListRegistry::Add(const LiveNodeListBase* list,
                                NodeListInvalidationType type) {
   Entry entry = {list, MaskForInvalidationType(type)};
-  DCHECK(!base::Contains(data_, entry));
+  DCHECK(!std::ranges::contains(data_, entry));
   data_.push_back(entry);
   mask_ |= entry.second;
 }
@@ -26,8 +25,8 @@ void LiveNodeListRegistry::Add(const LiveNodeListBase* list,
 void LiveNodeListRegistry::Remove(const LiveNodeListBase* list,
                                   NodeListInvalidationType type) {
   Entry entry = {list, MaskForInvalidationType(type)};
-  auto it = base::ranges::find(data_, entry);
-  CHECK(it != data_.end(), base::NotFatalUntil::M130);
+  auto it = std::ranges::find(data_, entry);
+  CHECK(it != data_.end());
   data_.erase(it);
   data_.ShrinkToReasonableCapacity();
   RecomputeMask();

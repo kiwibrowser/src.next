@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/fragment_data.h"
+
+#include "base/debug/dump_without_crashing.h"
 #include "third_party/blink/renderer/core/page/scrolling/sticky_position_scrolling_constraints.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
@@ -23,14 +25,16 @@ void FragmentData::RareData::EnsureId() {
 void FragmentData::RareData::SetLayer(PaintLayer* new_layer) {
   if (layer && layer != new_layer) {
     layer->Destroy();
-    sticky_constraints = nullptr;
+    x_sticky_constraints = nullptr;
+    y_sticky_constraints = nullptr;
   }
   layer = new_layer;
 }
 
 void FragmentData::RareData::Trace(Visitor* visitor) const {
   visitor->Trace(layer);
-  visitor->Trace(sticky_constraints);
+  visitor->Trace(x_sticky_constraints);
+  visitor->Trace(y_sticky_constraints);
   visitor->Trace(additional_fragments);
   visitor->Trace(paint_properties);
   visitor->Trace(local_border_box_properties);
@@ -50,12 +54,11 @@ void FragmentData::SetLayer(PaintLayer* layer) {
 
 const TransformPaintPropertyNodeOrAlias& FragmentData::PreTransform() const {
   if (const auto* properties = PaintProperties()) {
-    for (const TransformPaintPropertyNode* transform :
-         properties->AllCSSTransformPropertiesOutsideToInside()) {
-      if (transform) {
-        DCHECK(transform->Parent());
-        return *transform->Parent();
-      }
+    auto range = properties->CSSTransformPropertiesOutsideToInside();
+    if (range.begin() != range.end()) {
+      const auto* transform = *range.begin();
+      DCHECK(transform->Parent());
+      return *transform->Parent();
     }
   }
   return LocalBorderBoxProperties().Transform();
@@ -64,14 +67,21 @@ const TransformPaintPropertyNodeOrAlias& FragmentData::PreTransform() const {
 const TransformPaintPropertyNodeOrAlias& FragmentData::ContentsTransform()
     const {
   if (const auto* properties = PaintProperties()) {
-    if (properties->TransformIsolationNode())
+    if (properties->TransformIsolationNode()) {
       return *properties->TransformIsolationNode();
-    if (properties->ScrollTranslation())
+    }
+    if (properties->ScrollTranslation()) {
       return *properties->ScrollTranslation();
-    if (properties->ReplacedContentTransform())
+    }
+    if (properties->ReplacedContentTransform()) {
       return *properties->ReplacedContentTransform();
-    if (properties->Perspective())
+    }
+    if (properties->Perspective()) {
       return *properties->Perspective();
+    }
+    if (properties->ContentTranslation()) {
+      return *properties->ContentTranslation();
+    }
   }
   return LocalBorderBoxProperties().Transform();
 }
@@ -130,6 +140,25 @@ const EffectPaintPropertyNodeOrAlias& FragmentData::ContentsEffect() const {
       return *properties->EffectIsolationNode();
   }
   return LocalBorderBoxProperties().Effect();
+}
+
+PropertyTreeStateOrAlias FragmentData::LocalBorderBoxPropertiesFallback()
+    const {
+  // TODO(crbug.com/40218657): This should never be reached, but does in
+  // practice and we haven't been able to find all of the cases where it
+  // happens yet. crbug.com/40152845 is an example case. crbug.com/396612314
+  // is an example of fixed cases.
+#if DCHECK_IS_ON()
+  // Crash on DCHECK build.
+  NOTREACHED();
+#else
+  // Otherwise, dump stack without crashing, and fallback to root. This may
+  // cause unexpected situation in later stages, which are probably also worked
+  // around. We can remove this function and all later workarounds if this no
+  // longer happens.
+  base::debug::DumpWithoutCrashing();
+  return PropertyTreeStateOrAlias::Root();
+#endif
 }
 
 FragmentData& FragmentDataList::AppendNewFragment() {

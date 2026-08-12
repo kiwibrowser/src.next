@@ -25,18 +25,17 @@
 #include "third_party/blink/renderer/core/core_probes_inl.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/visited_link_state.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 
 namespace blink {
 
-// Builds pseudo element ancestors for rule matching:
+// Builds pseudo-element ancestors for rule matching:
 // - For regular elements just returns empty array.
-// - For pseudo elements (including nested pseudo elements) returns
-// array of every pseudo element ancestor, including
-// pseudo element for which rule matching is performed.
+// - For pseudo-elements (including nested pseudo-elements) returns
+// array of every pseudo-element ancestor, including
+// pseudo-element for which rule matching is performed.
 // This array is later used to check rules by simultaneously going
 // through the array and rules sub selectors.
 // E.g.: <li> element with ::after and ::marker inside that ::after:
@@ -49,6 +48,14 @@ ElementResolveContext::PseudoElementAncestors
 ElementResolveContext::BuildPseudoElementAncestors(Element* element) {
   PseudoElementAncestors pseudo_element_ancestors;
   if (!element->IsPseudoElement()) {
+    return pseudo_element_ancestors;
+  }
+  // View transition pseudo-elements can have multiple pseudo-element ancestors,
+  // but the spec says we should only check against the element itself.
+  // E.g. the tree can be root -> ::A -> ::B -> ::C, and we should match rule
+  // ::B for element being B, or rule ::C for element C.
+  if (element->IsViewTransitionPseudoElement()) {
+    pseudo_element_ancestors[--pseudo_element_ancestors_size_] = element;
     return pseudo_element_ancestors;
   }
   while (element->IsPseudoElement()) {
@@ -91,7 +98,7 @@ ElementResolveContext::ElementResolveContext(Element& element)
     : element_(&element),
       ultimate_originating_element_(
           element_->IsPseudoElement()
-              ? To<PseudoElement>(element_)->UltimateOriginatingElement()
+              ? &To<PseudoElement>(element_)->UltimateOriginatingElement()
               : element_),
       pseudo_element_(element_->IsPseudoElement() ? element_ : nullptr),
       element_link_state_(GetLinkStateForElement(element)),

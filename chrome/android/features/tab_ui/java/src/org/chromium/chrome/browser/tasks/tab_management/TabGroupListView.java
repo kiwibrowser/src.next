@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.view.View;
@@ -13,24 +14,31 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+import androidx.annotation.DrawableRes;
+import androidx.annotation.Px;
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.util.Consumer;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.recyclerview.widget.RecyclerView.OnScrollListener;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectableListLayout;
+import org.chromium.ui.base.DeviceFormFactor;
 
 /** Conditionally displays empty state for the tab group pane. */
+@NullMarked
 public class TabGroupListView extends FrameLayout {
+
     private RecyclerView mRecyclerView;
     private View mEmptyStateContainer;
     private TextView mEmptyStateSubheading;
     private UiConfig mUiConfig;
+    // Effectively final once set.
+    private boolean mEnableContainment;
 
     /** Constructor for inflation. */
     public TabGroupListView(Context context, @Nullable AttributeSet attrs) {
@@ -42,15 +50,21 @@ public class TabGroupListView extends FrameLayout {
         super.onFinishInflate();
 
         Context context = getContext();
+
         mRecyclerView = findViewById(R.id.tab_group_list_recycler_view);
         mRecyclerView.setLayoutManager(new LinearLayoutManager(context));
 
         mEmptyStateContainer = findViewById(R.id.empty_state_container);
 
         ImageView emptyStateIllustration = findViewById(R.id.empty_state_icon);
-        Drawable illustration =
-                AppCompatResources.getDrawable(
-                        context, R.drawable.tab_group_list_empty_state_illustration);
+
+        @DrawableRes
+        int emptyImageResId =
+                DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)
+                        ? R.drawable.tablet_tab_group_list_empty_state_illustration
+                        : R.drawable.tab_group_list_empty_state_illustration;
+
+        Drawable illustration = AppCompatResources.getDrawable(context, emptyImageResId);
         emptyStateIllustration.setImageDrawable(illustration);
 
         TextView emptyStateHeading = findViewById(R.id.empty_state_text_title);
@@ -59,6 +73,8 @@ public class TabGroupListView extends FrameLayout {
 
         mUiConfig = new UiConfig(this);
         mUiConfig.addObserver(this::onDisplayStyleChanged);
+
+        TabUiUtils.applyXrEmptyStateBackplate(this);
     }
 
     void setRecyclerViewAdapter(RecyclerView.Adapter adapter) {
@@ -74,11 +90,20 @@ public class TabGroupListView extends FrameLayout {
         mRecyclerView.addOnScrollListener(
                 new OnScrollListener() {
                     @Override
-                    public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                    public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
                         onIsScrolledMaybeChanged.accept(
                                 mRecyclerView.computeVerticalScrollOffset() != 0);
                     }
                 });
+    }
+
+    void setEnableContainment(boolean enabled) {
+        mEnableContainment = enabled;
+
+        if (enabled) {
+            mRecyclerView.addItemDecoration(new TabGroupListItemDecoration(getContext()));
+        }
+        onDisplayStyleChanged(mUiConfig.getCurrentDisplayStyle());
     }
 
     void setEmptyStateVisible(boolean visible) {
@@ -97,16 +122,32 @@ public class TabGroupListView extends FrameLayout {
         return mRecyclerView;
     }
 
+    void maybeMakeSpaceForSearchBar(boolean isTabletOrLandscape) {
+        if (isTabletOrLandscape) {
+            setPadding(getPaddingLeft(), 0, getPaddingRight(), getPaddingBottom());
+        } else {
+            int searchBoxGap = getResources().getDimensionPixelSize(R.dimen.hub_search_box_gap);
+            setPadding(getPaddingLeft(), searchBoxGap, getPaddingRight(), getPaddingBottom());
+        }
+    }
+
     private void onDisplayStyleChanged(UiConfig.DisplayStyle newDisplayStyle) {
+        Resources res = getResources();
         int padding =
-                SelectableListLayout.getPaddingForDisplayStyle(
-                        newDisplayStyle, mRecyclerView, getResources());
+                SelectableListLayout.getPaddingForDisplayStyle(newDisplayStyle, mRecyclerView, res);
+        if (mEnableContainment) {
+            final @Px int minPadding =
+                    res.getDimensionPixelSize(R.dimen.tab_group_recycler_view_min_padding);
+            padding = Math.max(padding, minPadding);
+        }
         mRecyclerView.setPaddingRelative(
                 padding, mRecyclerView.getPaddingTop(), padding, mRecyclerView.getPaddingBottom());
     }
 
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
+        // TODO(crbug.com/515150822): Investigate to see whether this logic also needs to be
+        //  triggered by #onSizeChanged().
         if (mUiConfig != null) mUiConfig.updateDisplayStyle();
     }
 }

@@ -21,15 +21,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_
 
+#include <concepts>
+#include <initializer_list>
+
 #include "base/memory/values_equivalent.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/custom_spaces.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-
-namespace WTF {
-class String;
-}  // namespace WTF
+#include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
@@ -42,7 +42,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   // TODO(sashab): Remove this method and move logic to the caller.
   static CSSValue* Create(const Length& value, float zoom);
 
-  WTF::String CssText() const;
+  String CssText() const;
   unsigned Hash() const;
 
   bool IsNumericLiteralValue() const {
@@ -61,9 +61,11 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool IsBaseValueList() const { return class_type_ == kValueListClass; }
 
+  // Matches the spec <basic-shape> production, i.e. one of circle(), ellipse(),
+  // polygon(), inset(), rect(), xywh(), path(), shape().
   bool IsBasicShapeValue() const {
     return class_type_ >= kBasicShapeCircleClass &&
-           class_type_ <= kBasicShapeXYWHClass;
+           class_type_ <= kBasicShapeShapeClass;
   }
   bool IsBasicShapeCircleValue() const {
     return class_type_ == kBasicShapeCircleClass;
@@ -87,9 +89,16 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsBorderImageSliceValue() const {
     return class_type_ == kBorderImageSliceClass;
   }
+  bool IsAlphaColorValue() const { return class_type_ == kAlphaColorClass; }
   bool IsColorValue() const { return class_type_ == kColorClass; }
   bool IsColorMixValue() const { return class_type_ == kColorMixClass; }
+  bool IsContrastColorValue() const {
+    return class_type_ == kContrastColorClass;
+  }
   bool IsCounterValue() const { return class_type_ == kCounterClass; }
+  bool IsCounterContentValue() const {
+    return class_type_ == kCounterContentClass;
+  }
   bool IsCursorImageValue() const { return class_type_ == kCursorImageClass; }
   bool IsCrossfadeValue() const { return class_type_ == kCrossfadeClass; }
   bool IsDynamicRangeLimitMixValue() const {
@@ -108,12 +117,11 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsFunctionValue() const { return class_type_ == kFunctionClass; }
   bool IsCustomIdentValue() const { return class_type_ == kCustomIdentClass; }
   bool IsImageGeneratorValue() const {
-    return class_type_ >= kCrossfadeClass &&
-           class_type_ <= kConstantGradientClass;
+    return class_type_ >= kCrossfadeClass && class_type_ <= kColorImageClass;
   }
   bool IsGradientValue() const {
     return class_type_ >= kLinearGradientClass &&
-           class_type_ <= kConstantGradientClass;
+           class_type_ <= kColorImageClass;
   }
   bool IsImageSetOptionValue() const {
     return class_type_ == kImageSetOptionClass;
@@ -126,8 +134,13 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsUnsetValue() const { return class_type_ == kUnsetClass; }
   bool IsRevertValue() const { return class_type_ == kRevertClass; }
   bool IsRevertLayerValue() const { return class_type_ == kRevertLayerClass; }
+  bool IsRevertRuleValue() const { return class_type_ == kRevertRuleClass; }
+  // https://drafts.csswg.org/css-cascade-5/#cascade-dependent-keyword
+  bool IsCascadeDependentKeyword() const {
+    return IsRevertValue() || IsRevertLayerValue() || IsRevertRuleValue();
+  }
   bool IsCSSWideKeyword() const {
-    return class_type_ >= kInheritedClass && class_type_ <= kRevertLayerClass;
+    return class_type_ >= kInheritedClass && class_type_ <= kRevertRuleClass;
   }
   bool IsLayoutFunctionValue() const {
     return class_type_ == kLayoutFunctionClass;
@@ -136,7 +149,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kLinearGradientClass;
   }
   bool IsPaletteMixValue() const { return class_type_ == kPaletteMixClass; }
-  bool IsPathValue() const { return class_type_ == kPathClass; }
+  bool IsPathValue() const { return class_type_ == kBasicShapePathClass; }
+  bool IsShapeValue() const { return class_type_ == kBasicShapeShapeClass; }
   bool IsQuadValue() const { return class_type_ == kQuadClass; }
   bool IsRayValue() const { return class_type_ == kRayClass; }
   bool IsRadialGradientValue() const {
@@ -146,12 +160,17 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kConicGradientClass;
   }
   bool IsConstantGradientValue() const {
-    return class_type_ == kConstantGradientClass;
+    return class_type_ == kConstantGradientClass ||
+           class_type_ == kColorImageClass;
   }
+  bool IsColorImageValue() const { return class_type_ == kColorImageClass; }
+  bool IsProgressValue() const { return class_type_ == kProgressClass; }
   bool IsReflectValue() const { return class_type_ == kReflectClass; }
   bool IsShadowValue() const { return class_type_ == kShadowClass; }
   bool IsStringValue() const { return class_type_ == kStringClass; }
+  bool IsSuperellipseValue() const { return class_type_ == kSuperellipseClass; }
   bool IsURIValue() const { return class_type_ == kURIClass; }
+  bool IsURLPatternValue() const { return class_type_ == kURLPatternClass; }
   bool IsLinearTimingFunctionValue() const {
     return class_type_ == kLinearTimingFunctionClass;
   }
@@ -219,6 +238,12 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kRelativeColorClass;
   }
 
+  // NOTE: Relative colors can also be unresolved; this is about
+  // the specific case of unresolved absolute colors.
+  bool IsUnresolvedColorValue() const {
+    return class_type_ == kUnresolvedColorClass;
+  }
+
   bool IsRepeatValue() const { return class_type_ == kRepeatClass; }
 
   bool HasFailedOrCanceledSubresources() const;
@@ -226,7 +251,6 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   void ReResolveUrl(const Document&) const;
 
   bool operator==(const CSSValue&) const;
-  bool operator!=(const CSSValue& o) const { return !(*this == o); }
 
   // Returns the same CSS value, but populated with the given tree scope for
   // tree-scoped names and references.
@@ -238,11 +262,16 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   }
   bool IsScopedValue() const { return !needs_tree_scope_population_; }
 
-  const CSSValue* UntaintedCopy() const;
+  bool IsTriggerAttachmentValue() const {
+    return class_type_ == kTriggerAttachmentClass;
+  }
 
 #if DCHECK_IS_ON()
-  WTF::String ClassTypeToString() const;
+  String ClassTypeToString() const;
 #endif
+
+  // Checks if a CSS random() function is present in the value.
+  bool HasRandomFunctions() const;
 
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
@@ -257,12 +286,17 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kIdentifierClass,
     kScopedKeywordClass,
     kColorClass,
+    kUnresolvedColorClass,
     kColorMixClass,
+    kAlphaColorClass,
+    kContrastColorClass,
     kCounterClass,
+    kCounterContentClass,
     kQuadClass,
     kCustomIdentClass,
     kStringClass,
     kURIClass,
+    kURLPatternClass,
     kValuePairClass,
     kLightDarkValuePairClass,
     kScrollClass,
@@ -270,14 +304,18 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kRatioClass,
     kRelativeColorClass,
 
-    // Basic shape classes.
-    // TODO(sashab): Represent these as a single subclass, BasicShapeClass.
+    // Basic shape classes. These must remain contiguous (and
+    // kBasicShapeShapeClass must stay at the end of the run), as
+    // IsBasicShapeValue() tests them with a range check.
+    // ref: https://drafts.csswg.org/css-shapes/#supported-basic-shapes
     kBasicShapeCircleClass,
     kBasicShapeEllipseClass,
     kBasicShapePolygonClass,
     kBasicShapeInsetClass,
     kBasicShapeRectClass,
     kBasicShapeXYWHClass,
+    kBasicShapePathClass,
+    kBasicShapeShapeClass,
 
     // Image classes.
     kImageClass,
@@ -290,11 +328,14 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kRadialGradientClass,
     kConicGradientClass,
     kConstantGradientClass,
+    kColorImageClass,
 
     // Timing function classes.
     kLinearTimingFunctionClass,
     kCubicBezierTimingFunctionClass,
     kStepsTimingFunctionClass,
+
+    kProgressClass,
 
     // Other class types.
     kBorderImageSliceClass,
@@ -311,13 +352,13 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kUnsetClass,
     kRevertClass,
     kRevertLayerClass,
+    kRevertRuleClass,
 
     kReflectClass,
     kShadowClass,
     kUnicodeRangeClass,
     kGridTemplateAreasClass,
     kPaletteMixClass,
-    kPathClass,
     kRayClass,
     kUnparsedDeclarationClass,
     kPendingSubstitutionValueClass,
@@ -337,6 +378,12 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
     kRepeatStyleClass,
 
+    kSuperellipseClass,
+
+    kTriggerAttachmentClass,
+
+    kRepeatClass,
+
     // List class types must appear after ValueListClass.
     kValueListClass,
     kFunctionClass,
@@ -345,7 +392,6 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kGridAutoRepeatClass,
     kGridIntegerRepeatClass,
     kAxisClass,
-    kRepeatClass,
     // Do not append non-list class types here.
   };
 
@@ -391,9 +437,6 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   // the functionality).
   uint8_t was_quirky_ : 1 = false;
 
-  // See css_attr_value_tainting.h.
-  uint8_t attr_tainted_ : 1 = false;
-
  private:
   const uint8_t class_type_;  // ClassType
 };
@@ -415,14 +458,27 @@ inline bool CompareCSSValueVector(
   return true;
 }
 
+// Returns true if all provided CSSValue pointers are non-null and equal.
+inline bool AllCSSValuesEqual(
+    std::initializer_list<const CSSValue*> values) {
+  const CSSValue* first = nullptr;
+  for (const CSSValue* v : values) {
+    if (!first) {
+      first = v;
+    } else if (!base::ValuesEquivalent(first, v)) {
+      return false;
+    }
+  }
+  return first != nullptr;
+}
+
 }  // namespace blink
 
 namespace cppgc {
 // Assign CSSValue to be allocated on custom CSSValueSpace.
 template <typename T>
-struct SpaceTrait<
-    T,
-    std::enable_if_t<std::is_base_of<blink::CSSValue, T>::value>> {
+  requires(std::derived_from<T, blink::CSSValue>)
+struct SpaceTrait<T> {
   using Space = blink::CSSValueSpace;
 };
 }  // namespace cppgc

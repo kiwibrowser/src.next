@@ -26,9 +26,10 @@ FrameView::FrameView(const gfx::Rect& frame_rect)
     : EmbeddedContentView(frame_rect) {}
 
 Frame& FrameView::GetFrame() const {
-  if (const LocalFrameView* lfv = DynamicTo<LocalFrameView>(this))
+  if (const LocalFrameView* lfv = DynamicTo<LocalFrameView>(*this)) {
     return lfv->GetFrame();
-  return DynamicTo<RemoteFrameView>(this)->GetFrame();
+  }
+  return To<RemoteFrameView>(*this).GetFrame();
 }
 
 bool FrameView::CanThrottleRenderingForPropagation() const {
@@ -264,28 +265,32 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
   gfx::Transform pixel_snapped_transform = main_frame_transform_matrix;
   pixel_snapped_transform.Round2dTranslationComponents();
 
+  // Check if the parent frame is hidden for media playback first, since that
+  // makes all child frames hidden regardless of their own properties.
+  bool is_hidden_for_media_playback = false;
+  if (auto* parent_frame = DynamicTo<LocalFrame>(frame.Tree().Parent())) {
+    is_hidden_for_media_playback =
+        parent_frame->IsHiddenForMediaPlayback().value_or(false);
+  }
+
+  if (!is_hidden_for_media_playback) {
+    is_hidden_for_media_playback =
+        (!owner_layout_object  // display:none
+         || owner_layout_object->Style()->Visibility() ==
+                EVisibility::kHidden  // visibility:hidden
+         || owner_layout_object->ReplacedContentRect()
+                .IsEmpty());  // zero-area layout
+  }
   SetViewportIntersection(mojom::blink::ViewportIntersectionState(
       viewport_intersection, mainframe_intersection, gfx::Rect(),
       occlusion_state, frame.GetOutermostMainFrameSize(),
-      frame.GetOutermostMainFrameScrollPosition(), pixel_snapped_transform));
+      frame.GetOutermostMainFrameScrollPosition(), pixel_snapped_transform,
+      is_hidden_for_media_playback));
 
   UpdateFrameVisibility(!viewport_intersection.IsEmpty());
 
-  if (ShouldReportMainFrameIntersection()) {
-    gfx::Rect projected_rect = gfx::ToEnclosingRect(
-        main_frame_transform_matrix
-            .ProjectQuad(gfx::QuadF(gfx::RectF(mainframe_intersection)))
-            .BoundingBox());
-    // Return <0, 0, 0, 0> if there is no area.
-    if (projected_rect.IsEmpty())
-      projected_rect.set_origin(gfx::Point(0, 0));
-    GetFrame().Client()->OnMainFrameIntersectionChanged(projected_rect);
-  }
-
-  // We don't throttle display:none iframes unless they are cross-origin and
-  // ThrottleCrossOriginIframes is enabled, because in practice they are
-  // sometimes used to drive UI logic. Zero-area iframes are only throttled if
-  // they are also display:none.
+  // We don't throttle display:none iframes unless they are cross-origin,
+  // because in practice they are sometimes used to drive UI logic.
   bool zero_viewport_intersection = viewport_intersection.IsEmpty();
   bool is_display_none = !owner_layout_object;
   bool has_zero_area = FrameRect().IsEmpty();

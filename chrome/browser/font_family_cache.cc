@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
 
 #include "chrome/browser/font_family_cache.h"
 
@@ -54,7 +50,7 @@ void FontFamilyCache::FillFontFamilyMap(
     const char* map_name,
     blink::web_pref::ScriptFontFamilyMap* map) {
   // TODO(falken): Get rid of the brute-force scan over possible
-  // (font family / script) combinations - see http://crbug.com/308095.
+  // (font family / script) combinations - see http://crbug.com/40337107.
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
     std::u16string result = FetchAndCacheFont(script, map_name);

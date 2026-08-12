@@ -49,6 +49,7 @@
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
@@ -95,8 +96,8 @@ class FrameSerializerTest
 
   void RegisterURL(const KURL& url, const char* file, const char* mime_type) {
     url_test_helpers::RegisterMockedURLLoad(
-        url, test::CoreTestDataPath(WebString::FromUTF8(folder_ + file)),
-        WebString::FromUTF8(mime_type));
+        url, test::CoreTestDataPath(WebString::FromUtf8(folder_ + file)),
+        WebString::FromUtf8(mime_type));
   }
 
   void RegisterURL(const char* url, const char* file, const char* mime_type) {
@@ -108,7 +109,7 @@ class FrameSerializerTest
   }
 
   void RegisterErrorURL(const char* file, int status_code) {
-    ResourceError error = ResourceError::Failure(NullURL());
+    ResourceError error = ResourceError::Failure(NullUrl());
 
     WebURLResponse response;
     response.SetMimeType("text/html");
@@ -164,8 +165,9 @@ class FrameSerializerTest
     String mime(mime_type);
     for (const SerializedResource& resource : resources_) {
       if (resource.url == url && !resource.data->empty() &&
-          (mime.IsNull() || EqualIgnoringASCIICase(resource.mime_type, mime)))
+          (mime.IsNull() || EqualIgnoringAsciiCase(resource.mime_type, mime))) {
         return &resource;
+      }
     }
     return nullptr;
   }
@@ -209,7 +211,11 @@ class FrameSerializerTest
 
   test::TaskEnvironment task_environment_;
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
+
+ protected:
   frame_test_helpers::WebViewHelper helper_;
+
+ private:
   std::string folder_;
   KURL base_url_;
   Deque<SerializedResource> resources_;
@@ -328,9 +334,9 @@ TEST_F(FrameSerializerTest, Frames) {
   EXPECT_TRUE(IsSerialized("frame_4.png", "image/png"));
 
   // Verify all 3 frame src are rewritten to Content ID URLs.
-  Vector<String> split_string;
-  GetSerializedData("simple_frames.html", "text/html")
-      .Split("<frame src=\"cid:", split_string);
+  Vector<String> split_string =
+      GetSerializedData("simple_frames.html", "text/html")
+          .Split("<frame src=\"cid:");
   EXPECT_EQ(split_string.size(), 4u);
 }
 
@@ -368,11 +374,11 @@ TEST_F(FrameSerializerTest, IFrames) {
       "<meta http-equiv=\"Content-Type\" content=\"text/html; "
       "charset=EUC-KR\">";
   EXPECT_TRUE(GetSerializedData("encoded_iframe.html", "text/html")
-                  .Contains(expected_meta_charset));
+                  .contains(expected_meta_charset));
   EXPECT_TRUE(GetSerializedData("encoded_iframe.html", "text/html")
-                  .Contains("\xE4\xC5\xD1\xE2"));
+                  .contains("\xE4\xC5\xD1\xE2"));
   EXPECT_FALSE(GetSerializedData("encoded_iframe.html", "text/html")
-                   .Contains("\xE4\xC5\xE4\xC5"));
+                   .contains("\xE4\xC5\xE4\xC5"));
 }
 
 // Tests that when serializing a page with blank frames these are reported with
@@ -460,19 +466,19 @@ TEST_F(FrameSerializerTest, CSS) {
 
   // Ensure encodings are specified.
   EXPECT_TRUE(
-      GetSerializedData("link_styles.css", "text/css").StartsWith("@charset"));
+      GetSerializedData("link_styles.css", "text/css").starts_with("@charset"));
   EXPECT_TRUE(GetSerializedData("import_styles.css", "text/css")
-                  .StartsWith("@charset"));
+                  .starts_with("@charset"));
   EXPECT_TRUE(GetSerializedData("import_style_from_link.css", "text/css")
-                  .StartsWith("@charset"));
+                  .starts_with("@charset"));
   EXPECT_TRUE(GetSerializedData("encoding.css", "text/css")
-                  .StartsWith("@charset \"euc-kr\";"));
+                  .starts_with("@charset \"euc-kr\";"));
 
   // Ensure that stylesheet contents are not NFC-normalized before encoding.
   EXPECT_TRUE(GetSerializedData("encoding.css", "text/css")
-                  .Contains("\xE4\xC5\xD1\xE2"));
+                  .contains("\xE4\xC5\xD1\xE2"));
   EXPECT_FALSE(GetSerializedData("encoding.css", "text/css")
-                   .Contains("\xE4\xC5\xE4\xC5"));
+                   .contains("\xE4\xC5\xE4\xC5"));
 }
 
 TEST_F(FrameSerializerTest, CSSImport) {
@@ -499,7 +505,7 @@ TEST_F(FrameSerializerTest, XMLDeclaration) {
   Serialize("xmldecl.xml");
 
   String expected_start("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-  EXPECT_TRUE(GetSerializedData("xmldecl.xml").StartsWith(expected_start));
+  EXPECT_TRUE(GetSerializedData("xmldecl.xml").starts_with(expected_start));
 }
 
 TEST_F(FrameSerializerTest, DTD) {
@@ -509,7 +515,7 @@ TEST_F(FrameSerializerTest, DTD) {
   Serialize("html5.html");
 
   String expected_start("<!DOCTYPE html>");
-  EXPECT_TRUE(GetSerializedData("html5.html").StartsWith(expected_start));
+  EXPECT_TRUE(GetSerializedData("html5.html").starts_with(expected_start));
 }
 
 TEST_F(FrameSerializerTest, Font) {
@@ -559,6 +565,95 @@ TEST_F(FrameSerializerTest, SVGImageDontCrash) {
   EXPECT_TRUE(IsSerialized("green_rectangle.svg", "image/svg+xml"));
   EXPECT_GT(GetSerializedData("green_rectangle.svg", "image/svg+xml").length(),
             250U);
+}
+
+TEST_F(FrameSerializerTest, SVGScriptElementStripped) {
+  SetBaseFolder("frameserializer/svg/");
+
+  RegisterURL("svg_script.html", "text/html");
+  Serialize("svg_script.html");
+
+  String data = GetSerializedData("svg_script.html", "text/html");
+  EXPECT_FALSE(data.contains("<script"));
+  EXPECT_FALSE(data.contains("svg script"));
+  EXPECT_FALSE(data.contains("html script"));
+}
+
+TEST_F(FrameSerializerTest, EventHandlersStripped) {
+  SetBaseFolder("frameserializer/svg/");
+
+  RegisterURL("svg_onload.html", "text/html");
+  Serialize("svg_onload.html");
+
+  String data = GetSerializedData("svg_onload.html", "text/html");
+  EXPECT_FALSE(data.contains("onload"));
+  EXPECT_FALSE(data.contains("onclick"));
+}
+
+// Regression test for crbug.com/503865896
+TEST_F(FrameSerializerTest, MixedCaseScriptingAttributesStripped) {
+  SetBaseFolder("frameserializer/elements/");
+
+  RegisterURL("empty.html", "empty.txt", "text/html");
+  Serialize("empty.html");
+
+  // Inject mixed-case scripting attributes.
+  Element* body = helper_.LocalMainFrame()->GetFrame()->GetDocument()->body();
+  body->setAttributeNS(g_null_atom, AtomicString("ONLOAD"),
+                       AtomicString("alert(1)"), IGNORE_EXCEPTION_FOR_TESTING);
+  body->setAttributeNS(g_null_atom, AtomicString("oNCLICK"),
+                       AtomicString("alert(2)"), IGNORE_EXCEPTION_FOR_TESTING);
+
+  Element* anchor =
+      helper_.LocalMainFrame()->GetFrame()->GetDocument()->CreateRawElement(
+          html_names::kATag);
+  anchor->setAttributeNS(g_null_atom, AtomicString("HREF"),
+                         AtomicString("javascript:alert(3)"),
+                         IGNORE_EXCEPTION_FOR_TESTING);
+  body->AppendChild(anchor);
+
+  Element* iframe =
+      helper_.LocalMainFrame()->GetFrame()->GetDocument()->CreateRawElement(
+          html_names::kIFrameTag);
+  iframe->setAttributeNS(g_null_atom, AtomicString("SRCDOC"),
+                         AtomicString("<html></html>"),
+                         IGNORE_EXCEPTION_FOR_TESTING);
+  body->AppendChild(iframe);
+
+  // Inject a mixed-case attribute with a non-null namespace.
+  // This should also be stripped because the HTML parser (which is
+  // namespace-unaware) will lowercase it and activate it as an event handler
+  // upon reload. See crbug.com/503865896.
+  body->setAttributeNS(AtomicString("http://example.com"),
+                       AtomicString("ONLOAD"), AtomicString("alert(4)"),
+                       IGNORE_EXCEPTION_FOR_TESTING);
+
+  // Re-serialize the same frame.
+  GetResources().clear();
+  base::RunLoop run_loop;
+  FrameSerializer::SerializeFrame(
+      *this, *helper_.LocalMainFrame()->GetFrame(),
+      base::BindLambdaForTesting([&](Deque<SerializedResource> resources) {
+        for (auto& res : resources) {
+          GetResources().push_back(res);
+        }
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+
+  String data = GetSerializedData("empty.html", "text/html");
+  EXPECT_EQ(data.FindIgnoringAsciiCase("onload"), kNotFound);
+  EXPECT_EQ(data.FindIgnoringAsciiCase("onclick"), kNotFound);
+  EXPECT_EQ(data.FindIgnoringAsciiCase("href"), kNotFound);
+  EXPECT_EQ(data.FindIgnoringAsciiCase("srcdoc"), kNotFound);
+
+  // Even the attribute with a non-null namespace should be stripped if its
+  // lowercased name matches a scripting attribute, because the HTML parser
+  // will activate it.
+  EXPECT_EQ(data.FindIgnoringAsciiCase("alert(4)"), kNotFound);
+
+  // Ensure that *something* was returned.
+  EXPECT_NE(data.FindIgnoringAsciiCase("<a"), kNotFound);
 }
 
 TEST_F(FrameSerializerTest, DontIncludeErrorImage) {

@@ -7,33 +7,32 @@ package org.chromium.components.embedder_support.util;
 import android.net.Uri;
 import android.text.TextUtils;
 
-import androidx.annotation.NonNull;
 import androidx.core.text.BidiFormatter;
 
 import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
-import org.chromium.base.CollectionUtil;
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.build.annotations.Contract;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.components.url_formatter.UrlFormatter;
-import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * Utilities for working with URIs (and URLs). These methods may be used in security-sensitive
  * contexts (after all, origins are the security boundary on the web), and so the correctness bar
  * must be high.
- *
- * Use ShadowUrlUtilities to mock out native-dependent methods in tests.
- * TODO(pshmakov): we probably should just make those methods non-static.
  */
 @JNINamespace("embedder_support")
+@NullMarked
 public class UrlUtilities {
     /** Regular expression for prefixes to strip from publisher hostnames. */
     private static final Pattern HOSTNAME_PREFIX_PATTERN =
@@ -42,7 +41,7 @@ public class UrlUtilities {
     private static final List<String> SUPPORTED_SCHEMES =
             new ArrayList<String>(
                     Arrays.asList(
-                            ContentUrlConstants.ABOUT_SCHEME,
+                            UrlConstants.ABOUT_SCHEME,
                             UrlConstants.DATA_SCHEME,
                             UrlConstants.FILE_SCHEME,
                             UrlConstants.HTTP_SCHEME,
@@ -61,17 +60,16 @@ public class UrlUtilities {
                             UrlConstants.HTTPS_SCHEME));
 
     /** URI schemes that are internal to Chrome. */
-    private static final HashSet<String> INTERNAL_SCHEMES =
-            CollectionUtil.newHashSet(
+    private static final Set<String> INTERNAL_SCHEMES =
+            Set.of(
                     UrlConstants.CHROME_SCHEME,
                     UrlConstants.CHROME_NATIVE_SCHEME,
-                    ContentUrlConstants.ABOUT_SCHEME);
+                    UrlConstants.ABOUT_SCHEME);
 
     private static final String TEL_SCHEME = "tel";
 
     /**
      * @param uri A URI.
-     *
      * @return True if the URI's scheme is phone number scheme.
      */
     public static boolean isTelScheme(GURL gurl) {
@@ -95,9 +93,12 @@ public class UrlUtilities {
      *
      * @return True if the GURL's scheme is one that ContentView can handle.
      */
-    public static boolean isAcceptedScheme(GURL url) {
+    public static boolean isAcceptedScheme(@Nullable GURL url) {
         if (GURL.isEmptyOrInvalid(url)) return false;
-        return SUPPORTED_SCHEMES.contains(url.getScheme());
+        return SUPPORTED_SCHEMES.contains(url.getScheme())
+                || (url.getScheme().equals(UrlConstants.CHROME_SCHEME)
+                        && EmbedderSupportFeatures.ANDROID_CHROME_SCHEME_NAVIGATION_KILL_SWITCH
+                                .isEnabled());
     }
 
     /**
@@ -105,7 +106,7 @@ public class UrlUtilities {
      *
      * @return True if the GURL's scheme is one that Chrome can download.
      */
-    public static boolean isDownloadableScheme(@NonNull GURL url) {
+    public static boolean isDownloadableScheme(GURL url) {
         if (!url.isValid()) return false;
         return DOWNLOADABLE_SCHEMES.contains(url.getScheme());
     }
@@ -115,7 +116,7 @@ public class UrlUtilities {
      *
      * @return Whether the URL's scheme is for a internal chrome page.
      */
-    public static boolean isInternalScheme(@NonNull GURL gurl) {
+    public static boolean isInternalScheme(GURL gurl) {
         return INTERNAL_SCHEMES.contains(gurl.getScheme());
     }
 
@@ -129,7 +130,7 @@ public class UrlUtilities {
      *
      * @return Whether the URL's scheme is HTTP or HTTPS.
      */
-    public static boolean isHttpOrHttps(@NonNull GURL url) {
+    public static boolean isHttpOrHttps(GURL url) {
         return isSchemeHttpOrHttps(url.getScheme());
     }
 
@@ -138,7 +139,7 @@ public class UrlUtilities {
      *
      * @return Whether the URL's scheme is HTTP or HTTPS.
      */
-    public static boolean isHttpOrHttps(@NonNull String url) {
+    public static boolean isHttpOrHttps(String url) {
         // URI#getScheme would throw URISyntaxException if the other parts contain invalid
         // characters. For example, "http://foo.bar/has[square].html" has [] in the path, which
         // is not valid in URI. Both Uri.parse().getScheme() and URL().getProtocol() work in
@@ -153,15 +154,15 @@ public class UrlUtilities {
      * @param url A URL.
      * @return Whether the URL's scheme is HTTPS.
      */
-    public static boolean isHttps(@NonNull String url) {
+    public static boolean isHttps(String url) {
         return isSchemeHttps(Uri.parse(url).getScheme());
     }
 
-    private static boolean isSchemeHttps(String scheme) {
+    private static boolean isSchemeHttps(@Nullable String scheme) {
         return UrlConstants.HTTPS_SCHEME.equals(scheme);
     }
 
-    private static boolean isSchemeHttpOrHttps(String scheme) {
+    private static boolean isSchemeHttpOrHttps(@Nullable String scheme) {
         return UrlConstants.HTTP_SCHEME.equals(scheme) || isSchemeHttps(scheme);
     }
 
@@ -212,8 +213,9 @@ public class UrlUtilities {
      *     subcomponent (i.e. no dots other than leading/trailing ones), or is itself a recognized
      *     registry identifier.
      */
-    // TODO(crbug.com/40549331): Convert to GURL.
-    public static String getDomainAndRegistry(String uri, boolean includePrivateRegistries) {
+    @Contract("null, _ -> null")
+    public static @Nullable String getDomainAndRegistry(
+            @Nullable String uri, boolean includePrivateRegistries) {
         if (TextUtils.isEmpty(uri)) return uri;
         return UrlUtilitiesJni.get().getDomainAndRegistry(uri, includePrivateRegistries);
     }
@@ -223,8 +225,10 @@ public class UrlUtilities {
         return UrlUtilitiesJni.get().isUrlWithinScope(url, scopeUrl);
     }
 
-    /** @return whether two URLs match, ignoring the #fragment. */
-    public static boolean urlsMatchIgnoringFragments(String url, String url2) {
+    /**
+     * @return whether two URLs match, ignoring the #fragment.
+     */
+    public static boolean urlsMatchIgnoringFragments(@Nullable String url, @Nullable String url2) {
         if (TextUtils.equals(url, url2)) return true;
         return UrlUtilitiesJni.get().urlsMatchIgnoringFragments(url, url2);
     }
@@ -266,8 +270,23 @@ public class UrlUtilities {
     }
 
     /**
-     * Escapes characters in text suitable for use as a query parameter value.
-     * This method calls into base::EscapeQueryParamValue.
+     * Strips a trailing slash from the given URL string if it exists.
+     *
+     * @param url A URL string.
+     * @return The URL string with the trailing slash stripped.
+     */
+    public static String stripTrailingSlash(String url) {
+        String trimmed = url.trim();
+        if (trimmed.endsWith("/")) {
+            return trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    /**
+     * Escapes characters in text suitable for use as a query parameter value. This method calls
+     * into base::EscapeQueryParamValue.
+     *
      * @param text string to be escaped.
      * @param usePlus whether or not to use "+" in place of spaces.
      * @return the escaped string.
@@ -288,6 +307,7 @@ public class UrlUtilities {
     public static boolean isNtpUrl(GURL gurl) {
         if (!gurl.isValid() || !isInternalScheme(gurl)) return false;
         return UrlConstants.NTP_HOST.equals(gurl.getHost())
+                || UrlConstants.NEW_TAB_PAGE_HOST.equals(gurl.getHost())
                 || UrlConstants.NEW_TAB_PAGE_URL_LEGACY.equals(gurl.getValidSpecOrEmpty());
     }
 
@@ -299,7 +319,7 @@ public class UrlUtilities {
      *     into a GURL at their source using {@link UrlFormatter#fixupUrl(String)}.
      */
     @Deprecated
-    public static boolean isNtpUrl(String url) {
+    public static boolean isNtpUrl(@Nullable String url) {
         // Also handle the legacy chrome://newtab and about:newtab URLs since they will redirect to
         // chrome-native://newtab natively.
         if (TextUtils.isEmpty(url)) return false;
@@ -310,6 +330,15 @@ public class UrlUtilities {
     }
 
     /**
+     * @param url The URL to check whether it is for the Chrome native pages.
+     * @return Whether the passed in URL is used to render a chrome native page.
+     */
+    public static boolean isChromeNativeUrl(GURL url) {
+        if (!url.isValid() || !isInternalScheme(url)) return false;
+        return TextUtils.equals(UrlConstants.CHROME_NATIVE_SCHEME, url.getScheme());
+    }
+
+    /**
      * Returns whether the url matches an NTP URL exactly. This is used to support features showing
      * the omnibox before native is loaded. Prefer using {@see #isNtpUrl(GURL gurl)} when native is
      * loaded.
@@ -317,7 +346,7 @@ public class UrlUtilities {
      * @param url The current URL to compare.
      * @return Whether the given URL matches the NTP urls exactly.
      */
-    public static boolean isCanonicalizedNtpUrl(String url) {
+    public static boolean isCanonicalizedNtpUrl(@Nullable String url) {
         // TODO(crbug.com/40204389): Let callers check if the library is initialized and make them
         // call this method only before native is initialized.
         // After native initialization, the homepage url could become
@@ -346,7 +375,7 @@ public class UrlUtilities {
      * @return null if the key doesn't exist in the query string for the URL. Otherwise, returns the
      * value for the key in the query string.
      */
-    public static String getValueForKeyInQuery(GURL url, String key) {
+    public static @Nullable String getValueForKeyInQuery(GURL url, String key) {
         return UrlUtilitiesJni.get().getValueForKeyInQuery(url, key);
     }
 
@@ -356,35 +385,67 @@ public class UrlUtilities {
                 || url.getScheme().equals(UrlConstants.INTENT_SCHEME);
     }
 
+    /** Returns whether the given URL uses the Google.com domain. */
+    public static boolean isGoogleDomainUrl(String url, boolean allowNonStandardPort) {
+        return UrlUtilitiesJni.get().isGoogleDomainUrl(url, allowNonStandardPort);
+    }
+
+    /** Returns whether the given URL is a Google.com domain or sub-domain. */
+    public static boolean isGoogleSubDomainUrl(String url) {
+        return UrlUtilitiesJni.get().isGoogleSubDomainUrl(url);
+    }
+
+    /** Returns whether the given URL is a Google.com Search URL. */
+    public static boolean isGoogleSearchUrl(@Nullable String url) {
+        return UrlUtilitiesJni.get().isGoogleSearchUrl(url);
+    }
+
+    /** Returns whether the given URL is the Google Web Search URL. */
+    public static boolean isGoogleHomePageUrl(String url) {
+        return UrlUtilitiesJni.get().isGoogleHomePageUrl(url);
+    }
+
+    public static void setNativesForTesting(Natives natives) {
+        UrlUtilitiesJni.setInstanceForTesting(natives);
+    }
+
     @NativeMethods
     public interface Natives {
         boolean sameDomainOrHost(
-                String primaryUrl, String secondaryUrl, boolean includePrivateRegistries);
+                @JniType("std::string") String primaryUrl,
+                @JniType("std::string") String secondaryUrl,
+                boolean includePrivateRegistries);
 
-        String getDomainAndRegistry(String url, boolean includePrivateRegistries);
+        @JniType("std::string")
+        String getDomainAndRegistry(
+                @JniType("std::string") String url, boolean includePrivateRegistries);
 
-        /** Returns whether the given URL uses the Google.com domain. */
-        boolean isGoogleDomainUrl(String url, boolean allowNonStandardPort);
+        boolean isGoogleDomainUrl(@JniType("std::string") String url, boolean allowNonStandardPort);
 
-        /** Returns whether the given URL is a Google.com domain or sub-domain. */
-        boolean isGoogleSubDomainUrl(String url);
+        boolean isGoogleSubDomainUrl(@JniType("std::string") String url);
 
-        /** Returns whether the given URL is a Google.com Search URL. */
-        boolean isGoogleSearchUrl(String url);
+        boolean isGoogleSearchUrl(@Nullable @JniType("std::string") String url);
 
-        /** Returns whether the given URL is the Google Web Search URL. */
-        boolean isGoogleHomePageUrl(String url);
+        boolean isGoogleHomePageUrl(@JniType("std::string") String url);
 
-        boolean isUrlWithinScope(String url, String scopeUrl);
+        boolean isUrlWithinScope(
+                @JniType("std::string") String url, @JniType("std::string") String scopeUrl);
 
-        boolean urlsMatchIgnoringFragments(String url, String url2);
+        boolean urlsMatchIgnoringFragments(
+                @Nullable @JniType("std::string") String url,
+                @Nullable @JniType("std::string") String url2);
 
-        boolean urlsFragmentsDiffer(String url, String url2);
+        boolean urlsFragmentsDiffer(
+                @JniType("std::string") String url, @JniType("std::string") String url2);
 
-        String escapeQueryParamValue(String url, boolean usePlus);
+        @JniType("std::string")
+        String escapeQueryParamValue(@JniType("std::string") String url, boolean usePlus);
 
-        String getValueForKeyInQuery(GURL url, String key);
+        @JniType("std::optional<std::string>")
+        @Nullable String getValueForKeyInQuery(
+                @JniType("GURL") GURL url, @JniType("std::string") String key);
 
-        GURL clearPort(GURL url);
+        @JniType("GURL")
+        GURL clearPort(@JniType("GURL") GURL url);
     }
 }

@@ -28,9 +28,7 @@ class CORE_EXPORT StaticRange final : public AbstractRange {
         range->endContainer(), range->endOffset());
   }
   static StaticRange* Create(const EphemeralRange&);
-  static StaticRange* Create(Document&,
-                             const StaticRangeInit*,
-                             ExceptionState&);
+  static StaticRange* Create(const StaticRangeInit*, ExceptionState&);
 
   StaticRange(Document&,
               Node* start_container,
@@ -48,7 +46,7 @@ class CORE_EXPORT StaticRange final : public AbstractRange {
     return start_container_ == end_container_ && start_offset_ == end_offset_;
   }
 
-  Range* toRange(ExceptionState& = ASSERT_NO_EXCEPTION) const;
+  Range* toRange(ExceptionState&) const;
 
   bool IsValid() const;
   bool IsStaticRange() const override { return true; }
@@ -67,6 +65,7 @@ class CORE_EXPORT StaticRange final : public AbstractRange {
 };
 
 using StaticRangeVector = HeapVector<Member<StaticRange>>;
+using GCedStaticRangeVector = GCedHeapVector<Member<StaticRange>>;
 
 template <>
 struct DowncastTraits<StaticRange> {

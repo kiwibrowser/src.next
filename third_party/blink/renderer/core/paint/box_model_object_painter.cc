@@ -47,8 +47,9 @@ PhysicalRect BoxModelObjectPainter::AdjustRectForScrolledContent(
   scrolled_paint_rect.offset -=
       PhysicalOffset(this_box.PixelSnappedScrolledContentOffset());
   scrolled_paint_rect.SetWidth(border.HorizontalSum() + this_box.ScrollWidth());
-  scrolled_paint_rect.SetHeight(this_box.BorderTop() + this_box.ScrollHeight() +
-                                this_box.BorderBottom());
+  // FIXME: Why isn't this using the provided pixel snapped borders?
+  scrolled_paint_rect.SetHeight(this_box.BorderOutsets().VerticalSum() +
+                                this_box.ScrollHeight());
   return scrolled_paint_rect;
 }
 
@@ -56,12 +57,13 @@ BoxPainterBase::FillLayerInfo BoxModelObjectPainter::GetFillLayerInfo(
     const Color& color,
     const FillLayer& bg_layer,
     BackgroundBleedAvoidance bleed_avoidance,
-    bool is_painting_background_in_contents_space) const {
+    bool is_painting_background_in_contents_space,
+    PaintFlags paint_flags) const {
   return BoxPainterBase::FillLayerInfo(
       box_model_.GetDocument(), box_model_.StyleRef(),
       box_model_.IsScrollContainer(), color, bg_layer, bleed_avoidance,
       PhysicalBoxSides(), box_model_.IsLayoutInline(),
-      is_painting_background_in_contents_space);
+      is_painting_background_in_contents_space, paint_flags);
 }
 
 }  // namespace blink

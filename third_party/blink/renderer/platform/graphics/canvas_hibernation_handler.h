@@ -6,24 +6,48 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CANVAS_HIBERNATION_HANDLER_H_
 
 #include "base/feature_list.h"
+#include "base/memory/post_delayed_memory_reduction_task.h"
+#include "base/memory/raw_ref.h"
 #include "base/no_destructor.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/graphics/memory_managed_paint_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
+class Canvas2DResourceProviderSharedImage;
+
+inline constexpr char kCanvasHibernationEventHistogramName[] =
+    "Blink.Canvas.HibernationEvents2";
+
 PLATFORM_EXPORT BASE_DECLARE_FEATURE(kCanvasHibernationSnapshotZstd);
 
 // All the fields are main-thread only. See DCheckInvariant() for invariants.
 class PLATFORM_EXPORT CanvasHibernationHandler {
  public:
+  class Delegate {
+   public:
+    virtual ~Delegate() = default;
+
+    virtual Canvas2DResourceProviderSharedImage* GetSharedImageProvider()
+        const = 0;
+    virtual bool HasResourceProvider() const = 0;
+    virtual bool IsPageVisible() const = 0;
+    virtual bool IsContextLost() const = 0;
+    virtual void ResetResourceProvider() = 0;
+    virtual void SetNeedsCompositingUpdate() = 0;
+    virtual void ClearCanvas2DLayerTexture() {}
+  };
+
   // The values of the enum entries must not change because they are used for
   // usage metrics histograms. New values can be added to the end.
+  // LINT.IfChange(CanvasHibernationEvent)
   enum HibernationEvent {
     kHibernationScheduled = 0,
     kHibernationAbortedDueToDestructionWhileHibernatePending = 1,
@@ -38,8 +62,20 @@ class PLATFORM_EXPORT CanvasHibernationHandler {
     kHibernationEndedWithFallbackToSW = 10,
     kHibernationEndedWithTeardown = 11,
     kHibernationAbortedBecauseNoSurface = 12,
-    kMaxValue = kHibernationAbortedBecauseNoSurface,
+    kHibernationEndedOnReset = 13,
+    kHibernationAbortedDueToEpochMismatch = 14,
+    kMaxValue = kHibernationAbortedDueToEpochMismatch,
   };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/blink/enums.xml:CanvasHibernationEvent)
+
+  static void ReportHibernationEvent(
+      CanvasHibernationHandler::HibernationEvent event) {
+    UMA_HISTOGRAM_ENUMERATION(kCanvasHibernationEventHistogramName, event);
+  }
+
+  explicit CanvasHibernationHandler(Delegate& delegate);
+  CanvasHibernationHandler(const CanvasHibernationHandler&) = delete;
+  CanvasHibernationHandler& operator=(const CanvasHibernationHandler&) = delete;
 
   ~CanvasHibernationHandler();
   // Semi-arbitrary threshold. Some past experiments (e.g. tile discard) have
@@ -47,9 +83,17 @@ class PLATFORM_EXPORT CanvasHibernationHandler {
   // and a minimal impact on tab switching latency (and on needless
   // compression).
   static constexpr base::TimeDelta kBeforeCompressionDelay = base::Minutes(5);
+  // Semi-arbitrary threshold, chosen to be a bit shorter than tile discard, and
+  // shorter than compression above. Actual delay is random, and the compression
+  // delay includes this one.
+  static constexpr base::TimeDelta kMaxHibernationDelay = base::Minutes(4);
+
+  void InitiateHibernationIfNecessary();
 
   void SaveForHibernation(sk_sp<SkImage>&& image,
-                          std::unique_ptr<MemoryManagedPaintRecorder> recorder);
+                          std::unique_ptr<MemoryManagedPaintRecorder> recorder,
+                          base::MemoryReductionTaskContext context,
+                          base::TimeDelta delay);
   // Returns the uncompressed image for this hibernation image. Does not
   // invalidate the hibernated image. Must call `Clear()` if invalidation is
   // required.
@@ -73,23 +117,9 @@ class PLATFORM_EXPORT CanvasHibernationHandler {
   int width() const { return width_; }
   int height() const { return height_; }
 
-  void SetTaskRunnersForTesting(
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner>
-          background_thread_task_runner) {
-    main_thread_task_runner_for_testing_ = main_thread_task_runner;
-    background_thread_task_runner_for_testing_ = background_thread_task_runner;
-  }
-
-  // Sets a callback that will be invoked on each completion of OnEncoded().
-  // The client can then check whether encoding has succeeded by check
-  // CanvasHibernationHandler::IsEncoded().
-  void SetOnEncodedCallbackForTesting(
-      base::RepeatingClosure on_encoded_callback) {
-    on_encoded_callback_for_testing_ = std::move(on_encoded_callback);
-  }
-  void SetBeforeCompressionDelayForTesting(base::TimeDelta delay) {
-    before_compression_delay_ = delay;
+  void SetBackgroundTaskRunnerForTesting(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+    background_thread_task_runner_for_testing_ = task_runner;
   }
 
   enum class CompressionAlgorithm { kZlib, kZstd };
@@ -128,8 +158,15 @@ class PLATFORM_EXPORT CanvasHibernationHandler {
   void OnEncoded(
       std::unique_ptr<CanvasHibernationHandler::BackgroundTaskParams> params,
       sk_sp<SkData> encoded);
-  scoped_refptr<base::SingleThreadTaskRunner> GetMainThreadTaskRunner() const;
   static size_t ImageMemorySize(const SkImage& image);
+  static void HibernateOrLogFailure(
+      base::WeakPtr<CanvasHibernationHandler> handler,
+      uint64_t epoch,
+      base::TimeDelta delay,
+      base::MemoryReductionTaskContext context);
+  void Hibernate(base::MemoryReductionTaskContext context,
+                 base::TimeDelta delay);
+  static scoped_refptr<base::SingleThreadTaskRunner> GetMainThreadTaskRunner();
 
   // Incremented each time the canvas is hibernated.
   uint64_t epoch_ = 0;
@@ -140,15 +177,12 @@ class PLATFORM_EXPORT CanvasHibernationHandler {
   CompressionAlgorithm algorithm_ = CompressionAlgorithm::kZlib;
   std::unique_ptr<MemoryManagedPaintRecorder> recorder_;
   scoped_refptr<base::SingleThreadTaskRunner>
-      main_thread_task_runner_for_testing_;
-  scoped_refptr<base::SingleThreadTaskRunner>
       background_thread_task_runner_for_testing_;
-  base::RepeatingClosure on_encoded_callback_for_testing_;
-  base::TimeDelta before_compression_delay_ = kBeforeCompressionDelay;
   int width_;
   int height_;
   int bytes_per_pixel_;
 
+  const base::raw_ref<Delegate> delegate_;
   base::WeakPtrFactory<CanvasHibernationHandler> weak_ptr_factory_{this};
 };
 
@@ -169,7 +203,7 @@ class PLATFORM_EXPORT HibernatedCanvasMemoryDumpProvider
   HibernatedCanvasMemoryDumpProvider();
 
   base::Lock lock_;
-  WTF::HashSet<CanvasHibernationHandler*> handlers_ GUARDED_BY(lock_);
+  HashSet<CanvasHibernationHandler*> handlers_ GUARDED_BY(lock_);
 };
 
 }  // namespace blink

@@ -8,7 +8,6 @@
 
 #include "base/barrier_closure.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -27,16 +26,15 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/test/base/fake_profile_manager.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/signin/public/base/signin_pref_names.h"
-#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_task_environment.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -59,9 +57,9 @@ void CreateCookies(
     GURL url(url_name.first);
     std::unique_ptr<net::CanonicalCookie> cookie =
         net::CanonicalCookie::CreateSanitizedCookie(
-            url, url_name.second, "A=" + url_name.second, url.host(),
-            url.path(), base::Time::Now(), base::Time::Max(), base::Time::Now(),
-            url.SchemeIsCryptographic(), false,
+            url, url_name.second, "A=" + url_name.second, url.GetHost(),
+            url.GetPath(), base::Time::Now(), base::Time::Max(),
+            base::Time::Now(), url.SchemeIsCryptographic(), false,
             net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT,
             std::nullopt, /*status=*/nullptr);
     cookie_manager->SetCanonicalCookie(
@@ -118,15 +116,16 @@ class UnittestProfileManager : public FakeProfileManager {
 // Testing params:
 // - bool enable_third_party_management_feature
 // - bool setup_cookies_to_move
-// - bool explicit_browser_signin_enabled
 class DiceSignedInProfileCreatorTest
     : public testing::Test,
-      public testing::WithParamInterface<std::tuple<bool, bool, bool>>,
+      public testing::WithParamInterface<std::tuple<bool, bool>>,
       public ProfileManagerObserver {
  public:
-  DiceSignedInProfileCreatorTest()
-      : local_state_(TestingBrowserProcess::GetGlobal()) {
-    InitFeatures();
+  DiceSignedInProfileCreatorTest() {
+    scoped_feature_list_.InitWithFeatureState(
+        profile_management::features::kThirdPartyProfileManagement,
+        enable_third_party_management_feature());
+
     auto profile_manager_unique = std::make_unique<UnittestProfileManager>(
         base::CreateUniqueTempDirectoryScopedToTest());
     profile_manager_ = profile_manager_unique.get();
@@ -140,26 +139,6 @@ class DiceSignedInProfileCreatorTest
     profile_manager()->AddObserver(this);
   }
 
-  void InitFeatures() {
-    std::vector<base::test::FeatureRef> enabled;
-    std::vector<base::test::FeatureRef> disabled;
-    if (enable_third_party_management_feature()) {
-      enabled.push_back(
-          profile_management::features::kThirdPartyProfileManagement);
-    } else {
-      disabled.push_back(
-          profile_management::features::kThirdPartyProfileManagement);
-    }
-
-    if (explicit_browser_signin_enabled()) {
-      enabled.push_back(switches::kExplicitBrowserSigninUIOnDesktop);
-    } else {
-      disabled.push_back(switches::kExplicitBrowserSigninUIOnDesktop);
-    }
-
-    scoped_feature_list_.InitWithFeatures(enabled, disabled);
-  }
-
   ~DiceSignedInProfileCreatorTest() override { DeleteProfiles(); }
 
   bool enable_third_party_management_feature() {
@@ -167,8 +146,6 @@ class DiceSignedInProfileCreatorTest
   }
 
   bool setup_cookies_to_move() { return std::get<1>(GetParam()); }
-
-  bool explicit_browser_signin_enabled() { return std::get<2>(GetParam()); }
 
   UnittestProfileManager* profile_manager() { return profile_manager_; }
 
@@ -276,24 +253,18 @@ class DiceSignedInProfileCreatorTest
       return;
     }
 
-    // I don't know why this test looks like this, but I am only removing
-    // !BUILDFLAG(IS_FUCHSIA).
-    return;
-
     EXPECT_EQ(3u, cookies_source_profile.size());
     EXPECT_EQ(3u, cookies_new_profile.size());
 
     for (const auto& cookie : cookies_new_profile) {
-      EXPECT_TRUE(cookie.IsDomainMatch(url.host()));
-      EXPECT_TRUE(cookie.Name() == "oldgoogle0" ||
-                  cookie.Name() == "validgoogle1" ||
-                  cookie.Name() == "newgoogle1");
+      EXPECT_TRUE(cookie.IsDomainMatch(url.GetHost()));
+      EXPECT_THAT(cookie.Name(),
+                  testing::AnyOf("oldgoogle0", "validgoogle1", "newgoogle2"));
     }
   }
 
  private:
   content::BrowserTaskEnvironment task_environment_;
-  ScopedTestingLocalState local_state_;
   raw_ptr<UnittestProfileManager, DanglingUntriaged> profile_manager_ = nullptr;
   std::unique_ptr<IdentityTestEnvironmentProfileAdaptor>
       identity_test_env_profile_adaptor_;
@@ -314,7 +285,8 @@ TEST_P(DiceSignedInProfileCreatorTest, CreateWithTokensLoaded) {
   base::RunLoop loop;
   std::unique_ptr<DiceSignedInProfileCreator> creator =
       std::make_unique<DiceSignedInProfileCreator>(
-          profile(), account_info.account_id, kProfileTestName, kTestIcon,
+          profile(), account_info.account_id, std::vector<CoreAccountId>{},
+          kProfileTestName, kTestIcon,
           base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
                          base::Unretained(this), loop.QuitClosure()));
   loop.Run();
@@ -331,10 +303,8 @@ TEST_P(DiceSignedInProfileCreatorTest, CreateWithTokensLoaded) {
   EXPECT_EQ(1u, new_identity_manager->GetAccountsWithRefreshTokens().size());
   EXPECT_TRUE(IdentityManagerFactory::GetForProfile(signed_in_profile())
                   ->HasAccountWithRefreshToken(account_info.account_id));
-  if (explicit_browser_signin_enabled()) {
-    EXPECT_TRUE(
-        new_identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
-  }
+  EXPECT_TRUE(
+      new_identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
 
   // Check profile type
   ASSERT_FALSE(signed_in_profile()->IsGuestSession());
@@ -361,7 +331,8 @@ TEST_P(DiceSignedInProfileCreatorTest, CreateWithTokensNotLoaded) {
   SetupCookiesToMove();
   std::unique_ptr<DiceSignedInProfileCreator> creator =
       std::make_unique<DiceSignedInProfileCreator>(
-          profile(), account_info.account_id, std::u16string(), std::nullopt,
+          profile(), account_info.account_id, std::vector<CoreAccountId>{},
+          std::u16string(), std::nullopt,
           base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
                          base::Unretained(this), creator_loop.QuitClosure()));
   profile_added_loop.Run();
@@ -398,7 +369,8 @@ TEST_P(DiceSignedInProfileCreatorTest, DeleteWhileCreating) {
   SetupCookiesToMove();
   std::unique_ptr<DiceSignedInProfileCreator> creator =
       std::make_unique<DiceSignedInProfileCreator>(
-          profile(), account_info.account_id, std::u16string(), std::nullopt,
+          profile(), account_info.account_id, std::vector<CoreAccountId>{},
+          std::u16string(), std::nullopt,
           base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
                          base::Unretained(this), base::OnceClosure()));
   EXPECT_FALSE(creator_callback_called());
@@ -418,7 +390,8 @@ TEST_P(DiceSignedInProfileCreatorTest, DeleteProfile) {
   SetupCookiesToMove();
   std::unique_ptr<DiceSignedInProfileCreator> creator =
       std::make_unique<DiceSignedInProfileCreator>(
-          profile(), account_info.account_id, std::u16string(), std::nullopt,
+          profile(), account_info.account_id, std::vector<CoreAccountId>{},
+          std::u16string(), std::nullopt,
           base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
                          base::Unretained(this), creator_loop.QuitClosure()));
   profile_added_loop.Run();
@@ -439,8 +412,120 @@ TEST_P(DiceSignedInProfileCreatorTest, DeleteProfile) {
   EXPECT_FALSE(signed_in_profile());
 }
 
+TEST_P(DiceSignedInProfileCreatorTest, CreateWithMultipleTokensLoaded) {
+  AccountInfo initiator_info =
+      identity_test_env()->MakeAccountAvailable("initiator@example.com");
+  AccountInfo secondary_info1 =
+      identity_test_env()->MakeAccountAvailable("secondary1@example.com");
+  AccountInfo secondary_info2 =
+      identity_test_env()->MakeAccountAvailable("secondary2@example.com");
+
+  std::vector<CoreAccountId> secondary_ids = {secondary_info1.account_id,
+                                              secondary_info2.account_id};
+
+  std::vector<CoreAccountId> all_account_ids = {initiator_info.account_id,
+                                                secondary_info1.account_id,
+                                                secondary_info2.account_id};
+
+  size_t kTestIcon = profiles::GetModernAvatarIconStartIndex();
+
+  SetupCookiesToMove();
+  base::RunLoop loop;
+  std::unique_ptr<DiceSignedInProfileCreator> creator =
+      std::make_unique<DiceSignedInProfileCreator>(
+          profile(), initiator_info.account_id, secondary_ids, kProfileTestName,
+          kTestIcon,
+          base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
+                         base::Unretained(this), loop.QuitClosure()));
+  loop.Run();
+
+  // Check that the accounts were moved.
+  EXPECT_TRUE(creator_callback_called());
+  EXPECT_TRUE(signed_in_profile());
+  EXPECT_NE(profile(), signed_in_profile());
+  EXPECT_EQ(signed_in_profile(), added_profile());
+
+  // Verify accounts removed from source profile.
+  for (const auto& id : all_account_ids) {
+    EXPECT_FALSE(IdentityManagerFactory::GetForProfile(profile())
+                     ->HasAccountWithRefreshToken(id));
+  }
+
+  signin::IdentityManager* new_identity_manager =
+      IdentityManagerFactory::GetForProfile(signed_in_profile());
+  EXPECT_EQ(3u, new_identity_manager->GetAccountsWithRefreshTokens().size());
+
+  // Verify accounts added to target profile.
+  for (const auto& id : all_account_ids) {
+    EXPECT_TRUE(new_identity_manager->HasAccountWithRefreshToken(id));
+  }
+
+  // Verify initiator is set as primary.
+  EXPECT_EQ(
+      new_identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin),
+      initiator_info.account_id);
+
+  // Check profile type
+  ASSERT_FALSE(signed_in_profile()->IsGuestSession());
+
+  // Check the profile name and icon.
+  ProfileAttributesStorage& storage =
+      profile_manager()->GetProfileAttributesStorage();
+  ProfileAttributesEntry* entry =
+      storage.GetProfileAttributesWithPath(signed_in_profile()->GetPath());
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(kProfileTestName, entry->GetLocalProfileName());
+  EXPECT_EQ(kTestIcon, entry->GetAvatarIconIndex());
+  VerifyCookiesMoved();
+}
+
+TEST_P(DiceSignedInProfileCreatorTest, CreateWithMissingTokens) {
+  AccountInfo initiator_info =
+      identity_test_env()->MakeAccountAvailable("initiator@example.com");
+  AccountInfo secondary_info_with_token =
+      identity_test_env()->MakeAccountAvailable(
+          "secondary_with_token@example.com");
+  AccountInfo secondary_info_no_token =
+      identity_test_env()->MakeAccountAvailable(
+          "secondary_no_token@example.com");
+
+  // Secondary 2 doesn't have a refresh token in the source profile.
+  identity_test_env()->RemoveRefreshTokenForAccount(
+      secondary_info_no_token.account_id);
+
+  std::vector<CoreAccountId> secondary_ids = {
+      secondary_info_with_token.account_id, secondary_info_no_token.account_id};
+
+  size_t kTestIcon = profiles::GetModernAvatarIconStartIndex();
+
+  SetupCookiesToMove();
+  base::RunLoop loop;
+  std::unique_ptr<DiceSignedInProfileCreator> creator =
+      std::make_unique<DiceSignedInProfileCreator>(
+          profile(), initiator_info.account_id, secondary_ids, kProfileTestName,
+          kTestIcon,
+          base::BindOnce(&DiceSignedInProfileCreatorTest::OnProfileCreated,
+                         base::Unretained(this), loop.QuitClosure()));
+  loop.Run();
+
+  EXPECT_TRUE(creator_callback_called());
+  EXPECT_TRUE(signed_in_profile());
+  EXPECT_NE(profile(), signed_in_profile());
+
+  signin::IdentityManager* new_identity_manager =
+      IdentityManagerFactory::GetForProfile(signed_in_profile());
+
+  // Only initiator and secondary with token should have been moved.
+  EXPECT_EQ(2u, new_identity_manager->GetAccountsWithRefreshTokens().size());
+  EXPECT_TRUE(new_identity_manager->HasAccountWithRefreshToken(
+      initiator_info.account_id));
+  EXPECT_TRUE(new_identity_manager->HasAccountWithRefreshToken(
+      secondary_info_with_token.account_id));
+  EXPECT_FALSE(new_identity_manager->HasAccountWithRefreshToken(
+      secondary_info_no_token.account_id));
+}
+
 INSTANTIATE_TEST_SUITE_P(All,
                          DiceSignedInProfileCreatorTest,
                          testing::Combine(testing::Bool(),
-                                          testing::Bool(),
                                           testing::Bool()));

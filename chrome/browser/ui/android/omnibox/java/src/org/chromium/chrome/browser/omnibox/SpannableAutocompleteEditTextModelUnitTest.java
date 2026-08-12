@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.content.Context;
+import android.text.Selection;
 import android.text.SpannableStringBuilder;
 import android.view.ContextThemeWrapper;
 import android.view.KeyEvent;
@@ -32,9 +33,8 @@ import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.omnibox.test.R;
+import org.chromium.components.omnibox.TextSelection;
 
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Unit tests for {@link SpannableAutocompleteEditTextModel}. */
@@ -139,7 +139,7 @@ public class SpannableAutocompleteEditTextModelUnitTest {
 
     @Test
     public void dispatchKeyEvent_processAutocompleteKeysWhenAutocompletionIsAvailable() {
-        mCurrentState.setAutocompleteText(Optional.of("google.com"));
+        mCurrentState.setAutocompleteText("google.com");
 
         confirmAutocompletionAppliedWithKey(KeyEvent.KEYCODE_DPAD_RIGHT);
         // Enter is forwarded to the delegate for handling which is what "bypassed" checks.
@@ -150,7 +150,7 @@ public class SpannableAutocompleteEditTextModelUnitTest {
 
     @Test
     public void dispatchKeyEvent_passAutocompleteKeysWhenAutocompletionIsNotAvailable() {
-        mCurrentState.setAutocompleteText(Optional.empty());
+        mCurrentState.setAutocompleteText(null);
 
         confirmAutocompletionBypassed(KeyEvent.KEYCODE_DPAD_RIGHT);
         confirmAutocompletionBypassed(KeyEvent.KEYCODE_ENTER);
@@ -161,8 +161,8 @@ public class SpannableAutocompleteEditTextModelUnitTest {
     @Test
     public void dispatchKeyEvent_handleForwardDel() {
         mCurrentState.setUserText("goo");
-        mCurrentState.setAutocompleteText(Optional.of("gle.com"));
-        assertEquals(mCurrentState.getText(), "google.com"); // Verify full state constructed.
+        mCurrentState.setAutocompleteText("gle.com");
+        assertEquals("google.com", mCurrentState.getText()); // Verify full state constructed.
 
         // The delete key doesn't get sent to our delegate when in autocomplete mode so
         // confirmAutocompletionBypassed() doesn't work. Manually dispatch.
@@ -171,11 +171,43 @@ public class SpannableAutocompleteEditTextModelUnitTest {
         mModel.dispatchKeyEvent(event);
 
         // Inline autocompleted text should be deleted.
-        assertEquals(mCurrentState.getText(), "goo");
+        assertEquals("goo", mCurrentState.getText());
 
         // Go left and then forward delete the last user-char. The forward delete should still
         // get dispatched.
         confirmAutocompletionBypassed(KeyEvent.KEYCODE_DPAD_LEFT);
         confirmAutocompletionBypassed(KeyEvent.KEYCODE_FORWARD_DEL);
+    }
+
+    @Test
+    public void dispatchKeyEvent_handleDel() {
+        mCurrentState.setUserText("goo");
+        mCurrentState.setAutocompleteText("gle.com");
+        assertEquals("google.com", mCurrentState.getText());
+
+        clearInvocations(mConnection, mDelegate);
+        mModel.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+        assertEquals("goo", mCurrentState.getText());
+    }
+
+    @Test
+    public void testSpanCursorController_setSpan_clampsSelection() {
+        SpannableStringBuilder editable = new SpannableStringBuilder("userText");
+        doReturn(editable).when(mDelegate).getEditableText();
+
+        SpanCursorController controller = mModel.getSpanCursorController();
+
+        AutocompleteState state =
+                new AutocompleteState(
+                        "userText",
+                        "auto",
+                        null,
+                        new TextSelection(Integer.MAX_VALUE, Integer.MAX_VALUE),
+                        null);
+
+        controller.setSpan(state);
+
+        assertEquals(12, Selection.getSelectionStart(editable));
+        assertEquals(12, Selection.getSelectionEnd(editable));
     }
 }

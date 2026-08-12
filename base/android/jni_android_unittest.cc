@@ -15,6 +15,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "build/robolectric_buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -89,12 +90,9 @@ JniAndroidExceptionTestContext* JniAndroidExceptionTestContext::instance =
 
 std::atomic<jmethodID> g_atomic_id(nullptr);
 int LazyMethodIDCall(JNIEnv* env, jclass clazz, int p) {
-  jmethodID id = base::android::MethodID::LazyGet<
-      base::android::MethodID::TYPE_STATIC>(
-      env, clazz,
-      "abs",
-      "(I)I",
-      &g_atomic_id);
+  jmethodID id =
+      base::android::MethodID::LazyGet<base::android::MethodID::TYPE_STATIC>(
+          env, clazz, "abs", "(I)I", &g_atomic_id);
 
   return env->CallStaticIntMethod(clazz, id, p);
 }
@@ -110,23 +108,25 @@ TEST(JNIAndroidMicrobenchmark, MethodId) {
   ScopedJavaLocalRef<jclass> clazz(GetClass(env, "java/lang/Math"));
   base::Time start_lazy = base::Time::Now();
   int o = 0;
-  for (int i = 0; i < 1024; ++i)
+  for (int i = 0; i < 1024; ++i) {
     o += LazyMethodIDCall(env, clazz.obj(), i);
+  }
   base::Time end_lazy = base::Time::Now();
 
   jmethodID id = g_atomic_id;
   base::Time start = base::Time::Now();
-  for (int i = 0; i < 1024; ++i)
+  for (int i = 0; i < 1024; ++i) {
     o += MethodIDCall(env, clazz.obj(), id, i);
+  }
   base::Time end = base::Time::Now();
 
   // On a Galaxy Nexus, results were in the range of:
   // JNI LazyMethodIDCall (us) 1984
   // JNI MethodIDCall (us) 1861
-  LOG(ERROR) << "JNI LazyMethodIDCall (us) " <<
-      base::TimeDelta(end_lazy - start_lazy).InMicroseconds();
-  LOG(ERROR) << "JNI MethodIDCall (us) " <<
-      base::TimeDelta(end - start).InMicroseconds();
+  LOG(ERROR) << "JNI LazyMethodIDCall (us) "
+             << base::TimeDelta(end_lazy - start_lazy).InMicroseconds();
+  LOG(ERROR) << "JNI MethodIDCall (us) "
+             << base::TimeDelta(end - start).InMicroseconds();
   LOG(ERROR) << "JNI " << o;
 }
 
@@ -260,5 +260,83 @@ TEST(JniAndroidExceptionTest, HandleExceptionInJava_ReentrantOom) {
   EXPECT_THAT(ctx.assertion_message, Optional(Eq(kReetrantOutOfMemoryMessage)));
 }
 
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+namespace {
+class ScopedJniUnhooker {
+ public:
+  explicit ScopedJniUnhooker(JNIEnv* env) : env_(env) {}
+  ~ScopedJniUnhooker() { UnhookJniFindClassForTesting(env_); }
+
+ private:
+  raw_ptr<JNIEnv> env_;
+};
+
+void TestHookJniFindClassImpl() {
+  JNIEnv* env = AttachCurrentThread();
+  const JNINativeInterface* orig_functions = env->functions;
+
+  // Before hooking, the test helper should return null (meaning not hooked yet
+  // on this thread).
+  EXPECT_EQ(GetOriginalJniFunctionsForTesting(), nullptr);
+
+  ScopedJniUnhooker unhooker(env);
+
+  HookJniFindClass(env);
+
+  const JNINativeInterface* hooked_functions = env->functions;
+  // Verify that functions table was replaced.
+  EXPECT_NE(orig_functions, hooked_functions);
+  EXPECT_NE(orig_functions->FindClass, hooked_functions->FindClass);
+
+  // Verify that the helper returns the correct original functions.
+  EXPECT_EQ(GetOriginalJniFunctionsForTesting(), orig_functions);
+
+  // Verify that FindClass still works (calls through to original eventually).
+  jclass string_class = env->FindClass("java/lang/String");
+  ASSERT_NE(string_class, nullptr);
+  env->DeleteLocalRef(string_class);
+
+  // Call it again, should be a safe no-op.
+  HookJniFindClass(env);
+
+  // It should STILL point to original functions, not the hooked ones.
+  EXPECT_EQ(GetOriginalJniFunctionsForTesting(), orig_functions);
+}
+}  // namespace
+
+TEST(JniAndroidTest, HookJniFindClassSingleThread) {
+  TestHookJniFindClassImpl();
+}
+
+TEST(JniAndroidTest, HookJniFindClassThreadSafe) {
+  JNIEnv* env = AttachCurrentThread();
+  const JNINativeInterface* orig_functions = env->functions;
+
+  // Hook the main thread, and ensure it is cleaned up when this test exits.
+  // The main thread will REMAIN hooked while the background thread runs.
+  ScopedJniUnhooker main_unhooker(env);
+  HookJniFindClass(env);
+
+  const JNINativeInterface* hooked_functions = env->functions;
+  EXPECT_NE(orig_functions, hooked_functions);
+  EXPECT_NE(orig_functions->FindClass, hooked_functions->FindClass);
+  EXPECT_EQ(GetOriginalJniFunctionsForTesting(), orig_functions);
+
+  // Spawn a background thread and hook it as well.
+  // This verifies that HookJniFindClass can be called on multiple threads
+  // and hook multiple threads safely.
+  class HelperThread : public Thread {
+   public:
+    HelperThread() : Thread("HookTestThread") {}
+    void Init() override { TestHookJniFindClassImpl(); }
+  };
+
+  HelperThread t;
+  t.StartAndWaitForTesting();
+}
+#endif  // !BUILDFLAG(IS_ROBOLECTRIC)
+
 }  // namespace android
 }  // namespace base
+
+DEFINE_JNI(JniAndroidTestUtils)

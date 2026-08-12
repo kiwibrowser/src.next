@@ -17,14 +17,15 @@
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread.h"
+#include "base/win/scoped_gdi_object.h"
 #include "chrome/browser/win/icon_reader_service.h"
 #include "chrome/services/util_win/public/mojom/util_read_icon.mojom.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/display/win/dpi.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/win/icon_util.h"
 
 namespace {
 // Helper class to manage lifetime of icon reader service.
@@ -160,7 +161,7 @@ gfx::Image GetIconForFileExtension(const std::wstring& group,
   gfx::Image image;
 
   // Not only is GetFileInfo a blocking call, it's also known to hang
-  // (crbug.com/1249943), add a ScopedBlockingCall to let the scheduler know
+  // (crbug.com/40791559), add a ScopedBlockingCall to let the scheduler know
   // when this hangs and to explicitly label this call in tracing.
   base::ScopedBlockingCall blocking_call(FROM_HERE,
                                          base::BlockingType::MAY_BLOCK);
@@ -169,14 +170,14 @@ gfx::Image GetIconForFileExtension(const std::wstring& group,
   if (SHGetFileInfo(group.c_str(), FILE_ATTRIBUTE_NORMAL, &file_info,
                     sizeof(file_info),
                     SHGFI_ICON | size | SHGFI_USEFILEATTRIBUTES)) {
-    const SkBitmap bitmap = IconUtil::CreateSkBitmapFromHICON(file_info.hIcon);
+    base::win::ScopedGDIObject<HICON> file_icon(file_info.hIcon);
+    const SkBitmap bitmap = IconUtil::CreateSkBitmapFromHICON(file_icon.get());
     if (!bitmap.isNull()) {
       gfx::ImageSkia image_skia(
           gfx::ImageSkiaRep(bitmap, display::win::GetDPIScale()));
       image_skia.MakeThreadSafe();
       image = gfx::Image(image_skia);
     }
-    DestroyIcon(file_info.hIcon);
   }
   return image;
 }

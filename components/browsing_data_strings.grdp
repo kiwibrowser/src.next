@@ -16,28 +16,44 @@
      =1 {1 item (and more on synced devices)}
      other {# items (and more on synced devices)}}
   </message>
+  <message name="IDS_DEL_NO_BROWSING_HISTORY_TEXT" desc="This string will be shown in Delete Browsing Data indicating that there are no history entries within deletion range.">
+    None
+  </message>
+  <message name="IDS_DEL_NO_BROWSING_HISTORY_SYNC_TEXT" desc="This string will be shown in Delete Browsing Data indicating that there are no history entries within deletion range on the device but more items might be synced and affected by the deletion.">
+    From at least 1 site on synced devices
+  </message>
+  <message name="IDS_DEL_BROWSING_HISTORY_DOMAIN_COUNT_TEXT" desc="This string will be shown in Delete Browsing Data. It will start by mentioning the last visited domain, followed by this string showing the count of other unique domains that the user has visited that might be affected by the deletion. For example: if a user visits/revisits facebook.com, followed by figma.com, within the specified time range, then this text would say 'figma.com and 1 other site'.">
+    {DOMAIN_COUNT, plural,
+      =1 {+ 1 site}
+      other {+ # sites}}
+  </message>
+  <message name="IDS_DEL_BROWSING_HISTORY_DOMAIN_COUNT_SYNC_TEXT" desc="This string will be shown in Delete Browsing Data. It will start by mentioning the last visited domain, followed by this string showing the count of other unique domains that the user has visited that might be affected by the deletion. More items might be synced and affected by the deletion. For example: if a user visits/revisits facebook.com, followed by figma.com, within the specified time range, then this text would say 'figma.com and 1 other site (more on sync devices)'.">
+    {DOMAIN_COUNT, plural,
+      =1 {+ 1 site (more on synced devices)}
+      other {+ # sites (more on synced devices)}}
+  </message>
+  <message name="IDS_DEL_BROWSING_HISTORY_COUNTER_MULTIPLE_DOMAINS_TEXT" desc="This string will be shown in Delete Browsing Data the Browsing History title. It will start by mentioning the last visited domain, followed by this string showing the count of other unique domains that the user has visited that might be affected by the deletion. More items might be synced and affected by the deletion which can be reflected on the second string. For example: if a user visits/revisits facebook.com, followed by figma.com, within the specified time range, then this text would say 'figma.com and 1 other site (more on sync devices)'.">
+    From <ph name="TYPE_1">$1<ex>google.com</ex></ph> <ph name="TYPE_2">$2<ex>+ 1 site</ex></ph>
+  </message>
+  <message name="IDS_DEL_BROWSING_HISTORY_COUNTER_SINGLE_DOMAIN_TEXT" desc="This string will be shown in Delete Browsing Data below the Browsing History title. It concatenates one string with the from prefix. For example: 'From figma.com + 1 site'.">
+    From <ph name="TYPE_1">$1<ex>google.com</ex></ph>
+  </message>
+  <message name="IDS_DEL_BROWSING_HISTORY_COUNTER_SINGLE_DOMAIN_SYNC_TEXT" desc="This string will be shown in Delete Browsing Data. It concatenates one string stating what is deleted with the fact that more items might be synced and affected by the deletion. E.g. 'From figma.com + 1 site (more on synced devices)'.">
+    From <ph name="TYPE_1">$1<ex>From google.com</ex></ph> (more on synced devices)
+  </message>
   <message name="IDS_DEL_CACHE_COUNTER_UPPER_ESTIMATE" desc="A counter showing that the user has less than X megabytes of cache. The value X will be substituted.">
     Less than <ph name="UPPER_ESTIMATE">$1<ex>328 MB</ex></ph>
   </message>
   <message name="IDS_DEL_CACHE_COUNTER_ALMOST_EMPTY" desc="A counter showing that the user's cache is almost empty, having less than 1 MB of data.">
     Less than 1 MB
   </message>
-  <message name="IDS_DEL_CACHE_COUNTER_BASIC" desc="A counter showing the size of the users's cache. The estimate (e.g. '328 MB' will be substituted). It also explains that the cache is used to speed up the loading of websites.">
-    Frees up <ph name="SIZE">$1<ex>328 MB</ex></ph>. Some sites may load more slowly on your next visit.
-  </message>
-  <message name="IDS_DEL_CACHE_COUNTER_UPPER_ESTIMATE_BASIC" desc="A counter showing an upper estimate of the size of the users's cache. The estimate (e.g. '328 MB' will be substituted). It also explains that the cache is used to speed up the loading of websites.">
-    Frees up less than <ph name="SIZE">$1<ex>328 MB</ex></ph>. Some sites may load more slowly on your next visit.
-  </message>
-  <message name="IDS_DEL_CACHE_COUNTER_ALMOST_EMPTY_BASIC" desc="A counter showing that the user's cache is almost empty and explaining that the cache is used to speed up the loading of websites.">
-    Frees up less than 1 MB. Some sites may load more slowly on your next visit.
-  </message>
-  <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED" desc="A counter showing the size of the users's cache on the Advanced Clear browsing data dialog. The value (e.g. '328 MB') will be substituted. It also explains that the cache is used to speed up the loading of websites.">
+    <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED" desc="A counter showing the size of the users's cache on the Clear browsing data dialog. The value (e.g. '328 MB') will be substituted. It also explains that the cache is used to speed up the loading of websites.">
     <ph name="SIZE">$1<ex>328 MB</ex></ph>. Some sites may load more slowly on your next visit.
   </message>
-  <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED_UPPER_ESTIMATE" desc="A counter showing that the user has less than X megabytes of cache on the Advanced Clear browsing data dialog. The value X will be substituted. It also explains that the cache is used to speed up the loading of websites.">
+  <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED_UPPER_ESTIMATE" desc="A counter showing that the user has less than X megabytes of cache on the Clear browsing data dialog. The value X will be substituted. It also explains that the cache is used to speed up the loading of websites.">
     Less than <ph name="UPPER_ESTIMATE">$1<ex>328 MB</ex></ph>. Some sites may load more slowly on your next visit.
   </message>
-  <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED_ALMOST_EMPTY" desc="A counter showing that the user's cache is almost empty, having less than 1 MB of data, on the Advanced Clear browsing data dialog. It also explains that the cache is used to speed up the loading of websites.">
+  <message name="IDS_ANDROID_DEL_CACHE_COUNTER_ADVANCED_ALMOST_EMPTY" desc="A counter showing that the user's cache is almost empty, having less than 1 MB of data, on the Clear browsing data dialog. It also explains that the cache is used to speed up the loading of websites.">
     Less than 1 MB. Some sites may load more slowly on your next visit.
   </message>
   <message name="IDS_DEL_PASSWORDS_COUNTER" desc="A counter showing how many passwords the user has. The list of example domains associated with the user's passwords is denoted by the placeholder DOMAIN_LIST.">
@@ -147,8 +163,8 @@
   <message name="IDS_DEL_COOKIES_COUNTER_ADVANCED" desc="A counter showing the number of sites that use cookies.">
     {COUNT, plural,
       =0 {None}
-      =1 {From 1 site }
-      other {From # sites }}
+      =1 {From 1 site}
+      other {From # sites}}
   </message>
   <message name="IDS_DEL_COOKIES_COUNTER_ADVANCED_WITH_SIGNED_IN_EXCEPTION" desc="A counter showing the number of sites that use cookies, followed by an exception message that the user will stay signed in to their Google account.">
     {COUNT, plural,
@@ -156,7 +172,7 @@
       =1 {From 1 site (you'll stay signed in to your Google Account)}
       other {From # sites (you'll stay signed in to your Google Account)}}
   </message>
-  <message name="IDS_ANDROID_DEL_COOKIES_COUNTER_ADVANCED" desc="A counter showing the number of sites that use cookies on the advanced Clear browsing data screen on Android. It also explains that deleting these cookies will sign you out of most sites.">
+  <message name="IDS_ANDROID_DEL_COOKIES_COUNTER_ADVANCED" desc="A counter showing the number of sites that use cookies on the Clear browsing data screen on Android. It also explains that deleting these cookies will sign you out of most sites.">
     {COUNT, plural,
       =0 {None}
       =1 {From 1 site. Signs you out of most sites. }
@@ -198,5 +214,50 @@
   </message>
   <message name="IDS_DEL_TABS_MULTIWINDOW_COUNTER" desc="A counter showing how many tabs the user opened or modified across multiple windows.">
     <ph name="TAB_COUNT">$1<ex>5 tabs</ex></ph> from <ph name="WINDOW_COUNT">$2<ex>2 windows</ex></ph> on this device
+  </message>
+  <message name="IDS_DEL_GOOGLE_COOKIES_SIGNOUT_LINK" desc="A message that will be appended to IDS_DEL_COOKIES_COUNTER_ADVANCED if the user is signed in. It informs the user that their Google cookies will only be deleted if they signed out of Chrome. This string includes a link that, when clicked on, will sign the user out of Chrome.">
+    To delete Google cookies from this device, <ph name="BEGIN_LINK">&lt;a href="#" target="_blank" id="signOutLink"&gt;</ph>sign out of Chrome<ph name="END_LINK">&lt;/a&gt;</ph>.
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_IN_GOOGLE_PASSWORD_MANAGER" desc="Description for the 'Passwords and Passkeys' linkout in the 'Other Google Data' subpage inside the 'Delete browsing data' dialog. This lets users know that passwords and passkeys can be managed and deleted in Google password manager.">
+    Manage in Google Password Manager
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_IN_YOUR_GOOGLE_ACCOUNT" desc="Description for the MyActivity and Search History linkouts in the 'Other Google Data' subpage inside the 'Delete browsing data' dialog. This lets users know that this data can be managed and deleted in their Google account.">
+    Manage in your Google Account
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_OTHER_DATA_LABEL" desc="Label for the 'Manage other data' subpage entry-point in the 'Delete Browsing Data' dialog where the user can find link-outs to manage their data outside of Chrome. This is the label shown when the user does not have Google as their default search engine.">
+    Manage other data
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_OTHER_GOOGLE_DATA_LABEL" desc="Label for the 'Manage other Google data' subpage entry-point in the 'Delete Browsing Data' dialog where the user can find link-outs to manage their data outside of Chrome. This is the label shown when the user has Google as their default search engine.">
+    Manage other Google data
+  </message>
+  <message name="IDS_SETTINGS_MY_ACTIVITY" desc="Label for the 'My Activity' linkout in the 'Other Google Data' subpage inside the 'Delete browsing data' dialog, where the user can see and manage data that is stored outside of Chrome. This linkout is specifically for activity data stored in the user's Google account.">
+    My Activity
+  </message>
+  <message name="IDS_SETTINGS_OTHER_DATA_TITLE" desc="Title for the 'Other Data' subpage inside the 'Delete browsing data' dialog, where the user can see and manage data that is stored outside of Chrome. This is the title shown when the user did not set Google as their default search engine, indicating that they may have data stored outside of Google.">
+    Other data
+  </message>
+  <message name="IDS_SETTINGS_OTHER_GOOGLE_DATA_TITLE" desc="Title for the 'Other Google Data' subpage inside the 'Delete browsing data' dialog, where the user can see and manage data that is stored outside of Chrome. This is the title shown when the user set Google as their default search engine, indicating that all data linked in this subpage is stored within Google.">
+    Other Google data
+  </message>
+  <message name="IDS_SETTINGS_PASSWORDS_AND_PASSKEYS" desc="Label for the 'Passwords and Passkeys' linkout in the 'Other Google Data' subpage inside the 'Delete browsing data' dialog, where the user can see and manage data that is stored outside of Chrome. This linkout is specifically for passwords and passkeys stored in Google password manager.">
+    Passwords and passkeys
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_PASSWORDS_SUB_LABEL" desc="Sub-label for the 'Manage other Data' subpage entrypoint in the 'Delete Browsing Data' dialog, explaining to the user that passwords can only be deleted in their management settings.">
+    Passwords can be deleted in their management settings
+  </message>
+  <message name="IDS_SETTINGS_SEARCH_HISTORY" desc="Label for the 'Search history' linkout in the 'Other Google Data' subpage inside the 'Delete browsing data' dialog, where the user can see and manage data that is stored outside of Chrome. This linkout is specifically for search history stored in the user's default search engine account.">
+    Search history
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_OTHER_DATA_SUB_LABEL" desc="Sub-label for the 'Manage other Google Data' option in the 'Delete Browsing Data' dialog, explaining to the user that search history and passwords can be deleted outside of Chrome in their respective management settings.">
+    Search history and passwords can be deleted in their management settings
+  </message>
+  <message name="IDS_SETTINGS_OTHER_DATA_DESCRIPTION" desc="Description text at the top of the 'Other Google data' subpage in the 'Delete browsing data' settings dialog. It informs users that data linked in this page are not managed or deleted in Chrome.">
+    To delete this data, go to its management settings
+  </message>
+  <message name="IDS_SETTINGS_CLEAR_NON_GOOGLE_SEARCH_HISTORY_NON_PREPOPULATED_DSE" desc="A description informing the user about the way to clear their search history when their Default Search Engine is not Google.">
+    See your search engine's instructions for deleting your search history, if applicable
+  </message>
+  <message name="IDS_SETTINGS_CLEAR_NON_GOOGLE_SEARCH_HISTORY_PREPOPULATED_DSE" desc="A description informing the user about the way to clear their search history when their Default Search Engine is not Google.">
+    Your search engine is <ph name="DSE">$1<ex>Bing</ex></ph>. See their instructions for deleting your search history, if applicable.
   </message>
 </grit-part>

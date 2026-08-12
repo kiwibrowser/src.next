@@ -4,6 +4,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_COLOR_FUNCTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_COLOR_FUNCTION_H_
 
+#include <array>
+
 #include "base/containers/fixed_flat_map.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
@@ -90,9 +92,11 @@ class ColorFunction {
           {Color::ColorSpace::kSRGB, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kSRGBLinear, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kDisplayP3, MetadataEntry::kColorRgb},
+          {Color::ColorSpace::kDisplayP3Linear, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kA98RGB, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kProPhotoRGB, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kRec2020, MetadataEntry::kColorRgb},
+          {Color::ColorSpace::kRec2100Linear, MetadataEntry::kColorRgb},
           {Color::ColorSpace::kXYZD50, MetadataEntry::kColorXyz},
           {Color::ColorSpace::kXYZD65, MetadataEntry::kColorXyz},
           {Color::ColorSpace::kLab, MetadataEntry::kLab},

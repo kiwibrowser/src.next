@@ -6,10 +6,10 @@
 #define CONTENT_BROWSER_AGENT_CLUSTER_KEY_H_
 
 #include <optional>
+#include <variant>
 
-#include "content/browser/security/coop/cross_origin_isolation_mode.h"
 #include "content/common/content_export.h"
-#include "third_party/abseil-cpp/absl/types/variant.h"
+#include "third_party/blink/public/mojom/frame/agent_cluster_key.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -29,21 +29,33 @@ namespace content {
 // The AgentClusterKey is computed upon navigation, or when launching a worker.
 // It is then passed to RenderFrameHostManager to determine which SiteInstance
 // is appropriate to host the execution context.
-// TODO(crbug.com/342365078): Currently, AgentClusterKey is only computed when a
-// document has a Document-Isolation-Policy. Compute it on all navigations. Once
-// this is properly done, use the AgentClusterKey to replace the site URL in
-// SiteInfo, as it will only duplicate the information in AgentClusterKey.
+//
+// The AgentClusterKey is passed to the renderer process as a
+// blink::mojom::AgentClusterKey in the CommitNavigationParams. It is then
+// converted to a blink::WebAgentClusterKey and passed to blink, where it is
+// converted again to a blink::AgentClusterKey. The blink versions of the
+// AgentClusterKey are mostly similar to this one, except that they do not track
+// the OAC status of the creator of the AgentClusterKey, since OAC tracking is
+// done entirely in the browser process.
+//
+// LINT.IfChange(AgentClusterKey)
+// IMPORTANT: when adding new members to this class, check if they should also
+// be sent to the renderer process and update the blink versions of the
+// AgentClusterKey:
+//   - third_party/blink/public/mojom/frame/agent_cluster_key.mojom
+//   - third_party/blink/public/web/web_agent_cluster_key.h
+//   - third_party/blink/renderer/core/execution_context/agent_cluster_key.h
 class CONTENT_EXPORT AgentClusterKey {
  public:
   // Cross-origin isolated agent clusters have an additional isolation key.
   struct CONTENT_EXPORT CrossOriginIsolationKey {
     CrossOriginIsolationKey(
         const url::Origin& common_coi_origin,
-        CrossOriginIsolationMode cross_origin_isolation_mode);
+        blink::mojom::CrossOriginIsolationMode cross_origin_isolation_mode,
+        bool cross_origin_isolated_through_dip);
     CrossOriginIsolationKey(const CrossOriginIsolationKey& other);
     ~CrossOriginIsolationKey();
     bool operator==(const CrossOriginIsolationKey& b) const;
-    bool operator!=(const CrossOriginIsolationKey& b) const;
     // The origin of the document which triggered cross-origin isolation. This
     // might be different from the origin returned by AgentClusterKey::GetOrigin
     // when cross-origin isolation was enabled by COOP + COEP. It should always
@@ -57,26 +69,73 @@ class CONTENT_EXPORT AgentClusterKey {
     // isolation. In this case, the web-visible isolation restrictions apply,
     // but do not lead to access to extra APIs. This is logical cross-origin
     // isolation.
-    CrossOriginIsolationMode cross_origin_isolation_mode;
+    blink::mojom::CrossOriginIsolationMode cross_origin_isolation_mode;
+
+    // Whether cross-origin isolation was obtained through
+    // DocumentIsolationPolicy or through COOP and COEP. This impacts process
+    // allocation when SiteIsolation is not available.
+    bool cross_origin_isolated_through_dip;
   };
 
-  // Note: CreateSiteKeyed and CreateOriginKeyed are currently only used in
-  // tests. Eventually, we will refactor the Origin-Agent-Cluster code so that
-  // all navigations receive an AgentClusterKey. See crbug.com/342365078.
+  // Tracks the state of an Origin-Agent-Cluster request for a document.
+  // The Origin-Agent-Cluster header can be used to request either an
+  // origin-keyed agent cluster (1?) or a site-keyed one (0?). In the absence of
+  // an OAC header, agent clusters will be either site-keyed or origin-keyed by
+  // default, depending on whether features::kOriginKeyedProcessesByDefault is
+  // enabled.
+  enum class OACStatus {
+    kOriginKeyedByHeader,
+    kSiteKeyedByHeader,
+    kOriginKeyedByDefault,
+    kSiteKeyedByDefault
+  };
+
+  // The following functions are used to create appropriate AgentClusterKeys for
+  // a navigation. The |oac_status| parameter passed to the AgentClusterKey is
+  // the OAC status computed for the navigation. Note that it corresponds to OAC
+  // backed by actual process isolation, and not logical OAC (ie OAC enabled
+  // only in the renderer process).
+  //
   // Following the deprecation of document.domain by default (a.k.a.
   // Origin-Agent-Cluster by default), AgentClusterKeys should be origin keyed
   // unless the document sends a "Origin-Agent-Cluster: ?0" header. However,
   // without SiteInstanceGroup, this would lead to extra process creation. So
-  // when computing AgentClusterKeys for all navigations, we might need to make
-  // them site-keyed by default until SiteInstanceGroup ships.
+  // when computing AgentClusterKeys for all navigations, we make
+  // them site-keyed by default. Eventually, we should make them origin-keyed,
+  // but have SiteInfos with a same-site AgentClusterKey share a
+  // SiteInstanceGroup when kOriginKeyedProcessesByDefault is not enabled.
   // See crbug.com/40176090.
-  static AgentClusterKey CreateSiteKeyed(const GURL& site_url);
-  static AgentClusterKey CreateOriginKeyed(const url::Origin& origin);
+  //
+  // When using CreateSiteKeyed, the |oac_status| must be kSiteKeyed*.
+  //
+  // When using CreateOriginKeyed, the |oac_status| does not have to be
+  // kOriginKeyed*. The browser might want to
+  // assign origin-keyed agent clusters in some cases, even when the document
+  // did not request OAC and kOriginKeyedProcessesByDefault is not enabled. This
+  // does not happen in practice currently, but should happen when we convert
+  // the following cases to always create origin-keyed AgentClusterKeys:
+  //   - origin-isolated sandboxed data iframes
+  //   - legacy kStrictOriginIsolation mode.
+  //
+  // When using CreateWithCrossOriginIsolationKey, the |oac_status| does not
+  // have to be kOriginKeyed*. Cross-origin isolated contexts are always
+  // origin-keyed per spec, regardless of the OAC header.
+  static AgentClusterKey CreateSiteKeyed(const GURL& site_url,
+                                         const OACStatus& oac_status);
+  static AgentClusterKey CreateOriginKeyed(const url::Origin& origin,
+                                           const OACStatus& oac_status);
 
   static AgentClusterKey CreateWithCrossOriginIsolationKey(
       const url::Origin& origin,
-      const AgentClusterKey::CrossOriginIsolationKey& isolation_key);
+      const AgentClusterKey::CrossOriginIsolationKey& isolation_key,
+      const OACStatus& oac_status);
 
+  // The default constructor will create an AgentClusterKey site-keyed to the
+  // empty URL.
+  // TODO(crbug.com/342366372): Once SiteInstanceGroup has launched for all
+  // SiteInstances, the default constructor should return an origin-keyed
+  // AgentClusterKey with an empty origin.
+  AgentClusterKey();
   AgentClusterKey(const AgentClusterKey& other);
   ~AgentClusterKey();
 
@@ -84,11 +143,35 @@ class CONTENT_EXPORT AgentClusterKey {
   bool IsSiteKeyed() const;
   bool IsOriginKeyed() const;
 
+  // The status of the Origin-Agent-Cluster header request for the navigation
+  // that created the AgentClusterKey.
+  // This is mainly used in SiteInfo to distinguish between SiteInfos that
+  // received process isolation for their origin due to an explicit OAC opt-in
+  // via header (kOriginKeyedByHeader) from the SiteInfos that received process
+  // isolation due to features::kOriginKeyedProcessesByDefault
+  // (kOriginKeyedByDefault). The former must be tracked per BrowsingInstance to
+  // maintain a consistent OAC state, while the latter do not need to do so.
+  // Note that this only applies to OAC that is backed by process isolation. OAC
+  // can also be logical, in which case it will only apply in the renderer
+  // process and is not tracked in the AgentClusterKey (and by extension
+  // SiteInfo). Also note that having an |oac_status_| of kOriginKeyedByHeader
+  // or kOriginKeyedByDefault will make the AgentClusterKey origin-keyed, the
+  // reverse is not true. It is possible for the AgentClusterKey to be
+  // origin-keyed and |oac_status_| to be kSiteKeyedByDefault, for example in
+  // the case of a cross-origin isolated document with DocumentIsolationPolicy.
+  const OACStatus& oac_status() const { return oac_status_; }
+
   // The site URL or the origin of the AgentClusterKey. Each function should
   // only be called when the Agent Cluster is site-keyed or origin-keyed
   // respectively. The functions will CHECK fail if called in the wrong cases.
   const GURL& GetSite() const;
   const url::Origin& GetOrigin() const;
+
+  // This will return a URL based on the site URL or the origin of the
+  // AgentClusterKey depending on whether the AgentClusterKey is site-keyed or
+  // origin-keyed. Prefer comparing the Site URL or the Origin directly when
+  // possible.
+  GURL GetURL() const;
 
   // Returns nullopt if the AgentClusterKey is not cross-origin isolated.
   // Otherwise, returns the CrossOriginIsolationKey associated to the
@@ -96,19 +179,63 @@ class CONTENT_EXPORT AgentClusterKey {
   const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
   GetCrossOriginIsolationKey() const;
 
+  // Returns true if the AgentClusterKey is cross-origin isolated.
+  bool IsCrossOriginIsolated() const;
+
   bool operator==(const AgentClusterKey& b) const;
-  bool operator!=(const AgentClusterKey& b) const;
 
   // Needed for tie comparisons in SiteInfo.
   bool operator<(const AgentClusterKey& b) const;
 
- private:
-  AgentClusterKey(const absl::variant<GURL, url::Origin>& key,
-                  const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
-                      isolation_key);
+  // Creates a mojo version of AgentClusterKey to send to the renderer process
+  // in CommitNavigationParams. Ideally, we would base this AgentClusterKey on
+  // the SiteInstance's AgentClusterKey. However, due to the constraints of
+  // process allocation, there are quite a few edge cases where the
+  // SiteInstance's AgentClusterKey differs from what the HTML spec would have
+  // us assign to the navigation. This is why we end up creating a brand new
+  // mojo version of the AgentClusterKey to ensure that we match the HTML spec.
+  //
+  // The returned key's site URL or Origin will be based on |origin_to_commit|.
+  //
+  // If |coi_key| has value, a cross-origin isolated origin-keyed
+  // blink::mojom::AgentClusterKey will be returned.
+  //
+  // If |is_origin_keyed| is true, an origin-keyed blink::mojom::AgentClusterKey
+  // will be returned. Note that even if |is_origin_keyed| is false, an origin
+  // keyed key will still be returned if a |coi_key| was provided.
+  //
+  // In all other cases, a site-keyed blink::mojom::AgentClusterKey will be
+  // returned.
+  static blink::mojom::AgentClusterKeyPtr
+  CreateAgentClusterKeyForNavigationCommit(
+      const url::Origin& origin_to_commit,
+      bool is_origin_keyed,
+      const std::optional<CrossOriginIsolationKey>& coi_key);
 
-  // The key used for the agent cluster. By default, this is a site URL.
-  absl::variant<GURL, url::Origin> key_;
+ private:
+  AgentClusterKey(const std::variant<GURL, url::Origin>& key,
+                  const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
+                      isolation_key,
+                  const OACStatus& oac_status);
+
+  // The origin or site URL that all execution contexts in the agent cluster
+  // must share. By default, this is a site URL and the agent cluster is
+  // site-keyed. The agent cluster can also be origin-keyed, in which case
+  // execution contexts in the agent cluster must share the same origin, as
+  // opposed to the site URL.
+  //
+  // For example, execution contexts with origin "https://example.com" and
+  // "https://subdomain.example.com" can be placed in the same site-keyed agent
+  // cluster with site URL key "https://example.com". But an execution context
+  // with origin "https://subdomain.example.com" cannot be placed in
+  // origin-keyed agent cluster with origin key "https://example.com" (because
+  // it is not same-origin with the origin key of the agent cluster).
+  //
+  // When used in ProcessLocks, in the case of an unlocked AllowAnySite process,
+  // the key_ will be an empty GURL in non-cross-origin isolated cases. For
+  // cross-origin isolated cases, it will be an empty origin (along with the
+  // appropriate cross-origin isolation key).
+  std::variant<GURL, url::Origin> key_;
 
   // This is used by DocumentIsolationPolicy to isolate the document in an agent
   // cluster with the appropriate cross-origin isolation status. Setting this to
@@ -117,11 +244,32 @@ class CONTENT_EXPORT AgentClusterKey {
   // set based on DocumentIsolationPolicy. It should also be set for documents
   // in a page with COOP and COEP.
   std::optional<AgentClusterKey::CrossOriginIsolationKey> isolation_key_;
+
+  // Tracks the status of the OAC header opt-in request for the navigation that
+  // created this AgentClusterKey.
+  // Note: this is not taken into account in
+  // AgentClusterKey::operator== because we want a document
+  // with OAC: 1? to have an AgentClusterKey equal to the AgentClusterKey of a
+  // document that got origin isolation through other means
+  // (features::kOriginKeyedProcessesByDefault,
+  // cross-origin isolation provided the cross-origin isolation status
+  // match...). Origin isolation is taken into account because origin-keyed and
+  // site-keyed AgentClusterKeys are never equivalent. The precise manner in
+  // which it was achieved is not.
+  AgentClusterKey::OACStatus oac_status_ =
+      AgentClusterKey::OACStatus::kSiteKeyedByDefault;
 };
+// LINT.ThenChange(third_party/blink/public/mojom/frame/agent_cluster_key.mojom,
+// third_party/blink/public/web/web_agent_cluster_key.h,
+// third_party/blink/renderer/core/execution_context/agent_cluster_key.h)
 
 CONTENT_EXPORT std::ostream& operator<<(
     std::ostream& out,
     const AgentClusterKey& agent_cluster_key);
+
+CONTENT_EXPORT std::ostream& operator<<(
+    std::ostream& out,
+    const AgentClusterKey::OACStatus& status);
 
 }  // namespace content
 

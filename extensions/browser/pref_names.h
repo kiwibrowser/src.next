@@ -16,9 +16,9 @@
 namespace extensions {
 namespace pref_names {
 
-// If the given |scope| is persisted, return true and populate |result| with the
+// If the given `scope` is persisted, return true and populate `result` with the
 // appropriate property (i.e. one of kPref*) within a kExtensions dictionary. If
-// |scope| is not persisted, return false, and leave |result| unchanged.
+// `scope` is not persisted, return false, and leave `result` unchanged.
 bool ScopeToPrefName(extensions::api::types::ChromeSettingScope scope,
                      std::string* result);
 
@@ -45,6 +45,15 @@ inline constexpr char kAppFullscreenAllowed[] = "apps.fullscreen.allowed";
 // A boolean indicating if external extensions are blocked from installing.
 inline constexpr char kBlockExternalExtensions[] =
     "extensions.block_external_extensions";
+
+// Records the last time the CWS Info Service downloaded information about
+// currently installed extensions from the Chrome Web Store, successfully
+// compared it with the information stored in extension_prefs and updated the
+// latter if necessary. The timestamp therefore represents the "freshness" of
+// the CWS information saved.
+inline constexpr char kCWSInfoTimestamp[] = "extensions.cws_info_timestamp";
+inline constexpr char kCWSInfoFetchErrorTimestamp[] =
+    "extensions.cws_info_fetch_error_timestamp";
 
 // A preference for a list of Component extensions that have been
 // uninstalled/removed and should not be reloaded.
@@ -73,7 +82,7 @@ inline constexpr char kExtensionManagement[] = "extensions.management";
 inline constexpr char kExtensionUnpublishedAvailability[] =
     "extensions.unpublished_availability";
 
-// A allowlist of extension ids the user can install: exceptions from the
+// An allowlist of extension ids the user can install: exceptions from the
 // following denylist.
 inline constexpr char kInstallAllowList[] = "extensions.install.allowlist";
 
@@ -88,6 +97,16 @@ inline constexpr char kInstallDenyList[] = "extensions.install.denylist";
 // This preference is set by an admin policy, and meant to be only
 // accessed through extensions::ExternalPolicyProvider.
 inline constexpr char kInstallForceList[] = "extensions.install.forcelist";
+
+// A list containing the ids of extensions that Chrome will install disabled for
+// acceptance by the user. This preference is typically populated from the
+// contents of the "initial_extensions" list in the installation's
+// inital_preferences file only for the initial profile during first run.
+inline constexpr char kInitialInstallList[] = "extensions.install.initiallist";
+
+// String pref indicates the name of the provider of the `kInitialInstallList`.
+inline constexpr char kInitialInstallProviderName[] =
+    "extensions.install.initialprovidername";
 
 // A dictionary containing, for each extension id, additional
 // OAuth redirect URLs that will be allowed in chrome.identity API.
@@ -107,20 +126,9 @@ inline constexpr char kNativeMessagingAllowlist[] =
 inline constexpr char kNativeMessagingUserLevelHosts[] =
     "native_messaging.user_level_hosts";
 
-// An integer indicates the availability of manifest v2 extensions. The value is
-// controlled by the ExtensionManifestV2Availability policy. More details can
-// be found at ExtensionManifestV2Availability.yaml.
-inline constexpr char kManifestV2Availability[] = "extensions.manifest_v2";
-
 // A preference that tracks extensions pinned to the toolbar. This is a list
 // object stored in the Preferences file. The extensions are stored by ID.
 inline constexpr char kPinnedExtensions[] = "extensions.pinned_extensions";
-
-// Indicates on-disk data might have skeletal data that needs to be cleaned
-// on the next start of the browser.
-// TODO(crbug.com/40922689): Delete ExtensionsPref::kStorageGarbageCollect.
-inline constexpr char kStorageGarbageCollect[] =
-    "extensions.storage.garbagecollect";
 
 // Pref for policy to enable/disable loading extension from command line
 inline constexpr char kExtensionInstallTypeBlocklist[] =
@@ -129,19 +137,43 @@ inline constexpr char kExtensionInstallTypeBlocklist[] =
 // Properties in kExtensions dictionaries --------------------------------------
 
 // Extension-controlled preferences.
-extern const char kPrefPreferences[];
+inline constexpr char kPrefPreferences[] = "preferences";
 
 // Extension-controlled incognito preferences.
-extern const char kPrefIncognitoPreferences[];
+inline constexpr char kPrefIncognitoPreferences[] = "incognito_preferences";
 
 // Extension-controlled regular-only preferences.
-extern const char kPrefRegularOnlyPreferences[];
+inline constexpr char kPrefRegularOnlyPreferences[] =
+    "regular_only_preferences";
 
 // Extension-set content settings.
-extern const char kPrefContentSettings[];
+inline constexpr char kPrefContentSettings[] = "content_settings";
 
 // Extension-set incognito content settings.
-extern const char kPrefIncognitoContentSettings[];
+inline constexpr char kPrefIncognitoContentSettings[] =
+    "incognito_content_settings";
+
+// Per-profile UUID to distinguish global shortcut sessions for
+// org.freedesktop.portal.GlobalShortcuts.
+inline constexpr char kGlobalShortcutsUuid[] =
+    "extensions.global_shortcuts.uuid";
+
+// Boolean that specifies whether ExtensionInstallCloudPolicyChecks is enabled.
+// This pref is used by both the profile and the browser, it can be found in the
+// local state as well as the profile prefs.
+inline constexpr char kExtensionInstallCloudPolicyChecksEnabled[] =
+    "extensions.install.cloud_policy_checks_enabled";
+
+// A pref that stores the expiration time for the enterprise promotion banner
+// on the Chrome Web Store. After this time, the banner will not be shown
+// anymore.
+inline constexpr char kEnterprisePromotionExpirationTime[] =
+    "extensions.enterprise_promotion.expiration_time";
+
+// A pref that stores whether the enterprise promotion banner on the Chrome
+// Web Store has been dismissed by the user by clicking the banner button.
+inline constexpr char kHasDismissedEnterprisePromotion[] =
+    "extensions.has_dismissed_enterprise_promotion";
 
 }  // namespace pref_names
 }  // namespace extensions

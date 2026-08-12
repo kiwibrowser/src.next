@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/core/css/css_font_feature_values_map.h"
 #include "third_party/blink/renderer/core/css/css_rule.h"
-#include "third_party/blink/renderer/core/css/style_rule_font_feature_values.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -33,6 +32,8 @@ class CSSFontFeatureValuesRule final : public CSSRule {
   CSSFontFeatureValuesMap* characterVariant();
   CSSFontFeatureValuesMap* styleset();
 
+  const StyleRuleFontFeatureValues* FontFeatureValues();
+
   String cssText() const override;
   void Reattach(StyleRuleBase*) override;
 
@@ -42,6 +43,12 @@ class CSSFontFeatureValuesRule final : public CSSRule {
   CSSRule::Type GetType() const override { return kFontFeatureValuesRule; }
 
   Member<StyleRuleFontFeatureValues> font_feature_values_rule_;
+  Member<CSSFontFeatureValuesMap> annotation_;
+  Member<CSSFontFeatureValuesMap> ornaments_;
+  Member<CSSFontFeatureValuesMap> stylistic_;
+  Member<CSSFontFeatureValuesMap> swash_;
+  Member<CSSFontFeatureValuesMap> character_variant_;
+  Member<CSSFontFeatureValuesMap> styleset_;
 };
 
 template <>

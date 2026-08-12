@@ -7,6 +7,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_static_range_init.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_list.h"
 #include "third_party/blink/renderer/core/dom/range.h"
@@ -49,7 +50,7 @@ HTMLDocument& StaticRangeTest::GetDocument() const {
 
 TEST_F(StaticRangeTest, SplitTextNodeRangeWithinText) {
   V8TestingScope scope;
-  GetDocument().body()->setInnerHTML("1234");
+  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes("1234");
   auto* old_text = To<Text>(GetDocument().body()->firstChild());
 
   auto* static_range04 = MakeGarbageCollected<StaticRange>(
@@ -120,16 +121,16 @@ TEST_F(StaticRangeTest, SplitTextNodeRangeWithinText) {
 
 TEST_F(StaticRangeTest, SplitTextNodeRangeOutsideText) {
   V8TestingScope scope;
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(
       "<span id=\"outer\">0<span id=\"inner-left\">1</span>SPLITME<span "
       "id=\"inner-right\">2</span>3</span>");
 
   Element* outer =
-      GetDocument().getElementById(AtomicString::FromUTF8("outer"));
+      GetDocument().getElementById(AtomicString::FromUtf8("outer"));
   Element* inner_left =
-      GetDocument().getElementById(AtomicString::FromUTF8("inner-left"));
+      GetDocument().getElementById(AtomicString::FromUtf8("inner-left"));
   Element* inner_right =
-      GetDocument().getElementById(AtomicString::FromUTF8("inner-right"));
+      GetDocument().getElementById(AtomicString::FromUtf8("inner-right"));
   auto* old_text = To<Text>(outer->childNodes()->item(2));
 
   auto* static_range_outer_outside =
@@ -235,7 +236,7 @@ TEST_F(StaticRangeTest, SplitTextNodeRangeOutsideText) {
 
 TEST_F(StaticRangeTest, InvalidToRange) {
   V8TestingScope scope;
-  GetDocument().body()->setInnerHTML("1234");
+  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes("1234");
   auto* old_text = To<Text>(GetDocument().body()->firstChild());
 
   auto* static_range04 = MakeGarbageCollected<StaticRange>(
@@ -255,6 +256,86 @@ TEST_F(StaticRangeTest, InvalidToRange) {
   DummyExceptionStateForTesting exception_state;
   static_range04->toRange(exception_state);
   EXPECT_TRUE(exception_state.HadException());
+}
+
+TEST_F(StaticRangeTest, OwnerDocumentMatchesStartContainerDocument) {
+  V8TestingScope scope;
+  // The StaticRange constructor surfaced via the IDL takes a
+  // |StaticRangeInit| dictionary. Its |owner_document_| must reflect the
+  // document that the start container actually lives in, regardless of which
+  // realm or document the constructor is being invoked from. This mirrors how
+  // |Range::setStart| updates a Range's owner document when given a node from
+  // a different document, and matches the W3C StaticRange specification which
+  // does not define an owner document for StaticRange (it is a Blink internal
+  // field). Without this, cross-realm consumers such as
+  // |HighlightRegistry::ValidateHighlightMarkers| reject the range because
+  // |range->OwnerDocument()| no longer matches the document being painted.
+  // See https://issues.chromium.org/issues/407812149.
+  ScopedNullExecutionContext other_execution_context;
+  Persistent<HTMLDocument> other_document = HTMLDocument::CreateForTest(
+      other_execution_context.GetExecutionContext());
+  auto* other_html = MakeGarbageCollected<HTMLHtmlElement>(*other_document);
+  other_html->AppendChild(
+      MakeGarbageCollected<HTMLBodyElement>(*other_document));
+  other_document->AppendChild(other_html);
+  other_document->body()->SetInnerHTMLWithoutTrustedTypes("hello");
+  auto* other_text = To<Text>(other_document->body()->firstChild());
+
+  auto* init = MakeGarbageCollected<StaticRangeInit>();
+  init->setStartContainer(other_text);
+  init->setStartOffset(0u);
+  init->setEndContainer(other_text);
+  init->setEndOffset(5u);
+
+  auto* static_range = StaticRange::Create(init, ASSERT_NO_EXCEPTION);
+  ASSERT_TRUE(static_range);
+  EXPECT_EQ(&static_range->OwnerDocument(), other_document.Get())
+      << "StaticRange::OwnerDocument() must follow the start container's "
+         "document, not the document associated with the calling realm.";
+  EXPECT_TRUE(static_range->IsValid());
+
+  // Sanity: the start/end containers and offsets round-trip unchanged.
+  EXPECT_EQ(other_text, static_range->startContainer());
+  EXPECT_EQ(0u, static_range->startOffset());
+  EXPECT_EQ(other_text, static_range->endContainer());
+  EXPECT_EQ(5u, static_range->endOffset());
+}
+
+TEST_F(StaticRangeTest,
+       IsInvalidWhenStartAndEndContainersAreInDifferentDocuments) {
+  V8TestingScope scope;
+  // A StaticRange whose start and end containers live in different documents
+  // is constructible, but |IsValid()| must return false because the two
+  // containers have different roots. Downstream consumers such as
+  // |HighlightRegistry::ValidateHighlightMarkers| check |IsValid()| via
+  // |IsAbstractRangePaintable| and silently drop such ranges, so we lock the
+  // behavior in here.
+  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes("hello");
+  auto* main_text = To<Text>(GetDocument().body()->firstChild());
+
+  ScopedNullExecutionContext other_execution_context;
+  Persistent<HTMLDocument> other_document = HTMLDocument::CreateForTest(
+      other_execution_context.GetExecutionContext());
+  auto* other_html = MakeGarbageCollected<HTMLHtmlElement>(*other_document);
+  other_html->AppendChild(
+      MakeGarbageCollected<HTMLBodyElement>(*other_document));
+  other_document->AppendChild(other_html);
+  other_document->body()->SetInnerHTMLWithoutTrustedTypes("world");
+  auto* other_text = To<Text>(other_document->body()->firstChild());
+
+  auto* init = MakeGarbageCollected<StaticRangeInit>();
+  init->setStartContainer(main_text);
+  init->setStartOffset(0u);
+  init->setEndContainer(other_text);
+  init->setEndOffset(5u);
+
+  auto* static_range = StaticRange::Create(init, ASSERT_NO_EXCEPTION);
+  ASSERT_TRUE(static_range);
+  // The owner document follows the start container per the IDL contract.
+  EXPECT_EQ(&static_range->OwnerDocument(), &GetDocument());
+  EXPECT_FALSE(static_range->IsValid())
+      << "A StaticRange whose endpoints are in different documents must "
+         "report IsValid() == false.";
 }
 
 }  // namespace blink

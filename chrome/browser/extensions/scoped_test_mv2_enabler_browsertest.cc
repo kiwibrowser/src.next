@@ -5,30 +5,24 @@
 #include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 
 #include "base/one_shot_event.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/extensions/manifest_v2_experiment_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/manifest_v2_handler.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_features.h"
 #include "extensions/test/test_extension_dir.h"
 
 namespace extensions {
 
 class ScopedTestMV2EnablerBrowserTest : public ExtensionBrowserTest {
  public:
-  ScopedTestMV2EnablerBrowserTest() {
-    feature_list_.InitAndEnableFeature(
-        extensions_features::kExtensionManifestV2Disabled);
-  }
+  ScopedTestMV2EnablerBrowserTest() = default;
   ~ScopedTestMV2EnablerBrowserTest() override = default;
 
  private:
-  base::test::ScopedFeatureList feature_list_;
   ScopedTestMV2Enabler mv2_enabler_;
 };
 
@@ -50,23 +44,23 @@ IN_PROC_BROWSER_TEST_F(ScopedTestMV2EnablerBrowserTest,
                        mojom::ManifestLocation::kInternal);
   ASSERT_TRUE(extension);
 
-  ManifestV2ExperimentManager* experiment_manager =
-      ManifestV2ExperimentManager::Get(profile());
+  ManifestV2Handler* handler = ManifestV2Handler::Get(profile());
 
-  // The experiment manager should not indicate the extension should be
-  // blocked from being installed.
-  EXPECT_FALSE(experiment_manager->ShouldBlockExtensionInstallation(
-      extension->id(), extension->manifest_version(), extension->GetType(),
-      extension->location(), extension->hashed_id()));
+  // The handler should not indicate the extension should be blocked from being
+  // installed.
+  EXPECT_FALSE(handler->ShouldBlockExtensionInstallation(
+      extension->manifest_version(), extension->GetType(),
+      extension->location()));
 
   // Even after disabling affected extensions, the extension should remain
   // enabled, since MV2 extensions are allowed for testing.
-  experiment_manager->DisableAffectedExtensionsForTesting();
+  handler->DisableAffectedExtensionsForTesting();
 
   EXPECT_TRUE(
       extension_registry()->enabled_extensions().Contains(extension->id()));
-  EXPECT_EQ(0,
-            ExtensionPrefs::Get(profile())->GetDisableReasons(extension->id()));
+  EXPECT_TRUE(ExtensionPrefs::Get(profile())
+                  ->GetDisableReasons(extension->id())
+                  .empty());
 }
 
 }  // namespace extensions

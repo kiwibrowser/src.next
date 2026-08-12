@@ -8,7 +8,6 @@
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/frame/frame_visual_properties.h"
-#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom.h"
@@ -22,7 +21,6 @@
 #include "third_party/blink/renderer/core/execution_context/remote_security_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
-#include "third_party/blink/renderer/core/frame/csp/conversion_util.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client_impl.h"
@@ -51,8 +49,8 @@ mojom::blink::FrameReplicationStatePtr ToBlinkFrameReplicationState(
   mojom::blink::FrameReplicationStatePtr result =
       mojom::blink::FrameReplicationState::New();
   result->origin = SecurityOrigin::CreateFromUrlOrigin(to_convert->origin);
-  result->name = WebString::FromUTF8(to_convert->name);
-  result->unique_name = WebString::FromUTF8(to_convert->unique_name);
+  result->name = WebString::FromUtf8(to_convert->name);
+  result->unique_name = WebString::FromUtf8(to_convert->unique_name);
 
   for (const auto& header : to_convert->permissions_policy_header)
     result->permissions_policy_header.push_back(header);
@@ -70,6 +68,7 @@ mojom::blink::FrameReplicationStatePtr ToBlinkFrameReplicationState(
   result->has_received_user_gesture_before_nav =
       to_convert->has_received_user_gesture_before_nav;
   result->is_ad_frame = to_convert->is_ad_frame;
+  result->is_secure_context_root = to_convert->is_secure_context_root;
   return result;
 }
 
@@ -252,7 +251,7 @@ WebLocalFrame* WebRemoteFrameImpl::CreateLocalChild(
       FrameInsertType::kInsertInConstructor, name, window_agent_factory, opener,
       document_token, std::move(interface_broker), std::move(policy_container),
       storage_key,
-      /*creator_base_url=*/KURL());
+      /*creator_base_url=*/NullUrl());
   DCHECK(child->GetFrame());
   return child;
 }
@@ -364,8 +363,8 @@ void WebRemoteFrameImpl::InitializeFrameVisualProperties(
       ancestor_widget->PinchGestureActiveInMainFrame();
   visual_properties.screen_infos = ancestor_widget->GetOriginalScreenInfos();
   visual_properties.visible_viewport_size =
-      ancestor_widget->VisibleViewportSizeInDIPs();
-  const WebVector<gfx::Rect>& viewport_segments =
+      ancestor_widget->VisibleViewportSize();
+  const std::vector<gfx::Rect>& viewport_segments =
       ancestor_widget->ViewportSegments();
   visual_properties.root_widget_viewport_segments.assign(
       viewport_segments.begin(), viewport_segments.end());
@@ -401,8 +400,7 @@ v8::Local<v8::Object> WebRemoteFrameImpl::GlobalProxy(
     v8::Isolate* isolate) const {
   return GetFrame()
       ->GetWindowProxy(DOMWrapperWorld::MainWorld(isolate))
-      ->GlobalProxyIfNotDetached()
-      .ToLocalChecked();
+      ->GetGlobalProxy();
 }
 
 gfx::Rect WebRemoteFrameImpl::GetCompositingRect() {
@@ -466,6 +464,7 @@ void WebRemoteFrameImpl::SetReplicatedState(
   remote_frame->SetInsecureRequestPolicy(state->insecure_request_policy);
   remote_frame->EnforceInsecureNavigationsSet(state->insecure_navigations_set);
   remote_frame->SetReplicatedIsAdFrame(state->is_ad_frame);
+  remote_frame->SetReplicatedIsSecureContextRoot(state->is_secure_context_root);
 
   if (state->has_active_user_gesture) {
     // TODO(crbug.com/1087963): This should be hearing about sticky activations

@@ -4,14 +4,19 @@
 
 package org.chromium.chrome.browser.download;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.app.Activity;
 import android.content.Context;
 
 import androidx.annotation.VisibleForTesting;
 
 import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.download.DownloadLocationDialogMetrics.DownloadLocationSuggestionEvent;
 import org.chromium.chrome.browser.download.dialogs.DownloadDialogUtils;
 import org.chromium.chrome.browser.download.dialogs.DownloadLocationDialogController;
@@ -28,17 +33,22 @@ import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
 /** Glues download dialogs UI code and handles the communication to download native backend. */
+@NullMarked
 public class DownloadDialogBridge implements DownloadLocationDialogController {
     private long mNativeDownloadDialogBridge;
 
     private final DownloadLocationDialogCoordinator mLocationDialog;
 
-    private Context mContext;
-    private ModalDialogManager mModalDialogManager;
-    private WindowAndroid mWindowAndroid;
+    private @Nullable Context mContext;
+    private @Nullable ModalDialogManager mModalDialogManager;
+    private @Nullable WindowAndroid mWindowAndroid;
     private @DownloadLocationDialogType int mLocationDialogType;
-    private String mSuggestedPath;
-    private Profile mProfile;
+    private @Nullable String mSuggestedPath;
+    private @Nullable Profile mProfile;
+    // Whether the user actively confirmed the result of the dialog. This is false when the dialog
+    // is not shown and the result is selected without user input, e.g. because there is only one
+    // option to choose from.
+    private boolean mDidUserConfirm;
 
     @VisibleForTesting
     DownloadDialogBridge(
@@ -60,6 +70,7 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
     void destroy() {
         mNativeDownloadDialogBridge = 0;
         mLocationDialog.destroy();
+        resetDialogState();
     }
 
     @CalledByNative
@@ -68,12 +79,12 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
             long totalBytes,
             @ConnectionType int connectionType,
             @DownloadLocationDialogType int dialogType,
-            String suggestedPath,
+            @JniType("std::string") String suggestedPath,
             Profile profile) {
         mWindowAndroid = windowAndroid;
         mProfile = profile;
         Activity activity = windowAndroid.getActivity().get();
-        if (activity == null) {
+        if (!(activity instanceof ModalDialogManagerHolder)) {
             onCancel();
             return;
         }
@@ -129,28 +140,51 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
     }
 
     private void onComplete() {
-        if (mNativeDownloadDialogBridge == 0) return;
+        if (mNativeDownloadDialogBridge == 0) {
+            resetDialogState();
+            return;
+        }
 
         DownloadDialogBridgeJni.get()
-                .onComplete(mNativeDownloadDialogBridge, DownloadDialogBridge.this, mSuggestedPath);
+                .onComplete(mNativeDownloadDialogBridge, mSuggestedPath, mDidUserConfirm);
+        resetDialogState();
     }
 
     private void onCancel() {
-        if (mNativeDownloadDialogBridge == 0) return;
-        DownloadDialogBridgeJni.get()
-                .onCanceled(mNativeDownloadDialogBridge, DownloadDialogBridge.this);
+        if (mNativeDownloadDialogBridge == 0) {
+            resetDialogState();
+            return;
+        }
+        DownloadDialogBridgeJni.get().onCanceled(mNativeDownloadDialogBridge);
         if (mWindowAndroid != null) {
             NewDownloadTab.closeExistingNewDownloadTab(mWindowAndroid);
-            mWindowAndroid = null;
         }
+        resetDialogState();
+    }
+
+    // Drop references to per-dialog activity-scoped objects so this bridge (owned by native
+    // and thus long-lived) does not keep them alive after a dialog completes.
+    private void resetDialogState() {
+        mContext = null;
+        mModalDialogManager = null;
+        mWindowAndroid = null;
+        mProfile = null;
+        mSuggestedPath = null;
+    }
+
+    @VisibleForTesting
+    @Nullable Context getContextForTesting() {
+        return mContext;
     }
 
     // DownloadLocationDialogController implementation.
     @Override
-    public void onDownloadLocationDialogComplete(String returnedPath) {
+    public void onDownloadLocationDialogComplete(String returnedPath, boolean didUserConfirm) {
         mSuggestedPath = returnedPath;
+        mDidUserConfirm = didUserConfirm;
 
         if (mLocationDialogType == DownloadLocationDialogType.LOCATION_SUGGESTION) {
+            assumeNonNull(mProfile);
             boolean isSelected = !mSuggestedPath.equals(getDownloadDefaultDirectory(mProfile));
             DownloadLocationDialogMetrics.recordDownloadLocationSuggestionChoice(isSelected);
         }
@@ -174,7 +208,8 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
     /**
      * @param directory New directory to set as the download default directory.
      */
-    public static void setDownloadAndSaveFileDefaultDirectory(Profile profile, String directory) {
+    public static void setDownloadAndSaveFileDefaultDirectory(
+            Profile profile, @Nullable String directory) {
         DownloadDialogBridgeJni.get()
                 .setDownloadAndSaveFileDefaultDirectory(
                         UserPrefs.get(profile.getOriginalProfile()), directory);
@@ -216,10 +251,13 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
     @NativeMethods
     public interface Natives {
         void onComplete(
-                long nativeDownloadDialogBridge, DownloadDialogBridge caller, String returnedPath);
+                long nativeDownloadDialogBridge,
+                @JniType("std::string") @Nullable String returnedPath,
+                boolean didUserConfirm);
 
-        void onCanceled(long nativeDownloadDialogBridge, DownloadDialogBridge caller);
+        void onCanceled(long nativeDownloadDialogBridge);
 
-        void setDownloadAndSaveFileDefaultDirectory(PrefService prefs, String directory);
+        void setDownloadAndSaveFileDefaultDirectory(
+                PrefService prefs, @JniType("std::string") @Nullable String directory);
     }
 }

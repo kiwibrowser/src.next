@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/extension_error_ui_default.h"
-
 #include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_error_ui.h"
-#include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/extension_error_ui_desktop.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
@@ -18,6 +16,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/mock_extension_system.h"
+#include "extensions/browser/ui_util.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_set.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -69,13 +68,13 @@ class ManagementPolicyMock : public extensions::ManagementPolicy::Provider {
 
 }  // namespace
 
-TEST(ExtensionErrorUIDefaultTest, BubbleTitleAndMessageMentionsExtension) {
+TEST(ExtensionErrorUIDesktopTest, BubbleTitleAndMessageMentionsExtension) {
   TestErrorUIDelegate delegate;
 
   delegate.InsertForbidden(extensions::ExtensionBuilder("Bar").Build());
   delegate.InsertForbidden(extensions::ExtensionBuilder("Baz").Build());
 
-  extensions::ExtensionErrorUIDefault ui(&delegate);
+  extensions::ExtensionErrorUIDesktop ui(&delegate);
   GlobalErrorWithStandardBubble* bubble = ui.GetErrorForTesting();
 
   std::u16string title = bubble->GetBubbleViewTitle();
@@ -95,7 +94,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleTitleAndMessageMentionsExtension) {
 }
 
 // Test that unusually long extension names in the bubble message are truncated.
-TEST(ExtensionErrorUIDefaultTest, BubbleMessageWithLongNameExtension) {
+TEST(ExtensionErrorUIDesktopTest, BubbleMessageWithLongNameExtension) {
   std::string long_name_a(128, 'a');
   std::string long_name_b(128, 'b');
 
@@ -103,7 +102,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleMessageWithLongNameExtension) {
   delegate.InsertForbidden(extensions::ExtensionBuilder(long_name_a).Build());
   delegate.InsertForbidden(extensions::ExtensionBuilder(long_name_b).Build());
 
-  extensions::ExtensionErrorUIDefault ui(&delegate);
+  extensions::ExtensionErrorUIDesktop ui(&delegate);
   GlobalErrorWithStandardBubble* bubble = ui.GetErrorForTesting();
 
   std::u16string title = bubble->GetBubbleViewTitle();
@@ -114,9 +113,9 @@ TEST(ExtensionErrorUIDefaultTest, BubbleMessageWithLongNameExtension) {
 
   // Expected values of extension names in the returned messages.
   std::u16string truncated_name_a =
-      extensions::util::GetFixupExtensionNameForUIDisplay(long_name_a);
+      extensions::ui_util::GetFixupExtensionNameForUIDisplay(long_name_a);
   std::u16string truncated_name_b =
-      extensions::util::GetFixupExtensionNameForUIDisplay(long_name_b);
+      extensions::ui_util::GetFixupExtensionNameForUIDisplay(long_name_b);
 
   ASSERT_LT(truncated_name_a.size(), long_name_a.size());
   ASSERT_LT(truncated_name_b.size(), long_name_b.size());
@@ -132,7 +131,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleMessageWithLongNameExtension) {
                                      truncated_name_b)));
 }
 
-TEST(ExtensionErrorUIDefaultTest, BubbleTitleAndMessageMentionsApp) {
+TEST(ExtensionErrorUIDesktopTest, BubbleTitleAndMessageMentionsApp) {
   TestErrorUIDelegate delegate;
 
   delegate.InsertForbidden(
@@ -140,7 +139,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleTitleAndMessageMentionsApp) {
           "Bar", extensions::ExtensionBuilder::Type::PLATFORM_APP)
           .Build());
 
-  extensions::ExtensionErrorUIDefault ui(&delegate);
+  extensions::ExtensionErrorUIDesktop ui(&delegate);
   GlobalErrorWithStandardBubble* bubble = ui.GetErrorForTesting();
 
   std::u16string title = bubble->GetBubbleViewTitle();
@@ -153,7 +152,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleTitleAndMessageMentionsApp) {
                   IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_MALWARE, u"Bar")));
 }
 
-TEST(ExtensionErrorUIDefaultTest, BubbleMessageMentionsMalware) {
+TEST(ExtensionErrorUIDesktopTest, BubbleMessageMentionsMalware) {
   TestErrorUIDelegate delegate;
   scoped_refptr<const extensions::Extension> extension =
       extensions::ExtensionBuilder(
@@ -164,7 +163,7 @@ TEST(ExtensionErrorUIDefaultTest, BubbleMessageMentionsMalware) {
       extensions::ExtensionPrefs::Get(delegate.GetContext()));
   delegate.InsertForbidden(extension);
 
-  extensions::ExtensionErrorUIDefault ui(&delegate);
+  extensions::ExtensionErrorUIDesktop ui(&delegate);
   GlobalErrorWithStandardBubble* bubble = ui.GetErrorForTesting();
 
   std::u16string title = bubble->GetBubbleViewTitle();
@@ -177,14 +176,14 @@ TEST(ExtensionErrorUIDefaultTest, BubbleMessageMentionsMalware) {
                             base::UTF8ToUTF16(extension->name()))));
 }
 
-TEST(ExtensionErrorUIDefaultTest, BubbleTitleForEnterpriseBlockedExtensions) {
+TEST(ExtensionErrorUIDesktopTest, BubbleTitleForEnterpriseBlockedExtensions) {
   TestErrorUIDelegate delegate;
 
   scoped_refptr<const extensions::Extension> extension =
       extensions::ExtensionBuilder("Bar").Build();
   delegate.InsertForbidden(extension);
 
-  extensions::ExtensionErrorUIDefault ui(&delegate);
+  extensions::ExtensionErrorUIDesktop ui(&delegate);
   ManagementPolicyMock provider(extension.get(), false);
   std::unique_ptr<extensions::ManagementPolicy> management_policy =
       std::make_unique<extensions::ManagementPolicy>();

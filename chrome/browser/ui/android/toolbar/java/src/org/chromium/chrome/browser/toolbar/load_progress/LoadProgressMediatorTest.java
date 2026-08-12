@@ -15,22 +15,23 @@ import android.os.Looper;
 
 import androidx.test.filters.SmallTest;
 
-import org.hamcrest.Matchers;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.Shadows;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.MathUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.Criteria;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.toolbar.load_progress.LoadProgressProperties.CompletionState;
@@ -45,6 +46,7 @@ public class LoadProgressMediatorTest {
     private static final GURL URL_1 = JUnitTestGURLs.EXAMPLE_URL;
     private static final GURL NATIVE_PAGE_URL = JUnitTestGURLs.NTP_URL;
 
+    @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Mock private Tab mTab;
     @Mock private Tab mTab2;
 
@@ -53,12 +55,11 @@ public class LoadProgressMediatorTest {
     private PropertyModel mModel;
     private LoadProgressMediator mMediator;
     private TabObserver mTabObserver;
-    private ObservableSupplierImpl<Tab> mTabSupplier;
+    private SettableNullableObservableSupplier<Tab> mTabSupplier;
     private ShadowLooper mShadowLooper;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
         mModel =
                 ThreadUtils.runOnUiThreadBlocking(
                         () -> new PropertyModel(LoadProgressProperties.ALL_KEYS));
@@ -67,8 +68,8 @@ public class LoadProgressMediatorTest {
     }
 
     private void initMediator() {
-        // ObservableSupplierImpl needs initialization in UI thread.
-        mTabSupplier = new ObservableSupplierImpl<>();
+        // ObservableSupplier needs initialization in UI thread.
+        mTabSupplier = ObservableSuppliers.createNullable();
         mMediator = new LoadProgressMediator(mTabSupplier, mModel);
         mTabSupplier.set(mTab);
         verify(mTab).addObserver(mTabObserverCaptor.capture());
@@ -87,7 +88,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         URL_1,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -129,7 +130,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         URL_1,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -155,7 +156,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         URL_1,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -166,7 +167,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         NATIVE_PAGE_URL,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -182,7 +183,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         URL_1,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -213,7 +214,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         URL_1,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         assertEquals(
@@ -235,31 +236,32 @@ public class LoadProgressMediatorTest {
 
     @Test
     @SmallTest
-    public void testSwapWebContents() {
+    public void loadingTabProgressUpdateStartsProgressBar() {
+        initMediator();
+        doReturn(true).when(mTab).isLoading();
+        assertEquals(
+                CompletionState.FINISHED_DONT_ANIMATE,
+                mModel.get(LoadProgressProperties.COMPLETION_STATE));
+
+        mTabObserver.onLoadProgressChanged(mTab, 0.7f);
+
+        assertEquals(0.7f, mModel.get(LoadProgressProperties.PROGRESS), MathUtils.EPSILON);
+        assertEquals(
+                CompletionState.UNFINISHED, mModel.get(LoadProgressProperties.COMPLETION_STATE));
+    }
+
+    @Test
+    @SmallTest
+    public void nonLoadingTabProgressUpdateDoesNotStartProgressBar() {
         initMediator();
         assertEquals(
                 CompletionState.FINISHED_DONT_ANIMATE,
                 mModel.get(LoadProgressProperties.COMPLETION_STATE));
-        // Swap web contents after loading started and finished. As loading already happened we
-        // simulate the load events.
-        mTabObserver.onWebContentsSwapped(mTab, true, true);
-        assertEquals(
-                CompletionState.UNFINISHED, mModel.get(LoadProgressProperties.COMPLETION_STATE));
-        assertEquals(0, mModel.get(LoadProgressProperties.PROGRESS), MathUtils.EPSILON);
 
-        // Ensure load events are simulated as expected.
-        float expectedProgress = LoadProgressSimulator.PROGRESS_INCREMENT;
-        while (expectedProgress < 1.0f + LoadProgressSimulator.PROGRESS_INCREMENT) {
-            mShadowLooper.runOneTask();
-            final float nextExpectedProgress = expectedProgress;
-            Criteria.checkThat(
-                    (double) mModel.get(LoadProgressProperties.PROGRESS),
-                    Matchers.closeTo(nextExpectedProgress, MathUtils.EPSILON));
-            expectedProgress += LoadProgressSimulator.PROGRESS_INCREMENT;
-        }
+        mTabObserver.onLoadProgressChanged(mTab, 0.7f);
 
         assertEquals(
-                CompletionState.FINISHED_DO_ANIMATE,
+                CompletionState.FINISHED_DONT_ANIMATE,
                 mModel.get(LoadProgressProperties.COMPLETION_STATE));
     }
 
@@ -276,7 +278,7 @@ public class LoadProgressMediatorTest {
                 NavigationHandle.createForTesting(
                         gurl,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
         mTabObserver.onLoadProgressChanged(mTab, 1.0f);
@@ -290,7 +292,7 @@ public class LoadProgressMediatorTest {
                         /* isInPrimaryMainFrame= */ true,
                         /* isSameDocument= */ true,
                         /* isRendererInitiated= */ false,
-                        /* pageTransition= */ 0,
+                        /* transition= */ 0,
                         /* hasUserGesture= */ false,
                         /* isReload= */ false);
         mTabObserver.onDidStartNavigationInPrimaryMainFrame(mTab, sameDocNav);

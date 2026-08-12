@@ -8,12 +8,11 @@
 #include <optional>
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/layout/layout_input_node.h"
+#include "third_party/blink/renderer/core/layout/block_node.h"
+#include "third_party/blink/renderer/core/layout/inline/inline_break_token.h"
 
 namespace blink {
 
-class InlineBreakToken;
-class BreakToken;
 class BlockBreakToken;
 
 // A utility class for block-flow layout which given the first child and a
@@ -34,7 +33,7 @@ class CORE_EXPORT BlockChildIterator {
 
  public:
   BlockChildIterator(LayoutInputNode first_child,
-                     const BlockBreakToken* break_token,
+                     const BlockBreakToken* container_break_token,
                      bool calculate_child_idx = false);
 
   // Returns the next input node which should be laid out, along with its
@@ -47,11 +46,11 @@ class CORE_EXPORT BlockChildIterator {
       const InlineBreakToken* previous_inline_break_token = nullptr);
 
  private:
-  void AdvanceToNextChild(const LayoutInputNode&);
+  void AdvanceToNextChild(const BlockNode&);
 
-  LayoutInputNode next_unstarted_child_;
-  LayoutInputNode tracked_child_ = nullptr;
-  const BlockBreakToken* break_token_;
+  BlockNode next_unstarted_child_ = nullptr;
+  BlockNode tracked_child_ = nullptr;
+  const BlockBreakToken* container_break_token_;
 
   // An index into break_token_'s ChildBreakTokens() vector. Used for keeping
   // track of the next child break token to inspect.
@@ -60,25 +59,32 @@ class CORE_EXPORT BlockChildIterator {
   std::optional<wtf_size_t> child_idx_;
 
   bool did_handle_first_child_ = false;
+  bool is_ifc_ = false;
 };
 
 struct BlockChildIterator::Entry {
   STACK_ALLOCATED();
 
  public:
-  Entry() : node(nullptr), token(nullptr) {}
-  Entry(LayoutInputNode node,
+  Entry() = default;
+  Entry(const BlockNode& block_node,
         const BreakToken* token,
         std::optional<wtf_size_t> index = std::nullopt)
-      : node(node), token(token), index(index) {}
+      : block_node(block_node), token(token), index(index) {}
+  explicit Entry(const InlineBreakToken* token, bool is_unstarted_ifc = false)
+      : token(token), is_unstarted_ifc(is_unstarted_ifc) {}
 
-  LayoutInputNode node;
-  const BreakToken* token;
+  BlockNode block_node = nullptr;
+  const BreakToken* token = nullptr;
   std::optional<wtf_size_t> index;
+  bool is_unstarted_ifc = false;
 
   bool operator==(const BlockChildIterator::Entry& other) const {
-    return node == other.node && token == other.token;
+    return block_node == other.block_node && token == other.token &&
+           index == other.index && is_unstarted_ifc == other.is_unstarted_ifc;
   }
+
+  bool AtEnd() const { return !block_node && !token && !is_unstarted_ifc; }
 };
 
 }  // namespace blink

@@ -49,7 +49,6 @@ void ChildFrameCompositingHelper::ChildFrameGone(float device_scale_factor) {
 
 void ChildFrameCompositingHelper::SetSurfaceId(
     const viz::SurfaceId& surface_id,
-    CaptureSequenceNumberChanged capture_sequence_number_changed,
     AllowPaintHolding allow_paint_holding) {
   if (surface_id_ == surface_id)
     return;
@@ -63,13 +62,8 @@ void ChildFrameCompositingHelper::SetSurfaceId(
   surface_layer_->SetSurfaceHitTestable(true);
   surface_layer_->SetBackgroundColor(SkColors::kTransparent);
 
-  // If we're synchronizing surfaces, then use an infinite deadline to ensure
-  // everything is synchronized.
-  cc::DeadlinePolicy deadline =
-      capture_sequence_number_changed == CaptureSequenceNumberChanged::kYes
-          ? cc::DeadlinePolicy::UseInfiniteDeadline()
-          : cc::DeadlinePolicy::UseDefaultDeadline();
-  surface_layer_->SetSurfaceId(surface_id, deadline);
+  surface_layer_->SetSurfaceId(surface_id,
+                               cc::DeadlinePolicy::UseDefaultDeadline());
   MaybeSetUpPaintHolding(current_surface_id, allow_paint_holding);
 
   // TODO(lfg): Investigate if it's possible to propagate the information
@@ -93,8 +87,8 @@ void ChildFrameCompositingHelper::MaybeSetUpPaintHolding(
 
     paint_holding_timer_.Start(
         FROM_HERE, kNewContentRenderingDelay,
-        WTF::BindOnce(&ChildFrameCompositingHelper::PaintHoldingTimerFired,
-                      base::Unretained(this)));
+        BindOnce(&ChildFrameCompositingHelper::PaintHoldingTimerFired,
+                 base::Unretained(this)));
   } else {
     surface_layer_->SetOldestAcceptableFallback(viz::SurfaceId());
   }

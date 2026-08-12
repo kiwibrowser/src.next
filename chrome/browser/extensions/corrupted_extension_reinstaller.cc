@@ -5,11 +5,15 @@
 #include "chrome/browser/extensions/corrupted_extension_reinstaller.h"
 
 #include "base/functional/bind.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/task/single_thread_task_runner.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/corrupted_extension_reinstaller_factory.h"
+#include "chrome/browser/extensions/external_provider_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -44,11 +48,18 @@ const net::BackoffEntry::Policy kCorruptedReinstallBackoffPolicy = {
 
 }  // namespace
 
+// static
+CorruptedExtensionReinstaller* CorruptedExtensionReinstaller::Get(
+    content::BrowserContext* context) {
+  return CorruptedExtensionReinstallerFactory::GetInstance()
+      ->GetForBrowserContext(context);
+}
+
 CorruptedExtensionReinstaller::CorruptedExtensionReinstaller(
     content::BrowserContext* context)
     : context_(context), backoff_entry_(&kCorruptedReinstallBackoffPolicy) {}
 
-CorruptedExtensionReinstaller::~CorruptedExtensionReinstaller() {}
+CorruptedExtensionReinstaller::~CorruptedExtensionReinstaller() = default;
 
 // static
 void CorruptedExtensionReinstaller::set_reinstall_action_for_test(
@@ -66,16 +77,18 @@ void CorruptedExtensionReinstaller::ExpectReinstallForCorruption(
     const ExtensionId& id,
     std::optional<PolicyReinstallReason> reason_for_uma,
     mojom::ManifestLocation manifest_location_for_uma) {
-  if (base::Contains(expected_reinstalls_, id))
+  if (expected_reinstalls_.contains(id)) {
     return;
+  }
   expected_reinstalls_[id] = base::TimeTicks::Now();
   if (reason_for_uma)
     RecordPolicyReinstallReason(*reason_for_uma);
 }
 
 void CorruptedExtensionReinstaller::MarkResolved(const ExtensionId& id) {
-  if (!base::Contains(expected_reinstalls_, id))
+  if (!expected_reinstalls_.contains(id)) {
     return;
+  }
 
   base::TimeDelta latency = base::TimeTicks::Now() - expected_reinstalls_[id];
   base::UmaHistogramLongTimes("Extensions.CorruptPolicyExtensionResolved",
@@ -87,7 +100,7 @@ void CorruptedExtensionReinstaller::MarkResolved(const ExtensionId& id) {
 
 bool CorruptedExtensionReinstaller::IsReinstallForCorruptionExpected(
     const ExtensionId& id) const {
-  return base::Contains(expected_reinstalls_, id);
+  return expected_reinstalls_.contains(id);
 }
 
 bool CorruptedExtensionReinstaller::HasAnyReinstallForCorruption() const {
@@ -104,20 +117,18 @@ void CorruptedExtensionReinstaller::NotifyExtensionDisabledDueToCorruption() {
 }
 
 void CorruptedExtensionReinstaller::Shutdown() {
-  // Cancel already scheduled attempts by invalidating weak pointers stored in
-  // postponed tasks.
+  // Cancels already-scheduled attempts, if any, for a smoother shutdown, by
+  // invalidating weak pointers stored in postponed tasks.
   weak_factory_.InvalidateWeakPtrs();
 }
 
 void CorruptedExtensionReinstaller::Fire() {
   scheduled_fire_pending_ = false;
-  ExtensionSystem* system = ExtensionSystem::Get(context_);
-  ExtensionService* service = system->extension_service();
   // If there's nothing to repair, then bail out.
   if (!HasAnyReinstallForCorruption())
     return;
 
-  service->CheckForExternalUpdates();
+  ExternalProviderManager::Get(context_)->CheckForExternalUpdates();
   ScheduleNextReinstallAttempt();
 }
 

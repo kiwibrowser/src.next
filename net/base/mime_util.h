@@ -48,6 +48,13 @@ NET_EXPORT bool GetWellKnownMimeTypeFromExtension(
 NET_EXPORT bool GetMimeTypeFromFile(const base::FilePath& file_path,
                                     std::string* mime_type);
 
+// Gets the mime type (if any) that is associated with the given file. Returns
+// true if a corresponding mime type exists. In this method, the search for a
+// mime type is constrained to a limited set of types known to the net library,
+// the OS/registry is not consulted.
+NET_EXPORT bool GetWellKnownMimeTypeFromFile(const base::FilePath& file_path,
+                                             std::string* mime_type);
+
 // Gets the preferred extension (if any) associated with the given mime type.
 // Returns true if a corresponding file extension exists.  The extension is
 // returned without a prefixed dot, ex "html".
@@ -55,10 +62,24 @@ NET_EXPORT bool GetPreferredExtensionForMimeType(
     std::string_view mime_type,
     base::FilePath::StringType* extension);
 
+// kNone: no extra checks.
+// kWildcardSlashOnly: require exactly one '/' in the type/subtype.
+// kWildcardSlashAndTokens: above + require type and subtype are HTTP tokens
+// when the wildcard targets a structured suffix (e.g. *+json).
+enum class MimeTypeValidationLevel {
+  kNone = 0,
+  kWildcardSlashOnly = 1,
+  kWildcardSlashAndTokens = 2,
+};
+
 // Returns true if this the mime_type_pattern matches a given mime-type.
 // Checks for absolute matching and wildcards. MIME types are case insensitive.
-NET_EXPORT bool MatchesMimeType(std::string_view mime_type_pattern,
-                                std::string_view mime_type);
+// When the pattern contains a wildcard, `validation_level` can enforce
+// slash/token rules.
+NET_EXPORT bool MatchesMimeType(
+    std::string_view mime_type_pattern,
+    std::string_view mime_type,
+    MimeTypeValidationLevel validation_level = MimeTypeValidationLevel::kNone);
 
 // Parses |type_str| for |mime_type| and any |params|. Returns false if mime
 // cannot be parsed, and does not modify |mime_type| or |params|.
@@ -68,6 +89,15 @@ NET_EXPORT bool MatchesMimeType(std::string_view mime_type_pattern,
 // If |params| is non-NULL, clears it and sets it with name-value pairs of
 // parsed parameters. Parsing of parameters is lenient, and invalid params are
 // ignored.
+//
+// Note on invalid inputs:
+// - If the input is missing a slash, or has space/tab before the slash (e.g.
+//   "text / html"), it returns false.
+// - If the input has other invalid characters in type/subtype (like newlines or
+//   unusual spaces, e.g. "text\n/\nhtml"), but has a slash and no space/tab
+//   before it, ParseMimeType will return true and extract the whole substring
+//   including the invalid characters (since it only terminates parsing the type
+//   on spaces, tabs, semicolons, or open parenthesis).
 NET_EXPORT bool ParseMimeType(std::string_view type_str,
                               std::string* mime_type,
                               base::StringPairs* params);
@@ -151,6 +181,17 @@ NET_EXPORT void AddMultipartValueForUploadWithFileName(
 NET_EXPORT void AddMultipartFinalDelimiterForUpload(
     const std::string& mime_boundary,
     std::string* post_data);
+
+// A test-only helper that overrides the functionality above while it is in
+// scope, causing any query for a mime type to return the supplied
+// `overriding_mime_type`. Functionality other than "get a mime type" is
+// unaffected. Does not support nesting.
+class NET_EXPORT ScopedOverrideGetMimeTypeForTesting {
+ public:
+  explicit ScopedOverrideGetMimeTypeForTesting(
+      std::string_view overriding_mime_type);
+  ~ScopedOverrideGetMimeTypeForTesting();
+};
 
 }  // namespace net
 

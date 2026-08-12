@@ -9,23 +9,39 @@
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
-#include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/test/task_environment.h"
+#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace blink {
 namespace {
 
 const float kEpsilon = 0.00001;
 
+SkBitmap MakeStripedBitmap(SkColor background,
+                           SkColor foreground,
+                           int foreground_x,
+                           int foreground_width) {
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(100, 100);
+  bitmap.eraseColor(background);
+  if (foreground_width > 0) {
+    bitmap.erase(foreground,
+                 SkIRect::MakeXYWH(foreground_x, 0, foreground_width, 100));
+  }
+  return bitmap;
+}
+
 }  // namespace
 
 class DarkModeImageClassifierTest : public testing::Test {
  public:
   DarkModeImageClassifierTest() {
-    dark_mode_image_classifier_ = std::make_unique<DarkModeImageClassifier>(
-        DarkModeImageClassifierPolicy::kNumColorsWithMlFallback);
+    dark_mode_image_classifier_ = std::make_unique<DarkModeImageClassifier>();
   }
 
   // Loads the image from |file_name|.
@@ -47,8 +63,8 @@ class DarkModeImageClassifierTest : public testing::Test {
   }
 
  protected:
-  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
-      platform_;
+  test::TaskEnvironmentWithMainThreadScheduler task_environment_;
+  ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
   std::unique_ptr<DarkModeImageClassifier> dark_mode_image_classifier_;
 };
 
@@ -63,7 +79,7 @@ TEST_F(DarkModeImageClassifierTest, ValidImage) {
   bitmap.peekPixels(&pixmap);
   EXPECT_EQ(image_classifier()->Classify(
                 pixmap, SkIRect::MakeWH(image->width(), image->height())),
-            DarkModeResult::kApplyFilter);
+            DarkModeResult::kDoNotApplyFilter);
 }
 
 TEST_F(DarkModeImageClassifierTest, InvalidImage) {
@@ -153,6 +169,58 @@ TEST_F(DarkModeImageClassifierTest, ImageSpriteAlternateFragmentsSame) {
 
   EXPECT_EQ(
       image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 180, 95, 36)),
+      DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest, ImageWithTransparentBackground) {
+  scoped_refptr<BitmapImage> image;
+  SkBitmap bitmap;
+  SkPixmap pixmap;
+  image = GetImage("/images/resources/sprite_transparent_background.png");
+  bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
+  bitmap.peekPixels(&pixmap);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 0, 128, 24)),
+      DarkModeResult::kApplyFilter);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 24, 128, 24)),
+      DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest, ImageWithLightBackground) {
+  scoped_refptr<BitmapImage> image;
+  SkBitmap bitmap;
+  SkPixmap pixmap;
+  image = GetImage("/images/resources/sprite_light_background.png");
+  bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
+  bitmap.peekPixels(&pixmap);
+
+  // TODO(pnevase): Handle this case better.
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 0, 128, 24)),
+      DarkModeResult::kDoNotApplyFilter);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 24, 128, 24)),
+      DarkModeResult::kApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest, ImageWithDarkBackground) {
+  scoped_refptr<BitmapImage> image;
+  SkBitmap bitmap;
+  SkPixmap pixmap;
+  image = GetImage("/images/resources/sprite_dark_background.png");
+  bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
+  bitmap.peekPixels(&pixmap);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 0, 128, 24)),
+      DarkModeResult::kApplyFilter);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 24, 128, 24)),
       DarkModeResult::kDoNotApplyFilter);
 }
 
@@ -282,12 +350,13 @@ TEST_F(DarkModeImageClassifierTest, FeaturesAndClassification) {
   EXPECT_NEAR(0.1875f, features.color_buckets_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.transparency_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.background_ratio, kEpsilon);
+  EXPECT_NEAR(0.3044f, features.high_luminance_ratio, kEpsilon);
 
   // Test Case 2:
   // Grayscale
   // Color Buckets Ratio: Medium
-  // Decision Tree: Can't Decide
-  // Neural Network: Apply
+  // Decision Tree: Do Not Apply
+  // Neural Network: NA
   image = GetImage("/images/resources/apng08-ref.png");
   bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
   bitmap.peekPixels(&pixmap);
@@ -298,16 +367,17 @@ TEST_F(DarkModeImageClassifierTest, FeaturesAndClassification) {
   EXPECT_EQ(image_classifier()->ClassifyWithFeatures(features),
             DarkModeResult::kDoNotApplyFilter);
   EXPECT_EQ(image_classifier()->ClassifyUsingDecisionTree(features),
-            DarkModeResult::kNotClassified);
+            DarkModeResult::kDoNotApplyFilter);
   EXPECT_FALSE(features.is_colorful);
   EXPECT_NEAR(0.8125f, features.color_buckets_ratio, kEpsilon);
   EXPECT_NEAR(0.446667f, features.transparency_ratio, kEpsilon);
   EXPECT_NEAR(0.03f, features.background_ratio, kEpsilon);
+  EXPECT_NEAR(0.6144578f, features.high_luminance_ratio, kEpsilon);
 
   // Test Case 3:
   // Color
   // Color Buckets Ratio: Low
-  // Decision Tree: Apply
+  // Decision Tree: Do Not Apply
   // Neural Network: NA.
   image = GetImage("/images/resources/twitter_favicon.ico");
   bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
@@ -317,13 +387,14 @@ TEST_F(DarkModeImageClassifierTest, FeaturesAndClassification) {
                                SkIRect::MakeWH(image->width(), image->height()))
                  .value();
   EXPECT_EQ(image_classifier()->ClassifyWithFeatures(features),
-            DarkModeResult::kApplyFilter);
+            DarkModeResult::kDoNotApplyFilter);
   EXPECT_EQ(image_classifier()->ClassifyUsingDecisionTree(features),
-            DarkModeResult::kApplyFilter);
+            DarkModeResult::kDoNotApplyFilter);
   EXPECT_TRUE(features.is_colorful);
   EXPECT_NEAR(0.0002441f, features.color_buckets_ratio, kEpsilon);
   EXPECT_NEAR(0.542092f, features.transparency_ratio, kEpsilon);
   EXPECT_NEAR(0.1500000f, features.background_ratio, kEpsilon);
+  EXPECT_NEAR(1.0f, features.high_luminance_ratio, kEpsilon);
 
   // Test Case 4:
   // Color
@@ -345,11 +416,12 @@ TEST_F(DarkModeImageClassifierTest, FeaturesAndClassification) {
   EXPECT_NEAR(0.032959f, features.color_buckets_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.transparency_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.background_ratio, kEpsilon);
+  EXPECT_NEAR(0.33f, features.high_luminance_ratio, kEpsilon);
 
   // Test Case 5:
   // Color
   // Color Buckets Ratio: Medium
-  // Decision Tree: Apply
+  // Decision Tree: Do Not Apply
   // Neural Network: NA.
   image = GetImage("/images/resources/ycbcr-444-float.jpg");
   bitmap = image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
@@ -359,13 +431,76 @@ TEST_F(DarkModeImageClassifierTest, FeaturesAndClassification) {
                                SkIRect::MakeWH(image->width(), image->height()))
                  .value();
   EXPECT_EQ(image_classifier()->ClassifyWithFeatures(features),
-            DarkModeResult::kApplyFilter);
+            DarkModeResult::kDoNotApplyFilter);
   EXPECT_EQ(image_classifier()->ClassifyUsingDecisionTree(features),
-            DarkModeResult::kApplyFilter);
+            DarkModeResult::kDoNotApplyFilter);
   EXPECT_TRUE(features.is_colorful);
   EXPECT_NEAR(0.0151367f, features.color_buckets_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.transparency_ratio, kEpsilon);
   EXPECT_NEAR(0.0f, features.background_ratio, kEpsilon);
+  EXPECT_NEAR(0.9255555272102356f, features.high_luminance_ratio, kEpsilon);
+}
+
+TEST_F(DarkModeImageClassifierTest, ImageWithHighlySaturatedColors) {
+  scoped_refptr<BitmapImage> image =
+      GetImage("/dark-mode/images/resources/country-flags-sprite.png");
+  SkBitmap bitmap =
+      image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
+  SkPixmap pixmap;
+  bitmap.peekPixels(&pixmap);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 192, 48, 32)),
+      DarkModeResult::kDoNotApplyFilter);
+
+  EXPECT_EQ(
+      image_classifier()->Classify(pixmap, SkIRect::MakeXYWH(0, 48, 48, 32)),
+      DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest,
+       SyntheticImageWithTransparentBackgroundLightForeground) {
+  // Image with mostly-transparent background and predominantly light foreground
+  // pixels.
+  SkBitmap bitmap =
+      MakeStripedBitmap(SK_ColorTRANSPARENT, SK_ColorWHITE, 50, 50);
+  SkPixmap pixmap;
+  ASSERT_TRUE(bitmap.peekPixels(&pixmap));
+  EXPECT_EQ(image_classifier()->Classify(pixmap, bitmap.bounds()),
+            DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest,
+       SyntheticImageWithFullySaturatedBackground) {
+  // Colorful, low-palette image with a saturated-dominant pixel distribution
+  // (e.g. dominated by vivid flat colors)
+  SkBitmap bitmap = MakeStripedBitmap(SK_ColorRED, SK_ColorRED, 0, 0);
+  SkPixmap pixmap;
+  ASSERT_TRUE(bitmap.peekPixels(&pixmap));
+  EXPECT_EQ(image_classifier()->Classify(pixmap, bitmap.bounds()),
+            DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest,
+       SyntheticImageWithLightBackgroundAndSaturatedForeground) {
+  // Colorful, mostly-light image with a smaller saturated region (e.g.
+  // light-field image with a smaller area of vivid colors).
+  SkBitmap bitmap = MakeStripedBitmap(SK_ColorWHITE, SK_ColorRED, 0, 15);
+  SkPixmap pixmap;
+  ASSERT_TRUE(bitmap.peekPixels(&pixmap));
+  EXPECT_EQ(image_classifier()->Classify(pixmap, bitmap.bounds()),
+            DarkModeResult::kDoNotApplyFilter);
+}
+
+TEST_F(DarkModeImageClassifierTest, SyntheticImageWithMutedChromaticColors) {
+  // Colorful, limited-palette image with muted mid-tone colors (chroma in
+  // [20, 80), luma < 96).
+  constexpr SkColor kMutedTeal = SkColorSetRGB(60, 100, 80);
+  SkBitmap bitmap = MakeStripedBitmap(kMutedTeal, kMutedTeal, 0, 0);
+  SkPixmap pixmap;
+  ASSERT_TRUE(bitmap.peekPixels(&pixmap));
+  EXPECT_EQ(image_classifier()->Classify(pixmap, bitmap.bounds()),
+            DarkModeResult::kDoNotApplyFilter);
 }
 
 }  // namespace blink

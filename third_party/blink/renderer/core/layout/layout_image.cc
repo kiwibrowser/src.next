@@ -34,26 +34,22 @@
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
-#include "third_party/blink/renderer/core/html/media/html_video_element.h"
-#include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
-#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
-#include "third_party/blink/renderer/core/layout/layout_video.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/paint/image_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
-#include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace blink {
 
-LayoutImage::LayoutImage(Element* element)
-    : LayoutReplaced(element, PhysicalSize()) {}
+LayoutImage::LayoutImage(Element* element) : LayoutReplaced(element) {}
 
 LayoutImage* LayoutImage::CreateAnonymous(Document& document) {
   LayoutImage* image = MakeGarbageCollected<LayoutImage>(nullptr);
@@ -76,6 +72,21 @@ void LayoutImage::WillBeDestroyed() {
   LayoutReplaced::WillBeDestroyed();
 }
 
+void LayoutImage::InsertedIntoTree() {
+  NOT_DESTROYED();
+  ImageResourceContent* image_content = image_resource_->CachedImage();
+  LocalDOMWindow* window = GetDocument().domWindow();
+
+  // If the image content was ready before attaching to the layout image, and
+  // and it did not have a node, it would not be possible to know if the node
+  // would be required for timing. Notify at this point now it is attached to
+  // its parent.
+  if (!GetNode() && window && image_content && image_content->IsLoaded()) {
+    ImageElementTiming::From(*window).NotifyImageFinished(*this, image_content);
+  }
+  LayoutReplaced::InsertedIntoTree();
+}
+
 void GetImageSizeChangeTracingData(perfetto::TracedValue context,
                                    Node* node,
                                    LocalFrame* frame) {
@@ -84,29 +95,28 @@ void GetImageSizeChangeTracingData(perfetto::TracedValue context,
   dict.Add("frameId", IdentifiersFactory::FrameId(frame));
 }
 
-void LayoutImage::StyleDidChange(StyleDifference diff,
-                                 const ComputedStyle* old_style) {
+void LayoutImage::StyleDidChange(
+    StyleDifference diff,
+    const ComputedStyle* old_style,
+    const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
-  LayoutReplaced::StyleDidChange(diff, old_style);
+  LayoutReplaced::StyleDidChange(diff, old_style, style_change_context);
 
   RespectImageOrientationEnum old_orientation =
       old_style ? old_style->ImageOrientation()
                 : ComputedStyleInitialValues::InitialImageOrientation();
   if (StyleRef().ImageOrientation() != old_orientation) {
-    IntrinsicSizeChanged();
+    NaturalSizeChanged();
   }
 
-  bool tracing_enabled;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), &tracing_enabled);
-
-  if (tracing_enabled) {
+  if (TRACE_EVENT_CATEGORY_ENABLED(
+          TRACE_DISABLED_BY_DEFAULT("devtools.timeline"))) {
     bool is_unsized = this->IsUnsizedImage();
     if (is_unsized) {
       Node* node = GetNode();
-      TRACE_EVENT_INSTANT_WITH_TIMESTAMP1(
-          "devtools.timeline", "LayoutImageUnsized", TRACE_EVENT_SCOPE_THREAD,
-          base::TimeTicks::Now(), "data", [&](perfetto::TracedValue ctx) {
+      TRACE_EVENT_INSTANT(
+          "devtools.timeline", "LayoutImageUnsized", base::TimeTicks::Now(),
+          "data", [&](perfetto::TracedValue ctx) {
             GetImageSizeChangeTracingData(std::move(ctx), node, GetFrame());
           });
     }
@@ -125,8 +135,6 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
   NOT_DESTROYED();
   DCHECK(View());
   DCHECK(View()->GetFrameView());
-  if (DocumentBeingDestroyed())
-    return;
 
   if (HasBoxDecorationBackground() || HasMask() || HasShapeOutside() ||
       HasReflection())
@@ -139,10 +147,14 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
     return;
 
   auto* html_image_element = DynamicTo<HTMLImageElement>(GetNode());
-  if (IsGeneratedContent() && html_image_element &&
-      image_resource_->ErrorOccurred()) {
-    html_image_element->EnsureFallbackForGeneratedContent();
-    return;
+  if (html_image_element) {
+    if (RuntimeEnabledFeatures::CSSImageAnimationEnabled()) {
+      html_image_element->PseudoStateChanged(CSSSelector::kPseudoAnimatedImage);
+    }
+    if (IsGeneratedContent() && image_resource_->ErrorOccurred()) {
+      html_image_element->EnsureFallbackForGeneratedContent();
+      return;
+    }
   }
 
   // If error occurred, image marker should be replaced by a LayoutText.
@@ -166,27 +178,44 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
         1 / image_resource_->CachedImage()->DevicePixelRatioHeaderValue();
   }
 
-  if (!did_increment_visually_non_empty_pixel_count_) {
-    // At a zoom level of 1 the image is guaranteed to have an integer size.
-    View()->GetFrameView()->IncrementVisuallyNonEmptyPixelCount(
-        gfx::ToFlooredSize(image_resource_->ImageSize(1.0f)));
-    did_increment_visually_non_empty_pixel_count_ = true;
-  }
-
   // The replaced content transform depends on the intrinsic size (see:
   // FragmentPaintPropertyTreeBuilder::UpdateReplacedContentTransform).
   SetNeedsPaintPropertyUpdate();
-  InvalidatePaintAndMarkForLayoutIfNeeded(defer);
+
+  if (!UpdateNaturalSizeIfNeeded() || !InvalidateLayoutOnNaturalSizeChange()) {
+    InvalidatePaintWithoutLayoutChange(defer);
+  }
+
+  if (!did_increment_visually_non_empty_pixel_count_) {
+    PhysicalSize default_object_size{LayoutUnit(kDefaultWidth),
+                                     LayoutUnit(kDefaultHeight)};
+    default_object_size.Scale(StyleRef().EffectiveZoom());
+    PhysicalSize concrete_object_size =
+        ConcreteObjectSize(natural_dimensions_, default_object_size);
+    concrete_object_size.Scale(1 / StyleRef().EffectiveZoom());
+    View()->GetFrameView()->IncrementVisuallyNonEmptyPixelCount(
+        ToFlooredSize(concrete_object_size));
+    did_increment_visually_non_empty_pixel_count_ = true;
+  }
 }
 
-void LayoutImage::UpdateIntrinsicSizeIfNeeded(const PhysicalSize& new_size) {
+bool LayoutImage::UpdateNaturalSizeIfNeeded() {
   NOT_DESTROYED();
-  if (image_resource_->ErrorOccurred())
-    return;
-  SetIntrinsicSize(new_size);
+  PhysicalNaturalSizingInfo new_natural_dimensions;
+  // If the image resource has no image or image dimensions then we set natural
+  // dimensions of 0x0 ("represents nothing" per HTML spec).
+  if (image_resource_->IsSizeAvailable()) {
+    new_natural_dimensions = PhysicalNaturalSizingInfo::FromSizingInfo(
+        image_resource_->GetNaturalDimensions(StyleRef().EffectiveZoom()));
+  }
+  const bool dimensions_changed = natural_dimensions_ != new_natural_dimensions;
+  if (!image_resource_->ErrorOccurred()) {
+    natural_dimensions_ = new_natural_dimensions;
+  }
+  return dimensions_changed;
 }
 
-bool LayoutImage::NeedsLayoutOnIntrinsicSizeChange() const {
+bool LayoutImage::NeedsLayoutOnNaturalSizeChange() const {
   NOT_DESTROYED();
   // Flex layout algorithm uses the intrinsic image width/height even if
   // width/height are specified.
@@ -203,32 +232,50 @@ bool LayoutImage::NeedsLayoutOnIntrinsicSizeChange() const {
   return !is_fixed_sized;
 }
 
-void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
+ResourcePriority LayoutImage::ComputeResourcePriority() const {
+  speculative_decode_parameters_.cached_resource_priority.emplace(
+      LayoutReplaced::ComputeResourcePriority());
+  return speculative_decode_parameters_.cached_resource_priority.value();
+}
+
+std::optional<ResourcePriority> LayoutImage::CachedResourcePriority() const {
+  return speculative_decode_parameters_.cached_resource_priority;
+}
+
+gfx::Size LayoutImage::ComputeSpeculativeDecodeSize() const {
+  speculative_decode_parameters_.cached_speculative_decode_size =
+      LayoutReplaced::ComputeSpeculativeDecodeSize();
+  return speculative_decode_parameters_.cached_speculative_decode_size;
+}
+
+gfx::Size LayoutImage::CachedSpeculativeDecodeSize() const {
+  return speculative_decode_parameters_.cached_speculative_decode_size;
+}
+
+InterpolationQuality LayoutImage::ComputeSpeculativeDecodeQuality() const {
+  speculative_decode_parameters_.cached_speculative_decode_quality =
+      LayoutReplaced::ComputeSpeculativeDecodeQuality();
+  return speculative_decode_parameters_.cached_speculative_decode_quality;
+}
+
+InterpolationQuality LayoutImage::CachedSpeculativeDecodeQuality() const {
+  return speculative_decode_parameters_.cached_speculative_decode_quality;
+}
+
+bool LayoutImage::InvalidateLayoutOnNaturalSizeChange() {
+  SetIntrinsicLogicalWidthsDirty();
+
+  if (!NeedsLayoutOnNaturalSizeChange()) {
+    return false;
+  }
+  SetNeedsLayoutAndFullPaintInvalidation(
+      layout_invalidation_reason::kSizeChanged);
+  return true;
+}
+
+void LayoutImage::InvalidatePaintWithoutLayoutChange(
     CanDeferInvalidation defer) {
   NOT_DESTROYED();
-  PhysicalSize old_intrinsic_size = IntrinsicSize();
-
-  PhysicalSize new_intrinsic_size = PhysicalSize::FromSizeFRound(
-      image_resource_->ImageSize(StyleRef().EffectiveZoom()));
-  UpdateIntrinsicSizeIfNeeded(new_intrinsic_size);
-
-  // In the case of generated image content using :before/:after/content, we
-  // might not be in the layout tree yet. In that case, we just need to update
-  // our intrinsic size. layout() will be called after we are inserted in the
-  // tree which will take care of what we are doing here.
-  if (!ContainingBlock())
-    return;
-
-  if (old_intrinsic_size != new_intrinsic_size) {
-    SetIntrinsicLogicalWidthsDirty();
-
-    if (NeedsLayoutOnIntrinsicSizeChange()) {
-      SetNeedsLayoutAndFullPaintInvalidation(
-          layout_invalidation_reason::kSizeChanged);
-      return;
-    }
-  }
-
   SetShouldDoFullPaintInvalidationWithoutLayoutChange(
       PaintInvalidationReason::kImage);
 
@@ -248,6 +295,16 @@ void LayoutImage::PaintReplaced(const PaintInfo& paint_info,
 void LayoutImage::Paint(const PaintInfo& paint_info) const {
   NOT_DESTROYED();
   ImagePainter(*this).Paint(paint_info);
+
+  if (image_resource_ && image_resource_->MaybeAnimated()) {
+    if (const auto* cached_image = image_resource_->CachedImage();
+        cached_image && (cached_image->NumberOfObservers() > 2)) {
+      // Images have 2 observers HTMLImageLoader and LayoutImage, when they're
+      // repeated in the same document they'll have more than 2.
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kAnimatedImageUsedMoreThanOnce);
+    }
+  }
 }
 
 void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
@@ -257,7 +314,7 @@ void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
   if (area_element->GetPath(this).IsEmpty())
     return;
 
-  InvalidatePaintAndMarkForLayoutIfNeeded(CanDeferInvalidation::kYes);
+  InvalidatePaintWithoutLayoutChange(CanDeferInvalidation::kYes);
 }
 
 bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
@@ -292,11 +349,15 @@ bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
   EObjectFit object_fit = StyleRef().GetObjectFit();
   if (object_fit != EObjectFit::kFill && object_fit != EObjectFit::kCover)
     return false;
+  // Object-view-box may leave parts of the content box empty.
+  if (StyleRef().ObjectViewBox()) {
+    return false;
+  }
   // Check for image with alpha.
   DEVTOOLS_TIMELINE_TRACE_EVENT_WITH_CATEGORIES(
       TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
       inspector_paint_image_event::Data, this, *image_content);
-  return image_content->GetImage()->CurrentFrameKnownToBeOpaque();
+  return image_content->GetImage()->IsOpaque();
 }
 
 bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
@@ -305,14 +366,6 @@ bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
     return false;
 
   return ForegroundIsKnownToBeOpaqueInRect(BackgroundPaintedExtent(), 0);
-}
-
-HTMLMapElement* LayoutImage::ImageMap() const {
-  NOT_DESTROYED();
-  auto* i = DynamicTo<HTMLImageElement>(GetNode());
-  return i ? i->GetTreeScope().GetImageMap(
-                 i->FastGetAttribute(html_names::kUsemapAttr))
-           : nullptr;
 }
 
 bool LayoutImage::NodeAtPoint(HitTestResult& result,
@@ -331,68 +384,16 @@ bool LayoutImage::NodeAtPoint(HitTestResult& result,
   return inside;
 }
 
-bool LayoutImage::CanApplyObjectViewBox() const {
-  if (!EmbeddedSVGImage()) {
-    return true;
-  }
-  // Only apply object-view-box if the image has both natural width/height.
-  const IntrinsicSizingInfo info =
-      image_resource_->GetNaturalDimensions(StyleRef().EffectiveZoom());
-  return info.has_width && info.has_height;
-}
-
-void LayoutImage::ComputeIntrinsicSizingInfo(
-    IntrinsicSizingInfo& intrinsic_sizing_info) const {
+PhysicalNaturalSizingInfo LayoutImage::GetNaturalDimensions() const {
   NOT_DESTROYED();
-  DCHECK(!ShouldApplySizeContainment());
-  if (EmbeddedSVGImage()) {
-    intrinsic_sizing_info =
-        image_resource_->GetNaturalDimensions(StyleRef().EffectiveZoom());
-
-    if (auto view_box = ComputeObjectViewBoxRect()) {
-      DCHECK(intrinsic_sizing_info.has_width);
-      DCHECK(intrinsic_sizing_info.has_height);
-      intrinsic_sizing_info.size = gfx::SizeF(view_box->size);
-    }
-
-    // The value returned by LayoutImageResource will be in zoomed CSS
-    // pixels, but for the 'scale-down' object-fit value we want "zoomed
-    // device pixels", so undo the DPR part here.
-    if (StyleRef().GetObjectFit() == EObjectFit::kScaleDown) {
-      intrinsic_sizing_info.size.InvScale(ImageDevicePixelRatio());
-    }
-    return;
-  }
-
-  LayoutReplaced::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-
-  // Don't compute an intrinsic ratio to preserve historical WebKit behavior if
-  // we're painting alt text and/or a broken image.
-  // Video is excluded from this behavior because video elements have a default
-  // aspect ratio that a failed poster image load should not override.
-  if (image_resource_ && image_resource_->ErrorOccurred() &&
-      !IsA<LayoutVideo>(this)) {
-    intrinsic_sizing_info.aspect_ratio = gfx::SizeF(1, 1);
-    return;
-  }
-}
-
-SVGImage* LayoutImage::EmbeddedSVGImage() const {
-  NOT_DESTROYED();
-  if (!image_resource_)
-    return nullptr;
-  ImageResourceContent* cached_image = image_resource_->CachedImage();
-  // TODO(japhet): This shouldn't need to worry about cache validation.
-  // https://crbug.com/761026
-  if (!cached_image || cached_image->IsCacheValidator())
-    return nullptr;
-  return DynamicTo<SVGImage>(cached_image->GetImage());
+  return natural_dimensions_;
 }
 
 bool LayoutImage::IsUnsizedImage() const {
+  NOT_DESTROYED();
   const ComputedStyle& style = this->StyleRef();
-  const auto explicit_width = style.LogicalWidth().IsSpecified();
-  const auto explicit_height = style.LogicalHeight().IsSpecified();
+  const auto explicit_width = style.LogicalWidth().HasOnlyFixedAndPercent();
+  const auto explicit_height = style.LogicalHeight().HasOnlyFixedAndPercent();
   bool has_aspect_ratio =
       style.AspectRatio().GetType() == EAspectRatioType::kRatio;
   const bool is_fixed_size =

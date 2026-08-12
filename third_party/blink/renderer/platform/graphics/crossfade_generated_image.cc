@@ -55,17 +55,14 @@ void CrossfadeGeneratedImage::DrawCrossfade(
   for (unsigned image_idx = 0; image_idx < images_.size(); ++image_idx) {
     ImageDrawOptions image_draw_options(draw_options);
     if (image_idx == 0) {
-      // TODO(junov): This code should probably be propagating the
-      // RespectImageOrientationEnum from CrossfadeGeneratedImage::draw(). Code
-      // was written this way during refactoring to avoid modifying existing
-      // behavior, but this warrants further investigation. crbug.com/472634
-      image_draw_options.respect_orientation = kDoNotRespectImageOrientation;
       image_flags.setBlendMode(SkBlendMode::kSrcOver);
     } else {
       image_flags.setBlendMode(SkBlendMode::kPlus);
     }
     const WeightedImage& image = images_[image_idx];
-    image_flags.setColor(ScaleAlpha(flags.getColor(), image.weight));
+    // TODO: Don't quantize the alpha to 8-bit.
+    const float image_alpha = SkColorGetA(flags.getColor()) * image.weight;
+    image_flags.setAlphaf(base::ClampRound<uint8_t>(image_alpha) / 255.0f);
     image.image->Draw(canvas, image_flags, dest_rect,
                       gfx::RectF(gfx::SizeF(image.image->Size())),
                       image_draw_options);

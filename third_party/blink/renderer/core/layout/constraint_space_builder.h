@@ -32,11 +32,28 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
                          WritingDirectionMode writing_direction,
                          bool is_new_fc,
                          bool adjust_inline_size_if_needed = true)
-      : ConstraintSpaceBuilder(parent_space.GetWritingMode(),
+      : ConstraintSpaceBuilder(parent_space,
+                               parent_space.GetWritingMode(),
                                writing_direction,
                                is_new_fc,
-                               /* force_orthogonal_writing_mode_root */ false,
-                               adjust_inline_size_if_needed) {
+                               adjust_inline_size_if_needed,
+                               /* force_orthogonal_writing_mode_root */ false) {
+  }
+
+  // The setters on this builder are in the writing mode of parent_writing_mode.
+  ConstraintSpaceBuilder(const ConstraintSpace& parent_space,
+                         WritingMode parent_writing_mode,
+                         WritingDirectionMode writing_direction,
+                         bool is_new_fc,
+                         bool adjust_inline_size_if_needed = true,
+                         bool force_orthogonal_writing_mode_root = false)
+      : ConstraintSpaceBuilder(
+            writing_direction,
+            IsParallelWritingMode(parent_writing_mode,
+                                  writing_direction.GetWritingMode()),
+            is_new_fc,
+            adjust_inline_size_if_needed,
+            force_orthogonal_writing_mode_root) {
     if (parent_space.ShouldPropagateChildBreakValues())
       SetShouldPropagateChildBreakValues();
     if (parent_space.ShouldRepeat())
@@ -46,27 +63,20 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
 
   // The setters on this builder are in the writing mode of parent_writing_mode.
   //
-  // forced_orthogonal_writing_mode_root is set for constraint spaces created
-  // directly from a LayoutObject. In this case parent_writing_mode isn't
-  // actually the parent's, it's the same as out_writing_mode.
-  // When this occurs we would miss setting the kOrthogonalWritingModeRoot flag
-  // unless we force it.
+  // force_orthogonal_writing_mode_root is used when parent_writing_mode isn't
+  // actually the parents.
   ConstraintSpaceBuilder(WritingMode parent_writing_mode,
                          WritingDirectionMode writing_direction,
                          bool is_new_fc,
-                         bool force_orthogonal_writing_mode_root = false,
-                         bool adjust_inline_size_if_needed = true)
-      : space_(writing_direction),
-        is_in_parallel_flow_(
+                         bool adjust_inline_size_if_needed = true,
+                         bool force_orthogonal_writing_mode_root = false)
+      : ConstraintSpaceBuilder(
+            writing_direction,
             IsParallelWritingMode(parent_writing_mode,
-                                  writing_direction.GetWritingMode())),
-        is_new_fc_(is_new_fc),
-        force_orthogonal_writing_mode_root_(force_orthogonal_writing_mode_root),
-        adjust_inline_size_if_needed_(adjust_inline_size_if_needed) {
-    space_.bitfields_.is_new_formatting_context = is_new_fc_;
-    space_.bitfields_.is_orthogonal_writing_mode_root =
-        !is_in_parallel_flow_ || force_orthogonal_writing_mode_root_;
-  }
+                                  writing_direction.GetWritingMode()),
+            is_new_fc,
+            adjust_inline_size_if_needed,
+            force_orthogonal_writing_mode_root) {}
 
   // If inline size is indefinite, use the fallback size for available inline
   // size for orthogonal flow roots. See:
@@ -78,42 +88,66 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
       return;
     DCHECK_NE(orthogonal_fallback_inline_size_, kIndefiniteSize);
     *inline_size = orthogonal_fallback_inline_size_;
-    space_.EnsureRareData()->uses_orthogonal_fallback_inline_size = true;
+    EnsureRareData()->uses_orthogonal_fallback_inline_size = true;
   }
 
   // |available_size| is logical for the writing-mode of the container.
   void SetAvailableSize(LogicalSize available_size) {
 #if DCHECK_IS_ON()
     is_available_size_set_ = true;
+    DCHECK(!is_percentage_resolution_size_set_);
 #endif
 
     if (is_in_parallel_flow_) [[likely]] {
-      space_.available_size_ = available_size;
+      space_.available_size_ = space_.percentage_size_ = available_size;
     } else {
-      space_.available_size_ = {available_size.block_size,
-                                available_size.inline_size};
-      if (adjust_inline_size_if_needed_)
-        AdjustInlineSizeIfNeeded(&space_.available_size_.inline_size);
+      if (adjust_inline_size_if_needed_) {
+        AdjustInlineSizeIfNeeded(&available_size.block_size);
+      }
+      space_.available_size_ = space_.percentage_size_ = {
+          available_size.block_size, available_size.inline_size};
     }
   }
 
-  // Set percentage resolution size. Prior to calling this method,
-  // SetAvailableSize() must have been called, since we'll compare the input
-  // against the available size set, because if they are equal in either
-  // dimension, we won't have to store the values separately.
-  void SetPercentageResolutionSize(LogicalSize percentage_resolution_size);
+  // Set percentage resolution size.
+  void SetPercentageResolutionSize(LogicalSize percentage_size) {
+#if DCHECK_IS_ON()
+    is_percentage_resolution_size_set_ = true;
+#endif
+    if (is_in_parallel_flow_) [[likely]] {
+      space_.percentage_size_ = percentage_size;
+    } else {
+      if (adjust_inline_size_if_needed_) {
+        AdjustInlineSizeIfNeeded(&percentage_size.block_size);
+      }
+      space_.percentage_size_ = {percentage_size.block_size,
+                                 percentage_size.inline_size};
+    }
+  }
 
-  // Set percentage resolution size for replaced content (a special quirk inside
-  // tables). Only honored if the writing modes (container vs. child) are
-  // parallel. In orthogonal writing modes, we'll use whatever regular
-  // percentage resolution size is already set. Prior to calling this method,
-  // SetAvailableSize() must have been called, since we'll compare the input
-  // against the available size set, because if they are equal in either
-  // dimension, we won't have to store the values separately. Additionally,
-  // SetPercentageResolutionSize() must have been called, since we'll override
-  // with that value on orthogonal writing mode roots.
-  void SetReplacedPercentageResolutionSize(
-      LogicalSize replaced_percentage_resolution_size);
+  // Sets the percentage resolution size for a replaced child.
+  // Replaced children within a table-cell have *slightly* different rules for
+  // percentage resolution. This should only be used for passing this
+  // information to inline-layout.
+  void SetReplacedChildPercentageResolutionSize(
+      LogicalSize replaced_child_percentage_resolution_size) {
+#if DCHECK_IS_ON()
+    DCHECK(is_percentage_resolution_size_set_);
+    DCHECK(is_in_parallel_flow_);
+#endif
+
+    // We don't store the replaced percentage resolution inline size, so we
+    // need it to be the same as the regular percentage resolution inline size.
+    DCHECK_EQ(replaced_child_percentage_resolution_size.inline_size,
+              space_.PercentageResolutionInlineSize());
+    DCHECK(replaced_child_percentage_resolution_size.block_size !=
+           kIndefiniteSize);
+    DCHECK(replaced_child_percentage_resolution_size.block_size !=
+           space_.PercentageResolutionBlockSize());
+
+    EnsureRareData()->replaced_child_percentage_resolution_block_size =
+        replaced_child_percentage_resolution_size.block_size;
+  }
 
   // Set the fallback available inline-size for an orthogonal child. The size is
   // the inline size in the writing mode of the orthogonal child.
@@ -124,7 +158,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
   void SetPageName(const AtomicString& name) {
     if (!name && !space_.rare_data_)
       return;
-    space_.EnsureRareData()->page_name = name;
+    EnsureRareData()->page_name = name;
   }
 
   void SetFragmentainerBlockSize(LayoutUnit size) {
@@ -133,7 +167,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_fragmentainer_block_size_set_ = true;
 #endif
     if (size != kIndefiniteSize)
-      space_.EnsureRareData()->fragmentainer_block_size = size;
+      EnsureRareData()->fragmentainer_block_size = size;
   }
 
   // This function may be called after having set available size (and thus
@@ -160,9 +194,9 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
 #if DCHECK_IS_ON()
     DCHECK(is_fragmentainer_block_size_set_);
 #endif
-    space_.rare_data_->fragmentainer_block_size -= space;
-    space_.rare_data_->fragmentainer_block_size =
-        space_.rare_data_->fragmentainer_block_size.ClampNegativeToZero();
+    rare_data_->fragmentainer_block_size -= space;
+    rare_data_->fragmentainer_block_size =
+        rare_data_->fragmentainer_block_size.ClampNegativeToZero();
   }
 
   void SetFragmentainerOffset(LayoutUnit offset) {
@@ -171,24 +205,36 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_fragmentainer_offset_set_ = true;
 #endif
     if (offset != LayoutUnit())
-      space_.EnsureRareData()->fragmentainer_offset = offset;
+      EnsureRareData()->fragmentainer_offset = offset;
   }
 
   void SetIsAtFragmentainerStart() {
-    space_.EnsureRareData()->is_at_fragmentainer_start = true;
+    EnsureRareData()->is_at_fragmentainer_start = true;
   }
 
-  void SetShouldRepeat(bool b) { space_.EnsureRareData()->should_repeat = b; }
+  void SetShouldRepeat(bool b) { EnsureRareData()->should_repeat = b; }
 
   void SetIsInsideRepeatableContent(bool b) {
     if (!b && !space_.rare_data_)
       return;
-    space_.EnsureRareData()->is_inside_repeatable_content = b;
+    EnsureRareData()->is_inside_repeatable_content = b;
   }
 
-  void DisableFurtherFragmentation() { space_.DisableFurtherFragmentation(); }
+  void SetIsInsideBreakAvoid(bool b) {
+    if (!b && !space_.rare_data_) {
+      return;
+    }
+    EnsureRareData()->is_inside_break_avoid = b;
+  }
+
+  void DisableFurtherFragmentation() {
+    if (space_.HasBlockFragmentation()) {
+      rare_data_->block_direction_fragmentation_type = kFragmentNone;
+      rare_data_->is_block_fragmentation_forced_off = true;
+    }
+  }
   void DisableMonolithicOverflowPropagation() {
-    space_.DisableMonolithicOverflowPropagation();
+    EnsureRareData()->is_monolithic_overflow_propagation_disabled = true;
   }
 
   void SetIsHiddenForPaint(bool is_hidden_for_paint) {
@@ -218,8 +264,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
   }
 
   void SetIsInitialBlockSizeIndefinite(bool b) {
-    if (is_in_parallel_flow_ || !force_orthogonal_writing_mode_root_)
-        [[likely]] {
+    if (is_in_parallel_flow_) [[likely]] {
       space_.bitfields_.is_initial_block_size_indefinite = b;
     }
   }
@@ -254,52 +299,65 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_block_direction_fragmentation_type_set_ = true;
 #endif
     if (fragmentation_type != FragmentationType::kFragmentNone) {
-      space_.EnsureRareData()->block_direction_fragmentation_type =
-          fragmentation_type;
+      EnsureRareData()->block_direction_fragmentation_type = fragmentation_type;
     }
   }
 
+  void SetPaperEdgeAdjacentSides(LogicalBoxSides sides) {
+    auto* rare_data = EnsureRareData();
+    rare_data->is_adjacent_to_paper_edge_inline_start = sides.inline_start;
+    rare_data->is_adjacent_to_paper_edge_inline_end = sides.inline_end;
+    rare_data->is_adjacent_to_paper_edge_block_start = sides.block_start;
+    rare_data->is_adjacent_to_paper_edge_block_end = sides.block_end;
+  }
+
+  void SetSafePrintableInset(LayoutUnit inset) {
+    EnsureRareData()->safe_printable_inset = inset;
+  }
+
   void SetRequiresContentBeforeBreaking(bool b) {
-    if (!b && !space_.HasRareData())
+    if (!b && !space_.rare_data_) {
       return;
-    space_.EnsureRareData()->requires_content_before_breaking = b;
+    }
+    EnsureRareData()->requires_content_before_breaking = b;
   }
 
   void SetIsInsideBalancedColumns() {
-    space_.EnsureRareData()->is_inside_balanced_columns = true;
+    EnsureRareData()->is_inside_balanced_columns = true;
   }
 
   void SetShouldIgnoreForcedBreaks() {
-    space_.EnsureRareData()->should_ignore_forced_breaks = true;
+    EnsureRareData()->should_ignore_forced_breaks = true;
   }
 
-  void SetIsInColumnBfc() { space_.EnsureRareData()->is_in_column_bfc = true; }
+  void SetIsInColumnBfc() { EnsureRareData()->is_in_column_bfc = true; }
 
-  void SetIsPastBreak() { space_.EnsureRareData()->is_past_break = true; }
+  void SetIsPastBreak() { EnsureRareData()->is_past_break = true; }
 
   void SetMinBlockSizeShouldEncompassIntrinsicSize() {
-    space_.EnsureRareData()->min_block_size_should_encompass_intrinsic_size =
-        true;
+    EnsureRareData()->min_block_size_should_encompass_intrinsic_size = true;
   }
 
   void SetMinBreakAppeal(BreakAppeal min_break_appeal) {
-    if (!space_.HasRareData() && min_break_appeal == kBreakAppealLastResort)
+    if (!space_.rare_data_ && min_break_appeal == kBreakAppealLastResort) {
       return;
-    space_.EnsureRareData()->min_break_appeal = min_break_appeal;
+    }
+    EnsureRareData()->min_break_appeal = min_break_appeal;
   }
 
   void SetShouldPropagateChildBreakValues(
       bool propagate_child_break_values = true) {
     // Don't create rare data if `propagate_child_break_values` is already
     // false.
-    if (!space_.HasRareData() && !propagate_child_break_values)
+    if (!space_.rare_data_ && !propagate_child_break_values) {
       return;
-    space_.EnsureRareData()->propagate_child_break_values =
+    }
+    EnsureRareData()->propagate_child_break_values =
         propagate_child_break_values;
   }
 
   void SetIsTableCell(bool is_table_cell) {
-    space_.EnsureRareData()->SetIsTableCell();
+    EnsureRareData()->SetIsTableCell();
   }
 
   void SetIsRestrictedBlockSizeTableCell(bool b) {
@@ -307,13 +365,13 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     if (!b && !space_.rare_data_) {
       return;
     }
-    space_.EnsureRareData()->is_restricted_block_size_table_cell = b;
+    EnsureRareData()->is_restricted_block_size_table_cell = b;
   }
 
   void SetHideTableCellIfEmpty(bool b) {
     if (!b && !space_.rare_data_)
       return;
-    space_.EnsureRareData()->hide_table_cell_if_empty = b;
+    EnsureRareData()->hide_table_cell_if_empty = b;
   }
 
   void SetIsAnonymous(bool b) { space_.bitfields_.is_anonymous = b; }
@@ -343,7 +401,20 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
 
   void SetBlockStartAnnotationSpace(LayoutUnit space) {
     if (space)
-      space_.EnsureRareData()->SetBlockStartAnnotationSpace(space);
+      EnsureRareData()->SetBlockStartAnnotationSpace(space);
+  }
+
+  void SetIgnoreMarginsForStretch(WritingMode parent_mode,
+                                  LineLogicalBoxSides sides) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_ignored_margins_set_);
+    is_ignored_margins_set_ = true;
+#endif
+    if (!sides.IsEmpty()) {
+      EnsureRareData()->ignore_margins_for_stretch =
+          PhysicalBoxSides(sides, parent_mode)
+              .ToLogical(space_.GetWritingDirection());
+    }
   }
 
   void SetMarginStrut(const MarginStrut& margin_strut) {
@@ -352,16 +423,13 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_margin_strut_set_ = true;
 #endif
     if (!is_new_fc_ && margin_strut != MarginStrut()) {
-      space_.EnsureRareData()->SetMarginStrut(margin_strut);
+      EnsureRareData()->SetMarginStrut(margin_strut);
     }
   }
 
   void SetBfcOffset(const BfcOffset& bfc_offset) {
     if (!is_new_fc_) {
-      if (space_.HasRareData())
-        space_.rare_data_->bfc_offset = bfc_offset;
-      else
-        space_.bfc_offset_ = bfc_offset;
+      space_.bfc_offset_ = bfc_offset;
     }
   }
 
@@ -371,7 +439,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_optimistic_bfc_block_offset_set_ = true;
 #endif
     if (!is_new_fc_) [[likely]] {
-      space_.EnsureRareData()->SetOptimisticBfcBlockOffset(
+      EnsureRareData()->SetOptimisticBfcBlockOffset(
           optimistic_bfc_block_offset);
     }
   }
@@ -382,7 +450,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_forced_bfc_block_offset_set_ = true;
 #endif
     DCHECK(!is_new_fc_);
-    space_.EnsureRareData()->SetForcedBfcBlockOffset(forced_bfc_block_offset);
+    EnsureRareData()->SetForcedBfcBlockOffset(forced_bfc_block_offset);
   }
 
   LayoutUnit ExpectedBfcBlockOffset() const {
@@ -395,7 +463,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_clearance_offset_set_ = true;
 #endif
     if (!is_new_fc_ && clearance_offset != LayoutUnit::Min())
-      space_.EnsureRareData()->SetClearanceOffset(clearance_offset);
+      EnsureRareData()->SetClearanceOffset(clearance_offset);
   }
 
   void SetTableCellBorders(const BoxStrut& table_cell_borders,
@@ -406,7 +474,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_table_cell_borders_set_ = true;
 #endif
     if (table_cell_borders != BoxStrut()) {
-      space_.EnsureRareData()->SetTableCellBorders(
+      EnsureRareData()->SetTableCellBorders(
           table_cell_borders.ConvertToPhysical(table_writing_direction)
               .ConvertToLogical(cell_writing_direction));
     }
@@ -419,7 +487,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_table_cell_alignment_baseline_set_ = true;
 #endif
     if (is_in_parallel_flow_ && table_cell_alignment_baseline) {
-      space_.EnsureRareData()->SetTableCellAlignmentBaseline(
+      EnsureRareData()->SetTableCellAlignmentBaseline(
           *table_cell_alignment_baseline);
     }
   }
@@ -429,7 +497,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     DCHECK(!is_table_cell_column_index_set_);
     is_table_cell_column_index_set_ = true;
 #endif
-    space_.EnsureRareData()->SetTableCellColumnIndex(column_index);
+    EnsureRareData()->SetTableCellColumnIndex(column_index);
   }
 
   void SetIsTableCellWithCollapsedBorders(bool has_collapsed_borders) {
@@ -438,7 +506,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_table_cell_with_collapsed_borders_set_ = true;
 #endif
     if (has_collapsed_borders) {
-      space_.EnsureRareData()->SetIsTableCellWithCollapsedBorders(
+      EnsureRareData()->SetIsTableCellWithCollapsedBorders(
           has_collapsed_borders);
     }
   }
@@ -463,8 +531,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     is_custom_layout_data_set_ = true;
 #endif
     if (custom_layout_data) {
-      space_.EnsureRareData()->SetCustomLayoutData(
-          std::move(custom_layout_data));
+      EnsureRareData()->SetCustomLayoutData(std::move(custom_layout_data));
     }
   }
 
@@ -474,7 +541,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     DCHECK(!is_table_row_data_set_);
     is_table_row_data_set_ = true;
 #endif
-    space_.EnsureRareData()->SetTableRowData(std::move(table_data), row_index);
+    EnsureRareData()->SetTableRowData(std::move(table_data), row_index);
   }
 
   void SetTableSectionData(
@@ -484,8 +551,7 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     DCHECK(!is_table_section_data_set_);
     is_table_section_data_set_ = true;
 #endif
-    space_.EnsureRareData()->SetTableSectionData(std::move(table_data),
-                                                 section_index);
+    EnsureRareData()->SetTableSectionData(std::move(table_data), section_index);
   }
 
   void SetLineClampData(LineClampData data) {
@@ -495,94 +561,76 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
 #endif
     DCHECK(!is_new_fc_);
     if (data.state != LineClampData::kDisabled) {
-      space_.EnsureRareData()->SetLineClampData(data);
+      EnsureRareData()->SetLineClampData(data);
     }
   }
 
-  void SetLineClampEndMarginStrut(MarginStrut end_margin_strut) {
-#if DCHECK_IS_ON()
-    DCHECK(!is_line_clamp_end_margin_strut_set_);
-    is_line_clamp_end_margin_strut_set_ = true;
-#endif
-    DCHECK(!is_new_fc_);
-    if (!end_margin_strut.IsEmpty()) {
-      space_.EnsureRareData()->SetLineClampEndMarginStrut(end_margin_strut);
-    }
-  }
-
-  void SetLineClampEndPadding(LayoutUnit end_padding) {
-#if DCHECK_IS_ON()
-    DCHECK(!is_line_clamp_end_padding_set_);
-    is_line_clamp_end_padding_set_ = true;
-#endif
-    DCHECK(!is_new_fc_);
-    if (end_padding) {
-      space_.EnsureRareData()->SetLineClampEndPadding(end_padding);
+  void SetLineClampAncestorChain(const LineClampAncestorChain* data) {
+    if (data) {
+      EnsureRareData()->SetLineClampAncestorChain(data);
     }
   }
 
   void SetShouldTextBoxTrimNodeStart(bool b) {
     if (b || space_.rare_data_) {
-      space_.EnsureRareData()->should_text_box_trim_node_start = b;
+      EnsureRareData()->should_text_box_trim_node_start = b;
     }
   }
   void SetShouldTextBoxTrimNodeEnd(bool b) {
     if (b || space_.rare_data_) {
-      space_.EnsureRareData()->should_text_box_trim_node_end = b;
+      EnsureRareData()->should_text_box_trim_node_end = b;
     }
   }
   void SetShouldTextBoxTrimFragmentainerStart(bool b) {
     if (b || space_.rare_data_) {
-      space_.EnsureRareData()->should_text_box_trim_fragmentainer_start = b;
+      EnsureRareData()->should_text_box_trim_fragmentainer_start = b;
     }
   }
   void SetShouldTextBoxTrimFragmentainerEnd(bool b) {
     if (b || space_.rare_data_) {
-      space_.EnsureRareData()->should_text_box_trim_fragmentainer_end = b;
+      EnsureRareData()->should_text_box_trim_fragmentainer_end = b;
     }
   }
   void SetShouldTextBoxTrimInsideWhenLineClamp(bool b) {
     if (b || space_.rare_data_) {
-      space_.EnsureRareData()->should_text_box_trim_inside_when_line_clamp = b;
+      EnsureRareData()->should_text_box_trim_inside_when_line_clamp = b;
     }
   }
 
-  void SetShouldForceTextBoxTrimEnd() { space_.SetShouldForceTextBoxTrimEnd(); }
-  void SetEffectiveTextBoxEdge(TextBoxEdge value) {
-    space_.SetEffectiveTextBoxEdge(value);
+  void SetShouldForceTextBoxTrimEnd() {
+    EnsureRareData()->should_force_text_box_trim_end = true;
+  }
+
+  void SetShouldForceMarginTrimEnd() {
+    EnsureRareData()->should_force_margin_trim_end = true;
   }
 
   void SetDecorationPercentageResolutionType(
       DecorationPercentageResolutionType type) {
-    space_.EnsureRareData()->decoration_percentage_resolution_type =
+    EnsureRareData()->decoration_percentage_resolution_type =
         static_cast<unsigned>(type);
   }
 
-  void SetIsPushedByFloats() {
-    space_.EnsureRareData()->is_pushed_by_floats = true;
-  }
+  void SetIsPushedByFloats() { EnsureRareData()->is_pushed_by_floats = true; }
 
   void SetTargetStretchInlineSize(LayoutUnit target_stretch_inline_size) {
     DCHECK_GE(target_stretch_inline_size, LayoutUnit());
-    space_.EnsureRareData()->SetTargetStretchInlineSize(
-        target_stretch_inline_size);
+    EnsureRareData()->SetTargetStretchInlineSize(target_stretch_inline_size);
   }
 
   void SetTargetStretchBlockSizes(
       ConstraintSpace::MathTargetStretchBlockSizes target_stretch_block_sizes) {
     DCHECK_GE(target_stretch_block_sizes.ascent, LayoutUnit());
     DCHECK_GE(target_stretch_block_sizes.descent, LayoutUnit());
-    space_.EnsureRareData()->SetTargetStretchBlockSizes(
-        target_stretch_block_sizes);
+    EnsureRareData()->SetTargetStretchBlockSizes(target_stretch_block_sizes);
   }
 
-  void SetGridLayoutSubtree(GridLayoutSubtree&& grid_layout_subtree) {
+  void SetGridLayoutSubtree(const GridLayoutSubtree* grid_layout_subtree) {
 #if DCHECK_IS_ON()
     DCHECK(!is_grid_layout_subtree_set_);
     is_grid_layout_subtree_set_ = true;
 #endif
-    space_.EnsureRareData()->SetGridLayoutSubtree(
-        std::move(grid_layout_subtree));
+    EnsureRareData()->SetGridLayoutSubtree(grid_layout_subtree);
   }
 
   // Creates a new constraint space.
@@ -606,7 +654,31 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
   }
 
  private:
+  ConstraintSpaceBuilder(WritingDirectionMode writing_direction,
+                         bool is_in_parallel_flow,
+                         bool is_new_fc,
+                         bool adjust_inline_size_if_needed,
+                         bool force_orthogonal_writing_mode_root)
+      : space_(writing_direction),
+        is_in_parallel_flow_(is_in_parallel_flow),
+        is_new_fc_(is_new_fc),
+        adjust_inline_size_if_needed_(adjust_inline_size_if_needed),
+        force_orthogonal_writing_mode_root_(
+            force_orthogonal_writing_mode_root) {
+    space_.bitfields_.is_new_formatting_context = is_new_fc_;
+    space_.bitfields_.is_orthogonal_writing_mode_root =
+        !is_in_parallel_flow_ || force_orthogonal_writing_mode_root_;
+  }
   ConstraintSpace space_;
+  ConstraintSpace::RareData* rare_data_ = nullptr;
+
+  ConstraintSpace::RareData* EnsureRareData() {
+    if (!rare_data_) {
+      rare_data_ = MakeGarbageCollected<ConstraintSpace::RareData>();
+      space_.rare_data_ = rare_data_;
+    }
+    return rare_data_;
+  }
 
   // Orthogonal writing mode roots may need a fallback, to prevent available
   // inline size from being indefinite, which isn't allowed. This is the
@@ -615,8 +687,8 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
 
   bool is_in_parallel_flow_;
   bool is_new_fc_;
-  bool force_orthogonal_writing_mode_root_;
   bool adjust_inline_size_if_needed_;
+  bool force_orthogonal_writing_mode_root_;
 
 #if DCHECK_IS_ON()
   bool is_hidden_for_paint_set_ = false;
@@ -635,11 +707,10 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
   bool is_table_cell_with_collapsed_borders_set_ = false;
   bool is_custom_layout_data_set_ = false;
   bool is_line_clamp_data_set_ = false;
-  bool is_line_clamp_end_padding_set_ = false;
-  bool is_line_clamp_end_margin_strut_set_ = false;
   bool is_table_row_data_set_ = false;
   bool is_table_section_data_set_ = false;
   bool is_grid_layout_subtree_set_ = false;
+  bool is_ignored_margins_set_ = false;
 
   bool to_constraint_space_called_ = false;
 #endif
@@ -673,8 +744,8 @@ class CORE_EXPORT MinMaxConstraintSpaceBuilder final {
     delegate_.SetPercentageResolutionSize({kIndefiniteSize, block_size});
   }
 
-  void SetReplacedPercentageResolutionBlockSize(LayoutUnit block_size) {
-    delegate_.SetReplacedPercentageResolutionSize(
+  void SetReplacedChildPercentageResolutionBlockSize(LayoutUnit block_size) {
+    delegate_.SetReplacedChildPercentageResolutionSize(
         {kIndefiniteSize, block_size});
   }
 

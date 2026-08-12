@@ -29,8 +29,6 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_segmented_font_face.h"
-#include "third_party/blink/renderer/core/css/font_face.h"
-#include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/platform/fonts/font_selection_types.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -41,6 +39,8 @@
 namespace blink {
 
 class FontDescription;
+class FontFace;
+class StyleRuleFontFace;
 
 class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
  public:
@@ -52,7 +52,8 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
   bool ClearCSSConnected();
   void ClearAll();
   void AddFontFace(FontFace*, bool css_connected);
-  void RemoveFontFace(FontFace*, bool css_connected);
+  // Returns true if the font face was found and removed.
+  bool RemoveFontFace(FontFace*, bool css_connected);
 
   size_t GetNumSegmentedFacesForTesting();
 
@@ -63,9 +64,6 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
   const HeapLinkedHashSet<Member<FontFace>>& CssConnectedFontFaces() const {
     return css_connected_font_faces_;
   }
-
-  unsigned Version() const { return version_; }
-  void IncrementVersion();
 
   void Trace(Visitor*) const;
 
@@ -92,7 +90,9 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
     void AddFontFace(FontFace* font_face, bool css_connected);
     bool IsEmpty() const { return map_.empty(); }
 
-    // Returns true if associated |CSSSegmentedFontFace| is empty.
+    // Returns true if the font face was found and removed. Handles the case
+    // where the font face's current capabilities differ from the stored key
+    // (e.g., after a descriptor update).
     bool RemoveFontFace(FontFace* font_face);
 
     void Trace(Visitor*) const;
@@ -123,7 +123,7 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
 
     using Map = HeapHashMap<String,
                             Member<FontSelectionQueryResult>,
-                            CaseFoldingHashTraits<String>>;
+                            DeprecatedCaseFoldingHashTraits<String>>;
 
    public:
     void Clear();
@@ -147,7 +147,9 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
     void Clear() { map_.clear(); }
     CapabilitiesSet* Find(const AtomicString& family) const;
     bool IsEmpty() const { return map_.empty(); }
-    // Returns true if |font_face| is removed from |map_|.
+    // Returns true if |font_face| is removed from |map_|. Handles the case
+    // where the font face's family name differs from the stored key (e.g.,
+    // after a setFamily descriptor update).
     bool RemoveFontFace(FontFace* font_face);
 
     size_t GetNumSegmentedFacesForTesting() const;
@@ -157,7 +159,7 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
    private:
     using Map = HeapHashMap<String,
                             Member<CapabilitiesSet>,
-                            CaseFoldingHashTraits<String>>;
+                            DeprecatedCaseFoldingHashTraits<String>>;
 
     Map map_;
   };
@@ -179,10 +181,6 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
   // StyleEngine, which clears all those faces from the FontCache which are
   // originating from CSS, as opposed to those originating from JS.
   HeapLinkedHashSet<Member<FontFace>> css_connected_font_faces_;
-
-  // FIXME: See if this could be ditched
-  // Used to compare Font instances, and the usage seems suspect.
-  unsigned version_;
 };
 
 }  // namespace blink

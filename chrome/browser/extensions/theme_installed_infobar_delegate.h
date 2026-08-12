@@ -8,8 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/functional/callback.h"
-#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_observer.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -38,7 +37,7 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
   friend class InfoBarUiTest;
 
   // Creates a theme installed infobar and delegate and adds the infobar to
-  // |infobar_manager|, replacing any previous theme infobar.
+  // `infobar_manager`, replacing any previous theme infobar.
   static void Create(
       infobars::ContentInfoBarManager* infobar_manager,
       ThemeService* theme_service,
@@ -65,8 +64,6 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
   // ThemeServiceObserver:
   void OnThemeChanged() override;
 
-  raw_ptr<ThemeService> theme_service_;
-
   // Name of theme that's just been installed.
   std::string theme_name_;
 
@@ -75,6 +72,9 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
 
   // Used to undo theme install.
   std::unique_ptr<ThemeService::ThemeReinstaller> prev_theme_reinstaller_;
+
+  base::ScopedObservation<ThemeService, ThemeServiceObserver>
+      theme_observation_{this};
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_THEME_INSTALLED_INFOBAR_DELEGATE_H_

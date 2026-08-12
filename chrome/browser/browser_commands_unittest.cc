@@ -2,15 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/browser_commands.h"
+
 #include <stddef.h>
 
+#include <memory>
+
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/resource_coordinator/tab_helper.h"
+#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
+#include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/browser_command_controller.h"
-#include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_sync_service_initialized_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -18,6 +27,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/saved_tab_groups/public/tab_group_sync_service.h"
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/navigation_controller.h"
@@ -48,6 +58,14 @@ class BrowserCommandsTest : public BrowserWithTestWindowTest {
     return {TestingProfile::TestingFactory{
         BookmarkModelFactory::GetInstance(),
         BookmarkModelFactory::GetDefaultFactory()}};
+  }
+
+  void WaitForTabGroupSyncServiceInitialized() {
+    auto observer =
+        std::make_unique<tab_groups::TabGroupSyncServiceInitializedObserver>(
+            tab_groups::TabGroupSyncServiceFactory::GetForProfile(
+                browser()->profile()));
+    observer->Wait();
   }
 };
 
@@ -83,6 +101,48 @@ TEST_F(BrowserCommandsTest, TabNavigationAccelerators) {
   ASSERT_EQ(2, browser()->tab_strip_model()->active_index());
 }
 
+// Tests IDC_SELECT_NEXT_TAB with MRU enabled.
+TEST_F(BrowserCommandsTest, SelectNextTab_MRU) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kCtrlTabMru);
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kCtrlTabMru, true);
+
+  GURL about_blank(url::kAboutBlankURL);
+
+  // Create three tabs.
+  AddTab(browser(), about_blank);
+  AddTab(browser(), about_blank);
+  AddTab(browser(), about_blank);
+
+  // For MRU tracking to work in unit tests, we need
+  // ResourceCoordinatorTabHelper.
+  for (int i = 0; i < browser()->tab_strip_model()->count(); ++i) {
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetWebContentsAt(i);
+    resource_coordinator::ResourceCoordinatorTabHelper::CreateForWebContents(
+        contents);
+  }
+
+  // Set times to simulate MRU order: Tab 2 (most recent) -> Tab 0 -> Tab 1
+  browser()->tab_strip_model()->GetWebContentsAt(2)->SetTabSwitchStartTime(
+      base::TimeTicks::Now(), false, false);
+
+  browser()->tab_strip_model()->GetWebContentsAt(0)->SetTabSwitchStartTime(
+      base::TimeTicks::Now() - base::Seconds(1), false, false);
+
+  browser()->tab_strip_model()->GetWebContentsAt(1)->SetTabSwitchStartTime(
+      base::TimeTicks::Now() - base::Seconds(2), false, false);
+
+  // We are currently on tab 2.
+  browser()->tab_strip_model()->ActivateTabAt(2);
+
+  CommandUpdater* updater = browser()->command_controller();
+
+  // If MRU is active, the most recently used tab before 2 is 0.
+  updater->ExecuteCommand(IDC_SELECT_NEXT_TAB);
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+}
+
 // Tests IDC_DUPLICATE_TAB.
 TEST_F(BrowserCommandsTest, DuplicateTab) {
   GURL url1("http://foo/1");
@@ -101,13 +161,14 @@ TEST_F(BrowserCommandsTest, DuplicateTab) {
   EXPECT_EQ(3, orig_controller.GetEntryCount());
   EXPECT_TRUE(orig_controller.GetPendingEntry());
 
-  size_t initial_window_count = chrome::GetTotalBrowserCount();
+  size_t initial_window_count =
+      GlobalBrowserCollection::GetInstance()->GetSize();
 
   // Duplicate the tab.
   chrome::ExecuteCommand(browser(), IDC_DUPLICATE_TAB);
 
   // The duplicated tab should not end up in a new window.
-  size_t window_count = chrome::GetTotalBrowserCount();
+  size_t window_count = GlobalBrowserCollection::GetInstance()->GetSize();
   ASSERT_EQ(initial_window_count, window_count);
 
   // And we should have a newly duplicated tab.
@@ -124,7 +185,7 @@ TEST_F(BrowserCommandsTest, DuplicateTab) {
   EXPECT_FALSE(controller.GetPendingEntry());
 }
 
-// Tests IDC_VIEW_SOURCE (See http://crbug.com/138140).
+// Tests IDC_VIEW_SOURCE (See http://crbug.com/40245175).
 TEST_F(BrowserCommandsTest, ViewSource) {
   GURL url1("http://foo/1");
   GURL url1_subframe("http://foo/subframe");
@@ -149,13 +210,14 @@ TEST_F(BrowserCommandsTest, ViewSource) {
   EXPECT_EQ(1, orig_controller.GetEntryCount());
   EXPECT_TRUE(orig_controller.GetPendingEntry());
 
-  size_t initial_window_count = chrome::GetTotalBrowserCount();
+  size_t initial_window_count =
+      GlobalBrowserCollection::GetInstance()->GetSize();
 
   // View Source.
   chrome::ExecuteCommand(browser(), IDC_VIEW_SOURCE);
 
   // The view source tab should not end up in a new window.
-  size_t window_count = chrome::GetTotalBrowserCount();
+  size_t window_count = GlobalBrowserCollection::GetInstance()->GetSize();
   ASSERT_EQ(initial_window_count, window_count);
 
   // And we should have a newly duplicated tab.
@@ -281,6 +343,9 @@ TEST_F(BrowserCommandsTest, BackForwardInNewTabWithGroup) {
   AddTab(browser(), url1);
   NavigateAndCommitActiveTab(url2);
 
+  // Ensure the service is initialized before making any changes to tab groups.
+  WaitForTabGroupSyncServiceInitialized();
+
   // Add the tab to a Tab Group.
   const tab_groups::TabGroupId group_id =
       browser()->tab_strip_model()->AddToNewGroup({0});
@@ -304,6 +369,82 @@ TEST_F(BrowserCommandsTest, BackForwardInNewTabWithGroup) {
 
   // The new tab should have inherited the tab group from the old tab.
   EXPECT_EQ(group_id, browser()->tab_strip_model()->GetTabGroupForTab(2));
+}
+TEST_F(BrowserCommandsTest, GroupAllUngroupedTabs) {
+  GURL url("http://www.google.com");
+
+  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+
+  ASSERT_TRUE(tab_strip_model->SupportsTabGroups());
+
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+
+  // Ensure the service is initialized before making any changes to tab groups.
+  WaitForTabGroupSyncServiceInitialized();
+
+  ASSERT_EQ(tab_strip_model->count(), 4);
+
+  // Group the middle two tabs. The outer two tabs are ungrouped for now.
+  const tab_groups::TabGroupId group_1 = tab_strip_model->AddToNewGroup({1, 2});
+
+  const tabs::TabInterface* ungrouped_tab_0 = tab_strip_model->GetTabAtIndex(0);
+  const tabs::TabInterface* ungrouped_tab_1 = tab_strip_model->GetTabAtIndex(3);
+
+  chrome::GroupAllUngroupedTabs(browser());
+
+  // Get the new group and make sure it is distinct from
+  // the first group.
+  std::optional<tab_groups::TabGroupId> group_2_opt =
+      ungrouped_tab_0->GetGroup();
+  ASSERT_TRUE(group_2_opt.has_value());
+  const tab_groups::TabGroupId group_2 = *group_2_opt;
+  EXPECT_NE(group_1, group_2);
+
+  EXPECT_TRUE(ungrouped_tab_1->GetGroup());
+  EXPECT_EQ(group_2, *ungrouped_tab_1->GetGroup());
+}
+
+TEST_F(BrowserCommandsTest, GroupAllUngroupedTabsWithPinnedTabs) {
+  GURL url("http://www.google.com");
+  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+
+  ASSERT_TRUE(tab_strip_model->SupportsTabGroups());
+
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+  AddTab(browser(), url);
+  ASSERT_EQ(tab_strip_model->count(), 4);
+
+  // Ensure the service is initialized before making any changes to tab groups.
+  WaitForTabGroupSyncServiceInitialized();
+
+  // Pin the first and third tabs. Then call group ungrouped tabs.
+  tab_strip_model->SetTabPinned(0, true);
+  tab_strip_model->SetTabPinned(1, true);
+
+  chrome::GroupAllUngroupedTabs(browser());
+  // Get the new group made from |GroupAllUngroupedTabs| and make sure it is
+  // distinct from the previous group.
+  std::optional<tab_groups::TabGroupId> group_opt =
+      tab_strip_model->GetTabGroupForTab(2);
+  ASSERT_TRUE(group_opt.has_value());
+  const tab_groups::TabGroupId group = *group_opt;
+
+  // Check the groups of the tab strip. Pinned tabs should not have a group.
+  EXPECT_EQ(std::nullopt, tab_strip_model->GetTabGroupForTab(0));
+  EXPECT_EQ(std::nullopt, tab_strip_model->GetTabGroupForTab(1));
+  EXPECT_EQ(group, tab_strip_model->GetTabGroupForTab(2));
+  EXPECT_EQ(group, tab_strip_model->GetTabGroupForTab(3));
+
+  // Check the pinned tabs are still pinned.
+  EXPECT_TRUE(tab_strip_model->IsTabPinned(0));
+  EXPECT_TRUE(tab_strip_model->IsTabPinned(1));
+  EXPECT_FALSE(tab_strip_model->IsTabPinned(2));
+  EXPECT_FALSE(tab_strip_model->IsTabPinned(3));
 }
 
 TEST_F(BrowserCommandsTest, OnMaxZoomIn) {

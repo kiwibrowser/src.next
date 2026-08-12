@@ -29,13 +29,14 @@
 
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/loader/image_loader.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 
 namespace blink {
 
 class LayoutObject;
-struct IntrinsicSizingInfo;
+struct NaturalSizingInfo;
 
 class CORE_EXPORT LayoutImageResource
     : public GarbageCollected<LayoutImageResource> {
@@ -52,9 +53,17 @@ class CORE_EXPORT LayoutImageResource
   void SetImageResource(ImageResourceContent*);
   ImageResourceContent* CachedImage() const { return cached_image_.Get(); }
   virtual bool HasImage() const { return cached_image_ != nullptr; }
+  virtual bool IsSizeAvailable() const {
+    return cached_image_ && cached_image_->IsSizeAvailable();
+  }
   ResourcePriority ComputeResourcePriority() const;
 
-  void ResetAnimation();
+  // Kept as the legacy reset path when SvgImageAnimationReset is disabled.
+  // The enabled path resets the image directly and uses InvalidatePaint().
+  void InvalidatePaint();
+
+  void ResetAnimation(
+      ImageLoader::ResetTimeline = ImageLoader::ResetTimeline::kAll);
   bool MaybeAnimated() const;
 
   virtual scoped_refptr<Image> GetImage(const gfx::SizeF&) const;
@@ -67,13 +76,9 @@ class CORE_EXPORT LayoutImageResource
   // the "broken image".
   void UseBrokenImage();
 
-  virtual bool HasIntrinsicSize() const;
+  virtual bool IsCorsSameOrigin() const;
 
-  virtual gfx::SizeF ImageSize(float multiplier) const;
-  virtual gfx::SizeF ConcreteObjectSize(
-      float multiplier,
-      const gfx::SizeF& default_object_size) const;
-  virtual IntrinsicSizingInfo GetNaturalDimensions(float multiplier) const;
+  virtual NaturalSizingInfo GetNaturalDimensions(float multiplier) const;
   virtual RespectImageOrientationEnum ImageOrientation() const;
   virtual WrappedImagePtr ImagePtr() const { return cached_image_.Get(); }
 

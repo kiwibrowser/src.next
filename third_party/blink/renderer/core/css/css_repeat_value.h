@@ -10,10 +10,6 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
-namespace WTF {
-class String;
-}  // namespace WTF
-
 namespace blink {
 namespace cssvalue {
 
@@ -28,7 +24,7 @@ class CSSRepeatValue : public CSSValue {
                           const CSSValueList& values)
       : CSSValue(kRepeatClass), repetitions_(repetitions), values_(&values) {}
 
-  WTF::String CustomCSSText() const;
+  String CustomCSSText() const;
   bool Equals(const CSSRepeatValue&) const;
 
   const CSSPrimitiveValue* Repetitions() const;
@@ -36,6 +32,8 @@ class CSSRepeatValue : public CSSValue {
   bool IsAutoRepeatValue() const;
 
   const CSSValueList& Values() const;
+
+  bool HasRandomFunctions() const;
 
   void TraceAfterDispatch(blink::Visitor* visitor) const;
 

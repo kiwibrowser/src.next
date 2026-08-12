@@ -8,7 +8,6 @@
 
 #include "base/containers/adapters.h"
 #include "base/containers/fixed_flat_map.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "net/url_request/url_request_job.h"
@@ -65,6 +64,7 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     RedirectInfo::FirstPartyURLPolicy original_first_party_url_policy,
     ReferrerPolicy original_referrer_policy,
     const std::string& original_referrer,
+    const std::optional<url::Origin>& original_initiator,
     int http_status_code,
     const GURL& new_location,
     const std::optional<std::string>& referrer_policy_header,
@@ -73,9 +73,15 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     bool is_signed_exchange_fallback_redirect) {
   RedirectInfo redirect_info;
 
+  redirect_info.original_initiator = original_initiator;
   redirect_info.status_code = http_status_code;
 
   // The request method may change, depending on the status code.
+  // See 4.4. HTTP-redirect fetch
+  // (https://fetch.spec.whatwg.org/#http-redirect-fetch), step 12.
+  // The headers and request body are updated later using
+  // RedirectUtil::UpdateHttpRequest for requests whose method
+  // changed to GET.
   redirect_info.new_method =
       ComputeMethodForRedirect(original_method, http_status_code);
 
@@ -86,7 +92,7 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     GURL::Replacements replacements;
     // Reference the |ref| directly out of the original URL to avoid a
     // malloc.
-    replacements.SetRefStr(original_url.ref_piece());
+    replacements.SetRefStr(original_url.ref());
     redirect_info.new_url = new_location.ReplaceComponents(replacements);
   } else {
     redirect_info.new_url = new_location;
@@ -105,6 +111,8 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     redirect_info.new_site_for_cookies = original_site_for_cookies;
   }
 
+  // See 4.4. HTTP-redirect fetch
+  // (https://fetch.spec.whatwg.org/#http-redirect-fetch), step 19.
   redirect_info.new_referrer_policy = ProcessReferrerPolicyHeaderOnRedirect(
       original_referrer_policy, referrer_policy_header);
 

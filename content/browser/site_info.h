@@ -5,10 +5,13 @@
 #ifndef CONTENT_BROWSER_SITE_INFO_H_
 #define CONTENT_BROWSER_SITE_INFO_H_
 
+#include "base/unguessable_token.h"
 #include "content/browser/agent_cluster_key.h"
+#include "content/browser/embedder_isolation_info.h"
 #include "content/browser/url_info.h"
 #include "content/browser/web_exposed_isolation_info.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/storage_partition_config.h"
 #include "content/public/browser/web_exposed_isolation_level.h"
 #include "url/gurl.h"
@@ -18,6 +21,7 @@ namespace content {
 
 class BrowserContext;
 class IsolationContext;
+class OriginAgentClusterIsolationState;
 class StoragePartitionConfig;
 struct UrlInfo;
 
@@ -34,6 +38,11 @@ struct UrlInfo;
 // site URLs can be finer grained (e.g., origins) or coarser grained (e.g.,
 // file://). See |site_url()| for more considerations.
 //
+// SecurityPrincipal is the interface that's exposed to features that need
+// to access security principals outside of //content, providing access to a
+// subset of SiteInfo properties. SiteInfo is the sole implementation of that
+// interface, for use inside //content.
+//
 // In the future, we may add more information to SiteInfo for cases where the
 // site URL is not sufficient to identify which process a document belongs in.
 // For example, origin isolation (https://crbug.com/1067389) will introduce a
@@ -42,7 +51,7 @@ struct UrlInfo;
 // values to have the same site URL. It is important that any extra members of
 // SiteInfo do not cause two documents that can script each other to end up in
 // different SiteInfos and thus different processes.
-class CONTENT_EXPORT SiteInfo {
+class CONTENT_EXPORT SiteInfo : public SecurityPrincipal {
  public:
   // Helper to create a SiteInfo that will be used for an error page.  This is
   // used only when error page isolation is enabled.  Note that when site
@@ -51,16 +60,22 @@ class CONTENT_EXPORT SiteInfo {
   // frames is enabled, error pages inside fenced frames will be isolated from
   // embedders.
   //
-  // `web_exposed_isolation_info` describes the isolation state of the error
-  // page. Top-level error pages use a non-isolated WebExposedIsolationInfo,
-  // while subframes and embedded content (including fenced frames, protals,
-  // etc.) inherit this value from their embedder.
+  // `web_exposed_isolation_info` and `cross_origin_isolation_key` describe the
+  // isolation state of the error page. Top-level error pages use a non-isolated
+  // WebExposedIsolationInfo and CrossOriginIsolationKey, while subframes and
+  // embedded content (including fenced frames, protals, etc.) will inherit the
+  // WebExposedIsolationInfo value from their embedder and may inherit the
+  // CrossOriginIsolationKey (depending on whether cross-origin isolation was
+  // enabled by COOP+COEP or DIP).
   static SiteInfo CreateForErrorPage(
       const StoragePartitionConfig storage_partition_config,
       bool is_guest,
       bool is_fenced,
       const WebExposedIsolationInfo& web_exposed_isolation_info,
-      WebExposedIsolationLevel web_exposed_isolation_level);
+      WebExposedIsolationLevel web_exposed_isolation_level,
+      const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
+          cross_origin_isolation_key,
+      const base::UnguessableToken& browser_context_id);
 
   // Helper to create a SiteInfo for default SiteInstances.  Default
   // SiteInstances are used for non-isolated sites on platforms without strict
@@ -70,7 +85,9 @@ class CONTENT_EXPORT SiteInfo {
   static SiteInfo CreateForDefaultSiteInstance(
       const IsolationContext& isolation_context,
       const StoragePartitionConfig storage_partition_config,
-      const WebExposedIsolationInfo& web_exposed_isolation_info);
+      const WebExposedIsolationInfo& web_exposed_isolation_info,
+      const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
+          cross_origin_isolation_key);
 
   // Helper to create a SiteInfo for a <webview> guest.  This helper can be
   // used for a new guest associated with a specific StoragePartitionConfig
@@ -84,23 +101,6 @@ class CONTENT_EXPORT SiteInfo {
   // thread because it must be able to compute an effective URL.
   static SiteInfo Create(const IsolationContext& isolation_context,
                          const UrlInfo& url_info);
-
-  // Similar to the function above, but this method can only be called on the
-  // IO thread. All fields except for the site_url should be the same as
-  // the other method. The site_url field will match the process_lock_url
-  // in the object returned by this function. This is because we cannot compute
-  // the effective URL from the IO thread.
-  //
-  // `url_info` MUST contain a StoragePartitionConfig because we can't ask the
-  // embedder which StoragePartitionConfig to use from the IO thread.
-  //
-  // NOTE: Do not use this method unless there is a very clear and good reason
-  // to do so. It primarily exists to facilitate the creation of ProcessLocks
-  // from any thread. ProcessLocks do not rely on the site_url field so the
-  // difference between this method and Create() does not cause problems for
-  // that usecase.
-  static SiteInfo CreateOnIOThread(const IsolationContext& isolation_context,
-                                   const UrlInfo& url_info);
 
   // Method to make creating SiteInfo objects for tests easier. It is a thin
   // wrapper around Create() that uses UrlInfo::CreateForTesting(),
@@ -153,17 +153,48 @@ class CONTENT_EXPORT SiteInfo {
   static WebExposedIsolationLevel ComputeWebExposedIsolationLevelForEmptySite(
       const WebExposedIsolationInfo& web_exposed_isolation_info);
 
+  // A helper to determine whether a site requires a dedicated process, based on
+  // fields from SiteInfo. This takes the relevant bits individually so it's not
+  // necessary to create a SiteInfo first.
+  static bool RequiresDedicatedProcessInternal(
+      const GURL& site_url,
+      const IsolationContext& isolation_context,
+      BrowserContext* browser_context,
+      bool does_site_request_dedicated_process_for_coop,
+      bool requires_origin_keyed_process,
+      bool is_sandboxed,
+      const EmbedderIsolationInfo& embedder_isolation_info,
+      bool cross_origin_isolated_through_dip);
+
+  // Exposes functionality of `GetSiteForURLInternal so tests can do effective
+  // URL translation.
+  static GURL GetSiteForURLForTest(const IsolationContext& isolation_context,
+                                   const UrlInfo& url_info,
+                                   bool should_use_effective_urls);
+
+  // A specific opaque origin used in origin-keyed AgentClusterKeys to represent
+  // the fact that the ProcessLock is not locked and allows any origin. When the
+  // AgentClusterKey is site-keyed, we use an empty GURL to represent that it
+  // allows any site. But there is no similar concept in url::Origin. In
+  // particular, url::Origin() will create an opaque origin with a different
+  // nonce each time it is called. This means that two origins created with
+  // url::Origin() will not be equal to one another. To get around this
+  // difficulty, we define one opaque origin created with url::Origin() as the
+  // origin representing an unlocked ProcessLock and we use it anywhere we want
+  // to check or indicate that a ProcessLock is not locked to a particular
+  // origin or site.
+  static const url::Origin& GetOriginForUnlockedProcess();
+
   // Initializes |storage_partition_config_| with a value appropriate for
   // |browser_context|.
   explicit SiteInfo(BrowserContext* browser_context);
+
   // The SiteInfo constructor should take in all values needed for comparing two
   // SiteInfos, to help ensure all creation sites are updated accordingly when
   // new values are added. The private function MakeSecurityPrincipalKey()
   // should be updated accordingly.
-  SiteInfo(const GURL& site_url,
-           const GURL& process_lock_url,
-           bool requires_origin_keyed_process,
-           bool requires_origin_keyed_process_by_default,
+  SiteInfo(const AgentClusterKey& agent_cluster_key,
+           const GURL& site_url,
            bool is_sandboxed,
            int unique_sandbox_id,
            const StoragePartitionConfig storage_partition_config,
@@ -173,88 +204,107 @@ class CONTENT_EXPORT SiteInfo {
            bool does_site_request_dedicated_process_for_coop,
            bool is_jit_disabled,
            bool are_v8_optimizations_disabled,
-           bool is_pdf,
            bool is_fenced,
-           const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
-               cross_origin_isolation_key);
+           const base::UnguessableToken& browser_context_id,
+           const EmbedderIsolationInfo& embedder_isolation_info);
   SiteInfo() = delete;
   SiteInfo(const SiteInfo& rhs);
-  ~SiteInfo();
+
+  // SecurityPrincipal overrides.
+  ~SiteInfo() override;
+  bool IsSandboxed() const override;
+  bool IsGuest() const override;
+  bool IsWebUI() const override;
+  const StoragePartitionConfig& GetStoragePartitionConfig() const override;
+  bool SchemeIs(std::string_view scheme) const override;
+  std::string GetHost() const override;
+  const GURL& GetDeprecatedSiteURL() const override;
 
   // This function returns a new SiteInfo which is equivalent to the original,
-  // except that (1) is_origin_keyed is false, and (2) the remaining SiteInfo
-  // state is used to compute a new SiteInfo from a UrlInfo reconstructed from
-  // the original SiteInfo, minus any OAC opt-in request.
+  // except that its AgentClusterKey is made site-keyed if it had been created
+  // as origin-keyed due to an OAC opt-in request.
   SiteInfo GetNonOriginKeyedEquivalentForMetrics(
       const IsolationContext& isolation_context) const;
 
-  // Returns the site URL associated with all of the documents and workers in
-  // this principal, as described above.
-  //
-  // NOTE: In most cases, code should be performing checks against the origin
-  // returned by |RenderFrameHost::GetLastCommittedOrigin()|. In contrast, the
-  // GURL returned by |site_url()| should not be considered authoritative
-  // because:
-  // - A SiteInstance can host pages from multiple sites if "site per process"
-  //   is not enabled and the SiteInstance isn't hosting pages that require
-  //   process isolation (e.g. WebUI or extensions).
-  // - Even with site per process, the site URL is not an origin: while often
-  //   derived from the origin, it only contains the scheme and the eTLD + 1,
-  //   i.e. an origin with the host "deeply.nested.subdomain.example.com"
-  //   corresponds to a site URL with the host "example.com".
-  // - When origin isolation is in use, there may be multiple SiteInstance with
-  //   the same site_url() but that differ in other properties.
+  // Additional non-virtual accessor to site_url_, which is ok to use from
+  // inside //content. See SecurityPrincipal::GetDeprecatedSiteURL for more
+  // info.
   const GURL& site_url() const { return site_url_; }
 
   // Returns the AgentClusterKey of the execution contexts within this SiteInfo.
-  const std::optional<AgentClusterKey>& agent_cluster_key() const {
+  // The AgentClusterKey can be origin-keyed, in which case all the execution
+  // contexts in the SiteInfo will belong to a specific origin. Or the
+  // AgentClusterKey can be site-keyed. In this case, execution contexts in the
+  // SiteInfo will belong to a specific origin and its subdomains. This is the
+  // case for most SiteInfos (unless features::kOriginKeyedProcessesByDefault is
+  // enabled), and in particular of command-line isolated origins and legacy
+  // isolated origins added via
+  // ChildProcessSecurityPolicy::AddFutureIsolatedOrigins().
+  //
+  // Origin-keyed AgentClusterKeys can be a result of an explicit
+  // Origin-Agent-Cluster opt-in. They are also the default when
+  // features::kOriginKeyedProcessesByDefault is true. In both cases, the OAC
+  // status of the SiteInfo will be tracked in |oac_status_|, with values of
+  // kOriginKeyedByHeader and kOriginKeyedByDefault.
+  //
+  // The AgentClusterKey can also be origin-keyed due to other factors beyond
+  // OAC. In this case, origin-keying will not be shown in the |oac_status_|.
+  // This is for example the case for documents cross-origin isolated through
+  // DocumentIsolationPolicy.
+  //
+  // Finally, some AgentClusterKeys are site-keyed, but with a site URL that is
+  // scoped in practice to an origin. This is the case when
+  // features::kStrictOriginIsolation is enabled, or for sandboxed data URLs
+  // with origin isolation.
+  // TODO(crbug.com/433443082): Refactor those cases so that they create an
+  // origin-keyed AgentClusterKey instead of a SiteKeyed one.
+  const AgentClusterKey& agent_cluster_key() const {
     return agent_cluster_key_;
   }
 
   // Returns the URL which should be used in a SetProcessLock call for this
-  // SiteInfo's process.  This is the same as |site_url_| except for cases
-  // involving effective URLs, such as hosted apps.  In those cases, this URL is
-  // a site URL that is computed without the use of effective URLs.
+  // SiteInfo's process, based on the |agent_cluster_key_|.  This is the same as
+  // |site_url_| except for cases involving effective URLs, such as hosted apps.
+  // In those cases, this URL is a site URL that is computed without the use of
+  // effective URLs.
   //
   // NOTE: This URL is currently set even in cases where this SiteInstance's
   //       process is *not* going to be locked to it.  Callers should be careful
   //       to consider this case when comparing lock URLs;
   //       ShouldLockProcessToSite() may be used to determine whether the
   //       process lock will actually be used.
-  //
-  // TODO(alexmos): See if we can clean this up and not set |process_lock_url_|
-  //                if the SiteInstance's process isn't going to be locked.
-  const GURL& process_lock_url() const { return process_lock_url_; }
+  GURL GetProcessLockURL() const;
 
-  // Returns whether this SiteInfo requires an origin-keyed process, such as for
-  // an OriginAgentCluster response header. This resolves an ambiguity of
-  // whether a process with a lock_url() like "https://foo.example" is allowed
-  // to include "https://sub.foo.example" or not. In opt-in isolation, it is
-  // possible for example.com to be isolated, and sub.example.com not be
-  // isolated. In contrast, if command-line isolation is used to isolate
-  // example.com, then sub.example.com is also (automatically) isolated.
-  // Also note that opt-in isolated origins will include ports (if non-default)
-  // in their site urls.
-  bool requires_origin_keyed_process() const {
-    return requires_origin_keyed_process_;
+  // The status of the Origin-Agent-Cluster header request for this SiteInfo.
+  // This is mainly used to distinguish between SiteInfos that received process
+  // isolation for their origin due to an explicit OAC opt-in via header
+  // (kOriginKeyedByHeader) from the SiteInfos that received process isolation
+  // due to features::kOriginKeyedProcessesByDefault (kOriginKeyedByDefault).
+  // The former must be tracked per BrowsingInstance to maintain a consistent
+  // OAC state, while the later do not need to do so.
+  // Note that this only applies to OAC that is backed by process isolation. OAC
+  // can also be logical, in which case it will only apply in the renderer
+  // process and is not tracked in the SiteInfo.
+  // Also note that having an |oac_status_| of kOriginKeyedByHeader or
+  // kOriginKeyedByDefault will make the |agent_cluster_key_| origin-keyed, the
+  // reverse is not true. It is possible for the |agent_cluster_key_| to be
+  // origin-keyed and |oac_status_| to be kSiteKeyedByDefault, for example in
+  // the case of a cross-origin isolated document with DocumentIsolationPolicy.
+  AgentClusterKey::OACStatus oac_status() const {
+    return agent_cluster_key_.oac_status();
   }
-
-  // If requires_origin_keyed_process() is true, this function indicates if the
-  // origin-keyed process is being used by default (e.g., via
-  // kOriginKeyedProcessesByDefault), rather than due to an opt-in OAC header.
-  bool requires_origin_keyed_process_by_default() const {
-    return requires_origin_keyed_process_by_default_;
-  }
-
-  // The following accessor is for the `is_sandboxed` flag, which is true when
-  // this SiteInfo is for an origin-restricted-sandboxed iframe.
-  bool is_sandboxed() const { return is_sandboxed_; }
 
   // Returns either kInvalidUniqueSandboxId or the unique sandbox id provided
   // when this SiteInfo was created. The latter case only occurs when
   // `is_sandboxed` is true, and kIsolateSandboxedIframes was specified with
   // the per-document grouping parameter.
   int unique_sandbox_id() const { return unique_sandbox_id_; }
+
+  // Returns the embedder-specified process isolation policy for this SiteInfo.
+  // See //content/browser/embedder_isolation_info.h.
+  const EmbedderIsolationInfo& embedder_isolation_info() const {
+    return embedder_isolation_info_;
+  }
 
   // Returns the web-exposed isolation mode of the BrowsingInstance hosting
   // SiteInstances with this SiteInfo. The level of isolation which a page
@@ -277,13 +327,12 @@ class CONTENT_EXPORT SiteInfo {
     return web_exposed_isolation_level_;
   }
 
-  bool is_guest() const { return is_guest_; }
   bool is_error_page() const;
   bool is_jit_disabled() const { return is_jit_disabled_; }
   bool are_v8_optimizations_disabled() const {
     return are_v8_optimizations_disabled_;
   }
-  bool is_pdf() const { return is_pdf_; }
+  bool is_pdf() const { return embedder_isolation_info_.is_pdf(); }
   bool is_fenced() const { return is_fenced_; }
 
   // See comments on `does_site_request_dedicated_process_for_coop_` for more
@@ -316,13 +365,12 @@ class CONTENT_EXPORT SiteInfo {
 
   // Note: equality operators are defined in terms of IsSamePrincipalWith().
   bool operator==(const SiteInfo& other) const;
-  bool operator!=(const SiteInfo& other) const;
 
   // Defined to allow this object to act as a key for std::map and std::set.
   // Note that the key is determined based on what distinguishes one security
   // principal from another (see IsSamePrincipalWith) and does not necessarily
   // include all the fields in SiteInfo.
-  bool operator<(const SiteInfo& other) const;
+  std::weak_ordering operator<=>(const SiteInfo& other) const;
 
   // Returns a string representation of this SiteInfo principal.
   std::string GetDebugString() const;
@@ -353,13 +401,6 @@ class CONTENT_EXPORT SiteInfo {
   // RenderProcessHost per site for the entire browser context.
   bool ShouldUseProcessPerSite(BrowserContext* browser_context) const;
 
-  // Get the StoragePartitionConfig, which describes the StoragePartition this
-  // SiteInfo is associated with.  For example, this will correspond to a
-  // non-default StoragePartition for <webview> guests.
-  const StoragePartitionConfig& storage_partition_config() const {
-    return storage_partition_config_;
-  }
-
   // Write a representation of this object into a trace.
   void WriteIntoTrace(perfetto::TracedValue context) const;
 
@@ -371,72 +412,68 @@ class CONTENT_EXPORT SiteInfo {
   // same entry in std::map, etc.
   static auto MakeSecurityPrincipalKey(const SiteInfo& site_info);
 
-  // Helper method containing common logic used by the public
-  // Create() and CreateOnIOThread() methods. Most of the parameters simply
-  // match the values passed into the caller. `compute_site_url` controls
-  // whether the site_url field is computed from an effective URL or simply
-  // copied from the `process_lock_url_`. `compute_site_url` is set to false in
-  // contexts where it may not be possible to get the effective URL (e.g. on the
-  // IO thread).
-  static SiteInfo CreateInternal(const IsolationContext& isolation_context,
-                                 const UrlInfo& url_info,
-                                 bool compute_site_url);
+  // Returns the AgentClusterKey (and OAC status) appropriate to use for the
+  // provided |url_info|. |effective_url| is the effective URL, which can
+  // override the real URL in |url_info| when loading hosted apps or the NTP. If
+  // an |effective_url| is provided, the AgentClusterKey will be computed based
+  // on this effective URL rather than the real URL. The |effective_url| is
+  // expected to be different from the real URL, except in the case of WebUIs
+  // (see below).
+  //
+  // Note: in the case of WebUIs, this function should first be called without
+  // an |effective_url| to compute the AgentClusterKey, and with an
+  // |effective_url| which is the real URL of the WebUI. The first call will
+  // return an AgentClusterKey whose site URL is the TLD (ie chrome://bar). The
+  // second call will be used to compute a Site URL which is the WebUIType. This
+  // allows WebUI to continue to differentiate WebUIType via SiteURL while
+  // allowing WebUI with a shared TLD to share a RenderProcessHost.
+  // TODO(crbug.com/40176090): Remove this and replace it with
+  // SiteInstanceGroups once the support lands.
+  static AgentClusterKey GetAgentClusterKeyForURL(
+      const IsolationContext& isolation_context,
+      const UrlInfo& url_info,
+      std::optional<GURL> effective_url);
 
-  // Returns the URL to which a process should be locked for the given UrlInfo.
-  // This is computed similarly to the site URL but without resolving effective
-  // URLs.
-  static GURL DetermineProcessLockURL(const IsolationContext& isolation_context,
-                                      const UrlInfo& url_info);
-
-  // Returns the site for the given UrlInfo, which includes only the scheme and
-  // registered domain.  Returns an empty GURL if the UrlInfo has no host.
-  // |should_use_effective_urls| specifies whether to resolve |url| to an
-  // effective URL (via ContentBrowserClient::GetEffectiveURL()) before
-  // determining the site.
-  static GURL GetSiteForURLInternal(const IsolationContext& isolation_context,
-                                    const UrlInfo& url,
-                                    bool should_use_effective_urls);
+  // The following functions are helpers for GetAgentClusterKeyForURL that
+  // covers the various fetch and local schemes.
+  static AgentClusterKey GetAgentClusterKeyForNonOpaqueOrigin(
+      const IsolationContext& isolation_context,
+      const UrlInfo& url_info,
+      const url::Origin& origin,
+      const OriginAgentClusterIsolationState& oac_isolation_state,
+      bool is_origin_isolated_sandboxed_data_iframe);
+  static AgentClusterKey GetAgentClusterKeyForSchemeOnlyOrigin(
+      const UrlInfo& url_info,
+      const url::Origin& origin,
+      AgentClusterKey::OACStatus oac_status);
+  static AgentClusterKey GetAgentClusterKeyForDataURL(
+      const UrlInfo& url_info,
+      const url::Origin& origin,
+      AgentClusterKey::OACStatus oac_status);
+  static AgentClusterKey GetAgentClusterKeyForBlobURL(
+      const GURL& url,
+      AgentClusterKey::OACStatus oac_status);
 
   // Helper function for ProcessLockCompareTo(). Returns a std::tie of the
   // SiteInfo elements required for doing a ProcessLock comparison.
   auto MakeProcessLockComparisonKey() const;
 
+  // In some cases such as hosted apps, the URL or origin of the AgentClusterKey
+  // might be overridden by an effective URL. The overridden site URL is stored
+  // in this member. When there is no effective URL, |site_url_| simply
+  // duplicates the information returned by GetProcessLockURL(). Regardless of
+  // the presence of effective URLs, it is never used when assigning a process
+  // lock. When assigning a process lock, we only take into account the
+  // AgentClusterKey.
   GURL site_url_;
 
   // The AgentClusterKey for the execution context. This represents the
-  // isolation requested through the use of Document-Isolation-Policy. The
-  // AgentClusterKey is currently optional and only computed when a navigation
-  // has a Document-Isolation-policy header. It should eventually be made
-  // non-optional once we compute it properly on each navigation. When this
-  // happens, it will replace site_url_ and web_exposed_isolation_info_.
-  // TODO(crbug.com/342365078): Origin-Agent-Cluster should also use the
-  // AgentClusterKey to represent the isolation it requests.
+  // set of contexts that has synchronous access to each other and must be
+  // placed in the same process.
   // TODO(crbug.com/342365083): Documents crossOriginIsolated through the use of
   // COOP and COEP should also use the AgentClusterKey instead of
   // WebExposedIsolationInfo.
-  std::optional<AgentClusterKey> agent_cluster_key_;
-
-  // The URL to use when locking a process to this SiteInstance's site via
-  // SetProcessLock(). This is the same as |site_url_| except for cases
-  // involving effective URLs, such as hosted apps.  In those cases, this URL is
-  // a site URL that is computed without the use of effective URLs.
-  GURL process_lock_url_;
-
-  // Indicates whether this SiteInfo is specific to a single origin and requires
-  // an origin-keyed process, rather than including all subdomains of that
-  // origin. Only used for OriginAgentCluster header opt-ins. In contrast, the
-  // site-level URLs that are typically used in SiteInfo include subdomains, as
-  // do command-line isolated origins.
-  bool requires_origin_keyed_process_ = false;
-
-  // When true, indicates that `requires_origin_keyed_process_` is true because
-  // this SiteInfo was created using origin-keyed processes by default, and not
-  // due to an opt-in header.
-  // Note: This is stored as a separate boolean instead of making
-  // requires_origin_keyed_process_ an enum due to complexity from std::tie
-  // comparisons, since we want two SiteInfos to be considered equivalent even
-  // if they differ in this boolean.
-  bool requires_origin_keyed_process_by_default_ = false;
+  AgentClusterKey agent_cluster_key_;
 
   // When true, indicates this SiteInfo is for a origin-restricted-sandboxed
   // iframe.
@@ -487,15 +524,21 @@ class CONTENT_EXPORT SiteInfo {
   // Indicates that v8 optimizations are disabled for this SiteInfo.
   bool are_v8_optimizations_disabled_ = false;
 
-  // Indicates that this SiteInfo is for PDF content.
-  bool is_pdf_ = false;
-
   // Indicates that this SiteInfo is for content inside a fenced frame. We use
   // just a bool as opposed to a GUID here in order to group same-origin fenced
   // frames together. See more details around fenced frame process isolation
   // here:
   // https://github.com/WICG/fenced-frame/blob/master/explainer/process_isolation.md.
   bool is_fenced_ = false;
+
+  // Unique id of the BrowserContext. SiteInfos associated with different
+  // BrowserContexts should be considered distinct security principals.
+  base::UnguessableToken browser_context_id_;
+
+  // Embedder-specified process isolation policy for this SiteInfo. See
+  // //content/browser/embedder_isolation_info.h.
+  EmbedderIsolationInfo embedder_isolation_info_ =
+      EmbedderIsolationInfo::CreateNone();
 };
 
 CONTENT_EXPORT std::ostream& operator<<(std::ostream& out,

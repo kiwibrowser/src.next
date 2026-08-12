@@ -36,10 +36,17 @@ class ExtensionsInstallWarningsDialogElement extends CrLitElement {
     };
   }
 
-  installWarnings: string[] = [];
+  accessor installWarnings: string[] = [];
 
   protected onOkClick_() {
     this.$.dialog.close();
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'extensions-install-warnings-dialog':
+        ExtensionsInstallWarningsDialogElement;
   }
 }
 

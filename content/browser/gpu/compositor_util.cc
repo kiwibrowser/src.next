@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/342213636): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "content/browser/gpu/compositor_util.h"
 
 #include <stddef.h>
@@ -24,7 +19,7 @@
 #include "base/system/sys_info.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
+#include "cc/base/features.h"
 #include "cc/base/switches.h"
 #include "components/viz/common/features.h"
 #include "content/browser/compositor/image_transport_factory.h"
@@ -122,11 +117,6 @@ std::vector<GpuFeatureData> GetGpuFeatureData(
           "via blocklist or the command line."),
       true);
   features.emplace_back(
-      "canvas_oop_rasterization",
-      SafeGetFeatureStatus(
-          gpu_feature_info, gpu::GPU_FEATURE_TYPE_CANVAS_OOP_RASTERIZATION,
-          command_line.HasSwitch(switches::kDisableAccelerated2dCanvas)));
-  features.emplace_back(
       "gpu_compositing",
       // TODO(rivr): Replace with a check to see which backend is used for
       // compositing; do the same for GPU rasterization if it's enabled. For
@@ -194,24 +184,18 @@ std::vector<GpuFeatureData> GetGpuFeatureData(
       "multiple_raster_threads",
       GetFakeFeatureStatus(NumberOfRendererRasterThreads() > 1));
 #if BUILDFLAG(IS_ANDROID)
-  features.emplace_back(
-      "surface_control",
-      SafeGetFeatureStatus(gpu_feature_info,
-                           gpu::GPU_FEATURE_TYPE_ANDROID_SURFACE_CONTROL));
+  features.emplace_back("surface_control",
+                        features::IsAndroidSurfaceControlEnabled()
+                            ? gpu::kGpuFeatureStatusEnabled
+                            : gpu::kGpuFeatureStatusDisabled);
 #endif
-  features.emplace_back(
-      "webgl2",
-      SafeGetFeatureStatus(
-          gpu_feature_info, gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2,
-          command_line.HasSwitch(switches::kDisableWebGL) ||
-              command_line.HasSwitch(switches::kDisableWebGL2)),
-      DisableInfo::Problem(
-          "WebGL2 has been disabled via blocklist or the command line."),
-      false);
   features.emplace_back("raw_draw",
                         GetFakeFeatureStatus(::features::IsUsingRawDraw()));
-  features.emplace_back("direct_rendering_display_compositor",
-                        GetFakeFeatureStatus(::features::IsDrDcEnabled()));
+  features.emplace_back(
+      "direct_rendering_display_compositor",
+      SafeGetFeatureStatus(
+          gpu_feature_info,
+          gpu::GPU_FEATURE_TYPE_DIRECT_RENDERING_DISPLAY_COMPOSITOR));
   features.emplace_back(
       "webgpu",
       SafeGetFeatureStatus(
@@ -228,6 +212,17 @@ std::vector<GpuFeatureData> GetGpuFeatureData(
   features.emplace_back(
       "webnn",
       SafeGetFeatureStatus(gpu_feature_info, gpu::GPU_FEATURE_TYPE_WEBNN));
+  features.emplace_back("trees_in_viz",
+                        base::FeatureList::IsEnabled(::features::kTreesInViz)
+                            ? gpu::kGpuFeatureStatusEnabled
+                            : gpu::kGpuFeatureStatusDisabled);
+
+#if BUILDFLAG(IS_LINUX)
+  features.emplace_back(
+      "webgpu_on_vk_via_gl_interop",
+      SafeGetFeatureStatus(gpu_feature_info,
+                           gpu::GPU_FEATURE_TYPE_WEBGPU_ON_VK_VIA_GL_INTEROP));
+#endif
   return features;
 }
 
@@ -249,7 +244,7 @@ base::Value GetFeatureStatusImpl(GpuFeatureInfoType type) {
         manager->IsGpuCompositingDisabledForHardwareGpu();
   }
 
-  base::Value::Dict feature_status_dict;
+  base::DictValue feature_status_dict;
 
   for (auto& gpu_feature_data :
        GetGpuFeatureData(gpu_feature_info, is_gpu_compositing_disabled)) {
@@ -277,7 +272,6 @@ base::Value GetFeatureStatusImpl(GpuFeatureInfoType type) {
         status += "_on";
       }
       if ((gpu_feature_data.name == "webgl" ||
-           gpu_feature_data.name == "webgl2" ||
            gpu_feature_data.name == "webgpu") &&
           is_gpu_compositing_disabled)
         status += "_readback";
@@ -300,7 +294,8 @@ base::Value GetFeatureStatusImpl(GpuFeatureInfoType type) {
           gpu_feature_data.name == "vulkan" ||
           gpu_feature_data.name == "skia_graphite" ||
           gpu_feature_data.name == "surface_control" ||
-          gpu_feature_data.name == "webnn") {
+          gpu_feature_data.name == "webnn" ||
+          gpu_feature_data.name == "trees_in_viz") {
         status += "_on";
       }
     }
@@ -327,7 +322,7 @@ base::Value GetProblemsImpl(GpuFeatureInfoType type) {
         manager->IsGpuCompositingDisabledForHardwareGpu();
   }
 
-  base::Value::List problem_list;
+  base::ListValue problem_list;
   if (!gpu_feature_info.applied_gpu_blocklist_entries.empty()) {
     std::unique_ptr<gpu::GpuBlocklist> blocklist(gpu::GpuBlocklist::Create());
     blocklist->GetReasons(problem_list, "disabledFeatures",
@@ -341,11 +336,11 @@ base::Value GetProblemsImpl(GpuFeatureInfoType type) {
   }
 
   if (gpu_access_blocked) {
-    base::Value::Dict problem;
+    base::DictValue problem;
     problem.Set("description",
                 "GPU process was unable to boot: " + gpu_access_blocked_reason);
-    problem.Set("crBugs", base::Value::List());
-    base::Value::List disabled_features;
+    problem.Set("crBugs", base::ListValue());
+    base::ListValue disabled_features;
     disabled_features.Append("all");
     problem.Set("affectedGpuSettings", std::move(disabled_features));
     problem.Set("tag", "disabledFeatures");
@@ -356,10 +351,10 @@ base::Value GetProblemsImpl(GpuFeatureInfoType type) {
        GetGpuFeatureData(gpu_feature_info, is_gpu_compositing_disabled)) {
     if (gpu_feature_data.status != gpu::kGpuFeatureStatusEnabled &&
         gpu_feature_data.disabled_info.is_problem) {
-      base::Value::Dict problem;
+      base::DictValue problem;
       problem.Set("description", gpu_feature_data.disabled_info.description);
-      problem.Set("crBugs", base::Value::List());
-      base::Value::List disabled_features;
+      problem.Set("crBugs", base::ListValue());
+      base::ListValue disabled_features;
       disabled_features.Append(gpu_feature_data.name);
       problem.Set("affectedGpuSettings", std::move(disabled_features));
       problem.Set("tag", "disabledFeatures");
@@ -479,8 +474,6 @@ bool IsGpuMemoryBufferCompositorResourcesEnabled() {
 
 #if BUILDFLAG(IS_APPLE)
   return true;
-#elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  return features::IsDelegatedCompositingEnabled();
 #elif BUILDFLAG(IS_WIN)
   return features::IsDelegatedCompositingEnabled() &&
          features::kDelegatedCompositingModeParam.Get() ==

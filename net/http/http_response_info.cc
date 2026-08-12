@@ -93,7 +93,7 @@ enum {
   RESPONSE_INFO_HAS_CONNECTION_INFO = 1 << 18,
 
   // This bit is set if the request has http authentication.
-  RESPONSE_INFO_USE_HTTP_AUTHENTICATION = 1 << 19,
+  RESPONSE_INFO_USE_SERVER_HTTP_AUTHENTICATION = 1 << 19,
 
   // This bit is set if ssl_info has SCTs.
   RESPONSE_INFO_HAS_SIGNED_CERTIFICATE_TIMESTAMPS = 1 << 20,
@@ -138,15 +138,22 @@ enum {
 // These values can be bit-wise combined to form the extra flags field of the
 // serialized HttpResponseInfo.
 enum {
-  // This bit is set if the request usd a shared dictionary for decoding its
-  // body.
+  // This bit was set if the request used a shared dictionary for decoding its
+  // body but is no longer persisted.
   RESPONSE_EXTRA_INFO_DID_USE_SHARED_DICTIONARY = 1,
 
   // This bit is set if the response has valid `proxy_chain`.
   RESPONSE_EXTRA_INFO_HAS_PROXY_CHAIN = 1 << 1,
 
   // This bit is set if the response has original_response_time.
-  RESPONSE_EXTRA_INFO_HAS_ORIGINAL_RESPONSE_TIME = 1 << 2
+  RESPONSE_EXTRA_INFO_HAS_ORIGINAL_RESPONSE_TIME = 1 << 2,
+
+  // This bit is set if the response has an encoded body size stored.
+  RESPONSE_EXTRA_INFO_HAS_ENCODED_BODY_SIZE = 1 << 3,
+
+  // This bit is set if the zstd uncompressed body size is stored, indicating
+  // the response body on disk is zstd-compressed.
+  RESPONSE_EXTRA_INFO_HAS_ZSTD_UNCOMPRESSED_BODY_SIZE = 1 << 4,
 };
 
 HttpResponseInfo::HttpResponseInfo() = default;
@@ -158,10 +165,8 @@ HttpResponseInfo::~HttpResponseInfo() = default;
 HttpResponseInfo& HttpResponseInfo::operator=(const HttpResponseInfo& rhs) =
     default;
 
-bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
+bool HttpResponseInfo::InitFromPickle(base::PickleIterator iter,
                                       bool* response_truncated) {
-  base::PickleIterator iter(pickle);
-
   // Read flags and verify version
   int flags;
   int extra_flags = 0;
@@ -318,7 +323,8 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
 
   *response_truncated = (flags & RESPONSE_INFO_TRUNCATED) != 0;
 
-  did_use_http_auth = (flags & RESPONSE_INFO_USE_HTTP_AUTHENTICATION) != 0;
+  did_use_server_http_auth =
+      (flags & RESPONSE_INFO_USE_SERVER_HTTP_AUTHENTICATION) != 0;
 
   unused_since_prefetch = (flags & RESPONSE_INFO_UNUSED_SINCE_PREFETCH) != 0;
 
@@ -365,21 +371,74 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
     browser_run_id = std::make_optional(id);
   }
 
-  did_use_shared_dictionary =
-      (extra_flags & RESPONSE_EXTRA_INFO_DID_USE_SHARED_DICTIONARY) != 0;
+  // Do NOT restore the did_use_shared_dictionary flag since
+  // dictionary-compressed responses are decoded before being stored in cache.
+  // It is no longer persisted but old cache entries may have it set.
+  did_use_shared_dictionary = false;
 
   if (extra_flags & RESPONSE_EXTRA_INFO_HAS_PROXY_CHAIN) {
-    if (!proxy_chain.InitFromPickle(&iter)) {
+    std::optional<ProxyChain> unpickled_proxy_chain =
+        ProxyChain::InitFromPickle(iter);
+    if (!unpickled_proxy_chain) {
       return false;
     }
+    proxy_chain = std::move(*unpickled_proxy_chain);
+  }
+
+  if (extra_flags & RESPONSE_EXTRA_INFO_HAS_ENCODED_BODY_SIZE) {
+    int64_t size;
+    if (!iter.ReadInt64(&size)) {
+      return false;
+    }
+    // Ignore obsolete negative values.
+    if (size >= 0) {
+      encoded_body_size = base::ByteSize(base::as_unsigned(size));
+    }
+  }
+
+  if (extra_flags & RESPONSE_EXTRA_INFO_HAS_ZSTD_UNCOMPRESSED_BODY_SIZE) {
+    int64_t size;
+    if (!iter.ReadInt64(&size) || size < 0) {
+      return false;  // Refuse malformed entries; do not silently degrade.
+    }
+    zstd_uncompressed_body_size = size;
   }
 
   return true;
 }
 
-void HttpResponseInfo::Persist(base::Pickle* pickle,
-                               bool skip_transient_headers,
-                               bool response_truncated) const {
+std::unique_ptr<base::Pickle> HttpResponseInfo::MakePickle(
+    bool skip_transient_headers,
+    bool response_truncated) const {
+  std::optional<int64_t> signed_body_size;
+  if (encoded_body_size.has_value()) {
+    signed_body_size = encoded_body_size->InBytes();
+  }
+  return MakePickleImpl(skip_transient_headers, response_truncated,
+                        signed_body_size);
+}
+
+std::unique_ptr<base::Pickle>
+HttpResponseInfo::MakePickleWithSignedBodySizeForTesting(
+    bool skip_transient_headers,
+    bool response_truncated,
+    int64_t signed_body_size) const {
+  return MakePickleImpl(skip_transient_headers, response_truncated,
+                        signed_body_size);
+}
+
+std::unique_ptr<base::Pickle> HttpResponseInfo::MakePickleImpl(
+    bool skip_transient_headers,
+    bool response_truncated,
+    std::optional<int64_t> signed_body_size) const {
+  auto pickle = std::make_unique<base::Pickle>();
+  // Pre-reserve memory for the Pickle contents to reduce allocations and
+  // copies. This doesn't affect the size of the data that is written to disk.
+  // The Pickle object only lives long enough to be written to disk, so it
+  // doesn't matter if we briefly overallocate memory. 10,900 bytes is enough to
+  // cover 99% percentile of HttpResponseInfo pickle sizes based on Dev/Canary
+  // data from 2025-01-20 (the mean is 4,773).
+  pickle->Reserve(10900);
   int flags = RESPONSE_INFO_VERSION;
   int extra_flags = 0;
   if (ssl_info.is_valid()) {
@@ -405,8 +464,8 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
   if (connection_info != HttpConnectionInfo::kUNKNOWN) {
     flags |= RESPONSE_INFO_HAS_CONNECTION_INFO;
   }
-  if (did_use_http_auth)
-    flags |= RESPONSE_INFO_USE_HTTP_AUTHENTICATION;
+  if (did_use_server_http_auth)
+    flags |= RESPONSE_INFO_USE_SERVER_HTTP_AUTHENTICATION;
   if (unused_since_prefetch)
     flags |= RESPONSE_INFO_UNUSED_SINCE_PREFETCH;
   if (restricted_prefetch)
@@ -423,12 +482,16 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
   if (browser_run_id.has_value())
     flags |= RESPONSE_INFO_BROWSER_RUN_ID;
 
-  if (did_use_shared_dictionary) {
-    extra_flags |= RESPONSE_EXTRA_INFO_DID_USE_SHARED_DICTIONARY;
-  }
-
   if (proxy_chain.IsValid()) {
     extra_flags |= RESPONSE_EXTRA_INFO_HAS_PROXY_CHAIN;
+  }
+
+  if (signed_body_size.has_value()) {
+    extra_flags |= RESPONSE_EXTRA_INFO_HAS_ENCODED_BODY_SIZE;
+  }
+
+  if (zstd_uncompressed_body_size.has_value()) {
+    extra_flags |= RESPONSE_EXTRA_INFO_HAS_ZSTD_UNCOMPRESSED_BODY_SIZE;
   }
 
   extra_flags |= RESPONSE_EXTRA_INFO_HAS_ORIGINAL_RESPONSE_TIME;
@@ -452,17 +515,17 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
                       HttpResponseHeaders::PERSIST_SANS_SECURITY_STATE;
   }
 
-  headers->Persist(pickle, persist_options);
+  headers->Persist(pickle.get(), persist_options);
 
   if (ssl_info.is_valid()) {
-    ssl_info.cert->Persist(pickle);
+    ssl_info.cert->Persist(pickle.get());
     pickle->WriteUInt32(ssl_info.cert_status);
     if (ssl_info.connection_status != 0)
       pickle->WriteInt(ssl_info.connection_status);
   }
 
   if (vary_data.is_valid())
-    vary_data.Persist(pickle);
+    vary_data.Persist(pickle.get());
 
   pickle->WriteString(remote_endpoint.ToStringWithoutPort());
   pickle->WriteUInt16(remote_endpoint.port());
@@ -496,8 +559,18 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
   }
 
   if (proxy_chain.IsValid()) {
-    proxy_chain.Persist(pickle);
+    proxy_chain.Persist(pickle.get());
   }
+
+  if (signed_body_size.has_value()) {
+    pickle->WriteInt64(signed_body_size.value());
+  }
+
+  if (zstd_uncompressed_body_size.has_value()) {
+    pickle->WriteInt64(zstd_uncompressed_body_size.value());
+  }
+
+  return pickle;
 }
 
 bool HttpResponseInfo::DidUseQuic() const {

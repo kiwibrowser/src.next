@@ -2,13 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_CASCADE_MAP_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_CASCADE_MAP_H_
+
+#include <memory>
 
 #include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -26,6 +23,12 @@ namespace blink {
 // Because using a HashMap for everything is quite expensive in terms of
 // performance, this class stores standard (non-custom) properties in a fixed-
 // size array, and only custom properties are stored in a HashMap.
+//
+// For each property, we ultimately just want one winning declaration
+// to apply to ComputeStyle(Builder). However, since a CSS declaration
+// can refer to a weaker declaration of the same property through various
+// "revert" mechanisms (revert-rule, revert-layer, etc), we maintain
+// a sorted list of all declarations seen per property.
 class CORE_EXPORT CascadeMap {
   STACK_ALLOCATED();
 
@@ -47,24 +50,30 @@ class CORE_EXPORT CascadeMap {
   const CascadePriority* Find(const CSSPropertyName&, CascadeOrigin) const;
   CascadePriority* FindKnownToExist(const CSSPropertyID id) {
     DCHECK(native_properties_.Bits().Has(id));
-    return &native_properties_.Buffer()[static_cast<size_t>(id)].Top(
-        backing_vector_);
+    return UNSAFE_BUFFERS(
+        &native_properties_.Buffer()[static_cast<size_t>(id)].Top(
+            backing_vector_));
   }
   const CascadePriority* FindKnownToExist(const CSSPropertyID id) const {
     DCHECK(native_properties_.Bits().Has(id));
-    return &native_properties_.Buffer()[static_cast<size_t>(id)].Top(
-        backing_vector_);
+    return UNSAFE_BUFFERS(
+        &native_properties_.Buffer()[static_cast<size_t>(id)].Top(
+            backing_vector_));
   }
   // Similar to Find(name, origin), but returns the CascadePriority from cascade
   // layers below the given priority. The uint64_t is presumed to come from
   // CascadePriority::ForLayerComparison().
   const CascadePriority* FindRevertLayer(const CSSPropertyName&,
                                          uint64_t) const;
+  // Find that CascadePriority in the cascade map weaker than `revert_from`
+  // that originates from a different rule.
+  //
+  // https://drafts.csswg.org/css-cascade-5/#revert-rule-keyword
+  const CascadePriority* FindRevertRule(const CSSPropertyName&,
+                                        CascadePriority revert_from) const;
   // Similar to Find(), if you already have the right CascadePriorityList.
   CascadePriority& Top(CascadePriorityList&);
-  // Adds an entry to the map if the incoming priority is greater than or equal
-  // to the current priority for the same name. Entries must be added in non-
-  // decreasing lexicographical order of (origin, tree scope, layer).
+  // Adds an entry to the map, keeping each bucket sorted.
   void Add(const AtomicString& custom_property_name, CascadePriority);
   void Add(CSSPropertyID, CascadePriority);
   // Added properties with CSSPropertyPriority::kHighPropertyPriority cause the
@@ -73,8 +82,15 @@ class CORE_EXPORT CascadeMap {
   uint64_t HighPriorityBits() const {
     return native_properties_.Bits().HighPriorityBits();
   }
-  // True if any important declaration has been added.
-  bool HasImportant() const { return has_important_; }
+  // Returns the set of (native) properties that have !important set.
+  // Can only be called once unless you do Reset().
+  std::unique_ptr<CSSBitset> ReleaseImportantSet() {
+#if DCHECK_IS_ON()
+    DCHECK(!important_set_released_);
+    important_set_released_ = true;
+#endif
+    return std::move(important_set_);
+  }
   // True if any inline style declaration lost the cascade to something
   // else. This is rare, but if it happens, we need to turn off incremental
   // style calculation (see CanApplyInlineStyleIncrementally() and related
@@ -84,10 +100,17 @@ class CORE_EXPORT CascadeMap {
   const CSSBitset& NativeBitset() const { return native_properties_.Bits(); }
   // Remove all properties (both native and custom) from the CascadeMap.
   void Reset();
+  // Clear all the already_applied_ flags on declarations.
+  void ClearAppliedFlags();
 
-  // A list storing the highest CascadePriority from each cascade layer that has
-  // a higher-priority declaration than all the previous layers. The entries are
-  // in the ascending lexicographical order of (origin, tree scope, layer).
+  // A sorted list storing all declarations (CascadePriority objects) seen
+  // for a specific property, with the strongest CascadePriority appearing
+  // first.
+  //
+  // We generally only care about the strongest entry when computing values,
+  // except for "reverts" (revert-rule, etc) that explicitly target
+  // some weaker entry.
+  //
   // To avoid constructor and destructor calls on a large number of lists, the
   // list is implemented as a linked stack where nodes are backed by a vector.
   class CascadePriorityList {
@@ -99,7 +122,7 @@ class CORE_EXPORT CascadeMap {
           : priority(priority), next_index(next_index) {}
 
       CascadePriority priority;
-      // 0 for null; Otherwise, next_index - 1 is index in the backing vector.
+      // Index in the backing vector, or kNotFound for "none".
       wtf_size_t next_index;
     };
 
@@ -112,8 +135,8 @@ class CORE_EXPORT CascadeMap {
     CascadePriorityList() = default;
     inline CascadePriorityList(BackingVector& backing_vector,
                                CascadePriority priority)
-        : head_index_(backing_vector.size() + 1) {
-      backing_vector.emplace_back(priority, 0);
+        : head_index_(backing_vector.size()) {
+      backing_vector.emplace_back(priority, kNotFound);
     }
 
     class Iterator {
@@ -144,11 +167,12 @@ class CORE_EXPORT CascadeMap {
     inline const CascadePriority& Top(const BackingVector&) const;
     inline CascadePriority& Top(BackingVector&);
     inline void Push(BackingVector&, CascadePriority priority);
+    inline void InsertKeepingSorted(BackingVector&, CascadePriority priority);
 
    private:
     friend class Iterator;
 
-    wtf_size_t head_index_ = 0;
+    wtf_size_t head_index_ = kNotFound;
   };
 
   class NativeMap {
@@ -182,11 +206,14 @@ class CORE_EXPORT CascadeMap {
  private:
   ALWAYS_INLINE void Add(CascadePriorityList* list, CascadePriority);
 
-  bool has_important_ = false;
   bool inline_style_lost_ = false;
   NativeMap native_properties_;
   CustomMap custom_properties_;
   CascadePriorityList::BackingVector backing_vector_;
+  std::unique_ptr<CSSBitset> important_set_;
+#if DCHECK_IS_ON()
+  bool important_set_released_ = false;
+#endif
 };
 
 // CascadePriorityList implementation is inlined for performance reasons.
@@ -208,10 +235,10 @@ CascadeMap::CascadePriorityList::Iterator::operator->() const {
 
 inline CascadeMap::CascadePriorityList::Iterator&
 CascadeMap::CascadePriorityList::Iterator::operator++() {
-  if (!backing_node_->next_index) {
+  if (backing_node_->next_index == kNotFound) {
     backing_node_ = nullptr;
   } else {
-    backing_node_ = &backing_vector_->at(backing_node_->next_index - 1);
+    backing_node_ = &backing_vector_->at(backing_node_->next_index);
   }
   return *this;
 }
@@ -226,10 +253,10 @@ inline bool CascadeMap::CascadePriorityList::Iterator::operator!=(
 inline CascadeMap::CascadePriorityList::Iterator
 CascadeMap::CascadePriorityList ::Begin(
     const BackingVector& backing_vector) const {
-  if (!head_index_) {
+  if (head_index_ == kNotFound) {
     return Iterator(&backing_vector, nullptr);
   }
-  return Iterator(&backing_vector, &backing_vector[head_index_ - 1]);
+  return Iterator(&backing_vector, &backing_vector[head_index_]);
 }
 
 inline CascadeMap::CascadePriorityList::Iterator
@@ -252,12 +279,49 @@ inline CascadePriority& CascadeMap::CascadePriorityList::Top(
 
 inline void CascadeMap::CascadePriorityList::Push(BackingVector& backing_vector,
                                                   CascadePriority priority) {
-  backing_vector.push_back(Node(priority, head_index_));
-  head_index_ = backing_vector.size();
+  backing_vector.emplace_back(priority, head_index_);
+  head_index_ = backing_vector.size() - 1;
+}
+
+inline void CascadeMap::CascadePriorityList::InsertKeepingSorted(
+    BackingVector& backing_vector,
+    CascadePriority priority) {
+  // We're inserting `priority` into an already-sorted linked list
+  // (higher properties appear first in the list).
+  wtf_size_t prev_index = kNotFound;
+  wtf_size_t curr_index = head_index_;
+  while (curr_index != kNotFound) {
+    Node& curr_node = backing_vector[curr_index];
+    if (priority >= curr_node.priority) {
+      // The incoming priority is bigger (or equal) to this node;
+      // we'll insert before that node.
+      break;
+    }
+    prev_index = curr_index;
+    curr_index = curr_node.next_index;
+  }
+
+  // The new node exists at `new_index`, and points to the node
+  // at `curr_index`.
+  wtf_size_t new_index = backing_vector.size();
+  backing_vector.emplace_back(priority, curr_index);
+
+  // Now link the preceding node to our new node.
+  if (prev_index == kNotFound) {
+    // The new node had no preceding node (it was inserted at the front).
+    //
+    // While this is supported by this function for completeness, it should
+    // not really happen in normal circumstances; the call site should prefer
+    // to call Push() in this scenario.
+    head_index_ = new_index;
+  } else {
+    // Link the previous node to the new node.
+    backing_vector[prev_index].next_index = new_index;
+  }
 }
 
 inline bool CascadeMap::CascadePriorityList::IsEmpty() const {
-  return !head_index_;
+  return head_index_ == kNotFound;
 }
 
 }  // namespace blink

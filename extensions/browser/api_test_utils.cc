@@ -7,17 +7,21 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <variant>
 
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/json/json_reader.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/values_test_util.h"
+#include "base/types/expected.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_function_dispatcher.h"
+#include "extensions/browser/extension_registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::ExtensionFunctionDispatcher;
@@ -40,11 +44,12 @@ bool SendResponseHelper::GetResponse() {
 }
 
 void SendResponseHelper::OnResponse(ExtensionFunction::ResponseType response,
-                                    base::Value::List results,
+                                    base::ListValue results,
                                     const std::string& error,
                                     mojom::ExtraResponseDataPtr) {
-  ASSERT_NE(ExtensionFunction::BAD_MESSAGE, response);
-  response_ = std::make_unique<bool>(response == ExtensionFunction::SUCCEEDED);
+  ASSERT_NE(ExtensionFunction::ResponseType::kBadMessage, response);
+  response_ = std::make_unique<bool>(
+      response == ExtensionFunction::ResponseType::kSucceeded);
   run_loop_.Quit();
 }
 
@@ -52,7 +57,7 @@ void SendResponseHelper::WaitForResponse() {
   run_loop_.Run();
 }
 
-bool GetBoolean(const base::Value::Dict& dict, const std::string& key) {
+bool GetBoolean(const base::DictValue& dict, const std::string& key) {
   std::optional<bool> value = dict.FindBool(key);
   if (!value.has_value()) {
     ADD_FAILURE() << key << " does not exist or is not a boolean.";
@@ -61,7 +66,7 @@ bool GetBoolean(const base::Value::Dict& dict, const std::string& key) {
   return *value;
 }
 
-int GetInteger(const base::Value::Dict& dict, const std::string& key) {
+int GetInteger(const base::DictValue& dict, const std::string& key) {
   std::optional<int> value = dict.FindInt(key);
   if (!value.has_value()) {
     ADD_FAILURE() << key << " does not exist or is not an integer.";
@@ -70,7 +75,7 @@ int GetInteger(const base::Value::Dict& dict, const std::string& key) {
   return *value;
 }
 
-std::string GetString(const base::Value::Dict& dict, const std::string& key) {
+std::string GetString(const base::DictValue& dict, const std::string& key) {
   const std::string* value = dict.FindString(key);
   if (!value) {
     ADD_FAILURE() << key << " does not exist or is not a string.";
@@ -79,48 +84,46 @@ std::string GetString(const base::Value::Dict& dict, const std::string& key) {
   return *value;
 }
 
-base::Value::List GetList(const base::Value::Dict& dict,
-                          const std::string& key) {
-  const base::Value::List* value = dict.FindList(key);
+base::ListValue GetList(const base::DictValue& dict, const std::string& key) {
+  const base::ListValue* value = dict.FindList(key);
   if (!value) {
     ADD_FAILURE() << key << " does not exist or is not a list.";
-    return base::Value::List();
+    return base::ListValue();
   }
   return value->Clone();
 }
 
-base::Value::Dict GetDict(const base::Value::Dict& dict,
-                          const std::string& key) {
-  const base::Value::Dict* value = dict.FindDict(key);
+base::DictValue GetDict(const base::DictValue& dict, const std::string& key) {
+  const base::DictValue* value = dict.FindDict(key);
   if (!value) {
     ADD_FAILURE() << key << " does not exist or is not a dict.";
-    return base::Value::Dict();
+    return base::DictValue();
   }
   return value->Clone();
 }
 
-base::Value::Dict ToDict(std::optional<base::ValueView> val) {
+base::DictValue ToDict(std::optional<base::ValueView> val) {
   if (!val) {
     ADD_FAILURE() << "val is nullopt";
-    return base::Value::Dict();
+    return base::DictValue();
   }
   base::Value result = val->ToValue();
   if (!result.is_dict()) {
     ADD_FAILURE() << "val is not a dictionary";
-    return base::Value::Dict();
+    return base::DictValue();
   }
   return std::move(result).TakeDict();
 }
 
-base::Value::List ToList(std::optional<base::ValueView> val) {
+base::ListValue ToList(std::optional<base::ValueView> val) {
   if (!val) {
     ADD_FAILURE() << "val is nullopt";
-    return base::Value::List();
+    return base::ListValue();
   }
   base::Value result = val->ToValue();
   if (!result.is_list()) {
-    ADD_FAILURE() << "val is not a dictionary";
-    return base::Value::List();
+    ADD_FAILURE() << "val is not a list";
+    return base::ListValue();
   }
   return std::move(result).TakeList();
 }
@@ -132,8 +135,9 @@ std::optional<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
     FunctionMode mode) {
   RunFunction(function, std::move(args), std::move(dispatcher), mode);
   EXPECT_TRUE(function->GetError().empty())
-      << "Unexpected error: " << function->GetError();
-  const base::Value::List* results = function->GetResultListForTest();
+      << "Function " << function->name()
+      << " had unexpected error: " << function->GetError();
+  const base::ListValue* results = function->GetResultListForTest();
   if (!results || results->empty()) {
     return std::nullopt;
   }
@@ -159,12 +163,37 @@ std::string RunFunctionAndReturnError(scoped_refptr<ExtensionFunction> function,
   RunFunction(function, std::move(args), context, mode);
   // When sending a response, the function will set an empty list value if there
   // is no specified result.
-  const base::Value::List* results = function->GetResultListForTest();
+  const base::ListValue* results = function->GetResultListForTest();
   CHECK(results);
   EXPECT_TRUE(results->empty()) << "Did not expect a result";
   CHECK(function->response_type());
-  EXPECT_EQ(ExtensionFunction::FAILED, *function->response_type());
+  EXPECT_EQ(ExtensionFunction::ResponseType::kFailed,
+            *function->response_type());
   return function->GetError();
+}
+
+base::expected<base::ListValue, std::string> RunFunctionAndReturnExpected(
+    scoped_refptr<ExtensionFunction> function,
+    ArgsType args,
+    content::BrowserContext* context,
+    FunctionMode mode) {
+  RunFunction(function, std::move(args), context, mode);
+
+  CHECK(function->response_type());
+
+  switch (*function->response_type()) {
+    case ExtensionFunction::ResponseType::kBadMessage:
+      // This case ASSERTs in `SendResponseHelper::OnResponse`.
+      NOTREACHED();
+
+    case ExtensionFunction::ResponseType::kFailed:
+      return base::unexpected(function->GetError());
+
+    case ExtensionFunction::ResponseType::kSucceeded:
+      const base::ListValue* results = function->GetResultListForTest();
+      CHECK(results);
+      return results->Clone();
+  }
 }
 
 bool RunFunction(scoped_refptr<ExtensionFunction> function,
@@ -179,10 +208,10 @@ bool RunFunction(scoped_refptr<ExtensionFunction> function,
                  ArgsType args,
                  std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
                  FunctionMode mode) {
-  static_assert(absl::variant_size<ArgsType>::value == 2, "Unhandled variant!");
-  base::Value::List parsed_args =
-      args.index() == 0 ? base::test::ParseJsonList(absl::get<0>(args))
-                        : std::move(absl::get<1>(args));
+  static_assert(std::variant_size<ArgsType>::value == 2, "Unhandled variant!");
+  base::ListValue parsed_args =
+      args.index() == 0 ? base::test::ParseJsonList(std::get<0>(args))
+                        : std::move(std::get<1>(args));
   SendResponseHelper response_helper(function.get());
   function->SetArgs(std::move(parsed_args));
 
@@ -196,6 +225,37 @@ bool RunFunction(scoped_refptr<ExtensionFunction> function,
 
   EXPECT_TRUE(response_helper.has_response());
   return response_helper.GetResponse();
+}
+
+const Extension* GetSingleLoadedExtension(content::BrowserContext* context,
+                                          std::string& message) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(context);
+
+  const Extension* result = nullptr;
+  for (const scoped_refptr<const Extension>& extension :
+       registry->enabled_extensions()) {
+    // Ignore any component extensions. They are automatically loaded into all
+    // profiles and aren't the extension we're looking for here.
+    if (extension->location() == mojom::ManifestLocation::kComponent) {
+      continue;
+    }
+
+    if (result != nullptr) {
+      // TODO(yoz): this is misleading; it counts component extensions.
+      message = base::StringPrintf(
+          "Expected only one extension to be present.  Found %u.",
+          static_cast<unsigned>(registry->enabled_extensions().size()));
+      return nullptr;
+    }
+
+    result = extension.get();
+  }
+
+  if (!result) {
+    message = "extension pointer is null.";
+    return nullptr;
+  }
+  return result;
 }
 
 }  // namespace api_test_utils

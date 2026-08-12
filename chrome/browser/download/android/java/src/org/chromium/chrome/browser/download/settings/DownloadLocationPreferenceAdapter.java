@@ -12,10 +12,9 @@ import android.view.ViewGroup;
 import android.widget.RadioButton;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.download.DirectoryOption;
 import org.chromium.chrome.browser.download.R;
 import org.chromium.chrome.browser.download.StringUtils;
@@ -23,6 +22,7 @@ import org.chromium.chrome.browser.download.StringUtils;
 /**
  * Class used to provide data shown in the download location preference in download settings page.
  */
+@NullMarked
 public class DownloadLocationPreferenceAdapter extends DownloadDirectoryAdapter
         implements OnClickListener {
     /** Constructor of DownloadLocationPreferenceAdapter. */
@@ -31,7 +31,7 @@ public class DownloadLocationPreferenceAdapter extends DownloadDirectoryAdapter
     }
 
     @Override
-    public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+    public View getView(int position, @Nullable View convertView, ViewGroup parent) {
         View view = convertView;
         if (view == null) {
             view =
@@ -55,10 +55,10 @@ public class DownloadLocationPreferenceAdapter extends DownloadDirectoryAdapter
         DirectoryOption directoryOption = (DirectoryOption) getItem(position);
         if (directoryOption == null) return view;
 
-        TextView titleText = (TextView) view.findViewById(R.id.title);
+        TextView titleText = view.findViewById(R.id.title);
         titleText.setText(directoryOption.name);
 
-        TextView summaryText = (TextView) view.findViewById(R.id.description);
+        TextView summaryText = view.findViewById(R.id.description);
         if (isEnabled(position)) {
             String summary =
                     StringUtils.getAvailableBytesForUi(
@@ -94,9 +94,10 @@ public class DownloadLocationPreferenceAdapter extends DownloadDirectoryAdapter
         if (option == null) return;
 
         // Update the native pref, which persists the download directory selected by the user.
-        mDelegate
-                .getDownloadLocationHelper()
-                .setDownloadAndSaveFileDefaultDirectory(option.location);
+        DownloadLocationHelper helper = mDelegate.getDownloadLocationHelper();
+        if (helper != null) {
+            helper.setDownloadAndSaveFileDefaultDirectory(option.location);
+        }
 
         mSelectedPosition = selectedId;
 

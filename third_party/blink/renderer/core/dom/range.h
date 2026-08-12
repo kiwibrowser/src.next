@@ -115,8 +115,9 @@ class CORE_EXPORT Range final : public AbstractRange {
 
   String GetText() const;
 
-  DocumentFragment* createContextualFragment(const String& html,
-                                             ExceptionState&);
+  DocumentFragment* createContextualFragment(
+      const V8UnionStringOrTrustedHTML* html,
+      ExceptionState&);
 
   void detach();
   Range* cloneRange() const;
@@ -212,17 +213,18 @@ class CORE_EXPORT Range final : public AbstractRange {
   RangeBoundaryPoint start_;
   RangeBoundaryPoint end_;
 
-  struct RangeBoundaryPoints : GarbageCollected<RangeBoundaryPoints> {
-    RangeBoundaryPoints(RangeBoundaryPoint start, RangeBoundaryPoint end)
-        : start(start), end(end) {}
-    RangeBoundaryPoint start;
-    RangeBoundaryPoint end;
-
-    void Trace(Visitor* visitor) const {
-      visitor->Trace(start);
-      visitor->Trace(end);
-    }
+  // This tracks how the range updates the selection:
+  // If kAll, set selection to have the same start and end as range.
+  // If kStartOnly, set selection to have the same start as range.
+  // If kEndOnly, set selection to have the same end as range.
+  enum class UpdateSelectionBehavior {
+    kAll,
+    kStartOnly,
+    kEndOnly,
   };
+  UpdateSelectionBehavior update_selection_behavior_ =
+      UpdateSelectionBehavior::kAll;
+  void ResetUpdateSelectionBehavior();
 
   friend class RangeUpdateScope;
 };

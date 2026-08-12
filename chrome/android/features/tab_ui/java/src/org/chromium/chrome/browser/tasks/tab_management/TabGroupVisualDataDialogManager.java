@@ -4,28 +4,39 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.chromium.build.NullUtil.assertNonNull;
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowManager;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.activity.ComponentDialog;
 import androidx.annotation.IntDef;
-import androidx.annotation.NonNull;
 import androidx.annotation.StringRes;
 import androidx.appcompat.widget.AppCompatEditText;
 import androidx.appcompat.widget.DialogTitle;
 
+import org.chromium.base.Token;
+import org.chromium.build.annotations.EnsuresNonNull;
+import org.chromium.build.annotations.Initializer;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.tab_group_sync.TabGroupSyncFeatures;
-import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
+import org.chromium.chrome.browser.tabmodel.TabGroupTitleUtils;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tasks.tab_management.ColorPickerCoordinator.ColorPickerLayoutType;
+import org.chromium.chrome.browser.tasks.tab_management.color_picker.ColorPickerContainer;
+import org.chromium.chrome.browser.tasks.tab_management.color_picker.ColorPickerCoordinator;
+import org.chromium.chrome.browser.tasks.tab_management.color_picker.ColorPickerCoordinator.ColorPickerLayoutType;
+import org.chromium.chrome.browser.tasks.tab_management.color_picker.ColorPickerType;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.FeatureConstants;
@@ -33,6 +44,7 @@ import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.components.sync.DataType;
 import org.chromium.components.sync.SyncService;
 import org.chromium.components.tab_groups.TabGroupColorId;
+import org.chromium.components.tab_groups.TabGroupColorPickerUtils;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogManagerObserver;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
@@ -44,6 +56,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.List;
 
 /** Manager of the logic to trigger a modal dialog for setting tab group visual data. */
+@NullMarked
 public class TabGroupVisualDataDialogManager {
     /** Type of the dialog to be created based on expected use case. */
     @IntDef({
@@ -64,13 +77,17 @@ public class TabGroupVisualDataDialogManager {
     // #showDialog call due to the possibility of a double show call being triggered for the
     // didCreateNewGroup observer and a fix that tackles that. Once the root cause has been fixed,
     // revert this to an instanced model within the function call for a proper lifecycle.
-    private PropertyModel mModel;
+    private @Nullable PropertyModel mModel;
     private ModalDialogManagerObserver mModalDialogManagerObserver;
     private View mCustomView;
     private TabGroupVisualDataTextInputLayout mTextInputLayout;
-    private String mDefaultGroupTitle;
+    private String mInitialGroupTitle;
     private ColorPickerCoordinator mColorPickerCoordinator;
     private @TabGroupColorId int mDefaultColorId;
+
+    // If non-null, it means TAB_GROUP_CREATION_DIALOG_SYNC_TEXT_FEATURE was triggered and needs to
+    // be marked as dismissed when the dialog is hidden.
+    private @Nullable Tracker mTracker;
 
     /**
      * The manager responsible for handling trigger logic for tab group visual data modal dialogs.
@@ -81,8 +98,8 @@ public class TabGroupVisualDataDialogManager {
      * @param dialogTitleRes The resource id of the string to be used for the dialog title.
      */
     public TabGroupVisualDataDialogManager(
-            @NonNull Context context,
-            @NonNull ModalDialogManager modalDialogManager,
+            Context context,
+            ModalDialogManager modalDialogManager,
             @DialogType int dialogType,
             @StringRes int dialogTitleRes) {
         mContext = context;
@@ -94,20 +111,29 @@ public class TabGroupVisualDataDialogManager {
     /**
      * Construct and show the modal dialog for setting tab group visual data.
      *
-     * @param rootId The destination root id when modifying a tab group.
-     * @param filter The current TabGroupModelFilter that this group is modified on.
+     * @param tabGroupId The destination tab group id when modifying a tab group.
+     * @param tabModel The current TabModel that this group is modified on.
      * @param dialogController The dialog controller for the modal dialog's actions.
      */
+    @Initializer
     public void showDialog(
-            int rootId,
-            TabGroupModelFilter filter,
+            @Nullable Token tabGroupId,
+            TabModel tabModel,
             ModalDialogProperties.Controller dialogController) {
         // If the model is not null, it indicates a chained double show attempt is occurring.
         // Early exit the second attempt so that we don't show another dialog and cause the
         // dialog controller and user actions to freeze when attempting to navigate out.
         if (mModel != null) {
+            assert mModalDialogManagerObserver != null;
+            assert mCustomView != null;
+            assert mTextInputLayout != null;
+            assert mInitialGroupTitle != null;
+            assert mColorPickerCoordinator != null;
             return;
         }
+
+        assert tabGroupId != null;
+        assert tabModel.tabGroupExists(tabGroupId);
 
         mCustomView =
                 LayoutInflater.from(mContext).inflate(R.layout.tab_group_visual_data_dialog, null);
@@ -116,34 +142,52 @@ public class TabGroupVisualDataDialogManager {
         DialogTitle dialogTitle = mCustomView.findViewById(R.id.visual_data_dialog_title);
         dialogTitle.setText(mDialogTitleRes);
         // Set the description text to be displayed on the dialog underneath the title.
-        setDescriptionText(filter);
+        setDescriptionText(tabModel);
 
-        // Create the default group title to be displayed in the edit text box.
-        createDefaultGroupTitle(rootId, filter);
+        // Set the default or current title to be displayed in the edit text box.
+        mInitialGroupTitle = TabGroupTitleUtils.getDisplayableTitle(mContext, tabModel, tabGroupId);
         AppCompatEditText editTextView = mCustomView.findViewById(R.id.title_input_text);
-        editTextView.setText(mDefaultGroupTitle);
+        editTextView.setText(mInitialGroupTitle);
+        editTextView.setAccessibilityDelegate(
+                new View.AccessibilityDelegate() {
+                    @Override
+                    public void onInitializeAccessibilityNodeInfo(
+                            View host, AccessibilityNodeInfo info) {
+                        super.onInitializeAccessibilityNodeInfo(host, info);
+                        String originalText =
+                                info.getText() == null ? "" : info.getText().toString();
+                        info.setText(
+                                mContext.getString(
+                                        R.string.accessibility_tab_group_title_field,
+                                        originalText));
+                    }
+                });
 
-        List<Integer> colors = ColorPickerUtils.getTabGroupColorIdList();
+        List<Integer> colors = TabGroupColorPickerUtils.getTabGroupColorIdList();
         // TODO(b/330597857): Allow a dynamic incognito setting for the color picker.
         // Force a false incognito value for the color picker as this modal dialog does not
         // support incognito color themes and should just follow the system theme.
+        LinearLayout linearLayout = mCustomView.findViewById(R.id.visual_data_dialog_layout);
+        View root =
+                LayoutInflater.from(mContext)
+                        .inflate(
+                                R.layout.tab_group_color_picker_container,
+                                linearLayout,
+                                /* attachToRoot= */ false);
+        ColorPickerContainer container = root.findViewById(R.id.color_picker_container);
         mColorPickerCoordinator =
                 new ColorPickerCoordinator(
                         mContext,
                         colors,
-                        LayoutInflater.from(mContext)
-                                .inflate(
-                                        R.layout.tab_group_color_picker_container,
-                                        /* root= */ null),
+                        container,
                         ColorPickerType.TAB_GROUP,
                         /* isIncognito= */ false,
                         ColorPickerLayoutType.DYNAMIC,
                         null);
-        mDefaultColorId = filter.getTabGroupColorWithFallback(rootId);
+        mDefaultColorId = tabModel.getTabGroupColorWithFallback(tabGroupId);
         mColorPickerCoordinator.setSelectedColorItem(mDefaultColorId);
 
-        LinearLayout linearLayout = mCustomView.findViewById(R.id.visual_data_dialog_layout);
-        linearLayout.addView(mColorPickerCoordinator.getContainerView());
+        linearLayout.addView(root);
 
         // Set the modal dialog model based on the UI properties required.
         setModel(dialogController);
@@ -151,14 +195,18 @@ public class TabGroupVisualDataDialogManager {
         mModalDialogManagerObserver =
                 new ModalDialogManagerObserver() {
                     @Override
-                    public void onDialogCreated(PropertyModel model, ComponentDialog dialog) {
+                    public void onDialogCreated(
+                            PropertyModel model, @Nullable ComponentDialog dialog) {
                         // Ensure that this dialog's model is the one that's being acted upon.
                         if (model == mModel) {
                             // Focus the edit text and display the keyboard on dialog showing.
                             editTextView.requestFocus();
-                            dialog.getWindow()
-                                    .setSoftInputMode(
-                                            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+                            // While showing the keyboard, prevent resizing of the modal dialog
+                            // which could cause UI issues by setting the window to pan only.
+                            Window window = assumeNonNull(assumeNonNull(dialog).getWindow());
+                            window.setSoftInputMode(
+                                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+                                            | WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
                             mModalDialogManager.removeObserver(this);
                         }
                     }
@@ -167,12 +215,17 @@ public class TabGroupVisualDataDialogManager {
         mModalDialogManager.showDialog(mModel, ModalDialogType.APP);
     }
 
-    /** Hide the modal dialog and destroy the necessary components. */
-    public void hideDialog() {
+    /** Cleans up when hidden. */
+    public void onHideDialog() {
         // Reset the model to null after each usage.
         mModel = null;
         if (mModalDialogManagerObserver != null) {
             mModalDialogManager.removeObserver(mModalDialogManagerObserver);
+        }
+
+        if (mTracker != null) {
+            mTracker.dismissed(FeatureConstants.TAB_GROUP_CREATION_DIALOG_SYNC_TEXT_FEATURE);
+            mTracker = null;
         }
     }
 
@@ -192,8 +245,8 @@ public class TabGroupVisualDataDialogManager {
     }
 
     /** Get the default group title displayed on show dialog. */
-    public String getDefaultGroupTitle() {
-        return mDefaultGroupTitle;
+    public String getInitialGroupTitle() {
+        return mInitialGroupTitle;
     }
 
     /** Get the default group color displayed on show dialog. */
@@ -202,31 +255,12 @@ public class TabGroupVisualDataDialogManager {
     }
 
     public @TabGroupColorId int getCurrentColorId() {
-        return mColorPickerCoordinator.getSelectedColorSupplier().get();
+        return assertNonNull(mColorPickerCoordinator.getSelectedColorSupplier().get());
     }
 
-    private void createDefaultGroupTitle(int rootId, TabGroupModelFilter filter) {
-        int tabCount = filter.getRelatedTabCountForRootId(rootId);
-        String defaultGroupTitle =
-                mContext.getResources()
-                        .getQuantityString(
-                                R.plurals.bottom_tab_grid_title_placeholder, tabCount, tabCount);
-
+    private void setDescriptionText(TabModel tabModel) {
         if (mDialogType == DialogType.TAB_GROUP_CREATION) {
-            mDefaultGroupTitle = defaultGroupTitle;
-        } else if (mDialogType == DialogType.TAB_GROUP_EDIT) {
-            mDefaultGroupTitle = filter.getTabGroupTitle(rootId);
-
-            if (mDefaultGroupTitle == null) {
-                mDefaultGroupTitle = defaultGroupTitle;
-            }
-        }
-    }
-
-    private void setDescriptionText(TabGroupModelFilter filter) {
-        if (mDialogType == DialogType.TAB_GROUP_CREATION) {
-            TabModel tabModel = filter.getTabModel();
-            Profile profile = tabModel.getProfile();
+            Profile profile = assumeNonNull(tabModel.getProfile());
             TextView descriptionView =
                     mCustomView.findViewById(R.id.visual_data_dialog_description);
             Tracker tracker = TrackerFactory.getTrackerForProfile(profile);
@@ -234,11 +268,11 @@ public class TabGroupVisualDataDialogManager {
             // TabGroupPane flags are enabled.
             if (!tabModel.isIncognitoBranded()
                     && TabGroupSyncFeatures.isTabGroupSyncEnabled(profile)
-                    && ChromeFeatureList.sTabGroupPaneAndroid.isEnabled()
                     && tracker.shouldTriggerHelpUi(
                             FeatureConstants.TAB_GROUP_CREATION_DIALOG_SYNC_TEXT_FEATURE)) {
+                mTracker = tracker;
                 descriptionView.setVisibility(View.VISIBLE);
-                SyncService syncService = SyncServiceFactory.getForProfile(profile);
+                SyncService syncService = assumeNonNull(SyncServiceFactory.getForProfile(profile));
                 boolean syncingTabGroups =
                         syncService.getActiveDataTypes().contains(DataType.SAVED_TAB_GROUP);
 
@@ -257,6 +291,7 @@ public class TabGroupVisualDataDialogManager {
         }
     }
 
+    @EnsuresNonNull("mModel")
     private void setModel(ModalDialogProperties.Controller dialogController) {
         PropertyModel.Builder builder =
                 new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)

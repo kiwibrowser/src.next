@@ -11,7 +11,7 @@ namespace blink {
 namespace {
 bool ShorthandMatches(CSSPropertyID expected_shorthand,
                       CSSPropertyID longhand) {
-  Vector<StylePropertyShorthand, 4> shorthands;
+  MatchingShorthandsVector shorthands;
   getMatchingShorthandsForLonghand(longhand, &shorthands);
   for (unsigned i = 0; i < shorthands.size(); ++i) {
     if (shorthands.at(i).id() == expected_shorthand) {
@@ -35,8 +35,8 @@ CSSKeyframeShorthandValue::CSSKeyframeShorthandValue(
 String CSSKeyframeShorthandValue::CustomCSSText() const {
 #if DCHECK_IS_ON()
   // Check that all property/value pairs belong to the same shorthand.
-  for (unsigned i = 0; i < properties_->PropertyCount(); i++) {
-    DCHECK(ShorthandMatches(shorthand_, properties_->PropertyAt(i).Id()))
+  for (const CSSPropertyValue& property : properties_->Properties()) {
+    DCHECK(ShorthandMatches(shorthand_, property.PropertyID()))
         << "These are not the longhands you're looking for.";
   }
 #endif

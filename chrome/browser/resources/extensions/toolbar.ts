@@ -16,6 +16,7 @@ import {listenOnce} from 'chrome://resources/js/util.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
+import {TOAST_DURATION_MS} from './item_util.js';
 import {getCss} from './toolbar.css.js';
 import {getHtml} from './toolbar.html.js';
 
@@ -99,18 +100,18 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
     };
   }
 
-  extensions: chrome.developerPrivate.ExtensionInfo[] = [];
-  delegate: ToolbarDelegate = new DummyToolbarDelegate();
-  inDevMode: boolean = false;
-  devModeControlledByPolicy: boolean = false;
-  isChildAccount: boolean = false;
+  accessor extensions: chrome.developerPrivate.ExtensionInfo[] = [];
+  accessor delegate: ToolbarDelegate = new DummyToolbarDelegate();
+  accessor inDevMode: boolean = false;
+  accessor devModeControlledByPolicy: boolean = false;
+  accessor isChildAccount: boolean = false;
 
-  narrow: boolean = false;
-  canLoadUnpacked?: boolean;
+  accessor narrow: boolean = false;
+  accessor canLoadUnpacked: boolean|undefined;
 
-  protected expanded_: boolean = false;
-  protected showPackDialog_: boolean = false;
-  private isUpdating_: boolean = false;
+  protected accessor expanded_: boolean = false;
+  protected accessor showPackDialog_: boolean = false;
+  private accessor isUpdating_: boolean = false;
 
   override firstUpdated(changedProperties: PropertyValues<this>) {
     super.firstUpdated(changedProperties);
@@ -183,7 +184,7 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
         .then((success) => {
           if (success) {
             const toastManager = getToastManager();
-            toastManager.duration = 3000;
+            toastManager.duration = TOAST_DURATION_MS;
             toastManager.show(this.i18n('toolbarLoadUnpackedDone'));
           }
         })
@@ -219,7 +220,7 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
         .then(
             () => {
               toastManager.hide();
-              toastManager.duration = 3000;
+              toastManager.duration = TOAST_DURATION_MS;
               toastManager.show(this.i18n('toolbarUpdateDone'));
               this.isUpdating_ = false;
             },

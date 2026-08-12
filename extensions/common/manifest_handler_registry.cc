@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handler.h"
 #include "extensions/common/permissions/manifest_permission.h"
@@ -75,6 +74,7 @@ bool ManifestHandlerRegistry::ValidateExtension(
     const Extension* extension,
     std::string* error,
     std::vector<InstallWarning>* warnings) {
+  CHECK(extension);
   std::set<ManifestHandler*> handlers;
   for (const auto& iter : handlers_) {
     ManifestHandler* handler = iter.second;
@@ -84,7 +84,7 @@ bool ManifestHandlerRegistry::ValidateExtension(
     }
   }
   for (auto* handler : handlers) {
-    if (!handler->Validate(extension, error, warnings)) {
+    if (!handler->Validate(*extension, error, warnings)) {
       return false;
     }
   }
@@ -160,7 +160,7 @@ void ManifestHandlerRegistry::SortManifestHandlers() {
         CHECK(prereq_iter != handlers_.end())
             << "Extension manifest handler depends on unrecognized key " << key;
         // Prerequisite is in our map.
-        if (base::Contains(priority_map_, prereq_iter->second)) {
+        if (priority_map_.contains(prereq_iter->second)) {
           unsatisfied--;
         }
       }

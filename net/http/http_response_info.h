@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "base/byte_size.h"
 #include "base/time/time.h"
 #include "net/base/auth.h"
 #include "net/base/ip_endpoint.h"
@@ -67,12 +68,20 @@ class NET_EXPORT HttpResponseInfo {
   // that would prevent us from doing a bunch of forward declaration.
 
   // Initializes from the representation stored in the given pickle.
-  bool InitFromPickle(const base::Pickle& pickle, bool* response_truncated);
+  bool InitFromPickle(base::PickleIterator iterator, bool* response_truncated);
 
-  // Call this method to persist the response info.
-  void Persist(base::Pickle* pickle,
-               bool skip_transient_headers,
-               bool response_truncated) const;
+  // Call this method to persist the response info. Can't fail. Returns a
+  // unique_ptr because base::Pickle doesn't support std::move().
+  std::unique_ptr<base::Pickle> MakePickle(bool skip_transient_headers,
+                                           bool response_truncated) const;
+
+  // As MakePickle(), but replaces `encoded_body_size` with the given
+  // `signed_body_size`. For testing backwards-compatibility with pickles
+  // created when `encoded_body_size` was an int64_t.
+  std::unique_ptr<base::Pickle> MakePickleWithSignedBodySizeForTesting(
+      bool skip_transient_headers,
+      bool response_truncated,
+      int64_t signed_body_size) const;
 
   // Whether QUIC is used or not.
   bool DidUseQuic() const;
@@ -109,14 +118,8 @@ class NET_EXPORT HttpResponseInfo {
   // Information about the proxy chain used to fetch this response, if any.
   ProxyChain proxy_chain;
 
-  // Whether this request was eligible for IP Protection based on the request
-  // being a match to the masked domain list, if available.
-  // This field is not persisted by `Persist()` and not restored by
-  // `InitFromPickle()`.
-  bool was_mdl_match = false;
-
-  // Whether the request use http proxy or server authentication.
-  bool did_use_http_auth = false;
+  // Whether the request uses server authentication.
+  bool did_use_server_http_auth = false;
 
   // True if the resource was originally fetched for a prefetch and has not been
   // used since.
@@ -203,8 +206,45 @@ class NET_EXPORT HttpResponseInfo {
   // session. Used for filtering cache access.
   std::optional<int64_t> browser_run_id;
 
+  // True if the request matched a shared dictionary and advertised it as being
+  // available with an "Available-Dictionary" request header.
+  // This is always false for resources served from cache.
+  bool did_send_available_dictionary = false;
+
   // True if the response used a shared dictionary for decoding its body.
+  // This is always false for resources served from cache (where
+  // dictionary-compressed responses are stored uncompressed).
   bool did_use_shared_dictionary = false;
+
+  // The original encoded (on-the-wire, before content decoding) body size.
+  // This is stored so that when the response is served from the disk cache
+  // (which stores the decoded body), we can still report the correct
+  // encodedBodySize for Resource Timing.
+  // Only set after the full body has been received.
+  std::optional<base::ByteSize> encoded_body_size;
+
+  // When present, the response body stored on disk is zstd-compressed
+  // (a cache storage optimization, distinct from any wire Content-Encoding).
+  // The value is the count of bytes the writer streamed into zstd at write
+  // time — i.e., exactly the number of bytes the read path's zstd
+  // decompressor must produce on a successful read.
+  //
+  // This is the only signal: presence ⇒ "decompress on read";
+  // absence ⇒ "stored verbatim". The two facts cannot drift.
+  //
+  // We do not use the wire Content-Length for this purpose. Content-Length
+  // describes the wire body, while the cache may store a different shape
+  // (e.g., for Content-Encoding: dcz the cache stores the dictionary-decoded
+  // plaintext, not the wire bytes).
+  std::optional<int64_t> zstd_uncompressed_body_size;
+
+ private:
+  // Implements MakePickle(), writing `encoded_body_size` as a signed int for
+  // backwards compatibility.
+  std::unique_ptr<base::Pickle> MakePickleImpl(
+      bool skip_transient_headers,
+      bool response_truncated,
+      std::optional<int64_t> signed_body_size) const;
 };
 
 }  // namespace net

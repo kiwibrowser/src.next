@@ -12,6 +12,7 @@
 namespace blink {
 
 class CSSImageSetTypeValue;
+class CSSLengthResolver;
 class CSSPrimitiveValue;
 
 // This class represents an image-set-option as specified in:
@@ -30,11 +31,11 @@ class CSSImageSetOptionValue : public CSSValue {
   ~CSSImageSetOptionValue();
 
   // Gets the resolution value in Dots Per Pixel
-  double ComputedResolution() const;
+  double ComputedResolution(const CSSLengthResolver&) const;
 
   // Returns true if the image-set-option uses an image format that the
   // browser can render.
-  bool IsSupported() const;
+  bool IsSupported(const CSSLengthResolver&) const;
 
   CSSValue& GetImage() const;
   const CSSPrimitiveValue& GetResolution() const;
@@ -43,6 +44,8 @@ class CSSImageSetOptionValue : public CSSValue {
   String CustomCSSText() const;
 
   bool Equals(const CSSImageSetOptionValue& other) const;
+
+  bool HasRandomFunctions() const;
 
   void TraceAfterDispatch(blink::Visitor* visitor) const;
 

@@ -8,15 +8,17 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 
 import androidx.annotation.ColorInt;
-import androidx.annotation.NonNull;
-import androidx.core.content.ContextCompat;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider.IncognitoStateObserver;
 import org.chromium.chrome.browser.theme.ThemeColorProvider.ThemeColorObserver;
 import org.chromium.chrome.browser.theme.ThemeColorProvider.TintObserver;
+import org.chromium.chrome.browser.ui.bottombar.BottomBarConfigUtils;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 
@@ -30,7 +32,12 @@ import org.chromium.components.browser_ui.styles.SemanticColorUtils;
  * <p>2. The color and tint of the toolbar's color provider when the toolbar is bottom-anchored.
  * This allows other bottom controls using this class to match the toolbar's color when it's
  * visually adjacent to them.
+ *
+ * <p>3. When AndroidBottomBar is enabled, the behavior of 1 and 2 is ignored. The background color
+ * is determined by the BottomControlsStacker, which is the source of truth for the theme color of
+ * the bottom controls. The tints continue to use the hardcoded combos.
  */
+@NullMarked
 public class BottomUiThemeColorProvider extends ThemeColorProvider
         implements BrowserControlsStateProvider.Observer,
                 IncognitoStateObserver,
@@ -44,7 +51,10 @@ public class BottomUiThemeColorProvider extends ThemeColorProvider
     private final ColorStateList mIncognitoTintWithTopToolbar;
     private final Context mContext;
     private final BrowserControlsStateProvider mBrowserControlsStateProvider;
+    private final BottomControlsStacker mBottomControlsStacker;
     private final IncognitoStateProvider mIncognitoStateProvider;
+    // This flag never changes during runtime so we can cache it.
+    private final boolean mIsBottomBarEnabled;
     private @ControlsPosition int mControlsPosition;
     private boolean mIncognito;
 
@@ -52,29 +62,30 @@ public class BottomUiThemeColorProvider extends ThemeColorProvider
      * @param toolbarThemeColorProvider Theme color provider for the toolbar contained in the
      *     control container, which can be either bottom- or top-anchored.
      * @param browserControlsStateProvider Provider of the state of the browser controls.
+     * @param bottomControlsStacker BrowserControlsStacker instance.
      * @param incognitoStateProvider Provided of current incognito state.
      * @param context The {@link Context} that is used to retrieve color related resources.
      */
     public BottomUiThemeColorProvider(
-            @NonNull ThemeColorProvider toolbarThemeColorProvider,
-            @NonNull BrowserControlsStateProvider browserControlsStateProvider,
-            @NonNull IncognitoStateProvider incognitoStateProvider,
-            @NonNull Context context) {
+            ThemeColorProvider toolbarThemeColorProvider,
+            BrowserControlsStateProvider browserControlsStateProvider,
+            BottomControlsStacker bottomControlsStacker,
+            IncognitoStateProvider incognitoStateProvider,
+            Context context) {
         super(context);
         mContext = context;
         mToolbarThemeColorProvider = toolbarThemeColorProvider;
         mBrowserControlsStateProvider = browserControlsStateProvider;
+        mBottomControlsStacker = bottomControlsStacker;
         mIncognitoStateProvider = incognitoStateProvider;
+        mIsBottomBarEnabled = BottomBarConfigUtils.isBottomBarEnabled(context);
         mControlsPosition = browserControlsStateProvider.getControlsPosition();
-        mPrimaryBackgroundColorWithTopToolbar = SemanticColorUtils.getDialogBgColor(context);
-        mIncognitoBackgroundColorWithTopToolbar =
-                context.getColor(R.color.dialog_bg_color_dark_baseline);
-
+        mPrimaryBackgroundColorWithTopToolbar = SemanticColorUtils.getColorSurface(context);
+        mIncognitoBackgroundColorWithTopToolbar = context.getColor(R.color.tab_strip_bg_incognito);
         mPrimaryTintWithTopToolbar =
-                ContextCompat.getColorStateList(mContext, R.color.default_icon_color_tint_list);
+                mContext.getColorStateList(R.color.default_icon_color_tint_list);
         mIncognitoTintWithTopToolbar =
-                ContextCompat.getColorStateList(
-                        mContext, R.color.default_icon_color_light_tint_list);
+                mContext.getColorStateList(R.color.default_icon_color_light_tint_list);
 
         mToolbarThemeColorProvider.addThemeColorObserver(this);
         mToolbarThemeColorProvider.addTintObserver(this);
@@ -97,6 +108,18 @@ public class BottomUiThemeColorProvider extends ThemeColorProvider
         updateColorAndTint(false);
     }
 
+    @Override
+    public void onBottomControlsBackgroundColorChanged(@ColorInt int backgroundColor) {
+        // When the bottom bar is enabled, BottomControlsStacker becomes the source of truth for the
+        // theme color of the bottom controls so we need to listen for its background color changes.
+        //
+        // When the bottom bar is disabled BottomUiThemeColorProvider drives updates into the
+        // BottomControlsStacker. See updateColorAndTint().
+        if (mIsBottomBarEnabled) {
+            updateColorAndTint(false);
+        }
+    }
+
     // IncognitoStateObserver implementation.
     @Override
     public void onIncognitoStateChanged(boolean isIncognito) {
@@ -113,23 +136,34 @@ public class BottomUiThemeColorProvider extends ThemeColorProvider
     // TintObserver implementation.
     @Override
     public void onTintChanged(
-            ColorStateList tint, ColorStateList activityFocusTint, int brandedColorScheme) {
+            @Nullable ColorStateList tint,
+            @Nullable ColorStateList activityFocusTint,
+            int brandedColorScheme) {
         updateColorAndTint(false);
     }
 
     private void updateColorAndTint(boolean animate) {
-        if (mControlsPosition == ControlsPosition.TOP) {
+        if (mIsBottomBarEnabled) {
+            updatePrimaryColor(mBottomControlsStacker.getBackgroundColor(), animate);
+            // Here we assume that while the BottomControlsStacker background color might be
+            // slightly different from the toolbar background color, the tints should follow the
+            // defaults for the current theme. If this assumption doesn't hold,
+            // BottomControlsStacker should provide a separate API to return the correct tint.
+            ColorStateList tint = getTintForTopAnchoredToolbar();
+            updateTint(tint, tint, getBrandedColorSchemeForTopAnchoredToolbar());
+        } else if (mControlsPosition == ControlsPosition.TOP) {
             updatePrimaryColor(getColorForTopAnchoredToolbar(), animate);
-            updateTint(
-                    getTintForTopAnchoredToolbar(),
-                    getTintForTopAnchoredToolbar(),
-                    BrandedColorScheme.APP_DEFAULT);
+            ColorStateList tint = getTintForTopAnchoredToolbar();
+            updateTint(tint, tint, getBrandedColorSchemeForTopAnchoredToolbar());
         } else {
             updatePrimaryColor(mToolbarThemeColorProvider.getThemeColor(), animate);
             updateTint(
                     mToolbarThemeColorProvider.getTint(),
                     mToolbarThemeColorProvider.getActivityFocusTint(),
                     mToolbarThemeColorProvider.getBrandedColorScheme());
+        }
+        if (!mIsBottomBarEnabled) {
+            mBottomControlsStacker.notifyBackgroundColor(getThemeColor());
         }
     }
 
@@ -141,5 +175,9 @@ public class BottomUiThemeColorProvider extends ThemeColorProvider
         return mIncognito
                 ? mIncognitoBackgroundColorWithTopToolbar
                 : mPrimaryBackgroundColorWithTopToolbar;
+    }
+
+    private @BrandedColorScheme int getBrandedColorSchemeForTopAnchoredToolbar() {
+        return mIncognito ? BrandedColorScheme.INCOGNITO : BrandedColorScheme.APP_DEFAULT;
     }
 }

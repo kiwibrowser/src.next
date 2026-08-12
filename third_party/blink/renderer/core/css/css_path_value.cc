@@ -9,15 +9,15 @@
 #include "third_party/blink/renderer/core/style/style_path.h"
 #include "third_party/blink/renderer/core/svg/svg_path_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
-
 namespace cssvalue {
 
-CSSPathValue::CSSPathValue(scoped_refptr<StylePath> style_path,
+CSSPathValue::CSSPathValue(StylePath* style_path,
                            PathSerializationFormat serialization_format)
-    : CSSValue(kPathClass),
+    : CSSValue(kBasicShapePathClass),
       serialization_format_(serialization_format),
       style_path_(std::move(style_path)) {
   DCHECK(style_path_);
@@ -26,7 +26,8 @@ CSSPathValue::CSSPathValue(scoped_refptr<StylePath> style_path,
 CSSPathValue::CSSPathValue(SVGPathByteStream path_byte_stream,
                            WindRule wind_rule,
                            PathSerializationFormat serialization_format)
-    : CSSPathValue(StylePath::Create(std::move(path_byte_stream), wind_rule),
+    : CSSPathValue(MakeGarbageCollected<StylePath>(std::move(path_byte_stream),
+                                                   wind_rule),
                    serialization_format) {}
 
 namespace {
@@ -55,14 +56,17 @@ String CSSPathValue::CustomCSSText() const {
 }
 
 bool CSSPathValue::Equals(const CSSPathValue& other) const {
-  return ByteStream() == other.ByteStream();
+  return style_path_->GetWindRule() == other.style_path_->GetWindRule() &&
+         ByteStream() == other.ByteStream();
 }
 
 unsigned CSSPathValue::CustomHash() const {
-  return ByteStream().Hash();
+  return HashInts(static_cast<unsigned>(style_path_->GetWindRule()),
+                  ByteStream().Hash());
 }
 
 void CSSPathValue::TraceAfterDispatch(blink::Visitor* visitor) const {
+  visitor->Trace(style_path_);
   CSSValue::TraceAfterDispatch(visitor);
 }
 

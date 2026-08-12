@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser;
 
+
 import android.os.LocaleList;
 import android.text.TextUtils;
 
@@ -13,6 +14,8 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.LocaleUtils;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.language.AppLocaleUtils;
 import org.chromium.chrome.browser.language.GlobalAppLocaleController;
@@ -23,6 +26,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.Locale;
 
 /** This class provides the locale related methods for Chrome. */
+@NullMarked
 public class ChromeLocalizationUtils {
     // Constants used to log UI language availability. Must stay in sync with values in the
     // LanguageUsage.UI.Available enum. These values are persisted to logs. Entries should
@@ -189,7 +193,7 @@ public class ChromeLocalizationUtils {
         if (isTopAndroidLanguageAvailable) {
             return UiAvailableTypes.TOP_AVAILABLE;
         }
-        if (isDefaultLanguageAvailable && !isTopAndroidLanguageAvailable) {
+        if (isDefaultLanguageAvailable) {
             return UiAvailableTypes.ONLY_DEFAULT_AVAILABLE;
         }
         return UiAvailableTypes.NONE_AVAILABLE;
@@ -263,10 +267,12 @@ public class ChromeLocalizationUtils {
     /**
      * Records the status of the previous system locale compared to the new system locale. The
      * histogram buckets are split based on if the Chrome app language is overridden.
+     *
      * @param previousLocale Comma separated string of the previous system locales.
      * @param currentLocale Comma separated string of the current system locales.
      */
-    public static void recordLocaleUpdateStatus(String previousLocale, String currentLocale) {
+    public static void recordLocaleUpdateStatus(
+            @Nullable String previousLocale, String currentLocale) {
         boolean isOverridden = GlobalAppLocaleController.getInstance().isOverridden();
         @LocaleUpdateStatus
         int status = getLocaleUpdateStatus(previousLocale, currentLocale, isOverridden);
@@ -278,6 +284,7 @@ public class ChromeLocalizationUtils {
      * Returns the status of the current system locale compared to a previous locale. If the
      * previous locale is empty returns |LocaleUpdateStatus.DO_NOT_RECORD| since this is the first
      * run.
+     *
      * @param previousLocale Comma separated string of the previous system locales.
      * @param currentLocale Comma separated string of the current system locales.
      * @param isOverridden True if the Chrome app language is overridden.
@@ -285,7 +292,7 @@ public class ChromeLocalizationUtils {
      */
     @VisibleForTesting
     static @LocaleUpdateStatus int getLocaleUpdateStatus(
-            String previousLocale, String currentLocale, boolean isOverridden) {
+            @Nullable String previousLocale, String currentLocale, boolean isOverridden) {
         if (TextUtils.isEmpty(previousLocale) || TextUtils.isEmpty(currentLocale)) {
             return LocaleUpdateStatus.FIRST_RUN;
         }

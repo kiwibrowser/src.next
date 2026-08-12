@@ -2,20 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "chrome/renderer/searchbox/searchbox.h"
 
 #include <stddef.h>
 
+#include <array>
 #include <map>
 #include <string>
 
 #include "chrome/common/search/instant_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/fuzztest/src/fuzztest/fuzztest.h"
 #include "url/gurl.h"
 
 namespace {
@@ -43,8 +40,7 @@ MockIconURLHelper::MockIconURLHelper() {
   rid_to_url_string_[3] = kUrlString3;
 }
 
-MockIconURLHelper::~MockIconURLHelper() {
-}
+MockIconURLHelper::~MockIconURLHelper() = default;
 
 std::string MockIconURLHelper::GetMainFrameToken() const {
   return "0123456789ABCDEF0123456789ABCDEF";
@@ -75,6 +71,14 @@ bool ParseIconRestrictedUrl(const GURL& url,
 void TranslateIconRestrictedUrl(const GURL& transient_url,
                                 const SearchBox::IconURLHelper& helper,
                                 GURL* url);
+
+void ParseFrameTokenAndRestrictedIdDoesNotCrash(const std::string& id_part) {
+  std::string frame_token;
+  InstantRestrictedID rid = -1;
+  ParseFrameTokenAndRestrictedId(id_part, &frame_token, &rid);
+}
+
+FUZZ_TEST(SearchBoxUtilFuzzTest, ParseFrameTokenAndRestrictedIdDoesNotCrash);
 
 TEST(SearchBoxUtilTest, ParseFrameTokenAndRestrictedIdSuccess) {
   std::string frame_token;
@@ -119,7 +123,7 @@ TEST(SearchBoxUtilTest, ParseFrameTokenAndRestrictedIdSuccess) {
 }
 
 TEST(SearchBoxUtilTest, ParseFrameIdAndRestrictedIdFailure) {
-  const char* test_cases[] = {
+  auto test_cases = std::to_array<const char*>({
       "",
       "    ",
       "/",
@@ -137,7 +141,7 @@ TEST(SearchBoxUtilTest, ParseFrameIdAndRestrictedIdFailure) {
       "FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE/3/1",
       "blahblah",
       "0xA/0x10",
-  };
+  });
   for (size_t i = 0; i < std::size(test_cases); ++i) {
     std::string frame_token;
     InstantRestrictedID rid = -1;
@@ -150,19 +154,20 @@ TEST(SearchBoxUtilTest, ParseFrameIdAndRestrictedIdFailure) {
 }
 
 TEST(SearchBoxUtilTest, ParseIconRestrictedUrlFaviconSuccess) {
-  struct {
+  struct TestCases {
     const char* transient_url_str;
     const char* expected_param_part;
     const char* expected_frame_token;
     InstantRestrictedID expected_rid;
-  } test_cases[] = {
+  };
+  auto test_cases = std::to_array<TestCases>({
       {"chrome-search://favicon/FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE/2", "",
        "FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE", 2},
       {"chrome-search://favicon/size/16@2x/1FFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE/4",
        "size/16@2x/", "1FFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE", 4},
       {"chrome-search://favicon/iconurl/FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFA/10",
        "iconurl/", "FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFA", 10},
-  };
+  });
   for (size_t i = 0; i < std::size(test_cases); ++i) {
     std::string param_part = "(unwritten)";
     std::string frame_token;
@@ -180,15 +185,16 @@ TEST(SearchBoxUtilTest, ParseIconRestrictedUrlFaviconSuccess) {
 }
 
 TEST(SearchBoxUtilTest, ParseIconRestrictedUrlFailure) {
-  struct {
+  struct TestCases {
     const char* transient_url_str;
-  } test_cases[] = {
+  };
+  auto test_cases = std::to_array<TestCases>({
       {"chrome-search://favicon/"},
       {"chrome-search://favicon/3/"},
       {"chrome-search://favicon/size/3/4"},
       {"chrome-search://favicon/largest/http://www.google.com"},
       {"chrome-search://favicon/size/16@2x/-1/10"},
-  };
+  });
   for (size_t i = 0; i < std::size(test_cases); ++i) {
     std::string param_part = "(unwritten)";
     std::string frame_token;
@@ -203,10 +209,11 @@ TEST(SearchBoxUtilTest, ParseIconRestrictedUrlFailure) {
 }
 
 TEST(SearchBoxUtilTest, TranslateIconRestrictedUrlSuccess) {
-  struct {
+  struct TestCases {
     const char* transient_url_str;
     std::string expected_url_str;
-  } test_cases[] = {
+  };
+  auto test_cases = std::to_array<TestCases>({
       {"chrome-search://favicon/0123456789ABCDEF0123456789ABCDEF/1",
        std::string("chrome-search://favicon/") + kUrlString1},
       {"chrome-search://favicon/", "chrome-search://favicon/"},
@@ -218,7 +225,7 @@ TEST(SearchBoxUtilTest, TranslateIconRestrictedUrlSuccess) {
       {"chrome-search://favicon/invalidstuff", "chrome-search://favicon/"},
       {"chrome-search://favicon/size/16@2x/http://www.google.com",
        "chrome-search://favicon/"},
-  };
+  });
 
   MockIconURLHelper helper;
   for (size_t i = 0; i < std::size(test_cases); ++i) {

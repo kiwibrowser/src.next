@@ -11,9 +11,9 @@
 #include "base/atomic_sequence_num.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
+#include "base/power_monitor/power_monitor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -33,6 +33,7 @@
 #include "net/socket/client_socket_pool_manager_impl.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/socket/stream_socket_close_reason.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_random.h"
@@ -83,12 +84,8 @@ spdy::SettingsMap AddDefaultHttp2Settings(spdy::SettingsMap http2_settings) {
 
 bool OriginToForceQuicOnInternal(const QuicParams& quic_params,
                                  const url::SchemeHostPort& destination) {
-  // TODO(crbug.com/40181080): Consider converting `origins_to_force_quic_on` to
-  // use url::SchemeHostPort.
-  return (
-      base::Contains(quic_params.origins_to_force_quic_on, HostPortPair()) ||
-      base::Contains(quic_params.origins_to_force_quic_on,
-                     HostPortPair::FromSchemeHostPort(destination)));
+  return (quic_params.force_quic_everywhere ||
+          quic_params.origins_to_force_quic_on.contains(destination));
 }
 
 }  // unnamed namespace
@@ -99,8 +96,6 @@ HttpNetworkSessionParams::HttpNetworkSessionParams()
       time_func(&base::TimeTicks::Now) {
   enable_early_data =
       base::FeatureList::IsEnabled(features::kEnableTLS13EarlyData);
-  use_dns_https_svcb_alpn =
-      base::FeatureList::IsEnabled(features::kUseDnsHttpsSvcbAlpn);
 }
 
 HttpNetworkSessionParams::HttpNetworkSessionParams(
@@ -201,26 +196,26 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
   normal_socket_pool_manager_ = std::make_unique<ClientSocketPoolManagerImpl>(
       CreateCommonConnectJobParams(false /* for_websockets */),
       CreateCommonConnectJobParams(true /* for_websockets */),
-      NORMAL_SOCKET_POOL,
+      SocketPoolType::kNormal,
       // cleanup_on_ip_address_change
       !params.ignore_ip_address_changes);
   websocket_socket_pool_manager_ =
       std::make_unique<ClientSocketPoolManagerImpl>(
           CreateCommonConnectJobParams(false /* for_websockets */),
           CreateCommonConnectJobParams(true /* for_websockets */),
-          WEBSOCKET_SOCKET_POOL,
+          SocketPoolType::kWebSocket,
           // cleanup_on_ip_address_change
           !params.ignore_ip_address_changes);
 
   if (params_.enable_http2) {
-    next_protos_.push_back(kProtoHTTP2);
+    next_protos_.push_back(NextProto::kProtoHTTP2);
     if (base::FeatureList::IsEnabled(features::kAlpsForHttp2)) {
       // Enable ALPS for HTTP/2 with empty data.
-      application_settings_[kProtoHTTP2] = {};
+      application_settings_[NextProto::kProtoHTTP2] = {};
     }
   }
 
-  next_protos_.push_back(kProtoHTTP11);
+  next_protos_.push_back(NextProto::kProtoHTTP11);
 
   http_server_properties_->SetMaxServerConfigsStoredInProperties(
       context.quic_context->params()->max_server_configs_stored_in_properties);
@@ -229,21 +224,19 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
           ->initial_delay_for_broken_alternative_service,
       context.quic_context->params()->exponential_backoff_on_initial_delay);
 
-  if (!params_.disable_idle_sockets_close_on_memory_pressure) {
-    memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
-        FROM_HERE, base::BindRepeating(&HttpNetworkSession::OnMemoryPressure,
-                                       base::Unretained(this)));
-  }
-
-  if (base::FeatureList::IsEnabled(features::kHappyEyeballsV3)) {
-    http_stream_pool_ = std::make_unique<HttpStreamPool>(
-        this,
-        /*cleanup_on_ip_address_change=*/!params.ignore_ip_address_changes);
-  }
+  http_stream_pool_ = std::make_unique<HttpStreamPool>(
+      this,
+      /*cleanup_on_ip_address_change=*/!params.ignore_ip_address_changes);
+#if BUILDFLAG(IS_WIN)
+  base::PowerMonitor::GetInstance()->AddPowerSuspendObserver(this);
+#endif
 }
 
 HttpNetworkSession::~HttpNetworkSession() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+#if BUILDFLAG(IS_WIN)
+  base::PowerMonitor::GetInstance()->RemovePowerSuspendObserver(this);
+#endif
   if (http_stream_pool_) {
     http_stream_pool_->OnShuttingDown();
   }
@@ -255,7 +248,7 @@ HttpNetworkSession::~HttpNetworkSession() {
 
 void HttpNetworkSession::StartResponseDrainer(
     std::unique_ptr<HttpResponseBodyDrainer> drainer) {
-  DCHECK(!base::Contains(response_drainers_, drainer.get()));
+  DCHECK(!response_drainers_.contains(drainer.get()));
   HttpResponseBodyDrainer* drainer_ptr = drainer.get();
   response_drainers_.insert(std::move(drainer));
   drainer_ptr->Start(this);
@@ -263,7 +256,7 @@ void HttpNetworkSession::StartResponseDrainer(
 
 void HttpNetworkSession::RemoveResponseDrainer(
     HttpResponseBodyDrainer* drainer) {
-  DCHECK(base::Contains(response_drainers_, drainer));
+  DCHECK(response_drainers_.contains(drainer));
 
   response_drainers_.erase(response_drainers_.find(drainer));
 }
@@ -279,33 +272,36 @@ base::Value HttpNetworkSession::SocketPoolInfoToValue() const {
   return normal_socket_pool_manager_->SocketPoolInfoToValue();
 }
 
-std::unique_ptr<base::Value> HttpNetworkSession::SpdySessionPoolInfoToValue()
-    const {
+base::Value HttpNetworkSession::SpdySessionPoolInfoToValue() const {
   return spdy_session_pool_.SpdySessionPoolInfoToValue();
 }
 
 base::Value HttpNetworkSession::QuicInfoToValue() const {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("sessions", quic_session_pool_.QuicSessionPoolInfoToValue());
   dict.Set("quic_enabled", IsQuicEnabled());
 
   const QuicParams* quic_params = context_.quic_context->params();
 
-  base::Value::List connection_options;
+  base::ListValue connection_options;
   for (const auto& option : quic_params->connection_options) {
     connection_options.Append(quic::QuicTagToString(option));
   }
   dict.Set("connection_options", std::move(connection_options));
 
-  base::Value::List supported_versions;
+  base::ListValue supported_versions;
   for (const auto& version : quic_params->supported_versions) {
     supported_versions.Append(ParsedQuicVersionToString(version));
   }
   dict.Set("supported_versions", std::move(supported_versions));
 
-  base::Value::List origins_to_force_quic_on;
-  for (const auto& origin : quic_params->origins_to_force_quic_on) {
-    origins_to_force_quic_on.Append(origin.ToString());
+  base::ListValue origins_to_force_quic_on;
+  if (quic_params->force_quic_everywhere) {
+    origins_to_force_quic_on.Append("<everywhere>");
+  } else {
+    for (const auto& origin : quic_params->origins_to_force_quic_on) {
+      origins_to_force_quic_on.Append(origin.Serialize());
+    }
   }
   dict.Set("origins_to_force_quic_on", std::move(origins_to_force_quic_on));
 
@@ -360,7 +356,9 @@ void HttpNetworkSession::CloseAllConnections(int net_error,
   websocket_socket_pool_manager_->FlushSocketPoolsWithError(
       net_error, net_log_reason_utf8);
   if (http_stream_pool_) {
-    http_stream_pool_->FlushWithError(net_error, net_log_reason_utf8);
+    http_stream_pool_->FlushWithError(
+        net_error, StreamSocketCloseReason::kCloseAllConnections,
+        net_log_reason_utf8);
   }
   spdy_session_pool_.CloseCurrentSessions(static_cast<Error>(net_error));
   quic_session_pool_.CloseAllSessions(net_error, quic::QUIC_PEER_GOING_AWAY);
@@ -373,6 +371,10 @@ void HttpNetworkSession::CloseIdleConnections(const char* net_log_reason_utf8) {
     http_stream_pool_->CloseIdleStreams(net_log_reason_utf8);
   }
   spdy_session_pool_.CloseCurrentIdleSessions(net_log_reason_utf8);
+}
+
+void HttpNetworkSession::SetTLS13EarlyDataEnabled(bool enabled) {
+  params_.enable_early_data = enabled;
 }
 
 bool HttpNetworkSession::IsQuicEnabled() const {
@@ -426,31 +428,36 @@ CommonConnectJobParams HttpNetworkSession::CreateCommonConnectJobParams(
       &params_.ignore_certificate_errors, &params_.enable_early_data);
 }
 
-ClientSocketPoolManager* HttpNetworkSession::GetSocketPoolManager(
-    SocketPoolType pool_type) {
-  switch (pool_type) {
-    case NORMAL_SOCKET_POOL:
-      return normal_socket_pool_manager_.get();
-    case WEBSOCKET_SOCKET_POOL:
-      return websocket_socket_pool_manager_.get();
-    default:
-      NOTREACHED();
+void HttpNetworkSession::ApplyTestingFixedPort(
+    url::SchemeHostPort& endpoint) const {
+  bool using_ssl = GURL::SchemeIsCryptographic(endpoint.scheme());
+  if (!using_ssl && params().testing_fixed_http_port != 0) {
+    endpoint = url::SchemeHostPort(endpoint.scheme(), endpoint.host(),
+                                   params().testing_fixed_http_port);
+  } else if (using_ssl && params().testing_fixed_https_port != 0) {
+    endpoint = url::SchemeHostPort(endpoint.scheme(), endpoint.host(),
+                                   params().testing_fixed_https_port);
   }
 }
 
-void HttpNetworkSession::OnMemoryPressure(
-    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
-  DCHECK(!params_.disable_idle_sockets_close_on_memory_pressure);
-
-  switch (memory_pressure_level) {
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
-      break;
-
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
-    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
-      CloseIdleConnections("Low memory");
-      break;
+ClientSocketPoolManager* HttpNetworkSession::GetSocketPoolManager(
+    SocketPoolType pool_type) {
+  switch (pool_type) {
+    case SocketPoolType::kNormal:
+      return normal_socket_pool_manager_.get();
+    case SocketPoolType::kWebSocket:
+      return websocket_socket_pool_manager_.get();
   }
+  NOTREACHED();
+}
+
+void HttpNetworkSession::OnSuspend() {
+  power_suspended_ = true;
+  CloseIdleConnections("Entering suspend mode");
+}
+
+void HttpNetworkSession::OnResume() {
+  power_suspended_ = false;
 }
 
 }  // namespace net

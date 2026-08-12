@@ -9,7 +9,6 @@
 #include <optional>
 
 #include "base/base64.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/functional/bind.h"
@@ -100,11 +99,11 @@ class ImageSanitizerTest : public testing::Test {
   ImageSanitizerTest& operator=(const ImageSanitizerTest&) = delete;
 
  protected:
-  void CreateValidImage(const base::FilePath::StringPieceType& file_name) {
+  void CreateValidImage(const base::FilePath::StringViewType& file_name) {
     ASSERT_TRUE(WriteBase64DataToFile(kBase64edValidPng, file_name));
   }
 
-  void CreateInvalidImage(const base::FilePath::StringPieceType& file_name) {
+  void CreateInvalidImage(const base::FilePath::StringViewType& file_name) {
     ASSERT_TRUE(WriteBase64DataToFile(kBase64edInvalidPng, file_name));
   }
 
@@ -133,7 +132,7 @@ class ImageSanitizerTest : public testing::Test {
 
  private:
   bool WriteBase64DataToFile(const std::string& base64_data,
-                             const base::FilePath::StringPieceType& file_name) {
+                             const base::FilePath::StringViewType& file_name) {
     std::string binary;
     if (!base::Base64Decode(base64_data, &binary)) {
       return false;
@@ -217,7 +216,7 @@ TEST_F(ImageSanitizerTest, ValidCase) {
     EXPECT_TRUE(file_size.has_value());
     EXPECT_GT(file_size.value(), 0);
 
-    ASSERT_TRUE(base::Contains(*client()->decoded_images(), path));
+    ASSERT_TRUE(client()->decoded_images()->contains(path));
     EXPECT_FALSE((*client()->decoded_images())[path].drawsNothing());
   }
   // No extra images should have been reported.

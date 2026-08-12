@@ -6,7 +6,10 @@
 #define CONTENT_BROWSER_NETWORK_SANDBOX_H_
 
 #include "base/functional/callback.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
 // As of 2022-03 there is no plan to sandbox the network service in any special
 // way on Android.
@@ -30,6 +33,13 @@ void GrantSandboxAccessOnThreadPool(
     network::mojom::NetworkContextParamsPtr params,
     base::OnceCallback<void(network::mojom::NetworkContextParamsPtr,
                             SandboxGrantResult)> result_callback);
+
+// Creates a network context on a background thread pool after granting sandbox
+// access.
+void GrantSandboxAccessAndCreateNetworkContextOnThreadPool(
+    mojo::PendingRemote<network::mojom::NetworkContextCreator> context_creator,
+    mojo::PendingReceiver<network::mojom::NetworkContext> context,
+    network::mojom::NetworkContextParamsPtr params);
 
 }  // namespace content
 

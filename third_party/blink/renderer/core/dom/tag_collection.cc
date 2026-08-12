@@ -23,8 +23,6 @@
 
 #include "third_party/blink/renderer/core/dom/tag_collection.h"
 
-#include "third_party/blink/renderer/core/dom/node_rare_data.h"
-
 namespace blink {
 
 TagCollection::TagCollection(ContainerNode& root_node,

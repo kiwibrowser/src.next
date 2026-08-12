@@ -6,10 +6,14 @@ package org.chromium.chrome.browser.tabmodel;
 
 import android.util.SparseArray;
 
+import org.chromium.build.annotations.NullMarked;
+
 /** A map associating a tab id to an {@link AsyncTabParams}. */
+@NullMarked
 public interface AsyncTabParamsManager {
     /**
      * Stores AsyncTabParams used when the tab with the given ID is launched via intent.
+     *
      * @param tabId The ID of the tab that will be launched via intent.
      * @param params The AsyncTabParams to use when creating the Tab.
      */
@@ -22,14 +26,19 @@ public interface AsyncTabParamsManager {
 
     /**
      * @return Whether there are any saved {@link AsyncTabParams} with a tab to reparent. All
-     *         implementations of this are keyed off of a user gesture so the likelihood of having
-     *         more than one is zero.
+     *     implementations of this are keyed off of a user gesture so the likelihood of having more
+     *     than one is zero.
      */
     boolean hasParamsWithTabToReparent();
 
     /**
+     * @return Whether there is an {@link AsyncTabParams} for the given ID with a tab to reparent.
+     */
+    boolean hasParamsWithTabToReparent(int tabId);
+
+    /**
      * @return A map of tab IDs to AsyncTabParams containing data that will be used later when a tab
-     *         is opened via an intent.
+     *     is opened via an intent.
      */
     SparseArray<AsyncTabParams> getAsyncTabParams();
 

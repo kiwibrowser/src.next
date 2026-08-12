@@ -24,6 +24,17 @@ communicating with someone in their primary language. We all get frustrated
 when working on hard problems, but we cannot allow that frustration to turn
 into personal attacks.
 
+It is especially important that we are respectful of each other's time.
+
+As a general rule, while it is acceptable to use AI for Chromium development
+(code authoring, bug finding, etc), you should not "delegate" discussing
+something with another human to an AI. If you file an AI-generated bug or
+upload an AI-authored CL and a human replies on it, you should reply to their
+comment yourself, not have your AI do so. Remember that at all times you are
+responsible for actions taken under your account in Chromium spaces, and if
+an agent using your account is disrespectful or unkind, the consequences of
+that as outlined below will apply to your account.
+
 ## Speak up if you see or hear something.
 
 You are empowered to politely engage when you feel that you or others are
@@ -74,6 +85,9 @@ discretion of the Chromium community managers:
 
 Participants warned to stop any harassing behavior are expected to comply
 immediately; failure to do so will result in an escalation of consequences.
+
+Bans or other consequences under this policy can be appealed by email to
+community@chromium.org.
 
 ## Acknowledgements
 

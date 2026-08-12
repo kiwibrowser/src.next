@@ -8,7 +8,9 @@
 #include <optional>
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/geometry/axis.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
+#include "third_party/blink/renderer/core/page/scrolling/sticky_position_scrolling_constraints.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
@@ -49,26 +51,54 @@ class CORE_EXPORT FragmentData : public GarbageCollected<FragmentData> {
   }
   void SetLayer(PaintLayer*);
 
-  StickyPositionScrollingConstraints* StickyConstraints() const {
+  StickyPositionScrollingConstraints StickyConstraints() const {
     AssertIsFirst();
-    return rare_data_ ? rare_data_->sticky_constraints.Get() : nullptr;
-  }
-  void SetStickyConstraints(StickyPositionScrollingConstraints* constraints) {
-    AssertIsFirst();
-    if (!rare_data_ && !constraints)
-      return;
-    EnsureRareData().sticky_constraints = constraints;
+    return rare_data_ ? StickyPositionScrollingConstraints(
+                            rare_data_->x_sticky_constraints.Get(),
+                            rare_data_->y_sticky_constraints.Get())
+                      : StickyPositionScrollingConstraints();
   }
 
-  // A fragment ID unique within the LayoutObject. It is the same as the
-  // fragmentainer index.
-  wtf_size_t FragmentID() const {
-    return rare_data_ ? rare_data_->fragment_id : 0;
+  bool HasStickyConstraints() const {
+    AssertIsFirst();
+    return rare_data_ && (rare_data_->x_sticky_constraints ||
+                          rare_data_->y_sticky_constraints);
   }
-  void SetFragmentID(wtf_size_t id) {
-    if (!rare_data_ && id == 0)
-      return;
-    EnsureRareData().fragment_id = id;
+
+  bool SetStickyConstraints(StickyConstraintsData constraints) {
+    AssertIsFirst();
+    DCHECK(constraints.x_data || constraints.y_data);
+    bool has_changed = false;
+    auto& rare_data = EnsureRareData();
+    if (constraints.x_data) {
+      has_changed = true;
+      rare_data.x_sticky_constraints = constraints.x_data;
+    }
+    if (constraints.y_data) {
+      has_changed = true;
+      rare_data.y_sticky_constraints = constraints.y_data;
+    }
+    return has_changed;
+  }
+
+  bool ClearStickyConstraints(PhysicalAxes axes_to_clear) {
+    AssertIsFirst();
+
+    bool has_changed = false;
+    if (!rare_data_) {
+      return has_changed;
+    }
+    if ((axes_to_clear & kPhysicalAxesHorizontal) &&
+        rare_data_->x_sticky_constraints) {
+      has_changed = true;
+      rare_data_->x_sticky_constraints = nullptr;
+    }
+    if ((axes_to_clear & kPhysicalAxesVertical) &&
+        rare_data_->y_sticky_constraints) {
+      has_changed = true;
+      rare_data_->y_sticky_constraints = nullptr;
+    }
+    return has_changed;
   }
 
   // Holds references to the paint property nodes created by this object.
@@ -105,13 +135,8 @@ class CORE_EXPORT FragmentData : public GarbageCollected<FragmentData> {
   //   properties would have a transform node that points to the div's
   //   ancestor transform space.
   PropertyTreeStateOrAlias LocalBorderBoxProperties() const {
-    DCHECK(HasLocalBorderBoxProperties());
-
-    // TODO(chrishtr): this should never happen, but does in practice and
-    // we haven't been able to find all of the cases where it happens yet.
-    // See crbug.com/1137883. Once we find more of them, remove this.
-    if (!HasLocalBorderBoxProperties()) {
-      return PropertyTreeState::Root();
+    if (!HasLocalBorderBoxProperties()) [[unlikely]] {
+      return LocalBorderBoxPropertiesFallback();
     }
     return PropertyTreeStateOrAlias(rare_data_->local_border_box_properties);
   }
@@ -169,6 +194,8 @@ class CORE_EXPORT FragmentData : public GarbageCollected<FragmentData> {
  protected:
   friend class FragmentDataTest;
 
+  NOINLINE PropertyTreeStateOrAlias LocalBorderBoxPropertiesFallback() const;
+
 #if DCHECK_IS_ON()
   void AssertIsFirst() const { DCHECK(is_first_); }
 #else
@@ -192,7 +219,10 @@ class CORE_EXPORT FragmentData : public GarbageCollected<FragmentData> {
     // avoid separate data structure for them. They are only to be accessed in
     // the first fragment.
     Member<PaintLayer> layer;
-    Member<StickyPositionScrollingConstraints> sticky_constraints;
+    Member<StickyPositionScrollingConstraints::PerAxisData>
+        x_sticky_constraints;
+    Member<StickyPositionScrollingConstraints::PerAxisData>
+        y_sticky_constraints;
     HeapVector<Member<FragmentData>> additional_fragments;
 
     // Fragment specific data.
@@ -202,7 +232,6 @@ class CORE_EXPORT FragmentData : public GarbageCollected<FragmentData> {
     CullRect cull_rect_;
     CullRect contents_cull_rect_;
     UniqueObjectId unique_id = 0;
-    wtf_size_t fragment_id = 0;
   };
 
   RareData& EnsureRareData();

@@ -5,22 +5,46 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_SETTINGS_OVERRIDDEN_PARAMS_PROVIDERS_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_SETTINGS_OVERRIDDEN_PARAMS_PROVIDERS_H_
 
+#include <memory>
 #include <optional>
 
+#include "base/functional/callback_forward.h"
 #include "chrome/browser/ui/extensions/extension_settings_overridden_dialog.h"
 
+namespace content {
+class WebContents;
+}  // namespace content
+
 namespace settings_overridden_params {
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// LINT.IfChange(MissingParams)
+enum class MissingParams {
+  kNone = 0,
+  kMissingNewSearchName = 1,
+  kMissingPreviousSearchName = 2,
+  kMaxValue = kMissingPreviousSearchName,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/extensions/enums.xml:MissingParams)
 
 // Retrieves the params for displaying the NTP setting overridden dialog, if
 // there is a controlling extension. Otherwise, returns an empty optional.
 std::optional<ExtensionSettingsOverriddenDialog::Params> GetNtpOverriddenParams(
     Profile* profile);
 
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 // Retrieves the params for displaying the dialog indicating that the default
-// search engine has been overridden, if there is a controlling extension.
-// Otherwise, returns an empty optional.
-std::optional<ExtensionSettingsOverriddenDialog::Params>
-GetSearchOverriddenParams(Profile* profile);
+// search engine has been overridden, if there is a controlling extension, and
+// asynchronously passes them to the supplied callback. Otherwise, the callback
+// is invoked with nullopt. Asynchronous operation allows fetching of
+// extension-related resources such as icons.
+void GetSearchOverriddenParamsThenRun(
+    content::WebContents* web_contents,
+    base::OnceCallback<
+        void(std::unique_ptr<ExtensionSettingsOverriddenDialog::Params>)>
+        done_callback);
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 
 }  // namespace settings_overridden_params
 

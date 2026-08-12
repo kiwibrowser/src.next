@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 // See "SSPI Sample Application" at
 // http://msdn.microsoft.com/en-us/library/aa918273.aspx
 
 #include "net/http/http_auth_sspi_win.h"
 
 #include "base/base64.h"
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
@@ -32,19 +28,19 @@ using DelegationType = HttpAuth::DelegationType;
 
 namespace {
 
-base::Value::Dict SecurityStatusToValue(Error mapped_error,
-                                        SECURITY_STATUS status) {
-  base::Value::Dict params;
+base::DictValue SecurityStatusToValue(Error mapped_error,
+                                      SECURITY_STATUS status) {
+  base::DictValue params;
   params.Set("net_error", mapped_error);
   params.Set("security_status", static_cast<int>(status));
   return params;
 }
 
-base::Value::Dict AcquireCredentialsHandleParams(const std::u16string* domain,
-                                                 const std::u16string* user,
-                                                 Error result,
-                                                 SECURITY_STATUS status) {
-  base::Value::Dict params;
+base::DictValue AcquireCredentialsHandleParams(const std::u16string* domain,
+                                               const std::u16string* user,
+                                               Error result,
+                                               SECURITY_STATUS status) {
+  base::DictValue params;
   if (domain && user) {
     params.Set("domain", base::UTF16ToUTF8(*domain));
     params.Set("user", base::UTF16ToUTF8(*user));
@@ -53,18 +49,18 @@ base::Value::Dict AcquireCredentialsHandleParams(const std::u16string* domain,
   return params;
 }
 
-base::Value::Dict ContextFlagsToValue(DWORD flags) {
-  base::Value::Dict params;
+base::DictValue ContextFlagsToValue(DWORD flags) {
+  base::DictValue params;
   params.Set("value", base::StringPrintf("0x%08lx", flags));
   params.Set("delegated", (flags & ISC_RET_DELEGATE) == ISC_RET_DELEGATE);
   params.Set("mutual", (flags & ISC_RET_MUTUAL_AUTH) == ISC_RET_MUTUAL_AUTH);
   return params;
 }
 
-base::Value::Dict ContextAttributesToValue(SSPILibrary* library,
-                                           PCtxtHandle handle,
-                                           DWORD attributes) {
-  base::Value::Dict params;
+base::DictValue ContextAttributesToValue(SSPILibrary* library,
+                                         PCtxtHandle handle,
+                                         DWORD attributes) {
+  base::DictValue params;
 
   SecPkgContext_NativeNames native_names = {0};
   auto qc_result = library->QueryContextAttributesEx(
@@ -98,12 +94,12 @@ base::Value::Dict ContextAttributesToValue(SSPILibrary* library,
   return params;
 }
 
-base::Value::Dict InitializeSecurityContextParams(SSPILibrary* library,
-                                                  PCtxtHandle handle,
-                                                  Error result,
-                                                  SECURITY_STATUS status,
-                                                  DWORD attributes) {
-  base::Value::Dict params;
+base::DictValue InitializeSecurityContextParams(SSPILibrary* library,
+                                                PCtxtHandle handle,
+                                                Error result,
+                                                SECURITY_STATUS status,
+                                                DWORD attributes) {
+  base::DictValue params;
   params.Set("status", SecurityStatusToValue(result, status));
   if (result == OK) {
     params.Set("context",
@@ -216,10 +212,10 @@ Error MapInitializeSecurityContextStatusToError(SECURITY_STATUS status) {
     case SEC_E_INSUFFICIENT_MEMORY:
       return ERR_OUT_OF_MEMORY;
     case SEC_E_UNSUPPORTED_FUNCTION:
-      DUMP_WILL_BE_NOTREACHED();
+      DLOG(DFATAL);
       return ERR_UNEXPECTED;
     case SEC_E_INVALID_HANDLE:
-      DUMP_WILL_BE_NOTREACHED();
+      DLOG(DFATAL);
       return ERR_INVALID_HANDLE;
     case SEC_E_INVALID_TOKEN:
       return ERR_INVALID_RESPONSE;
@@ -486,11 +482,12 @@ int HttpAuthSSPI::GetNextSecurityToken(const std::string& spn,
   CtxtHandle* ctxt_ptr = nullptr;
   SecBufferDesc in_buffer_desc, out_buffer_desc;
   SecBufferDesc* in_buffer_desc_ptr = nullptr;
-  SecBuffer in_buffers[2], out_buffer;
+  std::array<SecBuffer, 2> in_buffers;
+  SecBuffer out_buffer;
 
   in_buffer_desc.ulVersion = SECBUFFER_VERSION;
   in_buffer_desc.cBuffers = 0;
-  in_buffer_desc.pBuffers = in_buffers;
+  in_buffer_desc.pBuffers = in_buffers.data();
   if (in_token_len > 0) {
     // Prepare input buffer.
     SecBuffer& sec_buffer = in_buffers[in_buffer_desc.cBuffers++];
@@ -512,9 +509,11 @@ int HttpAuthSSPI::GetNextSecurityToken(const std::string& spn,
     sec_channel_bindings_buffer.reserve(sizeof(SEC_CHANNEL_BINDINGS) +
                                         channel_bindings.size());
     sec_channel_bindings_buffer.resize(sizeof(SEC_CHANNEL_BINDINGS));
+    // SAFETY: `sec_channel_bindings_buffer` was allocated to be long enough to
+    // hold a SEC_CHANNEL_BINDINGS object above.
     SEC_CHANNEL_BINDINGS* bindings_desc =
-        reinterpret_cast<SEC_CHANNEL_BINDINGS*>(
-            sec_channel_bindings_buffer.data());
+        UNSAFE_BUFFERS(reinterpret_cast<SEC_CHANNEL_BINDINGS*>(
+            sec_channel_bindings_buffer.data()));
     bindings_desc->cbApplicationDataLength = channel_bindings.size();
     bindings_desc->dwApplicationDataOffset = sizeof(SEC_CHANNEL_BINDINGS);
     sec_channel_bindings_buffer.insert(sec_channel_bindings_buffer.end(),
@@ -546,11 +545,13 @@ int HttpAuthSSPI::GetNextSecurityToken(const std::string& spn,
   // Firefox only sets ISC_REQ_DELEGATE, but MSDN documentation indicates that
   // ISC_REQ_MUTUAL_AUTH must also be set. On Windows delegation by KDC policy
   // is always respected.
-  if (delegation_type_ != DelegationType::kNone)
+  if (scheme_ == HttpAuth::AUTH_SCHEME_NEGOTIATE &&
+      delegation_type_ != DelegationType::kNone) {
     context_flags |= (ISC_REQ_DELEGATE | ISC_REQ_MUTUAL_AUTH);
+  }
 
   net_log.BeginEvent(NetLogEventType::AUTH_LIBRARY_INIT_SEC_CTX, [&] {
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("spn", spn);
     params.Set("flags", ContextFlagsToValue(context_flags));
     return params;

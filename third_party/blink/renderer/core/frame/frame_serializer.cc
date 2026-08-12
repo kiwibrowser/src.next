@@ -37,8 +37,10 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_serializer.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_observable_array_css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/css_font_face_rule.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
+#include "third_party/blink/renderer/core/css/css_grouping_rule.h"
 #include "third_party/blink/renderer/core/css/css_image_value.h"
 #include "third_party/blink/renderer/core/css/css_import_rule.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
@@ -104,6 +106,7 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -112,7 +115,7 @@
 namespace blink {
 
 namespace internal {
-// TODO(crbug.com/363289333): Try to add this functionality to wtf::String.
+// TODO(crbug.com/363289333): Try to add this functionality to blink::String.
 String ReplaceAllCaseInsensitive(
     String source,
     const String& from,
@@ -121,19 +124,18 @@ String ReplaceAllCaseInsensitive(
   size_t pos;
   StringBuilder builder;
   for (;;) {
-    pos = source.Find(from, offset,
-                      TextCaseSensitivity::kTextCaseASCIIInsensitive);
+    pos = source.FindIgnoringAsciiCase(from, offset);
     if (pos == kNotFound) {
       break;
     }
-    builder.Append(source.Substring(offset, pos - offset));
-    builder.Append(transform(source.Substring(pos, from.length())));
+    builder.Append(source.subview(offset, pos - offset));
+    builder.Append(transform(source.substr(pos, from.length())));
     offset = pos + from.length();
   }
   if (builder.empty()) {
     return source;
   }
-  builder.Append(source.Substring(offset));
+  builder.Append(source.subview(offset));
   return builder.ToString();
 }
 }  // namespace internal
@@ -150,13 +152,8 @@ const char kShadowDelegatesFocusAttributeName[] = "shadowdelegatesfocus";
 using mojom::blink::FormControlType;
 
 KURL MakePseudoUrl(StringView type) {
-  StringBuilder pseudo_sheet_url_builder;
-  pseudo_sheet_url_builder.Append("cid:");
-  pseudo_sheet_url_builder.Append(type);
-  pseudo_sheet_url_builder.Append("-");
-  pseudo_sheet_url_builder.Append(WTF::CreateCanonicalUUIDString());
-  pseudo_sheet_url_builder.Append("@mhtml.blink");
-  return KURL(pseudo_sheet_url_builder.ToString());
+  return KURL(
+      StrCat({"cid:", type, "-", CreateCanonicalUuidString(), "@mhtml.blink"}));
 }
 
 KURL MakePseudoCSSUrl() {
@@ -428,9 +425,9 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
       MultiResourcePacker* resource_serializer,
       WebFrameSerializer::MHTMLPartsGenerationDelegate* web_delegate,
       Document& document)
-      : MarkupAccumulator(kResolveAllURLs,
-                          IsA<HTMLDocument>(document) ? SerializationType::kHTML
-                                                      : SerializationType::kXML,
+      : MarkupAccumulator(ResolveUrls::kAll,
+                          IsA<HTMLDocument>(document) ? SerializationType::kHtml
+                                                      : SerializationType::kXml,
                           ShadowRootInclusion()),
         resource_serializer_(resource_serializer),
         web_delegate_(web_delegate),
@@ -496,13 +493,13 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
       center_y = page->GetChromeClient().WindowToViewportScalar(
           window->GetFrame(), center_y);
     }
-    if (!PhysicalRect(box->PhysicalLocation(), box->Size())
+    if (!PhysicalRect(box->PhysicalLocation(), box->StitchedSize())
              .Contains(LayoutUnit(center_x), LayoutUnit(center_y))) {
       return false;
     }
 
     // The z-index should be greater than the threshold.
-    if (box->Style()->EffectiveZIndex() < kPopupOverlayZIndexThreshold) {
+    if (box->StyleRef().EffectiveZIndex() < kPopupOverlayZIndexThreshold) {
       return false;
     }
 
@@ -535,6 +532,8 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
     // The special attribute in a template element to denote the shadow DOM
     // should only be generated from MHTML serialization. If it is found in the
     // original page, it should be ignored.
+    // TODO(crbug.com/503865896): These checks are case-sensitive and might be
+    // bypassed by mixed-case attributes created via setAttributeNS.
     if (IsA<HTMLTemplateElement>(element) &&
         (attribute.LocalName() == kShadowModeAttributeName ||
          attribute.LocalName() == kShadowDelegatesFocusAttributeName) &&
@@ -545,6 +544,8 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
     // If srcdoc attribute for frame elements will be rewritten as src attribute
     // containing link instead of html contents, don't ignore the attribute.
     // Bail out now to avoid the check in Element::isScriptingAttribute.
+    // TODO(crbug.com/503865896): This check is case-sensitive and might be
+    // bypassed by mixed-case attributes created via setAttributeNS.
     bool is_src_doc_attribute = IsA<HTMLFrameElementBase>(element) &&
                                 attribute.GetName() == html_names::kSrcdocAttr;
     String new_link_for_the_element;
@@ -554,6 +555,8 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
     }
 
     //  Drop integrity attribute for those links with subresource loaded.
+    // TODO(crbug.com/503865896): This check is case-sensitive and might be
+    // bypassed by mixed-case attributes created via setAttributeNS.
     auto* html_link_element = DynamicTo<HTMLLinkElement>(element);
     if (attribute.LocalName() == html_names::kIntegrityAttr &&
         html_link_element && html_link_element->sheet()) {
@@ -565,6 +568,35 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
     if (element.IsScriptingAttribute(attribute)) {
       return EmitAttributeChoice::kIgnore;
     }
+
+    // Check if the attribute is a scripting attribute in a case-insensitive
+    // way. While attributes are usually lowercased by the HTML parser, they
+    // can be created with mixed-case via DOM APIs like setAttributeNS.
+    // When saved to MHTML and later reopened, the HTML parser will lowercase
+    // them, potentially activating an event handler that was bypassed during
+    // serialization.
+    //
+    // We perform this check for all attributes, regardless of namespace,
+    // because the HTML parser is namespace-unaware and will lowercase any
+    // attribute name it encounters. Attributes with non-null namespaces
+    // (that aren't well-known to the HTML serializer) are emitted as regular
+    // attributes that the parser will then treat as potential event handlers.
+    // See crbug.com/503865896.
+    AtomicString lower_name = attribute.LocalName().ToAsciiLower();
+    if (lower_name != attribute.LocalName()) {
+      // We use g_null_atom for the prefix and namespace to simulate how the
+      // attribute will be treated by a namespace-unaware HTML parser upon
+      // re-parsing. This ensures that IsScriptingAttribute correctly identifies
+      // event handlers (which must be in the null namespace) and URL
+      // attributes (which are compared against null-namespaced QualifiedNames).
+      Attribute lower_attribute(
+          QualifiedName(g_null_atom, lower_name, g_null_atom),
+          attribute.Value());
+      if (element.IsScriptingAttribute(lower_attribute)) {
+        return EmitAttributeChoice::kIgnore;
+      }
+    }
+
     return EmitAttributeChoice::kEmit;
   }
 
@@ -669,10 +701,7 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
   }
 
   EmitElementChoice WillProcessElement(const Element& element) override {
-    if (IsA<HTMLScriptElement>(element)) {
-      return EmitElementChoice::kIgnore;
-    }
-    if (IsA<HTMLNoScriptElement>(element)) {
+    if (element.IsScriptElement() || IsA<HTMLNoScriptElement>(element)) {
       return EmitElementChoice::kIgnore;
     }
     auto* meta = DynamicTo<HTMLMetaElement>(element);
@@ -819,7 +848,7 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
     // page.
     auto metadata = std::make_unique<JSONObject>();
     auto custom_elements = std::make_unique<JSONArray>();
-    CustomElementRegistry* custom_registry = CustomElement::Registry(document);
+    CustomElementRegistry* custom_registry = document.customElementRegistry();
     if (custom_registry) {
       for (const AtomicString& name : custom_registry->DefinedNames()) {
         CustomElementDefinition* definition =
@@ -884,7 +913,7 @@ function main(metadata) {
     builder.Append("})();");
     resource_serializer_->AddToResources(SerializedResource(
         script_url, "text/javascript",
-        SharedBuffer::Create(builder.ToString().RawByteSpan())));
+        SharedBuffer::Create(StringView(builder).RawByteSpan())));
   }
 
   // Add `sheet` as a new resource and emit a <link> element to load it.
@@ -895,8 +924,7 @@ function main(metadata) {
 
     KURL pseudo_sheet_url = MakePseudoCSSUrl();
     AppendLinkElement(markup_, pseudo_sheet_url);
-    SerializeCSSStyleSheet(static_cast<CSSStyleSheet&>(sheet),
-                           pseudo_sheet_url);
+    SerializeCSSStyleSheet(To<CSSStyleSheet>(sheet), pseudo_sheet_url);
   }
 
   void AppendStylesheets(StyleSheetList& sheets, bool style_element_only) {
@@ -925,8 +953,7 @@ function main(metadata) {
         pseudo_sheet_url = iter->value;
       } else {
         pseudo_sheet_url = MakePseudoCSSUrl();
-        SerializeCSSStyleSheet(static_cast<CSSStyleSheet&>(*sheet),
-                               pseudo_sheet_url);
+        SerializeCSSStyleSheet(*sheet, pseudo_sheet_url);
         stylesheet_pseudo_urls_.insert(sheet, pseudo_sheet_url);
       }
 
@@ -947,8 +974,7 @@ function main(metadata) {
 
       KURL pseudo_sheet_url = MakePseudoCSSUrl();
       AppendLinkElement(markup_, pseudo_sheet_url);
-      SerializeCSSStyleSheet(static_cast<CSSStyleSheet&>(*sheet),
-                             pseudo_sheet_url);
+      SerializeCSSStyleSheet(To<CSSStyleSheet>(*sheet), pseudo_sheet_url);
     }
   }
 
@@ -984,8 +1010,8 @@ function main(metadata) {
   }
 
   void AppendAttributeValue(const String& attribute_value) {
-    MarkupFormatter::AppendAttributeValue(
-        markup_, attribute_value, IsA<HTMLDocument>(document_), *document_);
+    MarkupFormatter::AppendAttributeValue(markup_, attribute_value,
+                                          IsA<HTMLDocument>(document_));
   }
 
   void AppendRewrittenAttribute(const Element& element,
@@ -1036,7 +1062,8 @@ function main(metadata) {
         ImageResourceContent* cached_image = svg_image->CachedImage();
         if (cached_image) {
           resource_serializer_->AddImageToResources(
-              cached_image, document.CompleteURL(svg_image->SourceURL()));
+              cached_image,
+              document.CompleteURL(svg_image->SourceURL().GetString()));
         }
       }
     } else if (const auto* input = DynamicTo<HTMLInputElement>(element)) {
@@ -1059,7 +1086,7 @@ function main(metadata) {
       }
     } else if (const auto* style = DynamicTo<HTMLStyleElement>(element)) {
       if (CSSStyleSheet* sheet = style->sheet()) {
-        SerializeCSSStyleSheet(*sheet, NullURL());
+        SerializeCSSStyleSheet(*sheet, NullUrl());
       }
     } else if (const auto* plugin = DynamicTo<HTMLPlugInElement>(&element)) {
       if (plugin->IsImageType() && plugin->ImageLoader()) {
@@ -1096,15 +1123,13 @@ function main(metadata) {
     // tag.
     return blink::internal::ReplaceAllCaseInsensitive(
         css_text.ToString(), "</style", [](const String& text) {
-          StringBuilder builder;
-          builder.Append("\\3C/");  // \3C = '<'.
-          builder.Append(text.Substring(2));
-          return builder.ReleaseString();
+          // \3C = '<'.
+          return StrCat({"\\3C/", text.subview(2)});
         });
   }
 
   void SerializeCSSFile(Document& document, const KURL& url) {
-    if (!url.IsValid() || !url.ProtocolIsInHTTPFamily()) {
+    if (!url.IsValid() || !url.ProtocolIsInHttpFamily()) {
       return;
     }
 
@@ -1147,7 +1172,7 @@ function main(metadata) {
       // that case.
       css_text.Append("@charset \"");
       css_text.Append(charset.IsValid()
-                          ? charset.GetName().GetString().DeprecatedLower()
+                          ? charset.GetName().GetString().ToAsciiLower()
                           : "utf-8");
       css_text.Append("\";\n\n");
 
@@ -1165,17 +1190,16 @@ function main(metadata) {
       String text_string = css_text.ToString();
       std::string text;
       if (charset.IsValid()) {
-        WTF::TextEncoding text_encoding(charset);
-        text = text_encoding.Encode(text_string,
-                                    WTF::kCSSEncodedEntitiesForUnencodables);
+        TextEncoding text_encoding(charset);
+        text =
+            text_encoding.Encode(text_string, UnencodableHandling::kCssEscape);
       } else {
-        text = WTF::UTF8Encoding().Encode(
-            text_string, WTF::kCSSEncodedEntitiesForUnencodables);
+        text =
+            Utf8Encoding().Encode(text_string, UnencodableHandling::kCssEscape);
       }
 
-      resource_serializer_->AddToResources(
-          String("text/css"), SharedBuffer::Create(text.c_str(), text.length()),
-          url);
+      resource_serializer_->AddToResources(String("text/css"),
+                                           SharedBuffer::Create(text), url);
     }
 
     // Sub resources need to be serialized even if the CSS definition doesn't
@@ -1216,14 +1240,38 @@ function main(metadata) {
         break;
       }
 
-      // Rules inheriting CSSGroupingRule
+      // WARNING: This rule isn't implemented here, so some items may not be
+      // serialized.
       case CSSRule::kNestedDeclarationsRule:
+        break;
+
+      // Rules inheriting CSSGroupingRule.
       case CSSRule::kMediaRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kMediaRule));
+        [[fallthrough]];
+      case CSSRule::kMixinRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kMixinRule));
+        [[fallthrough]];
+      case CSSRule::kResultRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kResultRule));
+        [[fallthrough]];
+      case CSSRule::kNavigationRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kNavigationRule));
+        [[fallthrough]];
       case CSSRule::kSupportsRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kSupportsRule));
+        [[fallthrough]];
       case CSSRule::kContainerRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kContainerRule));
+        [[fallthrough]];
       case CSSRule::kLayerBlockRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kLayerBlockRule));
+        [[fallthrough]];
       case CSSRule::kScopeRule:
+        static_assert(IsCSSGroupingRuleType(CSSRule::kScopeRule));
+        [[fallthrough]];
       case CSSRule::kStartingStyleRule: {
+        static_assert(IsCSSGroupingRuleType(CSSRule::kStartingStyleRule));
         CSSRuleList* rule_list = rule->cssRules();
         for (unsigned i = 0; i < rule_list->length(); ++i) {
           SerializeCSSRuleResources(rule_list->item(i));
@@ -1265,6 +1313,16 @@ function main(metadata) {
       case CSSRule::kLayerStatementRule:
       case CSSRule::kViewTransitionRule:
       case CSSRule::kPositionTryRule:
+      case CSSRule::kFunctionDeclarationsRule:
+      case CSSRule::kFunctionRule:
+      case CSSRule::kCustomMediaRule:
+      case CSSRule::kContentsMixinRule:
+      case CSSRule::kRouteRule:
+        break;
+
+      // FIXME(sesse): We can reference external resources in a @contents
+      // argument.
+      case CSSRule::kApplyMixinRule:
         break;
     }
   }
@@ -1279,10 +1337,8 @@ function main(metadata) {
     // The background-image and list-style-image (for ul or ol) are the CSS
     // properties that make use of images. We iterate to make sure we include
     // any other image properties there might be.
-    unsigned property_count = style_declaration->PropertyCount();
-    for (unsigned i = 0; i < property_count; ++i) {
-      const CSSValue& css_value = style_declaration->PropertyAt(i).Value();
-      RetrieveResourcesForCSSValue(css_value, document);
+    for (const CSSPropertyValue& property : style_declaration->Properties()) {
+      RetrieveResourcesForCSSValue(property.Value(), document);
     }
   }
 
@@ -1372,10 +1428,9 @@ void FrameSerializer::SerializeFrame(
         accumulator.SerializeNodes<EditingStrategy>(document, kIncludeNode);
 
     std::string frame_html =
-        document.Encoding().Encode(text, WTF::kEntitiesForUnencodables);
-    resource_serializer->AddMainResource(
-        document.SuggestedMIMEType(),
-        SharedBuffer::Create(frame_html.c_str(), frame_html.length()), url);
+        document.Encoding().Encode(text, UnencodableHandling::kXmlCharRef);
+    resource_serializer->AddMainResource(document.SuggestedMIMEType(),
+                                         SharedBuffer::Create(frame_html), url);
     resource_serializer->Finish(std::move(callback));
   }
 }
@@ -1405,8 +1460,7 @@ String FrameSerializer::MarkOfTheWebDeclaration(const KURL& url) {
 // static
 String FrameSerializer::GetContentID(Frame* frame) {
   DCHECK(frame);
-  const String& frame_id = frame->GetFrameIdForTracing();
-  return "<frame-" + frame_id + "@mhtml.blink>";
+  return StrCat({"<frame-", frame->GetFrameIdForTracing(), "@mhtml.blink>"});
 }
 
 }  // namespace blink

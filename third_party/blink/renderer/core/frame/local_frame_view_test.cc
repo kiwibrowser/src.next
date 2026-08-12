@@ -6,8 +6,10 @@
 
 #include <memory>
 
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/with_feature_override.h"
+#include "cc/base/features.h"
 #include "content/test/test_blink_web_unit_test_support.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/features.h"
@@ -19,6 +21,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -55,7 +58,9 @@ class AnimationMockChromeClient : public RenderingTestChromeClient {
   }
 
   void ScheduleAnimation(const LocalFrameView*,
-                         base::TimeDelta = base::TimeDelta()) override {
+                         cc::BeginMainFrameReason,
+                         base::TimeDelta = base::TimeDelta(),
+                         bool urgent = false) override {
     has_scheduled_animation_ = true;
   }
   bool has_scheduled_animation_;
@@ -139,7 +144,8 @@ TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
       GetAnimationMockChromeClient(),
       MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _));
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(1, 1), mojom::blink::ScrollType::kUser);
+      ScrollOffset(1, 1), mojom::blink::ScrollType::kUser,
+      cc::ScrollSourceType::kNone);
 
   // Programmatic scrolling should not dismiss the tooltip, so
   // MockUpdateTooltipUnderCursor should not be called for this invocation.
@@ -148,7 +154,8 @@ TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
       MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _))
       .Times(0);
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(2, 2), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(2, 2), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
 }
 
 // NoOverflowInIncrementVisuallyNonEmptyPixelCount tests fail if the number of
@@ -604,7 +611,7 @@ TEST_F(LocalFrameViewRemoteParentSimTest, ThrottledLocalRootAnimationUpdate) {
   Document* document = LocalFrameRoot().GetFrame()->GetDocument();
 
   // Emulate user-land script
-  WebString source = WebString::FromASCII(R"JS(
+  WebString source = WebString::FromAscii(R"JS(
     let div = document.querySelector('div');
     let kf = [ { transform: 'rotate(0)' }, { transform: 'rotate(180deg)' } ];
     let tm = { duration: 1000, iterations: Infinity };
@@ -687,7 +694,7 @@ TEST_F(LocalFrameViewTest, StartOfLifecycleTaskRunsOnFullLifecycle) {
   TestCallback callback;
 
   frame_view->EnqueueStartOfLifecycleTask(
-      WTF::BindOnce(&TestCallback::Increment, WTF::Unretained(&callback)));
+      BindOnce(&TestCallback::Increment, Unretained(&callback)));
   EXPECT_EQ(callback.calls, 0);
 
   frame_view->UpdateAllLifecyclePhasesExceptPaint(DocumentUpdateReason::kTest);
@@ -734,6 +741,127 @@ TEST_F(LocalFrameViewTest,
   EXPECT_EQ(frame_view->MediaType(), "screen");
 }
 
+// Test fixture that disables kStopDeferringCommitsInCompositeForTest so that
+// paint holding state can be observed through BeginFrame in tests.
+class PaintHoldingSimTest : public SimTest {
+ public:
+  PaintHoldingSimTest() {
+    feature_list_.InitWithFeatures(
+        /*enabled_features=*/{blink::features::kPaintHolding,
+                              blink::features::
+                                  kReleasePaintHoldingWithoutContentfulPaint},
+        /*disabled_features=*/{
+            ::features::kStopDeferringCommitsInCompositeForTest});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Tests that a page not firing FCP (no text/images) releases paint
+// holding after First Paint when parsing is complete.
+TEST_F(PaintHoldingSimTest, ReleasedForBgColorOnlyPage) {
+  SimRequest resource("https://example.com/", "text/html");
+  LoadURL("https://example.com/");
+
+  resource.Complete(R"HTML(
+    <div style="width:100px;height:100px;background-color:red"></div>
+  )HTML");
+
+  // Paint holding should be active after parsing is complete but before FP.
+  PaintTiming& timing = PaintTiming::From(GetDocument());
+  ASSERT_TRUE(GetDocument().HasFinishedParsing());
+  ASSERT_TRUE(timing.FirstPaintRendered().is_null());
+  EXPECT_TRUE(Compositor().LayerTreeHost()->IsDeferringCommits());
+
+  // Trigger a paint frame — FP fires, FCP does not.
+  Compositor().BeginFrame();
+  ASSERT_TRUE(
+      timing.FirstContentfulPaintRenderedButNotPresentedAsMonotonicTime()
+          .is_null());
+
+  // Paint holding released after FP fires.
+  ASSERT_FALSE(timing.FirstPaintRendered().is_null());
+  EXPECT_FALSE(Compositor().LayerTreeHost()->IsDeferringCommits());
+}
+
+// Tests that a page not firing FCP (no text/images) doesn't release paint
+// holding after First Paint when parsing is still in progress. Verifies that
+// FinishedParsing is required.
+TEST_F(PaintHoldingSimTest, NotReleasedBeforeParsingComplete) {
+  SimRequest resource("https://example.com/", "text/html");
+  LoadURL("https://example.com/");
+
+  resource.Write(R"HTML(
+    <!DOCTYPE html>
+    <div style="width:100px;height:100px;background-color:green"></div>
+  )HTML");
+
+  // Parsing is not complete, FP is not fired, and paint holding is active.
+  ASSERT_TRUE(Compositor().LayerTreeHost()->IsDeferringCommits());
+  PaintTiming& timing = PaintTiming::From(GetDocument());
+  ASSERT_TRUE(timing.FirstPaintRendered().is_null());
+  ASSERT_FALSE(GetDocument().HasFinishedParsing());
+
+  // BeginFrame triggers FP but parsing is incomplete — paint holding stays.
+  Compositor().BeginFrame();
+  ASSERT_FALSE(timing.FirstPaintRendered().is_null());
+  ASSERT_FALSE(GetDocument().HasFinishedParsing());
+  EXPECT_TRUE(Compositor().LayerTreeHost()->IsDeferringCommits());
+
+  // Complete parsing, paint holding released.
+  resource.Complete("");
+  ASSERT_TRUE(GetDocument().HasFinishedParsing());
+  EXPECT_FALSE(Compositor().LayerTreeHost()->IsDeferringCommits());
+}
+
+// Tests that paint holding is released by FCP for pages with text content, not
+// by FP.
+TEST_F(PaintHoldingSimTest, ReleasedByFCPNotFP) {
+  SimRequest resource("https://example.com/", "text/html");
+  LoadURL("https://example.com/");
+
+  // Write a background-color-only div (no text yet).
+  resource.Write(R"HTML(
+    <div style="width:100px;height:100px;background-color:red"></div>
+  )HTML");
+
+  // Parsing is not complete, FP is not fired, and paint holding is active.
+  ASSERT_TRUE(Compositor().LayerTreeHost()->IsDeferringCommits());
+  PaintTiming& timing = PaintTiming::From(GetDocument());
+  ASSERT_TRUE(timing.FirstPaintRendered().is_null());
+  ASSERT_FALSE(GetDocument().HasFinishedParsing());
+
+  // First frame — FP fires (background painted), FCP does not (no text).
+  Compositor().BeginFrame();
+  ASSERT_FALSE(timing.FirstPaintRendered().is_null());
+  ASSERT_TRUE(
+      timing.FirstContentfulPaintRenderedButNotPresentedAsMonotonicTime()
+          .is_null());
+
+  // FP alone does not release paint holding.
+  EXPECT_TRUE(Compositor().LayerTreeHost()->IsDeferringCommits());
+
+  // Now write text content.
+  resource.Write("<p>Hello World</p>");
+  // Parsing is not complete.
+  ASSERT_FALSE(GetDocument().HasFinishedParsing());
+
+  // Second frame — FCP fires (text painted).
+  Compositor().BeginFrame();
+
+  ASSERT_FALSE(
+      timing.FirstContentfulPaintRenderedButNotPresentedAsMonotonicTime()
+          .is_null());
+  // Parsing is not complete yet, but FCP should release paint holding.
+  ASSERT_FALSE(GetDocument().HasFinishedParsing());
+
+  // Paint holding released by FCP.
+  EXPECT_FALSE(Compositor().LayerTreeHost()->IsDeferringCommits());
+
+  resource.Complete("");
+}
+
 class FencedFrameLocalFrameViewTest : private ScopedFencedFramesForTest,
                                       public SimTest {
  public:
@@ -769,7 +897,8 @@ class ResizableLocalFrameViewTest : public testing::Test {
   }
 
   void SetHtmlInnerHTML(const char* content) {
-    GetDocument().documentElement()->setInnerHTML(String::FromUTF8(content));
+    GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(
+        String::FromUtf8(content));
     UpdateAllLifecyclePhasesForTest();
   }
 
@@ -862,6 +991,70 @@ TEST_P(PrerenderLocalFrameViewTest, DryRunPaintBeforePrerenderActivation) {
               GetDocument().Lifecycle().GetState());
     EXPECT_TRUE(GetPage().GetVisualViewport().NeedsPaintPropertyUpdate());
   }
+}
+
+class LocalFrameViewPresentationTimeTest : public SimTest {
+ public:
+  void SetUp() override {
+    SimTest::SetUp();
+    WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  }
+};
+
+TEST_F(LocalFrameViewPresentationTimeTest,
+       SameDocumentNavigationPresentationTime) {
+  const char kHistogramName[] =
+      "Navigation.MainframeSameDocumentNavigationCommitToPresentFirstFrame";
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete("<div id='a' style='color: blue'>A</div>");
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
+
+  base::HistogramTester histogram_tester;
+
+  // 1. Simulate a same-document navigation.
+  LocalFrame* frame = GetDocument().GetFrame();
+  DocumentLoader* loader = frame->Loader().GetDocumentLoader();
+  loader->CommitSameDocumentNavigation(
+      KURL("https://example.com/test.html#foo"), WebFrameLoadType::kStandard,
+      nullptr, ClientRedirectPolicy::kNotClientRedirect,
+      false /* has_transient_user_activation */, /*initiator_origin=*/nullptr,
+      /*is_synchronously_committed=*/false, /*source_element=*/nullptr,
+      mojom::blink::TriggeringEventInfo::kNotFromEvent,
+      /*is_browser_initiated=*/false,
+      /*has_ua_visual_transition,=*/false,
+      /*soft_navigation_heuristics_task_id=*/std::nullopt,
+      /*should_skip_screenshot=*/false);
+
+  // 2. Verify that the UMA is not recorded yet.
+  histogram_tester.ExpectTotalCount(kHistogramName, 0);
+
+  // 3. Trigger a compositing step.
+  Compositor().BeginFrame();
+
+  // 4. Verify that the UMA is recorded once.
+  histogram_tester.ExpectTotalCount(kHistogramName, 1);
+
+  // 5. Simulate 100 more same-document navigations.
+  for (int i = 0; i < 100; ++i) {
+    loader->CommitSameDocumentNavigation(
+        KURL(StrCat({"https://example.com/test.html#bar", String::Number(i)})),
+        WebFrameLoadType::kStandard, nullptr,
+        ClientRedirectPolicy::kNotClientRedirect,
+        false /* has_transient_user_activation */, /*initiator_origin=*/nullptr,
+        /*is_synchronously_committed=*/false, /*source_element=*/nullptr,
+        mojom::blink::TriggeringEventInfo::kNotFromEvent,
+        /*is_browser_initiated=*/false,
+        /*has_ua_visual_transition,=*/false,
+        /*soft_navigation_heuristics_task_id=*/std::nullopt,
+        /*should_skip_screenshot=*/false);
+  }
+
+  Compositor().BeginFrame();
+
+  // 6. Verify that we only record one more histogram.
+  histogram_tester.ExpectTotalCount(kHistogramName, 2);
 }
 
 }  // namespace

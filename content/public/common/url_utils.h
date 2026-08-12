@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_COMMON_URL_UTILS_H_
 #define CONTENT_PUBLIC_COMMON_URL_UTILS_H_
 
+#include <string>
+
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
@@ -18,9 +20,6 @@ CONTENT_EXPORT bool HasWebUIScheme(const GURL& url);
 
 // Returns true if the origin is a WebUI.
 CONTENT_EXPORT bool HasWebUIOrigin(const url::Origin& origin);
-
-// Returns true if the origin is allowed to access the PDF internal plugin.
-CONTENT_EXPORT bool IsPdfInternalPluginAllowedOrigin(const url::Origin& origin);
 
 // Check whether we can do the saving page operation for the specified URL.
 CONTENT_EXPORT bool IsSavableURL(const GURL& url);
@@ -39,6 +38,10 @@ CONTENT_EXPORT bool IsURLHandledByNetworkStack(const GURL& url);
 // Determines whether it is safe to redirect from |from_url| to |to_url|.
 CONTENT_EXPORT bool IsSafeRedirectTarget(const GURL& from_url,
                                          const GURL& to_url);
+
+// Returns a canonicalized query string where parameters are sorted by key.
+// If the URL has no query, returns an empty string.
+CONTENT_EXPORT std::string GetCanonicalQuery(const GURL& url);
 
 }  // namespace content
 

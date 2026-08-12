@@ -4,15 +4,14 @@
 
 #include "extensions/browser/extension_event_histogram_value.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_enum_reader.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -40,8 +39,8 @@ TEST(ExtensionEventHistogramValueTest, CheckEnums) {
   std::string file_contents;
   ASSERT_TRUE(base::ReadFileToString(event_histogram_value, &file_contents));
 
-  file_contents.erase(base::ranges::remove_if(file_contents, ::isspace),
-                      file_contents.end());
+  auto to_remove = std::ranges::remove_if(file_contents, ::isspace);
+  file_contents.erase(to_remove.begin(), to_remove.end());
 
   for (const auto& entry : *enums) {
     // Check that the C++ file has a definition equal to the histogram file.
@@ -50,7 +49,7 @@ TEST(ExtensionEventHistogramValueTest, CheckEnums) {
     // (ignoring whitespaces).
     std::string expected_string =
         base::StringPrintf("%s=%d,", entry.second.c_str(), entry.first);
-    EXPECT_TRUE(base::Contains(file_contents, expected_string))
+    EXPECT_TRUE(file_contents.contains(expected_string))
         << "Failed to find entry " << entry.second << " with value "
         << entry.first << ". Make sure events::HistogramValue and the "
         << "ExtensionEvents enum in enums.xml agree with each other.";

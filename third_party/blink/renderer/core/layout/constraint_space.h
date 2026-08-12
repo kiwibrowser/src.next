@@ -15,13 +15,15 @@
 #include "third_party/blink/renderer/core/layout/exclusions/exclusion_space.h"
 #include "third_party/blink/renderer/core/layout/floats_utils.h"
 #include "third_party/blink/renderer/core/layout/geometry/bfc_offset.h"
+#include "third_party/blink/renderer/core/layout/geometry/box_sides.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/layout/geometry/margin_strut.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_size.h"
 #include "third_party/blink/renderer/core/layout/grid/grid_data.h"
 #include "third_party/blink/renderer/core/layout/line_clamp_data.h"
 #include "third_party/blink/renderer/core/layout/min_max_sizes.h"
 #include "third_party/blink/renderer/core/layout/table/table_constraint_space_data.h"
+#include "third_party/blink/renderer/platform/geometry/physical_size.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
@@ -108,68 +110,29 @@ class CORE_EXPORT ConstraintSpace final {
   DISALLOW_NEW();
 
  public:
-  // Percentages are frequently the same as the available-size, zero, or
-  // indefinite (thanks non-quirks mode)! This enum encodes this information.
-  enum PercentageStorage {
-    kSameAsAvailable,
-    kZero,
-    kIndefinite,
-    kRareDataPercentage
-  };
-
   ConstraintSpace(const ConstraintSpace& other)
       : available_size_(other.available_size_),
+        percentage_size_(other.percentage_size_),
+        bfc_offset_(other.bfc_offset_),
         exclusion_space_(other.exclusion_space_),
-        bitfields_(other.bitfields_) {
-    if (HasRareData())
-      rare_data_ = new RareData(*other.rare_data_);
-    else
-      bfc_offset_ = other.bfc_offset_;
-  }
+        rare_data_(other.rare_data_),
+        bitfields_(other.bitfields_) {}
   ConstraintSpace(ConstraintSpace&& other)
       : available_size_(other.available_size_),
+        percentage_size_(other.percentage_size_),
+        bfc_offset_(other.bfc_offset_),
         exclusion_space_(std::move(other.exclusion_space_)),
+        rare_data_(std::move(other.rare_data_)),
         bitfields_(other.bitfields_) {
-    if (HasRareData()) {
-      rare_data_ = other.rare_data_;
-      other.rare_data_ = nullptr;
-    } else {
-      bfc_offset_ = other.bfc_offset_;
-    }
+    other.rare_data_ = nullptr;
   }
 
-  ConstraintSpace& operator=(const ConstraintSpace& other) {
-    available_size_ = other.available_size_;
-    if (HasRareData())
-      delete rare_data_;
-    if (other.HasRareData())
-      rare_data_ = new RareData(*other.rare_data_);
-    else
-      bfc_offset_ = other.bfc_offset_;
-    exclusion_space_ = other.exclusion_space_;
-    bitfields_ = other.bitfields_;
-    return *this;
-  }
-  ConstraintSpace& operator=(ConstraintSpace&& other) {
-    available_size_ = other.available_size_;
-    if (HasRareData())
-      delete rare_data_;
-    if (other.HasRareData()) {
-      rare_data_ = other.rare_data_;
-      other.rare_data_ = nullptr;
-    } else {
-      bfc_offset_ = other.bfc_offset_;
-    }
-    exclusion_space_ = std::move(other.exclusion_space_);
-    bitfields_ = other.bitfields_;
-    return *this;
-  }
+  ConstraintSpace& operator=(const ConstraintSpace& other) = delete;
+  ConstraintSpace& operator=(ConstraintSpace&& other) = delete;
 
-  ConstraintSpace CloneWithoutFragmentation() const {
-    DCHECK(HasBlockFragmentation());
-    ConstraintSpace copy = *this;
-    copy.DisableFurtherFragmentation();
-    return copy;
+  void Trace(Visitor* visitor) const {
+    visitor->Trace(exclusion_space_);
+    visitor->Trace(rare_data_);
   }
 
   // If `this` needs to be modified for a block-in-inline child, creates a clone
@@ -177,9 +140,16 @@ class CORE_EXPORT ConstraintSpace final {
   const ConstraintSpace& CloneForBlockInInlineIfNeeded(
       std::optional<ConstraintSpace>& space) const;
 
-  ~ConstraintSpace() {
-    if (HasRareData())
-      delete rare_data_;
+  const ConstraintSpace CloneWithoutFragmentation() const {
+    DCHECK(HasBlockFragmentation());
+    ConstraintSpace copy(*this);
+    DCHECK(copy.rare_data_);
+
+    RareData* rare_data = MakeGarbageCollected<RareData>(*copy.rare_data_);
+    rare_data->block_direction_fragmentation_type = kFragmentNone;
+    rare_data->is_block_fragmentation_forced_off = true;
+    copy.rare_data_ = rare_data;
+    return copy;
   }
 
   const ExclusionSpace& GetExclusionSpace() const { return exclusion_space_; }
@@ -209,68 +179,26 @@ class CORE_EXPORT ConstraintSpace final {
   // The size to use for percentage resolution.
   // See: https://drafts.csswg.org/css-sizing/#percentage-sizing
   LayoutUnit PercentageResolutionInlineSize() const {
-    switch (
-        static_cast<PercentageStorage>(bitfields_.percentage_inline_storage)) {
-      default:
-        NOTREACHED();
-      case kSameAsAvailable:
-        return available_size_.inline_size;
-      case kZero:
-        return LayoutUnit();
-      case kIndefinite:
-        return kIndefiniteSize;
-      case kRareDataPercentage:
-        DCHECK(HasRareData());
-        return rare_data_->percentage_resolution_size.inline_size;
-    }
+    return percentage_size_.inline_size;
   }
-
   LayoutUnit PercentageResolutionBlockSize() const {
-    switch (
-        static_cast<PercentageStorage>(bitfields_.percentage_block_storage)) {
-      default:
-        NOTREACHED();
-      case kSameAsAvailable:
-        return available_size_.block_size;
-      case kZero:
-        return LayoutUnit();
-      case kIndefinite:
-        return kIndefiniteSize;
-      case kRareDataPercentage:
-        DCHECK(HasRareData());
-        return rare_data_->percentage_resolution_size.block_size;
+    return percentage_size_.block_size;
+  }
+  LogicalSize PercentageResolutionSize() const { return percentage_size_; }
+
+  // Returns the percentage resolution size to use with a replaced child.
+  // NOTE: This should only be used within inline layout, within a table-cell.
+  LayoutUnit ReplacedChildPercentageResolutionBlockSize() const {
+    if (rare_data_ &&
+        rare_data_->replaced_child_percentage_resolution_block_size !=
+            kIndefiniteSize) {
+      return rare_data_->replaced_child_percentage_resolution_block_size;
     }
+    return PercentageResolutionBlockSize();
   }
-
-  LogicalSize PercentageResolutionSize() const {
-    return {PercentageResolutionInlineSize(), PercentageResolutionBlockSize()};
-  }
-
-  LayoutUnit ReplacedPercentageResolutionInlineSize() const {
-    return PercentageResolutionInlineSize();
-  }
-
-  LayoutUnit ReplacedPercentageResolutionBlockSize() const {
-    switch (static_cast<PercentageStorage>(
-        bitfields_.replaced_percentage_block_storage)) {
-      case kSameAsAvailable:
-        return available_size_.block_size;
-      case kZero:
-        return LayoutUnit();
-      case kIndefinite:
-        return kIndefiniteSize;
-      case kRareDataPercentage:
-        DCHECK(HasRareData());
-        return rare_data_->replaced_percentage_resolution_block_size;
-      default:
-        NOTREACHED();
-    }
-  }
-
-  // The size to use for percentage resolution of replaced elements.
-  LogicalSize ReplacedPercentageResolutionSize() const {
-    return {ReplacedPercentageResolutionInlineSize(),
-            ReplacedPercentageResolutionBlockSize()};
+  LogicalSize ReplacedChildPercentageResolutionSize() const {
+    return {PercentageResolutionInlineSize(),
+            ReplacedChildPercentageResolutionBlockSize()};
   }
 
   // Return the size to use for percentage resolution for margin/padding.
@@ -315,15 +243,14 @@ class CORE_EXPORT ConstraintSpace final {
   // True if we're using the "fallback" available inline-size. This typically
   // means that we depend on the size of the initial containing block.
   bool UsesOrthogonalFallbackInlineSize() const {
-    return HasRareData() && rare_data_->uses_orthogonal_fallback_inline_size;
+    return rare_data_ && rare_data_->uses_orthogonal_fallback_inline_size;
   }
 
   // Inline/block target stretch size constraints.
   // See:
   // https://w3c.github.io/mathml-core/#dfn-inline-stretch-size-constraint
   LayoutUnit TargetStretchInlineSize() const {
-    return HasRareData() ? rare_data_->TargetStretchInlineSize()
-                         : kIndefiniteSize;
+    return rare_data_ ? rare_data_->TargetStretchInlineSize() : kIndefiniteSize;
   }
 
   bool HasTargetStretchInlineSize() const {
@@ -336,45 +263,43 @@ class CORE_EXPORT ConstraintSpace final {
   };
 
   std::optional<MathTargetStretchBlockSizes> TargetStretchBlockSizes() const {
-    return HasRareData() ? rare_data_->TargetStretchBlockSizes() : std::nullopt;
+    return rare_data_ ? rare_data_->TargetStretchBlockSizes() : std::nullopt;
   }
 
   // Return the borders which should be used for a table-cell.
   BoxStrut TableCellBorders() const {
-    return HasRareData() ? rare_data_->TableCellBorders() : BoxStrut();
+    return rare_data_ ? rare_data_->TableCellBorders() : BoxStrut();
   }
 
   wtf_size_t TableCellColumnIndex() const {
-    return HasRareData() ? rare_data_->TableCellColumnIndex() : 0;
+    return rare_data_ ? rare_data_->TableCellColumnIndex() : 0;
   }
 
   // Return the baseline offset which the table-cell children should align
   // their baseline to.
   std::optional<LayoutUnit> TableCellAlignmentBaseline() const {
-    return HasRareData() ? rare_data_->TableCellAlignmentBaseline()
-                         : std::nullopt;
+    return rare_data_ ? rare_data_->TableCellAlignmentBaseline() : std::nullopt;
   }
 
   bool IsTableCellWithCollapsedBorders() const {
-    return HasRareData() ? rare_data_->IsTableCellWithCollapsedBorders()
-                         : false;
+    return rare_data_ && rare_data_->IsTableCellWithCollapsedBorders();
   }
 
   const TableConstraintSpaceData* TableData() const {
-    return HasRareData() ? rare_data_->TableData() : nullptr;
+    return rare_data_ ? rare_data_->TableData() : nullptr;
   }
 
   wtf_size_t TableRowIndex() const {
-    return HasRareData() ? rare_data_->TableRowIndex() : kNotFound;
+    return rare_data_ ? rare_data_->TableRowIndex() : kNotFound;
   }
 
   wtf_size_t TableSectionIndex() const {
-    return HasRareData() ? rare_data_->TableSectionIndex() : kNotFound;
+    return rare_data_ ? rare_data_->TableSectionIndex() : kNotFound;
   }
 
   // Return any current page name, specified on an ancestor, or here.
   const AtomicString PageName() const {
-    return HasRareData() ? rare_data_->page_name : AtomicString();
+    return rare_data_ ? rare_data_->page_name : AtomicString();
   }
 
   // If we're block-fragmented AND the fragmentainer block-size is known, return
@@ -387,8 +312,7 @@ class CORE_EXPORT ConstraintSpace final {
   // fragmentainer. See the utility function FragmentainerCapacity() for more
   // details.
   LayoutUnit FragmentainerBlockSize() const {
-    return HasRareData() ? rare_data_->fragmentainer_block_size
-                         : kIndefiniteSize;
+    return rare_data_ ? rare_data_->fragmentainer_block_size : kIndefiniteSize;
   }
 
   // Return true if we're column-balancing, and are in the initial pass where
@@ -415,7 +339,7 @@ class CORE_EXPORT ConstraintSpace final {
   // fragmentainer, we'll return the block-offset relative to the current
   // fragmentainer.
   LayoutUnit FragmentainerOffset() const {
-    if (HasRareData() && HasBlockFragmentation()) {
+    if (rare_data_ && HasBlockFragmentation()) {
       return rare_data_->fragmentainer_offset;
     }
     return LayoutUnit();
@@ -429,7 +353,7 @@ class CORE_EXPORT ConstraintSpace final {
   // normally means that the node *isn't* at the start of the fragmentainer, but
   // for floats, this should still be considered to be at the start.
   bool IsAtFragmentainerStart() const {
-    return HasRareData() && rare_data_->is_at_fragmentainer_start;
+    return rare_data_ && rare_data_->is_at_fragmentainer_start;
   }
 
   // Return true if the content will be repeated in the next fragmentainer.
@@ -437,15 +361,19 @@ class CORE_EXPORT ConstraintSpace final {
   // repeatable table header / footer. Will return false even for repeatable
   // content, if we can tell for sure that this is the last time that the node
   // will repeat.
-  bool ShouldRepeat() const {
-    return HasRareData() && rare_data_->should_repeat;
-  }
+  bool ShouldRepeat() const { return rare_data_ && rare_data_->should_repeat; }
 
   // Return true if we're inside repeatable content inside block fragmentation,
   // which is the case when an element is fixed positioned (printing only), or a
   // repeatable table header / footer.
   bool IsInsideRepeatableContent() const {
-    return HasRareData() && rare_data_->is_inside_repeatable_content;
+    return rare_data_ && rare_data_->is_inside_repeatable_content;
+  }
+
+  // Return true if this is inside of (and affected by) an ancestor with
+  // break-inside:avoid.
+  bool IsInsideBreakAvoid() const {
+    return rare_data_ && rare_data_->is_inside_break_avoid;
   }
 
   // Whether the current constraint space is for the newly established
@@ -456,7 +384,7 @@ class CORE_EXPORT ConstraintSpace final {
 
   // Whether the current node is a table-cell.
   bool IsTableCell() const {
-    return HasRareData() &&
+    return rare_data_ &&
            rare_data_->data_union_type ==
                static_cast<unsigned>(RareData::DataUnionType::kTableCellData);
   }
@@ -464,7 +392,7 @@ class CORE_EXPORT ConstraintSpace final {
   // Whether the table-cell fragment should be hidden (not painted) if it has
   // no children.
   bool HideTableCellIfEmpty() const {
-    return HasRareData() && rare_data_->hide_table_cell_if_empty;
+    return rare_data_ && rare_data_->hide_table_cell_if_empty;
   }
 
   // Whether the fragment produced from layout should be anonymous, (e.g. it
@@ -559,9 +487,9 @@ class CORE_EXPORT ConstraintSpace final {
   // If specified a layout should produce a Fragment which fragments at the
   // blockSize if possible.
   FragmentationType BlockFragmentationType() const {
-    return HasRareData() ? static_cast<FragmentationType>(
-                               rare_data_->block_direction_fragmentation_type)
-                         : kFragmentNone;
+    return rare_data_ ? static_cast<FragmentationType>(
+                            rare_data_->block_direction_fragmentation_type)
+                      : kFragmentNone;
   }
 
   // Return true if this constraint space participates in a fragmentation
@@ -573,7 +501,7 @@ class CORE_EXPORT ConstraintSpace final {
   // Return true if the node actually participates in block fragmentation, that
   // was disabled due to clipped overflow.
   bool IsBlockFragmentationForcedOff() const {
-    return HasRareData() && rare_data_->is_block_fragmentation_forced_off;
+    return rare_data_ && rare_data_->is_block_fragmentation_forced_off;
   }
 
   // Return true if monolithic overflow isn't to be propagated when printing.
@@ -583,7 +511,7 @@ class CORE_EXPORT ConstraintSpace final {
   // up the tree, but OOF fragmentation breaks the containing block chain, so
   // that any clipping ancestor won't be seen.
   bool IsMonolithicOverflowPropagationDisabled() const {
-    return HasRareData() &&
+    return rare_data_ &&
            rare_data_->is_monolithic_overflow_propagation_disabled;
   }
 
@@ -594,36 +522,62 @@ class CORE_EXPORT ConstraintSpace final {
     return BlockFragmentationType() == kFragmentPage;
   }
 
+  // Only for printing. Get the inset from the paper edges needed to guarantee
+  // that content is printable. Most printers have a small region along each
+  // edge of the paper edges that's not reliably printable, usually due to the
+  // printer's paper handling mechanism. Although these regions are the same on
+  // every page in real-world measurements, the value returned here is in the
+  // layout coordinate space, which means that any page-individual shrink factor
+  // is taken into account (if trying to print one of the pages as A3 on an A4
+  // sheet, for instance).
+  LayoutUnit SafePrintableInset() const {
+    return rare_data_ ? rare_data_->safe_printable_inset : LayoutUnit();
+  }
+
+  // Only for printing: Return which edges are adjacent to the paper sheet edge.
+  // If a single page per sheet is printed (i.e. not n-up mode), all four edges
+  // of the page box is adjacent to a paper sheet edge. Additionally, every
+  // @page margin box has two (corner page margin boxes) or one (other page
+  // margin boxes) edge adjacent to a paper sheet edge. This is where the
+  // `page-margin-safety` property may apply.
+  LogicalBoxSides PaperEdgeAdjacentSides() const {
+    if (!rare_data_) {
+      return LogicalBoxSides(false);
+    }
+    return LogicalBoxSides(rare_data_->is_adjacent_to_paper_edge_inline_start,
+                           rare_data_->is_adjacent_to_paper_edge_inline_end,
+                           rare_data_->is_adjacent_to_paper_edge_block_start,
+                           rare_data_->is_adjacent_to_paper_edge_block_end);
+  }
+
   // Return true if we're not allowed to break until we have placed some
   // content. This will prevent last-resort breaks when there's no container
   // separation, and we'll instead overflow the fragmentainer.
   bool RequiresContentBeforeBreaking() const {
-    return HasRareData() && rare_data_->requires_content_before_breaking;
+    return rare_data_ && rare_data_->requires_content_before_breaking;
   }
 
   // Return true if there's an ancestor multicol container with balanced
   // columns that we might affect.
   bool IsInsideBalancedColumns() const {
-    return HasRareData() && rare_data_->is_inside_balanced_columns;
+    return rare_data_ && rare_data_->is_inside_balanced_columns;
   }
 
   // Return true if forced breaks inside should be ignored. This is needed by
   // out-of-flow positioned elements during column balancing.
   bool ShouldIgnoreForcedBreaks() const {
-    return HasRareData() && rare_data_->should_ignore_forced_breaks;
+    return rare_data_ && rare_data_->should_ignore_forced_breaks;
   }
 
   // Return true if we're participating in the same block formatting context as
   // the one established by the nearest ancestor multicol container.
   bool IsInColumnBfc() const {
-    return HasRareData() && rare_data_->is_in_column_bfc;
+    return rare_data_ && rare_data_->is_in_column_bfc;
   }
 
   // True if there's a preceding break in the current fragmentainer (typically a
   // break in a parallel flow, or we wouldn't attempt to keep laying out).
-  bool IsPastBreak() const {
-    return HasRareData() && rare_data_->is_past_break;
-  }
+  bool IsPastBreak() const { return rare_data_ && rare_data_->is_past_break; }
 
   // Return true if we would be at least our intrinsic block-size.
   //
@@ -634,7 +588,7 @@ class CORE_EXPORT ConstraintSpace final {
   // Grid (for example) will set this flag, and expand the row with this item in
   // order to accommodate the overflow.
   bool MinBlockSizeShouldEncompassIntrinsicSize() const {
-    return HasRareData() &&
+    return rare_data_ &&
            rare_data_->min_block_size_should_encompass_intrinsic_size;
   }
 
@@ -651,9 +605,8 @@ class CORE_EXPORT ConstraintSpace final {
   // loop, pushing the same content ahead of us, while creating columns with
   // nothing in them.
   BreakAppeal MinBreakAppeal() const {
-    if (!HasRareData())
-      return kBreakAppealLastResort;
-    return static_cast<BreakAppeal>(rare_data_->min_break_appeal);
+    return rare_data_ ? static_cast<BreakAppeal>(rare_data_->min_break_appeal)
+                      : kBreakAppealLastResort;
   }
 
   // In some cases, we may want to calculate the intial-break-before and
@@ -663,13 +616,13 @@ class CORE_EXPORT ConstraintSpace final {
   // final-break-after for these items can be used to determine the break
   // appeal of a row before the full fragmentation layout pass is performed.
   bool ShouldPropagateChildBreakValues() const {
-    return HasRareData() && rare_data_->propagate_child_break_values;
+    return rare_data_ && rare_data_->propagate_child_break_values;
   }
 
   // Return true if the block size of the table-cell should be considered
   // restricted (e.g. height of the cell or its table is non-auto).
   bool IsRestrictedBlockSizeTableCell() const {
-    return HasRareData() && rare_data_->is_restricted_block_size_table_cell;
+    return rare_data_ && rare_data_->is_restricted_block_size_table_cell;
   }
 
   // The amount of available space for block-start side annotation.
@@ -678,12 +631,11 @@ class CORE_EXPORT ConstraintSpace final {
   // If the value is negative, it's block-end annotation overflow of the
   // previous box.
   LayoutUnit BlockStartAnnotationSpace() const {
-    return HasRareData() ? rare_data_->BlockStartAnnotationSpace()
-                         : LayoutUnit();
+    return rare_data_ ? rare_data_->BlockStartAnnotationSpace() : LayoutUnit();
   }
 
   MarginStrut GetMarginStrut() const {
-    return HasRareData() ? rare_data_->GetMarginStrut() : MarginStrut();
+    return rare_data_ ? rare_data_->GetMarginStrut() : MarginStrut();
   }
 
   // The BfcOffset is where the MarginStrut is placed within the block
@@ -702,9 +654,7 @@ class CORE_EXPORT ConstraintSpace final {
   //   - Text content, atomic inlines, (see LineBreaker).
   //   - The current layout having a block_size.
   //   - Clearance before a child.
-  BfcOffset GetBfcOffset() const {
-    return HasRareData() ? rare_data_->bfc_offset : bfc_offset_;
-  }
+  BfcOffset GetBfcOffset() const { return bfc_offset_; }
 
   // If present, and the current layout hasn't resolved its BFC block-offset
   // yet (see BfcOffset), the layout should position all of its floats at this
@@ -720,15 +670,14 @@ class CORE_EXPORT ConstraintSpace final {
   // This value should be propagated to child layouts if the current layout
   // hasn't resolved its BFC offset yet.
   std::optional<LayoutUnit> ForcedBfcBlockOffset() const {
-    return HasRareData() ? rare_data_->ForcedBfcBlockOffset() : std::nullopt;
+    return rare_data_ ? rare_data_->ForcedBfcBlockOffset() : std::nullopt;
   }
 
   // If present, this is a hint as to where place any adjoining objects. This
   // isn't necessarily the final position, just where they ended up in a
   // previous layout pass.
   std::optional<LayoutUnit> OptimisticBfcBlockOffset() const {
-    return HasRareData() ? rare_data_->OptimisticBfcBlockOffset()
-                         : std::nullopt;
+    return rare_data_ ? rare_data_->OptimisticBfcBlockOffset() : std::nullopt;
   }
 
   // The "expected" BFC block-offset is:
@@ -740,7 +689,7 @@ class CORE_EXPORT ConstraintSpace final {
   // optimistically)
   LayoutUnit ExpectedBfcBlockOffset() const {
     // A short-circuit optimization (must equivalent to below).
-    if (!HasRareData()) {
+    if (!rare_data_) {
       DCHECK(!ForcedBfcBlockOffset());
       DCHECK(!OptimisticBfcBlockOffset());
       return bfc_offset_.block_offset;
@@ -751,7 +700,7 @@ class CORE_EXPORT ConstraintSpace final {
   }
 
   SerializedScriptValue* CustomLayoutData() const {
-    return HasRareData() ? rare_data_->CustomLayoutData() : nullptr;
+    return rare_data_ ? rare_data_->CustomLayoutData() : nullptr;
   }
 
   // Returns the types of preceding adjoining objects.
@@ -774,81 +723,79 @@ class CORE_EXPORT ConstraintSpace final {
   bool HasFloats() const { return !GetExclusionSpace().IsEmpty(); }
 
   bool HasClearanceOffset() const {
-    return HasRareData() && rare_data_->ClearanceOffset() != LayoutUnit::Min();
+    return rare_data_ && rare_data_->ClearanceOffset() != LayoutUnit::Min();
   }
   LayoutUnit ClearanceOffset() const {
-    return HasRareData() ? rare_data_->ClearanceOffset() : LayoutUnit::Min();
+    return rare_data_ ? rare_data_->ClearanceOffset() : LayoutUnit::Min();
   }
 
   // Return true if the BFC block-offset has been increased by the presence of
   // floats (e.g. clearance).
   bool IsPushedByFloats() const {
-    return HasRareData() && rare_data_->is_pushed_by_floats;
+    return rare_data_ && rare_data_->is_pushed_by_floats;
   }
 
   LineClampData GetLineClampData() const {
-    return HasRareData() ? rare_data_->GetLineClampData() : LineClampData();
+    return rare_data_ ? rare_data_->GetLineClampData() : LineClampData();
   }
 
-  LayoutUnit LineClampEndPadding() const {
-    return HasRareData() ? rare_data_->LineClampEndPadding() : LayoutUnit();
+  const LineClampAncestorChain* GetLineClampAncestorChain() const {
+    return rare_data_ ? rare_data_->GetLineClampAncestorChain() : nullptr;
   }
 
-  MarginStrut LineClampEndMarginStrut() const {
-    return HasRareData() ? rare_data_->LineClampEndMarginStrut()
-                         : MarginStrut();
-  }
-
-  // The effective `text-box-edge` may not match the one in the `ComputedStyle`
-  // due to the propagation.
-  TextBoxEdge EffectiveTextBoxEdge() const {
-    return HasRareData() ? TextBoxEdge(rare_data_->effective_text_box_edge)
-                         : TextBoxEdge();
-  }
   // Return true if `text-box-trim:trim-start` is in effect at the beginning of
   // a node.
   bool ShouldTextBoxTrimNodeStart() const {
-    return HasRareData() && rare_data_->should_text_box_trim_node_start;
+    return rare_data_ && rare_data_->should_text_box_trim_node_start;
   }
   // Return true if `text-box-trim:trim-end` is in effect at the end of a node.
   bool ShouldTextBoxTrimNodeEnd() const {
-    return HasRareData() && rare_data_->should_text_box_trim_node_end;
+    return rare_data_ && rare_data_->should_text_box_trim_node_end;
   }
   // Return true if `text-box-trim:trim-start` is in effect at the beginning of
   // a fragmentainer.
   bool ShouldTextBoxTrimFragmentainerStart() const {
-    return HasRareData() &&
-           rare_data_->should_text_box_trim_fragmentainer_start;
+    return rare_data_ && rare_data_->should_text_box_trim_fragmentainer_start;
   }
   // Return true if `text-box-trim:trim-end` is in effect at the end of a
   // fragmentainer.
   bool ShouldTextBoxTrimFragmentainerEnd() const {
-    return HasRareData() && rare_data_->should_text_box_trim_fragmentainer_end;
+    return rare_data_ && rare_data_->should_text_box_trim_fragmentainer_end;
   }
   // Return true if the last line before clamp which is a descendant of a node
   // should trim to the end.
   bool ShouldTextBoxTrimInsideWhenLineClamp() const {
-    return HasRareData() &&
+    return rare_data_ &&
            rare_data_->should_text_box_trim_inside_when_line_clamp;
   }
 
   // Apply `text-box-trim` to the block-end even if there are following content.
   bool ShouldForceTextBoxTrimEnd() const {
-    return HasRareData() && rare_data_->should_force_text_box_trim_end;
+    return rare_data_ && rare_data_->should_force_text_box_trim_end;
+  }
+
+  // Trim trailing block-end margin, also margins on trailing self-collapsing
+  // children.
+  bool ShouldForceMarginTrimEnd() const {
+    return rare_data_ && rare_data_->should_force_margin_trim_end;
   }
 
   // Return how percentage-based margins and padding should be resolved.
   DecorationPercentageResolutionType GetDecorationPercentageResolutionType()
       const {
-    if (!HasRareData()) {
-      return DecorationPercentageResolutionType::kContainingBlockInlineSize;
-    }
-    return static_cast<DecorationPercentageResolutionType>(
-        rare_data_->decoration_percentage_resolution_type);
+    return rare_data_
+               ? static_cast<DecorationPercentageResolutionType>(
+                     rare_data_->decoration_percentage_resolution_type)
+               : DecorationPercentageResolutionType::kContainingBlockInlineSize;
+  }
+
+  LogicalBoxSides IgnoreMarginsForStretch() const {
+    return rare_data_ ? rare_data_->ignore_margins_for_stretch
+                      : LogicalBoxSides{false, false, false, false};
   }
 
   const GridLayoutSubtree* GetGridLayoutSubtree() const {
-    return HasRareData() ? rare_data_->GetGridLayoutSubtree() : nullptr;
+    return rare_data_ ? rare_data_->GetGridLayoutSubtree() : nullptr;
   }
 
   // Return true if the two constraint spaces are similar enough that it *may*
@@ -859,16 +806,19 @@ class CORE_EXPORT ConstraintSpace final {
     if (!bitfields_.MaySkipLayout(other.bitfields_))
       return false;
 
-    if (!HasRareData() && !other.HasRareData())
+    if (!rare_data_ && !other.rare_data_) {
       return true;
+    }
 
-    if (HasRareData() && other.HasRareData())
+    if (rare_data_ && other.rare_data_) {
       return rare_data_->MaySkipLayout(*other.rare_data_);
+    }
 
-    if (HasRareData())
+    if (rare_data_) {
       return rare_data_->IsInitialForMaySkipLayout();
+    }
 
-    DCHECK(other.HasRareData());
+    DCHECK(other.rare_data_);
     return other.rare_data_->IsInitialForMaySkipLayout();
   }
 
@@ -880,60 +830,24 @@ class CORE_EXPORT ConstraintSpace final {
   bool AreBlockSizeConstraintsEqual(const ConstraintSpace& other) const {
     if (!bitfields_.AreBlockSizeConstraintsEqual(other.bitfields_))
       return false;
-    if (!HasRareData() && !other.HasRareData())
+    if (!rare_data_ && !other.rare_data_) {
       return true;
+    }
     return TableCellAlignmentBaseline() == other.TableCellAlignmentBaseline() &&
            MinBlockSizeShouldEncompassIntrinsicSize() ==
                other.MinBlockSizeShouldEncompassIntrinsicSize();
   }
 
   bool AreSizesEqual(const ConstraintSpace& other) const {
-    if (available_size_ != other.available_size_)
-      return false;
-
-    if (bitfields_.percentage_inline_storage !=
-        other.bitfields_.percentage_inline_storage)
-      return false;
-
-    if (bitfields_.percentage_block_storage !=
-        other.bitfields_.percentage_block_storage)
-      return false;
-
-    if (bitfields_.replaced_percentage_block_storage !=
-        other.bitfields_.replaced_percentage_block_storage)
-      return false;
-
-    // The rest of this method just checks the percentage resolution sizes. If
-    // neither space has rare data, we know that they must equal now.
-    if (!HasRareData() && !other.HasRareData())
-      return true;
-
-    if (bitfields_.percentage_inline_storage == kRareDataPercentage &&
-        other.bitfields_.percentage_inline_storage == kRareDataPercentage &&
-        rare_data_->percentage_resolution_size.inline_size !=
-            other.rare_data_->percentage_resolution_size.inline_size)
-      return false;
-
-    if (bitfields_.percentage_block_storage == kRareDataPercentage &&
-        other.bitfields_.percentage_block_storage == kRareDataPercentage &&
-        rare_data_->percentage_resolution_size.block_size !=
-            other.rare_data_->percentage_resolution_size.block_size)
-      return false;
-
-    if (bitfields_.replaced_percentage_block_storage == kRareDataPercentage &&
-        other.bitfields_.replaced_percentage_block_storage ==
-            kRareDataPercentage &&
-        rare_data_->replaced_percentage_resolution_block_size !=
-            other.rare_data_->replaced_percentage_resolution_block_size)
-      return false;
-
-    return true;
+    return available_size_ == other.available_size_ &&
+           percentage_size_ == other.percentage_size_;
   }
 
   void ReplaceTableRowData(const TableConstraintSpaceData& table_data,
                            const wtf_size_t row_index) {
-    DCHECK(HasRareData());
-    rare_data_->ReplaceTableRowData(table_data, row_index);
+    DCHECK(rare_data_);
+    const_cast<RareData*>(rare_data_.Get())
+        ->ReplaceTableRowData(table_data, row_index);
   }
 
   String ToString() const;
@@ -952,9 +866,9 @@ class CORE_EXPORT ConstraintSpace final {
   //
   // This information is kept in a separate in this heap-allocated struct to
   // reduce memory usage. Over time this may have to change based on usage data.
-  struct RareData {
-    USING_FAST_MALLOC(RareData);
-
+  //
+  // It is garbage-collected to utilize pointer-compression.
+  struct RareData : public GarbageCollected<RareData> {
    public:
     // |RareData| unions different types of data which are mutually exclusive.
     // They fall into the following categories:
@@ -966,19 +880,19 @@ class CORE_EXPORT ConstraintSpace final {
       kTableSectionData,  // A table-section (display: table-section).
       kCustomData,        // A custom layout (display: layout(foo)).
       kStretchData,       // The target inline/block stretch sizes for MathML.
-      kSubgridData        // A nested grid with subgridded columns/rows.
     };
 
-    explicit RareData(const BfcOffset bfc_offset) : bfc_offset(bfc_offset) {}
+    RareData() {}
     RareData(const RareData& other)
         : percentage_resolution_size(other.percentage_resolution_size),
-          replaced_percentage_resolution_block_size(
-              other.replaced_percentage_resolution_block_size),
           block_start_annotation_space(other.block_start_annotation_space),
-          bfc_offset(other.bfc_offset),
+          replaced_child_percentage_resolution_block_size(
+              other.replaced_child_percentage_resolution_block_size),
           page_name(other.page_name),
           fragmentainer_block_size(other.fragmentainer_block_size),
           fragmentainer_offset(other.fragmentainer_offset),
+          safe_printable_inset(other.safe_printable_inset),
+          ignore_margins_for_stretch(other.ignore_margins_for_stretch),
           data_union_type(other.data_union_type),
           is_pushed_by_floats(other.is_pushed_by_floats),
           is_restricted_block_size_table_cell(
@@ -1005,6 +919,7 @@ class CORE_EXPORT ConstraintSpace final {
           is_at_fragmentainer_start(other.is_at_fragmentainer_start),
           should_repeat(other.should_repeat),
           is_inside_repeatable_content(other.is_inside_repeatable_content),
+          is_inside_break_avoid(other.is_inside_break_avoid),
           should_text_box_trim_node_start(
               other.should_text_box_trim_node_start),
           should_text_box_trim_node_end(other.should_text_box_trim_node_end),
@@ -1015,8 +930,19 @@ class CORE_EXPORT ConstraintSpace final {
           should_force_text_box_trim_end(other.should_force_text_box_trim_end),
           should_text_box_trim_inside_when_line_clamp(
               other.should_text_box_trim_inside_when_line_clamp),
+          should_force_margin_trim_end(other.should_force_margin_trim_end),
           decoration_percentage_resolution_type(
-              other.decoration_percentage_resolution_type) {
+              other.decoration_percentage_resolution_type),
+          is_adjacent_to_paper_edge_inline_start(
+              other.is_adjacent_to_paper_edge_inline_start),
+          is_adjacent_to_paper_edge_inline_end(
+              other.is_adjacent_to_paper_edge_inline_end),
+          is_adjacent_to_paper_edge_block_start(
+              other.is_adjacent_to_paper_edge_block_start),
+          is_adjacent_to_paper_edge_block_end(
+              other.is_adjacent_to_paper_edge_block_end),
+          line_clamp_ancestor_chain_(other.line_clamp_ancestor_chain_),
+          grid_layout_subtree_(other.grid_layout_subtree_) {
       switch (GetDataUnionType()) {
         case DataUnionType::kNone:
           break;
@@ -1038,9 +964,6 @@ class CORE_EXPORT ConstraintSpace final {
           break;
         case DataUnionType::kStretchData:
           new (&stretch_data_) StretchData(other.stretch_data_);
-          break;
-        case DataUnionType::kSubgridData:
-          new (&subgrid_data_) SubgridData(other.subgrid_data_);
           break;
         default:
           NOTREACHED();
@@ -1068,16 +991,20 @@ class CORE_EXPORT ConstraintSpace final {
         case DataUnionType::kStretchData:
           stretch_data_.~StretchData();
           break;
-        case DataUnionType::kSubgridData:
-          subgrid_data_.~SubgridData();
-          break;
         default:
           NOTREACHED();
       }
     }
 
+    void Trace(Visitor* visitor) const {
+      visitor->Trace(line_clamp_ancestor_chain_);
+      visitor->Trace(grid_layout_subtree_);
+    }
+
     bool MaySkipLayout(const RareData& other) const {
-      if (data_union_type != other.data_union_type ||
+      if (replaced_child_percentage_resolution_block_size !=
+              other.replaced_child_percentage_resolution_block_size ||
+          data_union_type != other.data_union_type ||
           is_pushed_by_floats != other.is_pushed_by_floats ||
           is_restricted_block_size_table_cell !=
               other.is_restricted_block_size_table_cell ||
@@ -1098,6 +1025,7 @@ class CORE_EXPORT ConstraintSpace final {
           propagate_child_break_values != other.propagate_child_break_values ||
           should_repeat != other.should_repeat ||
           is_inside_repeatable_content != other.is_inside_repeatable_content ||
+          is_inside_break_avoid != other.is_inside_break_avoid ||
           should_text_box_trim_node_start !=
               other.should_text_box_trim_node_start ||
           should_text_box_trim_node_end !=
@@ -1110,8 +1038,22 @@ class CORE_EXPORT ConstraintSpace final {
               other.should_force_text_box_trim_end ||
           should_text_box_trim_inside_when_line_clamp !=
               other.should_text_box_trim_inside_when_line_clamp ||
+          should_force_margin_trim_end != other.should_force_margin_trim_end ||
           decoration_percentage_resolution_type !=
-              other.decoration_percentage_resolution_type) {
+              other.decoration_percentage_resolution_type ||
+          safe_printable_inset != other.safe_printable_inset ||
+          is_adjacent_to_paper_edge_inline_start !=
+              other.is_adjacent_to_paper_edge_inline_start ||
+          is_adjacent_to_paper_edge_inline_end !=
+              other.is_adjacent_to_paper_edge_inline_end ||
+          is_adjacent_to_paper_edge_block_start !=
+              other.is_adjacent_to_paper_edge_block_start ||
+          is_adjacent_to_paper_edge_block_end !=
+              other.is_adjacent_to_paper_edge_block_end ||
+          ignore_margins_for_stretch != other.ignore_margins_for_stretch ||
+          !base::ValuesEquivalent(line_clamp_ancestor_chain_,
+                                  other.line_clamp_ancestor_chain_) ||
+          !base::ValuesEquivalent(grid_layout_subtree_, other.grid_layout_subtree_)) {
         return false;
       }
 
@@ -1130,16 +1072,15 @@ class CORE_EXPORT ConstraintSpace final {
           return custom_data_.MaySkipLayout(other.custom_data_);
         case DataUnionType::kStretchData:
           return stretch_data_.MaySkipLayout(other.stretch_data_);
-        case DataUnionType::kSubgridData:
-          return subgrid_data_.MaySkipLayout(other.subgrid_data_);
       }
       NOTREACHED();
     }
 
     // Must be kept in sync with members checked within |MaySkipLayout|.
     bool IsInitialForMaySkipLayout() const {
-      if (page_name || fragmentainer_block_size != kIndefiniteSize ||
-          fragmentainer_offset || is_pushed_by_floats ||
+      if (replaced_child_percentage_resolution_block_size != kIndefiniteSize ||
+          page_name || fragmentainer_block_size != kIndefiniteSize ||
+          fragmentainer_offset || safe_printable_inset || is_pushed_by_floats ||
           is_restricted_block_size_table_cell || hide_table_cell_if_empty ||
           block_direction_fragmentation_type != kFragmentNone ||
           is_block_fragmentation_forced_off ||
@@ -1149,12 +1090,20 @@ class CORE_EXPORT ConstraintSpace final {
           min_break_appeal != kBreakAppealLastResort ||
           propagate_child_break_values || is_at_fragmentainer_start ||
           should_repeat || is_inside_repeatable_content ||
-          should_text_box_trim_node_start || should_text_box_trim_node_end ||
+          is_inside_break_avoid || should_text_box_trim_node_start ||
+          should_text_box_trim_node_end ||
           should_text_box_trim_fragmentainer_start ||
           should_text_box_trim_fragmentainer_end ||
           should_force_text_box_trim_end ||
           should_text_box_trim_inside_when_line_clamp ||
-          decoration_percentage_resolution_type) {
+          should_force_margin_trim_end ||
+          decoration_percentage_resolution_type ||
+          is_adjacent_to_paper_edge_inline_start ||
+          is_adjacent_to_paper_edge_inline_end ||
+          is_adjacent_to_paper_edge_block_start ||
+          is_adjacent_to_paper_edge_block_end ||
+          !ignore_margins_for_stretch.IsEmpty() || line_clamp_ancestor_chain_ ||
+          grid_layout_subtree_) {
         return false;
       }
 
@@ -1173,8 +1122,6 @@ class CORE_EXPORT ConstraintSpace final {
           return custom_data_.IsInitialForMaySkipLayout();
         case DataUnionType::kStretchData:
           return stretch_data_.IsInitialForMaySkipLayout();
-        case DataUnionType::kSubgridData:
-          return subgrid_data_.IsInitialForMaySkipLayout();
       }
       NOTREACHED();
     }
@@ -1238,24 +1185,12 @@ class CORE_EXPORT ConstraintSpace final {
       EnsureBlockData()->line_clamp_data = value;
     }
 
-    LayoutUnit LineClampEndPadding() const {
-      return GetDataUnionType() == DataUnionType::kBlockData
-                 ? block_data_.line_clamp_end_padding
-                 : LayoutUnit();
+    const LineClampAncestorChain* GetLineClampAncestorChain() const {
+      return line_clamp_ancestor_chain_;
     }
 
-    void SetLineClampEndPadding(LayoutUnit value) {
-      EnsureBlockData()->line_clamp_end_padding = value;
-    }
-
-    MarginStrut LineClampEndMarginStrut() const {
-      return GetDataUnionType() == DataUnionType::kBlockData
-                 ? block_data_.line_clamp_end_margin_strut
-                 : MarginStrut();
-    }
-
-    void SetLineClampEndMarginStrut(MarginStrut value) {
-      EnsureBlockData()->line_clamp_end_margin_strut = value;
+    void SetLineClampAncestorChain(const LineClampAncestorChain* value) {
+      line_clamp_ancestor_chain_ = value;
     }
 
     void SetIsTableCell() { EnsureTableCellData(); }
@@ -1326,7 +1261,7 @@ class CORE_EXPORT ConstraintSpace final {
       table_row_data_.row_index = row_index;
     }
 
-    const TableConstraintSpaceData* TableData() {
+    const TableConstraintSpaceData* TableData() const {
       if (GetDataUnionType() == DataUnionType::kTableRowData)
         return table_row_data_.table_data.get();
       if (GetDataUnionType() == DataUnionType::kTableSectionData)
@@ -1381,13 +1316,11 @@ class CORE_EXPORT ConstraintSpace final {
     }
 
     const GridLayoutSubtree* GetGridLayoutSubtree() const {
-      return GetDataUnionType() == DataUnionType::kSubgridData
-                 ? &subgrid_data_.layout_subtree
-                 : nullptr;
+      return grid_layout_subtree_ ? grid_layout_subtree_.Get() : nullptr;
     }
 
-    void SetGridLayoutSubtree(GridLayoutSubtree&& grid_layout_subtree) {
-      EnsureSubgridData()->layout_subtree = std::move(grid_layout_subtree);
+    void SetGridLayoutSubtree(const GridLayoutSubtree* grid_layout_subtree) {
+      grid_layout_subtree_ = grid_layout_subtree;
     }
 
     DataUnionType GetDataUnionType() const {
@@ -1395,13 +1328,16 @@ class CORE_EXPORT ConstraintSpace final {
     }
 
     LogicalSize percentage_resolution_size;
-    LayoutUnit replaced_percentage_resolution_block_size;
     LayoutUnit block_start_annotation_space;
-    BfcOffset bfc_offset;
+
+    LayoutUnit replaced_child_percentage_resolution_block_size =
+        kIndefiniteSize;
 
     AtomicString page_name;
     LayoutUnit fragmentainer_block_size = kIndefiniteSize;
     LayoutUnit fragmentainer_offset;
+    LayoutUnit safe_printable_inset;
+    LogicalBoxSides ignore_margins_for_stretch = {false, false, false, false};
 
     unsigned data_union_type : 3 = static_cast<unsigned>(DataUnionType::kNone);
 
@@ -1428,16 +1364,20 @@ class CORE_EXPORT ConstraintSpace final {
     unsigned is_at_fragmentainer_start : 1 = false;
     unsigned should_repeat : 1 = false;
     unsigned is_inside_repeatable_content : 1 = false;
+    unsigned is_inside_break_avoid : 1 = false;
     unsigned should_text_box_trim_node_start : 1 = false;
     unsigned should_text_box_trim_node_end : 1 = false;
     unsigned should_text_box_trim_fragmentainer_start : 1 = false;
     unsigned should_text_box_trim_fragmentainer_end : 1 = false;
-    unsigned effective_text_box_edge : TextBoxEdge::kBits =
-                                           static_cast<unsigned>(TextBoxEdge());
     unsigned should_force_text_box_trim_end : 1 = false;
     unsigned should_text_box_trim_inside_when_line_clamp : 1 = false;
+    unsigned should_force_margin_trim_end : 1 = false;
     unsigned decoration_percentage_resolution_type : 1 = static_cast<unsigned>(
         DecorationPercentageResolutionType::kContainingBlockInlineSize);
+    unsigned is_adjacent_to_paper_edge_inline_start : 1 = false;
+    unsigned is_adjacent_to_paper_edge_inline_end : 1 = false;
+    unsigned is_adjacent_to_paper_edge_block_start : 1 = false;
+    unsigned is_adjacent_to_paper_edge_block_end : 1 = false;
 
    private:
     struct BlockData {
@@ -1454,8 +1394,6 @@ class CORE_EXPORT ConstraintSpace final {
       std::optional<LayoutUnit> forced_bfc_block_offset;
       LayoutUnit clearance_offset = LayoutUnit::Min();
       LineClampData line_clamp_data;
-      LayoutUnit line_clamp_end_padding;
-      MarginStrut line_clamp_end_margin_strut;
     };
 
     struct TableCellData {
@@ -1537,16 +1475,6 @@ class CORE_EXPORT ConstraintSpace final {
       std::optional<MathTargetStretchBlockSizes> target_stretch_block_sizes;
     };
 
-    struct SubgridData {
-      bool MaySkipLayout(const SubgridData& other) const {
-        return layout_subtree == other.layout_subtree;
-      }
-
-      bool IsInitialForMaySkipLayout() const { return !layout_subtree; }
-
-      GridLayoutSubtree layout_subtree;
-    };
-
     BlockData* EnsureBlockData() {
       DCHECK(GetDataUnionType() == DataUnionType::kNone ||
              GetDataUnionType() == DataUnionType::kBlockData);
@@ -1608,16 +1536,6 @@ class CORE_EXPORT ConstraintSpace final {
       return &stretch_data_;
     }
 
-    SubgridData* EnsureSubgridData() {
-      DCHECK(GetDataUnionType() == DataUnionType::kNone ||
-             GetDataUnionType() == DataUnionType::kSubgridData);
-      if (GetDataUnionType() != DataUnionType::kSubgridData) {
-        data_union_type = static_cast<unsigned>(DataUnionType::kSubgridData);
-        new (&subgrid_data_) SubgridData();
-      }
-      return &subgrid_data_;
-    }
-
     union {
       BlockData block_data_;
       TableCellData table_cell_data_;
@@ -1625,8 +1543,10 @@ class CORE_EXPORT ConstraintSpace final {
       TableSectionData table_section_data_;
       CustomData custom_data_;
       StretchData stretch_data_;
-      SubgridData subgrid_data_;
     };
+
+    Member<const LineClampAncestorChain> line_clamp_ancestor_chain_;
+    Member<const GridLayoutSubtree> grid_layout_subtree_;
   };
 
   // This struct simply allows us easily copy, compare, and initialize all the
@@ -1674,7 +1594,6 @@ class CORE_EXPORT ConstraintSpace final {
                  other.is_restricted_block_size_table_cell_child;
     }
 
-    unsigned has_rare_data : 1 = false;
     unsigned adjoining_object_types : 3 =
         static_cast<unsigned>(AdjoiningObjectTypeValue::kAdjoiningNone);
     unsigned writing_mode : 3;
@@ -1705,63 +1624,19 @@ class CORE_EXPORT ConstraintSpace final {
     unsigned is_initial_block_size_indefinite : 1 = false;
     unsigned is_table_cell_child : 1 = false;
     unsigned is_restricted_block_size_table_cell_child : 1 = false;
-
-    unsigned percentage_inline_storage : 2 =
-        static_cast<unsigned>(PercentageStorage::kSameAsAvailable);
-    unsigned percentage_block_storage : 2 =
-        static_cast<unsigned>(PercentageStorage::kSameAsAvailable);
-    unsigned replaced_percentage_block_storage : 2 =
-        static_cast<unsigned>(PercentageStorage::kSameAsAvailable);
   };
 
-  // To ensure that the bfc_offset_, rare_data_ union doesn't get polluted,
-  // always initialize the bfc_offset_.
   explicit ConstraintSpace(WritingDirectionMode writing_direction)
       : available_size_(kIndefiniteSize, kIndefiniteSize),
-        bfc_offset_(),
+        percentage_size_(kIndefiniteSize, kIndefiniteSize),
         bitfields_(writing_direction) {}
 
-  inline bool HasRareData() const { return bitfields_.has_rare_data; }
-
-  RareData* EnsureRareData() {
-    if (!HasRareData()) {
-      rare_data_ = new RareData(bfc_offset_);
-      bitfields_.has_rare_data = true;
-    }
-
-    return rare_data_;
-  }
-
-  void DisableFurtherFragmentation() {
-    if (!HasBlockFragmentation()) {
-      return;
-    }
-    DCHECK(rare_data_);
-    rare_data_->block_direction_fragmentation_type = kFragmentNone;
-    rare_data_->is_block_fragmentation_forced_off = true;
-  }
-
-  void DisableMonolithicOverflowPropagation() {
-    EnsureRareData()->is_monolithic_overflow_propagation_disabled = true;
-  }
-
-  void SetEffectiveTextBoxEdge(TextBoxEdge value) {
-    EnsureRareData()->effective_text_box_edge = static_cast<unsigned>(value);
-  }
-  void SetShouldForceTextBoxTrimEnd(bool value = true) {
-    EnsureRareData()->should_force_text_box_trim_end = value;
-  }
-
   LogicalSize available_size_;
-
-  // To save a little space, we union these two fields. rare_data_ is valid if
-  // the |has_rare_data| bit is set, otherwise bfc_offset_ is valid.
-  union {
-    BfcOffset bfc_offset_;
-    RareData* rare_data_;
-  };
+  LogicalSize percentage_size_;
+  BfcOffset bfc_offset_;
 
   ExclusionSpace exclusion_space_;
+  Member<const RareData> rare_data_;
   Bitfields bitfields_;
 };
 

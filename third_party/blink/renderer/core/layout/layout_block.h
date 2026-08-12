@@ -34,13 +34,8 @@
 
 namespace blink {
 
-class BlockNode;
+class LayoutSVGText;
 struct PaintInfo;
-
-typedef HeapLinkedHashSet<Member<LayoutBox>> TrackedLayoutBoxLinkedHashSet;
-typedef HeapHashMap<WeakMember<const LayoutBlock>,
-                    Member<TrackedLayoutBoxLinkedHashSet>>
-    TrackedDescendantsMap;
 
 // LayoutBlock is the class that is used by any LayoutObject
 // that is a containing block.
@@ -106,8 +101,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
  public:
   void Trace(Visitor*) const override;
 
-  bool IsLayoutNGObject() const override;
-
   LayoutObject* FirstChild() const {
     NOT_DESTROYED();
     DCHECK_EQ(Children(), VirtualChildren());
@@ -132,12 +125,9 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
     return &children_;
   }
 
-  // These two functions are overridden for inline-block.
-  LayoutUnit FirstLineHeight() const override;
-
   const char* GetName() const override;
 
- protected:
+ private:
   // Insert a child correctly into the tree when |before_descendant| isn't a
   // direct child of |this|. This happens e.g. when there's an anonymous block
   // child of |this| and |before_descendant| has been reparented into that one.
@@ -152,8 +142,8 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   void RemovePositionedObjects(LayoutObject*);
 
-  void AddSvgTextDescendant(LayoutBox& svg_text);
-  void RemoveSvgTextDescendant(LayoutBox& svg_text);
+  void AddSvgTextDescendant(LayoutSVGText& svg_text);
+  void RemoveSvgTextDescendant(LayoutSVGText& svg_text);
 
   LayoutUnit TextIndentOffset() const;
 
@@ -162,15 +152,14 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   static LayoutBlock* CreateAnonymousWithParentAndDisplay(
       const LayoutObject*,
       EDisplay = EDisplay::kBlock);
-  LayoutBlock* CreateAnonymousBlock(EDisplay display = EDisplay::kBlock) const {
+  LayoutBlock* CreateAnonymousBlock() const {
     NOT_DESTROYED();
-    return CreateAnonymousWithParentAndDisplay(this, display);
+    return CreateAnonymousWithParentAndDisplay(this, EDisplay::kBlock);
   }
 
   LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject* parent) const override;
 
- public:
   RecalcScrollableOverflowResult RecalcScrollableOverflow() override;
 
   void RecalcVisualOverflow() override;
@@ -202,9 +191,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   void Paint(const PaintInfo&) const override;
 
   virtual bool HasLineIfEmpty() const;
-  // Returns baseline offset if we can get |SimpleFontData| from primary font.
-  // Or returns no value if we can't get font data.
-  std::optional<LayoutUnit> BaselineForEmptyLine() const;
 
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
@@ -212,14 +198,9 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
                    HitTestPhase) override;
 
  protected:
-  bool HitTestChildren(HitTestResult&,
-                       const HitTestLocation&,
-                       const PhysicalOffset& accumulated_offset,
-                       HitTestPhase) override;
-
-  void StyleWillChange(StyleDifference,
-                       const ComputedStyle& new_style) override;
-  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
+  void StyleDidChange(StyleDifference,
+                      const ComputedStyle* old_style,
+                      const StyleChangeContext&) override;
   bool RespectsCSSOverflow() const override;
 
  protected:
@@ -248,20 +229,15 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
     return true;
   }
 
-  virtual void RemoveLeftoverAnonymousBlock(LayoutBlock* child);
-
  protected:
   void InvalidatePaint(const PaintInvalidatorContext&) const override;
 
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
 
  private:
-  PhysicalRect LocalCaretRect(int caret_offset) const final;
+  PhysicalRect LocalCaretRect(int caret_offset,
+                              CaretShape caret_shape) const final;
   bool IsInlineBoxWrapperActuallyChild() const;
-
-  // End helper functions and structs used by layoutBlockChildren.
-
-  void RemoveFromGlobalMaps();
 
  protected:
   PositionWithAffinity PositionForPointIfOutsideAtomicInlineLevel(
@@ -269,17 +245,9 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutObjectChildList children_;
 
-  unsigned has_svg_text_descendants_ : 1;
-
-  unsigned may_be_non_contiguous_ifc_ : 1 = false;
-
   // FIXME: This is temporary as we move code that accesses block flow
   // member variables out of LayoutBlock and into LayoutBlockFlow.
   friend class LayoutBlockFlow;
-
-  // This is necessary for now for interoperability between the old and new
-  // layout code. Primarily for calling layoutPositionedObjects at the moment.
-  friend class BlockNode;
 };
 
 template <>

@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 
+#include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/values.h"
 #include "extensions/common/extension.h"
@@ -41,8 +42,8 @@ class ManifestTest : public testing::Test {
   class ManifestData {
    public:
     explicit ManifestData(std::string_view name);
-    explicit ManifestData(base::Value::Dict manifest);
-    ManifestData(base::Value::Dict manifest, std::string_view name);
+    explicit ManifestData(base::DictValue manifest);
+    ManifestData(base::DictValue manifest, std::string_view name);
     ManifestData(ManifestData&& other);
     ~ManifestData();
 
@@ -52,25 +53,25 @@ class ManifestTest : public testing::Test {
 
     const std::string& name() const { return name_; }
 
-    const std::optional<base::Value::Dict>& GetManifest(
+    const std::optional<base::DictValue>& GetManifest(
         const base::FilePath& manifest_path,
         std::string* error) const;
 
    private:
     const std::string name_;
-    mutable std::optional<base::Value::Dict> manifest_;
+    mutable std::optional<base::DictValue> manifest_;
   };
 
   // Allows the test implementation to override a loaded test manifest's
-  // extension ID. Useful for testing features behind a allowlist.
+  // extension ID. Useful for testing features behind an allowlist.
   virtual std::string GetTestExtensionID() const;
 
   // Returns the path in which to find test manifest data files, for example
   // extensions/test/data/manifest_tests.
   virtual base::FilePath GetTestDataDir();
 
-  std::optional<base::Value::Dict> LoadManifest(char const* manifest_name,
-                                                std::string* error);
+  std::optional<base::DictValue> LoadManifest(char const* manifest_name,
+                                              std::string* error);
 
   scoped_refptr<extensions::Extension> LoadExtension(
       const ManifestData& manifest,
@@ -146,11 +147,7 @@ class ManifestTest : public testing::Test {
 
   // used to differentiate between calls to LoadAndExpectError,
   // LoadAndExpectWarning and LoadAndExpectSuccess via function RunTestcases.
-  enum ExpectType {
-    EXPECT_TYPE_ERROR,
-    EXPECT_TYPE_WARNING,
-    EXPECT_TYPE_SUCCESS
-  };
+  enum class ExpectType { kError, kWarning, kSuccess };
 
   struct Testcase {
     const std::string manifest_filename_;
@@ -181,9 +178,7 @@ class ManifestTest : public testing::Test {
              int flags);
   };
 
-  void RunTestcases(const Testcase* testcases,
-                    size_t num_testcases,
-                    ExpectType type);
+  void RunTestcases(base::span<const Testcase> testcases, ExpectType type);
 
   void RunTestcase(const Testcase& testcase, ExpectType type);
 

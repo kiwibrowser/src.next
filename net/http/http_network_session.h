@@ -13,19 +13,16 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "base/containers/flat_set.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/functional/bind.h"
-#include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
+#include "base/power_monitor/power_observer.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
 #include "build/buildflag.h"
-#include "net/base/host_mapping_rules.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth_cache.h"
@@ -38,10 +35,6 @@
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_client_session_cache.h"
 #include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
-
-namespace base {
-class Value;
-}
 
 namespace net {
 
@@ -86,7 +79,6 @@ struct NET_EXPORT HttpNetworkSessionParams {
   HttpNetworkSessionParams(const HttpNetworkSessionParams& other);
   ~HttpNetworkSessionParams();
 
-  HostMappingRules host_mapping_rules;
   bool ignore_certificate_errors = false;
   uint16_t testing_fixed_http_port = 0;
   uint16_t testing_fixed_https_port = 0;
@@ -151,9 +143,6 @@ struct NET_EXPORT HttpNetworkSessionParams {
   // If non-empty, QUIC will only be spoken to hosts in this list.
   base::flat_set<std::string> quic_host_allowlist;
 
-  // If true, idle sockets won't be closed when memory pressure happens.
-  bool disable_idle_sockets_close_on_memory_pressure = false;
-
   bool key_auth_cache_server_entries_by_network_anonymization_key = false;
 
   // If true, enable sending PRIORITY_UPDATE frames until SETTINGS frame
@@ -173,7 +162,7 @@ struct NET_EXPORT HttpNetworkSessionParams {
   bool ignore_ip_address_changes = false;
 
   // Whether to use the ALPN information in the DNS HTTPS record.
-  bool use_dns_https_svcb_alpn = false;
+  bool use_dns_https_svcb_alpn = true;
 };
 
 // Structure with pointers to the dependencies of the HttpNetworkSession.
@@ -208,17 +197,21 @@ struct NET_EXPORT HttpNetworkSessionContext {
 };
 
 // This class holds session objects used by HttpNetworkTransaction objects.
-class NET_EXPORT HttpNetworkSession {
+class NET_EXPORT HttpNetworkSession : public base::PowerSuspendObserver {
  public:
-  enum SocketPoolType {
-    NORMAL_SOCKET_POOL,
-    WEBSOCKET_SOCKET_POOL,
-    NUM_SOCKET_POOL_TYPES
+  enum class SocketPoolType {
+    kNormal = 0,
+    kWebSocket = 1,
+    kMaxValue = kWebSocket,
   };
 
   HttpNetworkSession(const HttpNetworkSessionParams& params,
                      const HttpNetworkSessionContext& context);
-  ~HttpNetworkSession();
+  ~HttpNetworkSession() override;
+
+  // base::PowerSuspendObserver methods:
+  void OnSuspend() override;
+  void OnResume() override;
 
   HttpAuthCache* http_auth_cache() { return &http_auth_cache_; }
   SSLClientContext* ssl_client_context() { return &ssl_client_context_; }
@@ -267,7 +260,7 @@ class NET_EXPORT HttpNetworkSession {
   base::Value SocketPoolInfoToValue() const;
 
   // Creates a Value summary of the state of the SPDY sessions.
-  std::unique_ptr<base::Value> SpdySessionPoolInfoToValue() const;
+  base::Value SpdySessionPoolInfoToValue() const;
 
   // Creates a Value summary of the state of the QUIC sessions and
   // configuration.
@@ -289,6 +282,8 @@ class NET_EXPORT HttpNetworkSession {
   const SSLConfig::ApplicationSettings& GetApplicationSettings() const {
     return application_settings_;
   }
+
+  void SetTLS13EarlyDataEnabled(bool enabled);
 
   // Evaluates if QUIC is enabled for new streams.
   bool IsQuicEnabled() const;
@@ -314,14 +309,15 @@ class NET_EXPORT HttpNetworkSession {
   CommonConnectJobParams CreateCommonConnectJobParams(
       bool for_websockets = false);
 
+  // Rewrite the port of `endpoint` when testing fixed port is specified.
+  void ApplyTestingFixedPort(url::SchemeHostPort& endpoint) const;
+
+  bool power_suspended() const { return power_suspended_; }
+
  private:
   friend class HttpNetworkSessionPeer;
 
   ClientSocketPoolManager* GetSocketPoolManager(SocketPoolType pool_type);
-
-  // Flush sockets on low memory notifications callback.
-  void OnMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
   const raw_ptr<NetLog> net_log_;
   const raw_ptr<HttpServerProperties> http_server_properties_;
@@ -361,7 +357,7 @@ class NET_EXPORT HttpNetworkSession {
   HttpNetworkSessionParams params_;
   HttpNetworkSessionContext context_;
 
-  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
+  bool power_suspended_ = false;
 
   THREAD_CHECKER(thread_checker_);
 };

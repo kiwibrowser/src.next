@@ -5,7 +5,6 @@
 #include "chrome/browser/browser_process_platform_part_mac.h"
 
 #include "base/apple/foundation_util.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_manager_mac.h"
@@ -13,6 +12,7 @@
 #include "chrome/browser/apps/platform_apps/extension_app_shim_manager_delegate_mac.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_application_mac.h"
+#include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "services/device/public/cpp/geolocation/system_geolocation_source_apple.h"
 
 BrowserProcessPlatformPart::BrowserProcessPlatformPart() = default;
@@ -37,7 +37,9 @@ void BrowserProcessPlatformPart::AttemptExit(bool try_to_quit_application) {
 
   if (!try_to_quit_application) {
     // A keyboard menu invocation.
-    if (![AppController.sharedController runConfirmQuitPanel]) {
+    if ([AppController.sharedController confirmQuitIfNeeded] ==
+        ConfirmQuitResultAborted) {
+      chrome::OnClosingAllBrowsers(false);
       return;
     }
   }
@@ -65,11 +67,17 @@ void BrowserProcessPlatformPart::PreMainMessageLoopRun() {
   DCHECK(!app_shim_listener_.get());
   app_shim_listener_ = new AppShimListener;
 
+  // Workaround for https://crbug.com/40155239: This needs to be created at
+  // browser startup.
   if (!device::GeolocationSystemPermissionManager::GetInstance()) {
     device::GeolocationSystemPermissionManager::SetInstance(
         device::SystemGeolocationSourceApple::
             CreateGeolocationSystemPermissionManager());
   }
+}
+
+void BrowserProcessPlatformPart::PostDestroyThreads() {
+  app_shim_manager_.reset();
 }
 
 apps::AppShimManager* BrowserProcessPlatformPart::app_shim_manager() {

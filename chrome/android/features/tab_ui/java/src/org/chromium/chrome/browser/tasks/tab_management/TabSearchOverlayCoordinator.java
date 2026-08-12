@@ -1,0 +1,268 @@
+// Copyright 2026 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+package org.chromium.chrome.browser.tasks.tab_management;
+
+import static org.chromium.build.NullUtil.assumeNonNull;
+
+import android.app.Activity;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
+
+import androidx.annotation.IdRes;
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.base.CallbackUtils;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.R;
+import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
+import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
+import org.chromium.chrome.browser.omnibox.BackKeyBehaviorDelegate;
+import org.chromium.chrome.browser.omnibox.LocationBarEmbedder;
+import org.chromium.chrome.browser.omnibox.suggestions.OmniboxLoadUrlParams;
+import org.chromium.chrome.browser.omnibox.suggestions.action.OmniboxActionDelegateImpl;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.searchwidget.SearchActivityUtils;
+import org.chromium.chrome.browser.searchwidget.SearchBoxDataProvider;
+import org.chromium.chrome.browser.searchwidget.SearchUiCoordinator;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabwindow.TabWindowInfo;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.IntentOrigin;
+import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.SearchType;
+import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.ui.AsyncViewStub;
+import org.chromium.ui.base.PageTransition;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.edge_to_edge.EdgeToEdgeSystemBarColorHelper;
+import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modelutil.PropertyKey;
+import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
+import org.chromium.url.GURL;
+
+import java.util.function.Supplier;
+
+/**
+ * Coordinator that hosts SearchUiCoordinator in a floating Tab Search panel positioned overlaying
+ * the Vertical Tabs rail.
+ */
+@NullMarked
+public class TabSearchOverlayCoordinator {
+    private final Activity mActivity;
+    private final ViewGroup mParentContainer;
+    private final WindowAndroid mWindowAndroid;
+    private final MonotonicObservableSupplier<Profile> mProfileSupplier;
+    private final SnackbarManager mSnackbarManager;
+    private final Supplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
+    private final ActivityLifecycleDispatcher mLifecycleDispatcher;
+    private final MonotonicObservableSupplier<TabModelSelector> mTabModelSelectorSupplier;
+    private final @Nullable EdgeToEdgeSystemBarColorHelper mEdgeToEdgeSystemBarColorHelper;
+    private final PropertyModel mModel;
+
+    private @Nullable
+            PropertyModelChangeProcessor<
+                    PropertyModel, TabSearchOverlayViewBinder.ViewHolder, PropertyKey>
+            mChangeProcessor;
+    private @Nullable LinearLayout mPanelContainer;
+    private @Nullable SearchUiCoordinator mSearchUiCoordinator;
+    private final SearchBoxDataProvider mSearchBoxDataProvider;
+
+    /**
+     * Constructs a new TabSearchOverlayCoordinator.
+     *
+     * @param activity The current Android Activity.
+     * @param parentContainer The parent ViewGroup to attach the search overlay view to.
+     * @param windowAndroid The window helper for managing window-level state.
+     * @param profileSupplier Supplier for the current Profile.
+     * @param snackbarManager Manager for showing snackbar notifications.
+     * @param modalDialogManagerSupplier Supplier for the modal dialog manager.
+     * @param lifecycleDispatcher Dispatcher for activity lifecycle events.
+     * @param tabModelSelectorSupplier Supplier for the tab model selector.
+     * @param edgeToEdgeSystemBarColorHelper Helper for managing system bar colors in edge-to-edge.
+     */
+    public TabSearchOverlayCoordinator(
+            Activity activity,
+            ViewGroup parentContainer,
+            WindowAndroid windowAndroid,
+            MonotonicObservableSupplier<Profile> profileSupplier,
+            SnackbarManager snackbarManager,
+            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
+            ActivityLifecycleDispatcher lifecycleDispatcher,
+            MonotonicObservableSupplier<TabModelSelector> tabModelSelectorSupplier,
+            @Nullable EdgeToEdgeSystemBarColorHelper edgeToEdgeSystemBarColorHelper) {
+        mActivity = activity;
+        mParentContainer = parentContainer;
+        mWindowAndroid = windowAndroid;
+        mProfileSupplier = profileSupplier;
+        mSnackbarManager = snackbarManager;
+        mModalDialogManagerSupplier = modalDialogManagerSupplier;
+        mLifecycleDispatcher = lifecycleDispatcher;
+        mTabModelSelectorSupplier = tabModelSelectorSupplier;
+        mEdgeToEdgeSystemBarColorHelper = edgeToEdgeSystemBarColorHelper;
+
+        mModel = TabSearchOverlayProperties.createDefaultModel();
+        mModel.set(TabSearchOverlayProperties.VISIBLE, false);
+        mModel.set(TabSearchOverlayProperties.ON_SCRIM_CLICK, (v) -> hide());
+
+        mSearchBoxDataProvider = new SearchBoxDataProvider();
+        mSearchBoxDataProvider.setPageClassification(PageClassification.ANDROID_HUB_VALUE);
+    }
+
+    /** Destroys the coordinator, cleaning up resources and child coordinators. */
+    public void destroy() {
+        if (mChangeProcessor != null) {
+            mChangeProcessor.destroy();
+            mChangeProcessor = null;
+        }
+        if (mSearchUiCoordinator != null) {
+            mSearchUiCoordinator.destroy();
+            mSearchUiCoordinator = null;
+        }
+        mSearchBoxDataProvider.destroy();
+        if (mPanelContainer != null) {
+            mParentContainer.removeView(mPanelContainer);
+            mPanelContainer = null;
+        }
+    }
+
+    @VisibleForTesting
+    void ensureInitialized() {
+        if (mPanelContainer != null) return;
+
+        mPanelContainer =
+                (LinearLayout)
+                        LayoutInflater.from(mActivity)
+                                .inflate(
+                                        R.layout.tab_search_overlay_layout,
+                                        mParentContainer,
+                                        false);
+        final LinearLayout panelContainer = mPanelContainer;
+        View scrim = panelContainer.findViewById(R.id.tab_search_overlay_scrim);
+        View panelView = panelContainer.findViewById(R.id.tab_search_overlay_panel);
+        View searchActivityView = panelContainer.findViewById(R.id.search_activity_container);
+        mParentContainer.addView(panelContainer);
+
+        if (mSearchUiCoordinator == null) {
+            mSearchUiCoordinator = new SearchUiCoordinator(mActivity, mSearchBoxDataProvider);
+        }
+
+        LocationBarEmbedder embedder =
+                new LocationBarEmbedder() {
+                    @Override
+                    public @Nullable AsyncViewStub getSuggestionsContainerStub() {
+                        return panelContainer.findViewById(
+                                R.id.search_activity_suggestions_container_stub);
+                    }
+
+                    @Override
+                    public @IdRes int getSuggestionsContainerInflatedViewId() {
+                        return R.id.search_activity_suggestions_container;
+                    }
+                };
+
+        BackKeyBehaviorDelegate backKeyBehaviorDelegate =
+                new BackKeyBehaviorDelegate() {
+                    @Override
+                    public boolean handleBackKeyPressed() {
+                        hide();
+                        return true;
+                    }
+                };
+
+        OmniboxActionDelegateImpl omniboxActionDelegate =
+                new OmniboxActionDelegateImpl(
+                        mActivity,
+                        () -> {
+                            TabModelSelector selector = mTabModelSelectorSupplier.get();
+                            return selector != null ? selector.getCurrentTab() : null;
+                        },
+                        url ->
+                                loadUrl(
+                                        new OmniboxLoadUrlParams.Builder(url, PageTransition.TYPED)
+                                                .build(),
+                                        false),
+                        CallbackUtils.emptyRunnable(),
+                        CallbackUtils.emptyRunnable(),
+                        /* openQuickDeleteCb= */ null,
+                        TabWindowManagerSingleton::getInstance,
+                        this::bringTabToFront);
+
+        mSearchUiCoordinator.initialize(
+                searchActivityView,
+                panelView,
+                mWindowAndroid,
+                mProfileSupplier,
+                mSnackbarManager,
+                mModalDialogManagerSupplier,
+                mLifecycleDispatcher,
+                mTabModelSelectorSupplier,
+                this::loadUrl,
+                backKeyBehaviorDelegate,
+                CallbackUtils.emptyCallback(),
+                omniboxActionDelegate,
+                /* backPressManager= */ null,
+                embedder,
+                mEdgeToEdgeSystemBarColorHelper);
+
+        TabSearchOverlayViewBinder.ViewHolder viewHolder =
+                new TabSearchOverlayViewBinder.ViewHolder(panelContainer, scrim);
+        mChangeProcessor =
+                PropertyModelChangeProcessor.create(
+                        mModel, viewHolder, TabSearchOverlayViewBinder::bind);
+    }
+
+    private boolean loadUrl(OmniboxLoadUrlParams params, boolean isIncognito) {
+        // TODO(crbug.com/527090329): Implement URL loading when ready.
+        return false;
+    }
+
+    private void bringTabToFront(TabWindowInfo tabWindowInfo, GURL url) {
+        SearchActivityUtils.bringTabToFront(
+                mActivity, mTabModelSelectorSupplier.get(), tabWindowInfo, url, this::hide);
+    }
+
+    /**
+     * Shows the tab search overlay. If the overlay has not been inflated and attached to the parent
+     * container yet, this method will initialize it.
+     */
+    public void show() {
+        ensureInitialized();
+        mModel.set(TabSearchOverlayProperties.VISIBLE, true);
+        assumeNonNull(mSearchUiCoordinator)
+                .beginQuery(IntentOrigin.HUB, SearchType.TEXT, "", mWindowAndroid);
+    }
+
+    /** Hides the tab search overlay and clears the focus from the search box. */
+    public void hide() {
+        mModel.set(TabSearchOverlayProperties.VISIBLE, false);
+        if (mSearchUiCoordinator != null) {
+            var locationBar = mSearchUiCoordinator.getLocationBarCoordinator();
+            if (locationBar != null) {
+                locationBar.clearOmniboxFocus();
+            }
+        }
+    }
+
+    /** Returns whether the tab search overlay is currently visible. */
+    public boolean isVisible() {
+        return mModel.get(TabSearchOverlayProperties.VISIBLE);
+    }
+
+    @Nullable SearchUiCoordinator getSearchUiCoordinatorForTesting() {
+        return mSearchUiCoordinator;
+    }
+
+    @Nullable LinearLayout getPanelContainerForTesting() {
+        return mPanelContainer;
+    }
+
+    void setSearchUiCoordinatorForTesting(SearchUiCoordinator searchUiCoordinator) {
+        mSearchUiCoordinator = searchUiCoordinator;
+    }
+}

@@ -33,8 +33,11 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "cc/paint/paint_flags.h"
+#include "cc/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
+#include "third_party/blink/renderer/platform/graphics/css_image_animation_data_interface.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
+#include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
@@ -44,19 +47,31 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace blink {
 
+namespace {
+
+// Reserved ids for non-running frames.
+constexpr DOMNodeId kNormalCachedFrameId = -2;
+
 int GetRepetitionCountWithPolicyOverride(
     int actual_count,
-    mojom::blink::ImageAnimationPolicy policy) {
+    mojom::blink::ImageAnimationPolicy policy,
+    const ImageAnimationEnum image_animation) {
   if (actual_count == kAnimationNone ||
       policy == mojom::blink::ImageAnimationPolicy::
-                    kImageAnimationPolicyNoAnimation) {
+                    kImageAnimationPolicyNoAnimation ||
+      image_animation == ImageAnimationEnum::kStopped) {
     return kAnimationNone;
+  }
+
+  if (image_animation == ImageAnimationEnum::kPaused) {
+    return cc::kAnimationPaused;
   }
 
   if (actual_count == kAnimationLoopOnce ||
@@ -67,6 +82,8 @@ int GetRepetitionCountWithPolicyOverride(
 
   return actual_count;
 }
+
+}  // namespace
 
 BitmapImage::BitmapImage(ImageObserver* observer, bool is_multipart)
     : Image(observer, is_multipart),
@@ -83,12 +100,12 @@ BitmapImage::BitmapImage(ImageObserver* observer, bool is_multipart)
 
 BitmapImage::~BitmapImage() {}
 
-bool BitmapImage::CurrentFrameHasSingleSecurityOrigin() const {
+bool BitmapImage::HasSingleSecurityOrigin() const {
   return true;
 }
 
 void BitmapImage::DestroyDecodedData() {
-  cached_frame_ = PaintImage();
+  cached_frames_.clear();
   NotifyMemoryChanged();
 }
 
@@ -111,16 +128,27 @@ void BitmapImage::NotifyMemoryChanged() {
 }
 
 size_t BitmapImage::TotalFrameBytes() {
-  if (cached_frame_)
+  if (!cached_frames_.empty()) {
     return ClampTo<size_t>(Size().Area64() * sizeof(ImageFrame::PixelData));
+  }
   return 0u;
 }
 
 PaintImage BitmapImage::PaintImageForTesting() {
-  return CreatePaintImage();
+  return CreatePaintImage(
+      paint_image_id(), PaintImage::kInvalidId,
+      PaintImage::AnimationSyncSequence::kShared,
+      reset_animation_own_timeline_sequence_id_,
+      GetRepetitionCountWithPolicyOverride(RepetitionCount(), animation_policy_,
+                                           ImageAnimationEnum::kNormal));
 }
 
-PaintImage BitmapImage::CreatePaintImage() {
+PaintImage BitmapImage::CreatePaintImage(
+    PaintImage::Id paint_id,
+    PaintImage::Id sync_animation_id,
+    PaintImage::AnimationSyncSequence sync_sequence,
+    PaintImage::AnimationSequenceId reset_animation_sequence_id,
+    int image_animation_repetition_count) {
   sk_sp<PaintImageGenerator> generator =
       decoder_ ? decoder_->CreateGenerator() : nullptr;
   if (!generator)
@@ -129,14 +157,17 @@ PaintImage BitmapImage::CreatePaintImage() {
   auto completion_state = all_data_received_
                               ? PaintImage::CompletionState::kDone
                               : PaintImage::CompletionState::kPartiallyDone;
+
   auto builder =
-      CreatePaintImageBuilder()
+      CreatePaintImageBuilder(paint_id)
           .set_paint_image_generator(std::move(generator))
-          .set_repetition_count(GetRepetitionCountWithPolicyOverride(
-              RepetitionCount(), animation_policy_))
+          .set_repetition_count(image_animation_repetition_count)
           .set_is_high_bit_depth(decoder_->ImageIsHighBitDepth())
           .set_completion_state(completion_state)
-          .set_reset_animation_sequence_id(reset_animation_sequence_id_);
+          .set_reset_animation_sequence_id(reset_animation_sequence_id)
+          .set_sync_animation_target_id(sync_animation_id)
+          .set_sync_animation_sequence_id(
+              static_cast<PaintImage::AnimationSequenceId>(sync_sequence));
 
   sk_sp<PaintImageGenerator> gainmap_generator;
   SkGainmapInfo gainmap_info;
@@ -172,6 +203,12 @@ gfx::Size BitmapImage::SizeWithConfig(SizeConfig config) const {
 void BitmapImage::RecordDecodedImageType(UseCounter* use_counter) {
   BitmapImageMetrics::CountDecodedImageType(decoder_->FilenameExtension(),
                                             use_counter);
+}
+
+void BitmapImage::RecordDecodedImageC2PA(UseCounter* use_counter) {
+  if (decoder_->HasC2PAManifest()) {
+    BitmapImageMetrics::CountDecodedImageC2PA(use_counter);
+  }
 }
 
 bool BitmapImage::GetHotSpot(gfx::Point& hot_spot) const {
@@ -227,10 +264,10 @@ static inline uint64_t ImageDensityInCentiBpp(gfx::Size size,
 Image::SizeAvailability BitmapImage::DataChanged(bool all_data_received) {
   TRACE_EVENT0("blink", "BitmapImage::dataChanged");
 
-  // If the data was updated, clear the |cached_frame_| to push it to the
-  // compositor thread. Its necessary to clear the frame since more data
+  // If the data was updated, clear all caches to push them to the
+  // compositor thread. It's necessary to clear the frames since more data
   // requires a new PaintImageGenerator instance.
-  cached_frame_ = PaintImage();
+  cached_frames_.clear();
 
   // Report the image density metric right after we received all the data. The
   // SetData() call on the decoder_ (if there is one) should have decoded the
@@ -268,8 +305,16 @@ void BitmapImage::Draw(cc::PaintCanvas* canvas,
                        const gfx::RectF& src_rect,
                        const ImageDrawOptions& draw_options) {
   TRACE_EVENT0("skia", "BitmapImage::draw");
+  PaintImage image;
+  if (RuntimeEnabledFeatures::CSSImageAnimationEnabled() &&
+      draw_options.image_node_animation_info &&
+      draw_options.image_node_animation_info->node_id != kInvalidDOMNodeId) {
+    image = PaintImageForCurrentFrameWithInfo(
+        draw_options.image_node_animation_info);
+  } else {
+    image = PaintImageForCurrentFrame();
+  }
 
-  PaintImage image = PaintImageForCurrentFrame();
   if (!image)
     return;  // It's too early and we don't have an image yet.
 
@@ -297,7 +342,7 @@ void BitmapImage::Draw(cc::PaintCanvas* canvas,
 
   ImageOrientation orientation = ImageOrientationEnum::kDefault;
   if (draw_options.respect_orientation == kRespectImageOrientation)
-    orientation = CurrentFrameOrientation();
+    orientation = Orientation();
 
   PaintCanvasAutoRestore auto_restore(canvas, false);
   gfx::RectF adjusted_dst_rect = dst_rect;
@@ -308,8 +353,8 @@ void BitmapImage::Draw(cc::PaintCanvas* canvas,
     canvas->translate(adjusted_dst_rect.x(), adjusted_dst_rect.y());
     adjusted_dst_rect.set_origin(gfx::PointF());
 
-    canvas->concat(AffineTransformToSkM44(
-        orientation.TransformFromDefault(adjusted_dst_rect.size())));
+    canvas->concat(
+        orientation.TransformFromDefault(adjusted_dst_rect.size()).ToSkM44());
 
     if (orientation.UsesWidthAsHeight()) {
       // The destination rect will have its width and height already reversed
@@ -330,16 +375,14 @@ void BitmapImage::Draw(cc::PaintCanvas* canvas,
         this, &dark_mode_flags.value(), gfx::RectFToSkRect(src_rect));
     image_flags = &dark_mode_flags.value();
   }
-  canvas->drawImageRect(
-      std::move(image), gfx::RectFToSkRect(adjusted_src_rect),
-      gfx::RectFToSkRect(adjusted_dst_rect), draw_options.sampling_options,
-      image_flags,
-      WebCoreClampingModeToSkiaRectConstraint(draw_options.clamping_mode));
+  canvas->drawImageRect(std::move(image), gfx::RectFToSkRect(adjusted_src_rect),
+                        gfx::RectFToSkRect(adjusted_dst_rect),
+                        draw_options.sampling_options, image_flags,
+                        ToSkiaRectConstraint(draw_options.clamping_mode));
 
   if (is_lazy_generated) {
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
-                         "Draw LazyPixelRef", TRACE_EVENT_SCOPE_THREAD,
-                         "LazyPixelRef", stable_id);
+    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
+                        "Draw LazyPixelRef", "LazyPixelRef", stable_id);
   }
 
   StartAnimation();
@@ -368,25 +411,187 @@ bool BitmapImage::IsSizeAvailable() {
   return size_available_;
 }
 
-PaintImage BitmapImage::PaintImageForCurrentFrame() {
-  auto alpha_type = decoder_ ? decoder_->AlphaType() : kUnknown_SkAlphaType;
-  if (cached_frame_ && cached_frame_.GetAlphaType() == alpha_type)
-    return cached_frame_;
+PaintImage BitmapImage::PaintImageForCurrentFrameWithInfo(
+    const ImageNodeAnimationInfo* image_node_animation_info) {
+  ImageAnimationEnum image_animation =
+      image_node_animation_info ? image_node_animation_info->image_animation
+                                : ImageAnimationEnum::kNormal;
+  DOMNodeId id = kNormalCachedFrameId;
+  PaintImage::Id paint_id = paint_image_id();
+  PaintImage::Id sync_animation_target_id = PaintImage::kInvalidId;
+  PaintImage::AnimationSequenceId reset_animation_sequence_id =
+      reset_animation_own_timeline_sequence_id_;
+  PaintImage::AnimationSyncSequence sync_sequence =
+      PaintImage::AnimationSyncSequence::kShared;
 
-  cached_frame_ = CreatePaintImage();
+  std::optional<ImageAnimationData> image_animation_data;
+
+  if (image_node_animation_info) {
+    ElementImageAnimationData* animation_data =
+        image_node_animation_info->animation_data;
+    ImageResourceContent* image_key = image_node_animation_info->image;
+    DCHECK(animation_data && image_key);
+
+    image_animation_data = animation_data->GetImageAnimationData(image_key);
+
+    if (image_animation_data) {
+      const PaintImage::AnimationSequenceId reset_sequence =
+          (image_animation_data->sync_sequence ==
+           PaintImage::AnimationSyncSequence::kShared)
+              ? reset_animation_shared_timeline_sequence_id_
+              : reset_animation_own_timeline_sequence_id_;
+
+      if (image_animation_data->reset_sequence != reset_sequence) {
+        // Back to NoEntry state
+        cached_frames_.erase(image_animation_data->sync_sequence ==
+                                     PaintImage::AnimationSyncSequence::kShared
+                                 ? kNormalCachedFrameId
+                                 : image_node_animation_info->node_id);
+        animation_data->EraseImageAnimationData(image_key);
+        image_animation_data = std::nullopt;
+      }
+    }
+
+    // State machine for CSS Image Animation
+    //
+    // States:
+    //  NoEntry: no entry in image_animation_data_.
+    //  Shared:  entry with sync_sequence == kShared (paint_id =
+    //  paint_image_id()) Own: entry with sync_sequence == kOwn (paint_id =
+    //  unique per-element id)
+    //
+    //     ┌──── kPaused / kRunning (first paint, non-normal) ───┐
+    //     │                                                     ▼
+    //   ┌─┴───────┐  kNormal   ┌─────────┐  kPaused   ┌──────────┐
+    //   │ NoEntry │ ─────────► │ Shared  │ ─────────► │   Own    │
+    //   │         │            │ seq = 0 │            │ seq != 0 │
+    //   │         │ ◄───────── │         │            │          │
+    //   │         │  kStopped  └─────────┘ ◄──kNormal ┴──────────┘
+    //   |         |             ▲↻                     ▲↻      |
+    //   └────▲────┘        (self loop)           (self loop)   │
+    //        │                kNormal /             kPaused /  │
+    //        │                kRunning              kRunning   │
+    //        │                                                 │
+    //        └─────────────── kStopped (erase entry) ──────────┘
+    //
+    switch (image_animation) {
+      case ImageAnimationEnum::kNormal: {
+        if (image_animation_data &&
+            image_animation_data->sync_sequence ==
+                PaintImage::AnimationSyncSequence::kOwn) {
+          cached_frames_.erase(image_node_animation_info->node_id);
+        }
+        if (!image_animation_data ||
+            image_animation_data->sync_sequence ==
+                PaintImage::AnimationSyncSequence::kOwn ||
+            image_animation_data->paint_id != paint_id) {
+          animation_data->SetImageAnimationData(
+              image_key,
+              {.paint_id = paint_id,
+               .sync_sequence = PaintImage::AnimationSyncSequence::kShared,
+               .reset_sequence = reset_animation_shared_timeline_sequence_id_});
+        }
+        break;
+      }
+      case ImageAnimationEnum::kRunning: {
+        if (image_animation_data) {
+          paint_id = image_animation_data->paint_id;
+          sync_sequence = image_animation_data->sync_sequence;
+          if (image_animation_data->sync_sequence ==
+              PaintImage::AnimationSyncSequence::kOwn) {
+            id = image_node_animation_info->node_id;
+          }
+        } else {
+          paint_id = PaintImage::GetNextId();
+          sync_sequence = PaintImage::AnimationSyncSequence::kOwn;
+          id = image_node_animation_info->node_id;
+          animation_data->SetImageAnimationData(
+              image_key,
+              {.paint_id = paint_id,
+               .sync_sequence = sync_sequence,
+               .reset_sequence = reset_animation_own_timeline_sequence_id_});
+        }
+        break;
+      }
+      case ImageAnimationEnum::kPaused: {
+        if (image_animation_data &&
+            image_animation_data->sync_sequence ==
+                PaintImage::AnimationSyncSequence::kOwn) {
+          paint_id = image_animation_data->paint_id;
+          sync_sequence = image_animation_data->sync_sequence;
+          id = image_node_animation_info->node_id;
+        } else {
+          paint_id = PaintImage::GetNextId();
+          sync_animation_target_id = image_animation_data
+                                         ? image_animation_data->paint_id
+                                         : PaintImage::kInvalidId;
+          sync_sequence = PaintImage::AnimationSyncSequence::kOwn;
+          id = image_node_animation_info->node_id;
+          animation_data->SetImageAnimationData(
+              image_key,
+              {.paint_id = paint_id,
+               .sync_sequence = sync_sequence,
+               .reset_sequence = reset_animation_own_timeline_sequence_id_});
+        }
+        break;
+      }
+      case ImageAnimationEnum::kStopped: {
+        if (image_animation_data) {
+          paint_id = image_animation_data->paint_id;
+          animation_data->EraseImageAnimationData(image_key);
+        } else {
+          paint_id = PaintImage::GetNextId();
+        }
+        id = image_node_animation_info->node_id;
+        sync_animation_target_id = PaintImage::kInvalidId;
+        sync_sequence = PaintImage::AnimationSyncSequence::kShared;
+        break;
+      }
+    }
+  }
+
+  reset_animation_sequence_id =
+      sync_sequence == PaintImage::AnimationSyncSequence::kShared
+          ? reset_animation_shared_timeline_sequence_id_
+          : reset_animation_own_timeline_sequence_id_;
+
+  auto alpha_type = decoder_ ? decoder_->AlphaType() : kUnknown_SkAlphaType;
+  const int expected_repetition_count = GetRepetitionCountWithPolicyOverride(
+      RepetitionCount(), animation_policy_, image_animation);
+
+  if (auto it = cached_frames_.find(id); it != cached_frames_.end()) {
+    const PaintImage& cached_frame = it->value;
+    if (cached_frame &&
+        cached_frame.repetition_count() == expected_repetition_count &&
+        (!image_node_animation_info || image_animation_data) &&
+        cached_frame.GetAlphaType() == alpha_type) {
+      return cached_frame;
+    }
+  }
+
+  PaintImage new_frame =
+      CreatePaintImage(paint_id, sync_animation_target_id, sync_sequence,
+                       reset_animation_sequence_id, expected_repetition_count);
 
   // BitmapImage should not be texture backed.
-  DCHECK(!cached_frame_.IsTextureBacked());
+  DCHECK(!new_frame.IsTextureBacked());
 
   // Create the SkImage backing for this PaintImage here to ensure that copies
   // of the PaintImage share the same SkImage. Skia's caching of the decoded
   // output of this image is tied to the lifetime of the SkImage. So we create
   // the SkImage here and cache the PaintImage to keep the decode alive in
   // skia's cache.
-  cached_frame_.GetSwSkImage();
+  new_frame.GetSwSkImage();
+
+  cached_frames_.Set(id, new_frame);
+
   NotifyMemoryChanged();
 
-  return cached_frame_;
+  return new_frame;
+}
+
+PaintImage BitmapImage::PaintImageForCurrentFrame() {
+  return PaintImageForCurrentFrameWithInfo(nullptr);
 }
 
 scoped_refptr<Image> BitmapImage::ImageForDefaultFrame() {
@@ -409,20 +614,20 @@ scoped_refptr<Image> BitmapImage::ImageForDefaultFrame() {
   return Image::ImageForDefaultFrame();
 }
 
-bool BitmapImage::CurrentFrameKnownToBeOpaque() {
+bool BitmapImage::IsOpaque() {
   return decoder_ ? decoder_->AlphaType() == kOpaque_SkAlphaType : false;
 }
 
-bool BitmapImage::CurrentFrameIsComplete() {
+bool BitmapImage::FirstFrameIsComplete() {
   return decoder_ && decoder_->FrameIsReceivedAtIndex(0);
 }
 
-bool BitmapImage::CurrentFrameIsLazyDecoded() {
+bool BitmapImage::IsLazyDecoded() {
   // BitmapImage supports only lazy generated images.
   return true;
 }
 
-ImageOrientation BitmapImage::CurrentFrameOrientation() const {
+ImageOrientation BitmapImage::Orientation() const {
   return decoder_ ? decoder_->OrientationAtIndex(0)
                   : ImageOrientationEnum::kDefault;
 }
@@ -450,8 +655,21 @@ int BitmapImage::RepetitionCount() {
 }
 
 void BitmapImage::ResetAnimation() {
-  cached_frame_ = PaintImage();
-  reset_animation_sequence_id_++;
+  // If no PaintImage has been created yet, there is no bitmap animation
+  // timeline to rewind and no existing painted frame to invalidate.
+  if (RuntimeEnabledFeatures::SvgImageAnimationResetEnabled() &&
+      cached_frames_.empty()) {
+    return;
+  }
+
+  cached_frames_.clear();
+  reset_animation_own_timeline_sequence_id_++;
+  reset_animation_shared_timeline_sequence_id_++;
+}
+
+void BitmapImage::ResetAnimationSharedTimelineOnly() {
+  cached_frames_.erase(kNormalCachedFrameId);
+  reset_animation_shared_timeline_sequence_id_++;
 }
 
 bool BitmapImage::MaybeAnimated() {

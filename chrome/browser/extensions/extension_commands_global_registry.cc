@@ -4,32 +4,96 @@
 
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
 
+#include "base/functional/bind.h"
 #include "base/lazy_instance.h"
+#include "base/uuid.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/commands/command_service.h"
-#include "chrome/browser/extensions/global_shortcut_listener.h"
+#include "chrome/browser/extensions/extension_keybinding_registry.h"
+#include "components/prefs/pref_service.h"
+#include "components/user_prefs/user_prefs.h"
+#include "content/public/browser/browser_context.h"
+#include "extensions/browser/pref_names.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
+#include "ui/base/accelerators/command.h"
+#include "ui/base/accelerators/global_accelerator_listener/global_accelerator_listener.h"
+
+#if defined(USE_AURA) && !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
+#include "ui/gfx/native_ui_types.h"
+#endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
+
+namespace {
+
+gfx::AcceleratedWidget GetAcceleratedWidgetForContext(
+    content::BrowserContext* context) {
+#if defined(USE_AURA) && !BUILDFLAG(IS_ANDROID)
+  auto* profile = Profile::FromBrowserContext(context);
+  if (!profile) {
+    return gfx::kNullAcceleratedWidget;
+  }
+
+  BrowserWindowInterface* const browser =
+      ProfileBrowserCollection::GetForProfile(
+          Profile::FromBrowserContext(context))
+          ->GetLastActiveBrowser();
+  if (!browser || !browser->GetWindow()) {
+    return gfx::kNullAcceleratedWidget;
+  }
+
+  auto* native_window = browser->GetWindow()->GetNativeWindow();
+  if (!native_window || !native_window->GetHost()) {
+    return gfx::kNullAcceleratedWidget;
+  }
+
+  return native_window->GetHost()->GetAcceleratedWidget();
+#else
+  return gfx::kNullAcceleratedWidget;
+#endif  // defined(USE_AURA) && !BUILDFLAG(IS_ANDROID)
+}
+
+}  // namespace
 
 ExtensionCommandsGlobalRegistry::ExtensionCommandsGlobalRegistry(
     content::BrowserContext* context)
     : ExtensionKeybindingRegistry(context,
-                                  ExtensionKeybindingRegistry::ALL_EXTENSIONS,
-                                  nullptr),
+                                  /*tab_list_interface=*/nullptr,
+                                  ExtensionKeybindingRegistry::ALL_EXTENSIONS),
       browser_context_(context),
       registry_for_active_window_(nullptr) {
   Init();
 }
 
 ExtensionCommandsGlobalRegistry::~ExtensionCommandsGlobalRegistry() {
-  if (!IsEventTargetsEmpty()) {
-    GlobalShortcutListener* global_shortcut_listener =
-        GlobalShortcutListener::GetInstance();
+  ui::GlobalAcceleratorListener* global_shortcut_listener =
+      GetGlobalAcceleratorListener();
+  if (!global_shortcut_listener) {
+    return;
+  }
 
+  if (global_shortcut_listener->IsRegistrationHandledExternally()) {
+    // Eagerly cancel callbacks so PruneStaleCommands() can clear them before
+    // the WeakPtrFactory destructor runs.
+    weak_ptr_factory_.InvalidateWeakPtrs();
+    global_shortcut_listener->PruneStaleCommands();
+  }
+
+  if (!IsEventTargetsEmpty()) {
     // Resume GlobalShortcutListener before we clean up if the shortcut handling
     // is currently suspended.
-    if (global_shortcut_listener->IsShortcutHandlingSuspended())
+    if (global_shortcut_listener->IsShortcutHandlingSuspended()) {
       global_shortcut_listener->SetShortcutHandlingSuspended(false);
+    }
 
     global_shortcut_listener->UnregisterAccelerators(this);
   }
@@ -52,6 +116,11 @@ ExtensionCommandsGlobalRegistry* ExtensionCommandsGlobalRegistry::Get(
       context);
 }
 
+ui::GlobalAcceleratorListener*
+ExtensionCommandsGlobalRegistry::GetGlobalAcceleratorListener() const {
+  return ui::GlobalAcceleratorListener::GetInstance();
+}
+
 bool ExtensionCommandsGlobalRegistry::IsRegistered(
     const ui::Accelerator& accelerator) {
   return (registry_for_active_window() &&
@@ -59,58 +128,106 @@ bool ExtensionCommandsGlobalRegistry::IsRegistered(
          IsAcceleratorRegistered(accelerator);
 }
 
-void ExtensionCommandsGlobalRegistry::AddExtensionKeybindings(
-    const extensions::Extension* extension,
-    const std::string& command_name) {
-  // This object only handles named commands, not browser/page actions.
-  if (ShouldIgnoreCommand(command_name))
-    return;
+bool ExtensionCommandsGlobalRegistry::PopulateCommands(
+    const Extension* extension,
+    ui::CommandMap* commands) {
+  auto* instance = GetGlobalAcceleratorListener();
+  if (!instance) {
+    return false;
+  }
 
   extensions::CommandService* command_service =
       extensions::CommandService::Get(browser_context_);
-  // Add all the active global keybindings, if any.
-  extensions::CommandMap commands;
-  if (!command_service->GetNamedCommands(
-          extension->id(),
-          extensions::CommandService::ACTIVE,
-          extensions::CommandService::GLOBAL,
-          &commands))
-    return;
 
-  extensions::CommandMap::const_iterator iter = commands.begin();
-  for (; iter != commands.end(); ++iter) {
-    if (!command_name.empty() && (iter->second.command_name() != command_name))
-      continue;
-    const ui::Accelerator& accelerator = iter->second.accelerator();
-
-    if (!IsAcceleratorRegistered(accelerator)) {
-      if (!GlobalShortcutListener::GetInstance()->RegisterAccelerator(
-              accelerator, this))
-        continue;
-    }
-
-    AddEventTarget(accelerator, extension->id(), iter->second.command_name());
+  if (!instance->IsRegistrationHandledExternally()) {
+    // Add all the active global keybindings, if any.
+    return command_service->GetNamedCommands(
+        extension->id(), extensions::CommandService::ACTIVE,
+        extensions::CommandService::GLOBAL, commands);
   }
+
+  // All commands should be sent to the portal so the user can manually
+  // assign them, but they must be sanitized first to prevent hijacking
+  // reserved shortcuts.
+  ui::CommandMap all_commands;
+  if (!command_service->GetNamedCommands(
+          extension->id(), extensions::CommandService::ALL,
+          extensions::CommandService::ANY_SCOPE, &all_commands)) {
+    return false;
+  }
+
+  ui::CommandMap& active_global_commands = *commands;
+  active_global_commands.clear();
+  // Do not check the return value. An empty map is expected if the extension
+  // only has rejected global commands or regular non-global commands.
+  command_service->GetNamedCommands(
+      extension->id(), extensions::CommandService::ACTIVE,
+      extensions::CommandService::GLOBAL, &active_global_commands);
+
+  for (auto& cmd_pair : all_commands) {
+    if (!active_global_commands.contains(cmd_pair.first)) {
+      cmd_pair.second.set_accelerator(ui::Accelerator());
+    }
+  }
+
+  PrefService* prefs = user_prefs::UserPrefs::Get(browser_context_);
+  std::string profile_id = prefs->GetString(pref_names::kGlobalShortcutsUuid);
+  if (profile_id.empty()) {
+    auto uuid = base::Uuid::GenerateRandomV4();
+    profile_id = uuid.AsLowercaseString();
+    prefs->SetString(pref_names::kGlobalShortcutsUuid, profile_id);
+  }
+
+  instance->OnCommandsChanged(
+      extension->id(), profile_id, all_commands,
+      GetAcceleratedWidgetForContext(browser_context_),
+      base::BindRepeating(&ExtensionCommandsGlobalRegistry::ExecuteCommand,
+                          weak_ptr_factory_.GetWeakPtr()));
+
+  return !active_global_commands.empty();
 }
 
-void ExtensionCommandsGlobalRegistry::RemoveExtensionKeybindingImpl(
+bool ExtensionCommandsGlobalRegistry::RegisterAccelerator(
     const ui::Accelerator& accelerator,
+    const ExtensionId& extension_id,
     const std::string& command_name) {
-  GlobalShortcutListener::GetInstance()->UnregisterAccelerator(
-      accelerator, this);
+  auto* instance = GetGlobalAcceleratorListener();
+  if (!instance) {
+    return false;
+  }
+  return instance->RegisterAccelerator(accelerator, this);
+}
+
+void ExtensionCommandsGlobalRegistry::UnregisterAccelerator(
+    const ui::Accelerator& accelerator) {
+  auto* instance = GetGlobalAcceleratorListener();
+  if (!instance) {
+    return;
+  }
+  instance->UnregisterAccelerator(accelerator, this);
 }
 
 void ExtensionCommandsGlobalRegistry::OnShortcutHandlingSuspended(
     bool suspended) {
-  GlobalShortcutListener::GetInstance()->SetShortcutHandlingSuspended(
-      suspended);
-  if (registry_for_active_window())
+  auto* instance = GetGlobalAcceleratorListener();
+  if (!instance) {
+    return;
+  }
+  instance->SetShortcutHandlingSuspended(suspended);
+  if (registry_for_active_window()) {
     registry_for_active_window()->SetShortcutHandlingSuspended(suspended);
+  }
 }
 
 void ExtensionCommandsGlobalRegistry::OnKeyPressed(
     const ui::Accelerator& accelerator) {
   ExtensionKeybindingRegistry::NotifyEventTargets(accelerator);
+}
+
+void ExtensionCommandsGlobalRegistry::ExecuteCommand(
+    const ExtensionId& extension_id,
+    const std::string& command_id) {
+  CommandExecuted(extension_id, command_id);
 }
 
 }  // namespace extensions

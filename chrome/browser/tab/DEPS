@@ -1,3 +1,5 @@
 include_rules = [
-  "+chrome/browser/endpoint_fetcher",
+  "+chrome/browser/tab",
+  "+components/sqlite_proto",
+  "+sql",
 ]

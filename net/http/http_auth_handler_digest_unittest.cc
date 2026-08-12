@@ -7,6 +7,9 @@
 #include <string>
 #include <string_view>
 
+#include "base/files/file_path.h"
+#include "base/path_service.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/net_errors.h"
@@ -20,6 +23,7 @@
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/fuzztest/src/fuzztest/fuzztest.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 
@@ -95,7 +99,6 @@ bool RespondToChallenge(HttpAuth::Target target,
 }
 
 }  // namespace
-
 
 TEST(HttpAuthHandlerDigestTest, ParseChallenge) {
   // clang-format off
@@ -821,5 +824,43 @@ TEST(HttpAuthHandlerDigest, RespondToChallengeOpaque) {
             auth_token);
 }
 
+void DigestAuthDoesNotCrash(std::string_view challenge_suffix,
+                            std::string_view followup_suffix) {
+  std::string challenge = base::StrCat({"Digest ", challenge_suffix});
 
-} // namespace net
+  // Dummies
+  SSLInfo null_ssl_info;
+  url::SchemeHostPort scheme_host_port(GURL("https://foo.test/"));
+  auto host_resolver = std::make_unique<MockHostResolver>();
+  HttpAuthHandlerDigest::Factory factory;
+  std::unique_ptr<HttpAuthHandler> handler;
+  factory.CreateAuthHandlerFromString(challenge, HttpAuth::AUTH_SERVER,
+                                      null_ssl_info, NetworkAnonymizationKey(),
+                                      scheme_host_port, NetLogWithSource(),
+                                      host_resolver.get(), &handler);
+
+  if (!handler) {
+    return;
+  }
+
+  std::string followup = base::StrCat({"Digest ", followup_suffix});
+  HttpAuthChallengeTokenizer tokenizer(followup);
+  handler->HandleAnotherChallenge(&tokenizer);
+}
+
+std::vector<std::string> ReadDigestFuzzerDictionary() {
+  return fuzztest::ReadDictionaryFromFile(
+      base::PathService::CheckedGet(base::DIR_SRC_TEST_DATA_ROOT)
+          .AppendASCII("net/data/fuzzer_dictionaries/"
+                       "net_http_auth_handler_digest_fuzzer.dict")
+          .AsUTF8Unsafe());
+}
+
+FUZZ_TEST(HttpAuthHandlerDigestTest, DigestAuthDoesNotCrash)
+    .WithDomains(
+        // Pass the function as a pointer so the dictionary file is available
+        // for android after InitAndroidTestPaths runs.
+        fuzztest::String().WithDictionary(ReadDigestFuzzerDictionary),
+        fuzztest::String().WithDictionary(ReadDigestFuzzerDictionary));
+
+}  // namespace net

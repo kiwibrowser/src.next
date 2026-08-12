@@ -4,31 +4,38 @@
 
 package org.chromium.chrome.browser.toolbar.adaptive;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.graphics.drawable.Drawable;
 
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.JniMocker;
 import org.chromium.base.test.util.UserActionTester;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.toolbar.ButtonData;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonData;
 import org.chromium.chrome.browser.translate.TranslateBridge;
 import org.chromium.chrome.browser.translate.TranslateBridgeJni;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.url.JUnitTestGURLs;
 
@@ -36,23 +43,27 @@ import org.chromium.url.JUnitTestGURLs;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class TranslateToolbarButtonControllerUnitTest {
-    @Rule public final JniMocker mJniMocker = new JniMocker();
 
+    @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Mock private WebContents mWebContents;
     @Mock private Tab mTab;
     @Mock private Drawable mDrawable;
     @Mock private Tracker mTracker;
+    @Mock private Profile mProfile;
     @Mock TranslateBridge.Natives mMockTranslateBridge;
+    @Mock private PrefService mPrefService;
     @Mock private NativePage mNativePage;
 
     private UserActionTester mActionTester;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        mJniMocker.mock(TranslateBridgeJni.TEST_HOOKS, mMockTranslateBridge);
+        TranslateBridgeJni.setInstanceForTesting(mMockTranslateBridge);
         mActionTester = new UserActionTester();
 
+        UserPrefs.setPrefServiceForTesting(mPrefService);
+        when(mPrefService.getBoolean(Pref.OFFER_TRANSLATE_ENABLED)).thenReturn(true);
+        when(mTab.getProfile()).thenReturn(mProfile);
         when(mTab.getWebContents()).thenReturn(mWebContents);
         when(mTab.getUrl()).thenReturn(JUnitTestGURLs.EXAMPLE_URL);
     }
@@ -69,9 +80,9 @@ public class TranslateToolbarButtonControllerUnitTest {
                         () -> mTab, mDrawable, "Translate button description", () -> mTracker);
         ButtonData buttonData = translateToolbarButtonController.get(mTab);
 
-        Assert.assertTrue(buttonData.canShow());
-        Assert.assertTrue(buttonData.isEnabled());
-        Assert.assertNotNull(buttonData.getButtonSpec());
+        assertTrue(buttonData.canShow());
+        assertTrue(buttonData.isEnabled());
+        assertNotNull(buttonData.getButtonSpec());
     }
 
     @Test
@@ -81,7 +92,7 @@ public class TranslateToolbarButtonControllerUnitTest {
                         () -> mTab, mDrawable, "Translate button description", () -> mTracker);
         translateToolbarButtonController.onClick(null);
 
-        Assert.assertEquals(1, mActionTester.getActionCount("MobileTopToolbarTranslateButton"));
+        assertEquals(1, mActionTester.getActionCount("MobileTopToolbarTranslateButton"));
         verify(mTracker)
                 .notifyEvent(EventConstants.ADAPTIVE_TOOLBAR_CUSTOMIZATION_TRANSLATE_OPENED);
         verify(mMockTranslateBridge).manualTranslateWhenReady(mWebContents);
@@ -95,9 +106,9 @@ public class TranslateToolbarButtonControllerUnitTest {
                         () -> mTab, mDrawable, "Translate button description", () -> mTracker);
         ButtonData buttonData = translateToolbarButtonController.get(mTab);
 
-        Assert.assertFalse(buttonData.canShow());
-        Assert.assertTrue(buttonData.isEnabled());
-        Assert.assertNotNull(buttonData.getButtonSpec());
+        assertFalse(buttonData.canShow());
+        assertTrue(buttonData.isEnabled());
+        assertNotNull(buttonData.getButtonSpec());
     }
 
     @Test
@@ -111,8 +122,32 @@ public class TranslateToolbarButtonControllerUnitTest {
                         () -> mTab, mDrawable, "Translate button description", () -> mTracker);
         ButtonData buttonData = translateToolbarButtonController.get(mTab);
 
-        Assert.assertFalse(buttonData.canShow());
-        Assert.assertTrue(buttonData.isEnabled());
-        Assert.assertNotNull(buttonData.getButtonSpec());
+        assertFalse(buttonData.canShow());
+        assertTrue(buttonData.isEnabled());
+        assertNotNull(buttonData.getButtonSpec());
+    }
+
+    @Test
+    public void testShouldNotShowUpWhenDisabledByPolicy() {
+        when(mPrefService.isManagedPreference(Pref.OFFER_TRANSLATE_ENABLED)).thenReturn(true);
+        when(mPrefService.getBoolean(Pref.OFFER_TRANSLATE_ENABLED)).thenReturn(false);
+        TranslateToolbarButtonController translateToolbarButtonController =
+                new TranslateToolbarButtonController(
+                        () -> mTab, mDrawable, "Translate button description", () -> mTracker);
+        ButtonData buttonData = translateToolbarButtonController.get(mTab);
+
+        assertFalse(buttonData.canShow());
+    }
+
+    @Test
+    public void testShouldShowUpWhenDisabledByUser() {
+        when(mPrefService.isManagedPreference(Pref.OFFER_TRANSLATE_ENABLED)).thenReturn(false);
+        when(mPrefService.getBoolean(Pref.OFFER_TRANSLATE_ENABLED)).thenReturn(false);
+        TranslateToolbarButtonController translateToolbarButtonController =
+                new TranslateToolbarButtonController(
+                        () -> mTab, mDrawable, "Translate button description", () -> mTracker);
+        ButtonData buttonData = translateToolbarButtonController.get(mTab);
+
+        assertTrue(buttonData.canShow());
     }
 }

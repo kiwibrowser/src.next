@@ -8,9 +8,10 @@
 #include <string>
 
 #include "base/numerics/safe_conversions.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
@@ -19,27 +20,18 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/sharing_message/buildflags.h"
 #include "components/sharing_message/pref_names.h"
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#include "chrome/browser/win/installer_downloader/installer_downloader_pref_names.h"
+#endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
+#if !BUILDFLAG(IS_CHROMEOS)
 #include "ui/accessibility/accessibility_features.h"
 #endif
-
-namespace {
-
-uint32_t GetHomeAndForwardButtonAndHomePageIsNewTabPageFlags() {
-#if BUILDFLAG(IS_ANDROID)
-  return PrefRegistry::NO_REGISTRATION_FLAGS;
-#else
-  return user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
-#endif
-}
-
-}  // namespace
 
 void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAllowFileSelectionDialogs, true);
@@ -52,7 +44,22 @@ void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
           UpgradeDetector::GetDefaultHighAnnoyanceThreshold()
               .InMilliseconds()));
   registry->RegisterDictionaryPref(prefs::kRelaunchWindow);
+  registry->RegisterIntegerPref(prefs::kRelaunchFastIfOutdated, 0);
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  registry->RegisterIntegerPref(
+      installer_downloader::prefs::kInstallerDownloaderInfobarShowCount, 0);
+  registry->RegisterTimePref(
+      installer_downloader::prefs::kInstallerDownloaderInfobarLastShowTime,
+      base::Time());
+  registry->RegisterBooleanPref(
+      installer_downloader::prefs::kInstallerDownloaderPreventFutureDisplay,
+      false);
+  registry->RegisterBooleanPref(
+      installer_downloader::prefs::kInstallerDownloaderBypassEligibilityCheck,
+      false);
+#endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 #if BUILDFLAG(IS_MAC)
   registry->RegisterIntegerPref(
@@ -63,64 +70,105 @@ void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
 
   registry->RegisterBooleanPref(prefs::kHoverCardMemoryUsageEnabled, true);
 
+  registry->RegisterBooleanPref(
+      prefs::kHoverCardMemoryUsageDisableMigrationComplete, false);
+
 #if defined(USE_AURA)
   registry->RegisterBooleanPref(prefs::kOverscrollHistoryNavigationEnabled,
                                 true);
 #endif
+  registry->RegisterTimePref(prefs::kDefaultBrowserInfobarLastDeclinedTime,
+                             base::Time());
+  registry->RegisterIntegerPref(prefs::kDefaultBrowserInfobarDeclinedCount, 0);
   registry->RegisterTimePref(prefs::kDefaultBrowserLastDeclinedTime,
                              base::Time());
   registry->RegisterIntegerPref(prefs::kDefaultBrowserDeclinedCount, 0);
   registry->RegisterTimePref(prefs::kDefaultBrowserFirstShownTime,
                              base::Time());
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+  registry->RegisterTimePref(prefs::kPdfInfoBarLastShown, base::Time());
+  registry->RegisterIntegerPref(prefs::kPdfInfoBarTimesShown, 0);
+  registry->RegisterTimePref(prefs::kPinInfoBarLastShown, base::Time());
+  registry->RegisterIntegerPref(prefs::kPinInfoBarTimesShown, 0);
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-  registry->RegisterStringPref(prefs::kEnterpriseCustomLabel, std::string());
-  registry->RegisterStringPref(prefs::kEnterpriseLogoUrl, std::string());
+  registry->RegisterStringPref(prefs::kEnterpriseCustomLabelForBrowser,
+                               std::string());
+  registry->RegisterStringPref(prefs::kEnterpriseLogoUrlForBrowser,
+                               std::string());
+  registry->RegisterBooleanPref(prefs::kNTPFooterManagementNoticeEnabled, true);
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+#if !BUILDFLAG(IS_ANDROID)
+  registry->RegisterIntegerPref(prefs::kSplitViewDragAndDropNudgeShownCount, 0);
+  registry->RegisterIntegerPref(prefs::kSplitViewDragAndDropNudgeUsedCount, 0);
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kHomePageIsNewTabPage, true,
-      GetHomeAndForwardButtonAndHomePageIsNewTabPageFlags());
-  registry->RegisterBooleanPref(
-      prefs::kShowHomeButton, false,
-      GetHomeAndForwardButtonAndHomePageIsNewTabPageFlags());
+#if BUILDFLAG(IS_ANDROID)
+  const uint32_t pref_registration_flags = PrefRegistry::NO_REGISTRATION_FLAGS;
+#else
+  const uint32_t pref_registration_flags =
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
+#endif
 
-  registry->RegisterBooleanPref(
-      prefs::kShowForwardButton, true,
-      GetHomeAndForwardButtonAndHomePageIsNewTabPageFlags());
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+  registry->RegisterIntegerPref(prefs::kSessionRestoreInfoBarTimesShown, 0);
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 
-  registry->RegisterInt64Pref(prefs::kDefaultBrowserLastDeclined, 0);
+  registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                pref_registration_flags);
+  registry->RegisterBooleanPref(prefs::kShowHomeButton, false,
+                                pref_registration_flags);
+  registry->RegisterBooleanPref(prefs::kSplitViewDragAndDropEnabled, true,
+                                pref_registration_flags);
+
+  registry->RegisterBooleanPref(prefs::kShowForwardButton, true,
+                                pref_registration_flags);
+  registry->RegisterInt64Pref(prefs::kBookmarkBarHoverCount, 0);
+  registry->RegisterInt64Pref(prefs::kBookmarkBarNavigationCount, 0);
+  registry->RegisterTimePref(prefs::kBookmarkBarPreviousInitialRenderOnNtpTime,
+                             base::Time());
+  registry->RegisterIntegerPref(prefs::kBookmarkBarRenderedOnNtpCount, 0);
+  registry->RegisterBooleanPref(prefs::kPinContextualTaskButton, true,
+                                pref_registration_flags);
+  registry->RegisterBooleanPref(prefs::kPinSplitTabButton, false,
+                                pref_registration_flags);
+
   registry->RegisterBooleanPref(prefs::kWebAppCreateOnDesktop, true);
   registry->RegisterBooleanPref(prefs::kWebAppCreateInAppsMenu, true);
   registry->RegisterBooleanPref(prefs::kWebAppCreateInQuickLaunchBar, true);
   registry->RegisterBooleanPref(
       translate::prefs::kOfferTranslateEnabled, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterStringPref(prefs::kCloudPrintEmail, std::string());
-  registry->RegisterBooleanPref(prefs::kCloudPrintProxyEnabled, true);
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacement);
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacementPopup);
   registry->RegisterDictionaryPref(prefs::kAppWindowPlacement);
-#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_ANDROID)
+  registry->RegisterBooleanPref(
+      prefs::kEnableDoNotTrack, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
   registry->RegisterBooleanPref(prefs::kPrintPreviewUseSystemDefaultPrinter,
                                 false);
 #endif
   registry->RegisterStringPref(prefs::kWebRTCIPHandlingPolicy,
                                blink::kWebRTCIPHandlingDefault);
+  registry->RegisterListPref(prefs::kWebRTCIPHandlingUrl, base::ListValue());
+  registry->RegisterBooleanPref(prefs::kWebRTCPostQuantumKeyAgreement, false);
   registry->RegisterStringPref(prefs::kWebRTCUDPPortRange, std::string());
   registry->RegisterBooleanPref(prefs::kWebRtcEventLogCollectionAllowed, false);
   registry->RegisterListPref(prefs::kWebRtcLocalIpsAllowedUrls);
   registry->RegisterBooleanPref(prefs::kWebRtcTextLogCollectionAllowed, true);
+  registry->RegisterListPref(
+      prefs::kWebRTCDiagnosticLogCollectionAllowedForOrigins,
+      base::ListValue());
 
   // We need to register the type of these preferences in order to query
   // them even though they're only typically controlled via policy.
   registry->RegisterBooleanPref(policy::policy_prefs::kHideWebStoreIcon, false);
   registry->RegisterBooleanPref(prefs::kSharedClipboardEnabled, true);
 
-#if BUILDFLAG(ENABLE_CLICK_TO_CALL)
   registry->RegisterBooleanPref(prefs::kClickToCallEnabled, true);
-#endif  // BUILDFLAG(ENABLE_CLICK_TO_CALL)
 
 #if BUILDFLAG(IS_MAC)
   // This really belongs in platform code, but there's no good place to
@@ -157,12 +205,14 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(prefs::kTabCaptureAllowedByOrigins);
   registry->RegisterListPref(prefs::kSameOriginTabCaptureAllowedByOrigins);
 
-#if !BUILDFLAG(IS_ANDROID)
   registry->RegisterBooleanPref(prefs::kCaretBrowsingEnabled, false);
   registry->RegisterBooleanPref(prefs::kShowCaretBrowsingDialog, true);
+#if !BUILDFLAG(IS_ANDROID)
+  registry->RegisterBooleanPref(prefs::kNTPFooterExtensionAttributionEnabled,
+                                true);
 #endif
 
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
   registry->RegisterBooleanPref(prefs::kAccessibilityFocusHighlightEnabled,
                                 false);
 #endif
@@ -173,6 +223,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kHttpsFirstBalancedMode, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kHttpsFirstModeBundleToastQueued, false);
   registry->RegisterBooleanPref(
       prefs::kHttpsFirstModeIncognito, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
@@ -183,8 +234,6 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(prefs::kHttpsUpgradeNavigations);
   registry->RegisterBooleanPref(prefs::kHttpsOnlyModeAutoEnabled, false);
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-  registry->RegisterStringPref(prefs::kEnterpriseLogoUrl, std::string());
-  registry->RegisterStringPref(prefs::kEnterpriseCustomLabel, std::string());
   registry->RegisterStringPref(prefs::kEnterpriseLogoUrlForProfile,
                                std::string());
   registry->RegisterStringPref(prefs::kEnterpriseCustomLabelForProfile,

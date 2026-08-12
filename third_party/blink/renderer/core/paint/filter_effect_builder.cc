@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/paint/filter_effect_builder.h"
 
 #include <algorithm>
+
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_container.h"
 #include "third_party/blink/renderer/core/style/filter_operations.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
@@ -46,6 +47,7 @@
 #include "third_party/blink/renderer/platform/graphics/filters/source_graphic.h"
 #include "third_party/blink/renderer/platform/graphics/interpolation_space.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
@@ -131,10 +133,7 @@ FilterEffectBuilder::FilterEffectBuilder(const gfx::RectF& reference_box,
                                          const cc::PaintFlags* fill_flags,
                                          const cc::PaintFlags* stroke_flags)
     : reference_box_(reference_box),
-      viewport_(
-          RuntimeEnabledFeatures::SvgFilterUserSpaceViewportForNonSvgEnabled()
-              ? viewport
-              : std::nullopt),
+      viewport_(viewport),
       zoom_(zoom),
       shorthand_scale_(1),
       current_color_(current_color),
@@ -296,12 +295,14 @@ FilterEffect* FilterEffectBuilder::BuildFilterEffect(
             To<DropShadowFilterOperation>(*filter_operation).Shadow();
         const gfx::Vector2dF offset =
             gfx::ScaleVector2d(shadow.Offset(), shorthand_scale_);
-        gfx::PointF blur = gfx::ScalePoint(shadow.BlurXY(), shorthand_scale_);
+        // The blur values are stored in sigma form.
+        gfx::SizeF blur =
+            gfx::ScaleSize(shadow.BlurValueXY(), shorthand_scale_);
         effect = MakeGarbageCollected<FEDropShadow>(
-            parent_filter, blur.x(), blur.y(), offset.x(), offset.y(),
+            parent_filter, blur.width(), blur.height(), offset.x(), offset.y(),
             shadow.GetColor().Resolve(current_color_, color_scheme_),
             shadow.Opacity());
-        if (shadow.GetColor().IsCurrentColor()) {
+        if (filter_operation->UsesCurrentColor()) {
           effect->SetOriginTainted();
         }
         break;
@@ -378,8 +379,8 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
     switch (op->GetType()) {
       case FilterOperation::OperationType::kReference: {
         auto& reference_operation = To<ReferenceFilterOperation>(*op);
-        Filter* reference_filter =
-            BuildReferenceFilter(reference_operation, nullptr);
+        Filter* reference_filter = BuildReferenceFilter(
+            reference_operation, nullptr, nullptr, filters.OriginTainted());
         if (reference_filter && reference_filter->LastEffect()) {
           // Set the interpolation space for the source of the (sub)filter to
           // match that of the previous primitive (or input).
@@ -396,6 +397,9 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
           if (!paint_filter)
             continue;
           filters.AppendReferenceFilter(std::move(paint_filter));
+          if (filter_effect->OriginTainted()) {
+            filters.SetOriginTainted();
+          }
         }
         reference_operation.SetFilter(reference_filter);
         break;
@@ -460,7 +464,7 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
       }
       case FilterOperation::OperationType::kBlur: {
         float pixel_radius =
-            To<BlurFilterOperation>(*op).StdDeviation().GetFloatValue();
+            To<BlurFilterOperation>(*op).StdDeviation().Pixels();
         pixel_radius *= shorthand_scale_;
         filters.AppendBlurFilter(pixel_radius);
         break;
@@ -469,10 +473,14 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
         const ShadowData& shadow = To<DropShadowFilterOperation>(*op).Shadow();
         const gfx::Vector2d floored_offset = gfx::ToFlooredVector2d(
             gfx::ScaleVector2d(shadow.Offset(), shorthand_scale_));
-        float radius = shadow.Blur() * shorthand_scale_;
+        // The blur value is stored in sigma form.
+        float radius = shadow.BlurValue() * shorthand_scale_;
         filters.AppendDropShadowFilter(
             floored_offset, radius,
             shadow.GetColor().Resolve(current_color_, color_scheme_));
+        if (op->UsesCurrentColor()) {
+          filters.SetOriginTainted();
+        }
         break;
       }
       case FilterOperation::OperationType::kBoxReflect: {
@@ -506,7 +514,8 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
 Filter* FilterEffectBuilder::BuildReferenceFilter(
     const ReferenceFilterOperation& reference_operation,
     FilterEffect* previous_effect,
-    SVGFilterGraphNodeMap* node_map) const {
+    SVGFilterGraphNodeMap* node_map,
+    bool input_tainted) const {
   SVGResource* resource = reference_operation.Resource();
   auto* filter_element =
       DynamicTo<SVGFilterElement>(resource ? resource->Target() : nullptr);
@@ -537,19 +546,22 @@ Filter* FilterEffectBuilder::BuildReferenceFilter(
   // primitives since the behavior in these two cases (no primitives, empty
   // region) should match.
   if (filter_region.IsEmpty()) {
-    // TODO(fs): We rely on the presence of a node map here to opt-in to the
-    // check for an empty filter region. The reason for this is that we lack a
-    // viewport to resolve against for HTML content. This is crbug.com/512453.
-    if (viewport_ || node_map) {
-      return result;
-    }
+    return result;
+  }
+
+  if (input_tainted || (previous_effect && previous_effect->OriginTainted())) {
+    result->GetSourceGraphic()->SetOriginTainted();
   }
 
   if (!previous_effect)
     previous_effect = result->GetSourceGraphic();
   SVGFilterBuilder builder(previous_effect, node_map, fill_flags_,
                            stroke_flags_);
-  builder.BuildGraph(result, *filter_element, reference_box_);
+  builder.BuildGraph(
+      result, *filter_element, reference_box_,
+      RuntimeEnabledFeatures::SvgFilterUserSpaceViewportForSvgEnabled()
+          ? unzoomed_viewport
+          : std::nullopt);
   result->SetLastEffect(builder.LastEffect());
   return result;
 }

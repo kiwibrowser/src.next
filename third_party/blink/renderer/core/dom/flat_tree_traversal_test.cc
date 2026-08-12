@@ -2,13 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 
+#include <array>
 #include <memory>
 #include <string_view>
 
@@ -62,14 +58,14 @@ void FlatTreeTraversalTest::SetupSampleHTML(std::string_view main_html,
                                             std::string_view shadow_html,
                                             unsigned index) {
   Element* body = GetDocument().body();
-  body->setInnerHTML(String::FromUTF8(main_html));
+  body->SetInnerHTMLWithoutTrustedTypes(String::FromUtf8(main_html));
   auto* shadow_host = To<Element>(NodeTraversal::ChildAt(*body, index));
   AttachOpenShadowRoot(*shadow_host, shadow_html);
 }
 
 void FlatTreeTraversalTest::SetupDocumentTree(std::string_view main_html) {
   Element* body = GetDocument().body();
-  body->setInnerHTML(String::FromUTF8(main_html));
+  body->SetInnerHTMLWithoutTrustedTypes(String::FromUtf8(main_html));
 }
 
 void FlatTreeTraversalTest::AttachOpenShadowRoot(
@@ -77,7 +73,8 @@ void FlatTreeTraversalTest::AttachOpenShadowRoot(
     std::string_view shadow_inner_html) {
   ShadowRoot& shadow_root =
       shadow_host.AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML(String::FromUTF8(shadow_inner_html));
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(
+      String::FromUtf8(shadow_inner_html));
 }
 
 namespace {
@@ -130,7 +127,7 @@ TEST_F(FlatTreeTraversalTest, childAt) {
   Element* s04 = shadow_root->QuerySelector(AtomicString("#s04"));
 
   const unsigned kNumberOfChildNodes = 5;
-  Node* expected_child_nodes[5] = {s00, m01, s02, s03, s04};
+  std::array<Node*, 5> expected_child_nodes = {s00, m01, s02, s03, s04};
 
   ASSERT_EQ(kNumberOfChildNodes,
             FlatTreeTraversal::CountChildren(*shadow_host));
@@ -217,6 +214,35 @@ TEST_F(FlatTreeTraversalTest, DescendantsOf) {
               GatherFromTraversalRange(
                   FlatTreeTraversal::InclusiveDescendantsOf(*s03)));
   }
+}
+
+TEST_F(FlatTreeTraversalTest, IsInclusiveDescendantOf) {
+  const char* main_html =
+      "<div id='m0'>"
+      "<span slot='#m00' id='m00'>m00</span>"
+      "</div>";
+  const char* shadow_html =
+      "<a id='s00'>s00</a>"
+      "<slot name='#m00'></slot>";
+  SetupSampleHTML(main_html, shadow_html, 0);
+
+  Element* body = GetDocument().body();
+  Element* m0 = body->QuerySelector(AtomicString("#m0"));
+  ShadowRoot* shadow_root = m0->OpenShadowRoot();
+  Element* s00 = shadow_root->QuerySelector(AtomicString("#s00"));
+
+  // Inclusive: node == other.
+  EXPECT_TRUE(FlatTreeTraversal::IsInclusiveDescendantOf(*m0, *m0));
+
+  // Descendant: child is a descendant of ancestor.
+  EXPECT_TRUE(FlatTreeTraversal::IsInclusiveDescendantOf(*s00, *m0));
+
+  // Non-descendant: ancestor is not a descendant of child.
+  EXPECT_FALSE(FlatTreeTraversal::IsInclusiveDescendantOf(*m0, *s00));
+
+  // Different siblings are not inclusive descendants of each other.
+  Element* m00 = m0->QuerySelector(AtomicString("#m00"));
+  EXPECT_FALSE(FlatTreeTraversal::IsInclusiveDescendantOf(*s00, *m00));
 }
 
 TEST_F(FlatTreeTraversalTest, StartsAtOrAfter) {

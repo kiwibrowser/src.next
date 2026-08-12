@@ -8,12 +8,15 @@
 #include <utility>
 #include <vector>
 
+#include "base/check_is_test.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
+#include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
+#include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/task/thread_pool.h"
 #include "base/unguessable_token.h"
@@ -26,11 +29,13 @@
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/l10n_file_util.h"
 #include "extensions/browser/network_permissions_updater.h"
 #include "extensions/browser/service_worker/service_worker_task_queue.h"
+#include "extensions/browser/user_script_manager.h"
 #include "extensions/browser/user_script_world_configuration_manager.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -44,8 +49,10 @@
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/message_bundle.h"
+#include "extensions/common/mojom/renderer.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "ipc/ipc_channel_proxy.h"
+#include "third_party/blink/public/common/features.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/origin.h"
 
@@ -57,6 +64,41 @@
 namespace extensions {
 
 namespace {
+
+#if BUILDFLAG(IS_CHROMEOS)
+std::string GetFeatureSessionTypeAsString() {
+  switch (GetCurrentFeatureSessionType()) {
+    case mojom::FeatureSessionType::kInitial:
+      return "Initial";
+    case mojom::FeatureSessionType::kUnknown:
+      return "Unknown";
+    case mojom::FeatureSessionType::kRegular:
+      return "Regular";
+    case mojom::FeatureSessionType::kKiosk:
+      return "Kiosk";
+    case mojom::FeatureSessionType::kAutolaunchedKiosk:
+      return "Auto-launched kiosk";
+  }
+}
+
+void ReportActivationTokenError(content::BrowserContext* browser_context,
+                                const Extension& extension,
+                                const char* error_message) {
+  std::ostringstream error_stream;
+  error_stream << error_message << " "
+               << "Extension ID: " << extension.id()
+               << ". Session type: " << GetFeatureSessionTypeAsString()
+               << ". Is guest session: "
+               << ExtensionsBrowserClient::Get()->IsGuestSession(
+                      browser_context);
+  LOG(ERROR) << error_stream.str();
+  static auto* const crash_key = base::debug::AllocateCrashKeyString(
+      "GetActivationTokenForWorkerBasedExtension",
+      base::debug::CrashKeySize::Size1024);
+  base::debug::SetCrashKeyString(crash_key, error_stream.str());
+  base::debug::DumpWithoutCrashing();
+}
+#endif
 
 // Gets the current activation token for `extension`.
 std::optional<base::UnguessableToken> GetActivationTokenForWorkerBasedExtension(
@@ -76,13 +118,35 @@ std::optional<base::UnguessableToken> GetActivationTokenForWorkerBasedExtension(
   // For the off the record profile...
   if (browser_context->IsOffTheRecord()) {
     if (IncognitoInfo::IsSplitMode(&extension)) {
+#if BUILDFLAG(IS_CHROMEOS)
+      if (!activation_token.has_value()) {
+        // TODO(crbug.com/442902361): Remove crash logging once activation
+        // token issue has been fixed.
+        ReportActivationTokenError(
+            browser_context, extension,
+            "Off-the-record extension running in split mode is "
+            "missing an activation token.");
+      }
+#else
       // Split mode extensions will have a separate activation token.
       CHECK(activation_token.has_value());
       // TODO(crbug.com/357889496): Add a test that confirms that split mode
       // tokens are different across the OnTR and OffTR extension processes.
+#endif
     } else if (IncognitoInfo::IsSpanningMode(&extension)) {
+#if BUILDFLAG(IS_CHROMEOS)
+      if (activation_token.has_value()) {
+        // TODO(crbug.com/442902361): Remove crash logging once activation
+        // token issue has been fixed.
+        ReportActivationTokenError(
+            browser_context, extension,
+            "Off-the-record extension running in spanning mode "
+            "incorrectly has an activation token.");
+      }
+#else
       // Spanning mode extensions will not have a separate activation token.
       CHECK(!activation_token.has_value());
+#endif
     }
   }
 
@@ -122,6 +186,17 @@ mojom::ExtensionLoadedParamsPtr CreateExtensionLoadedParams(
     }
   }
 
+  // TODO(crbug.com/390138269): Optimize by only setting the value for the
+  // process(es) that host an extension that can use the userScripts API.
+  UserScriptManager* user_script_manager =
+      ExtensionSystem::Get(browser_context)->user_script_manager();
+  if (!user_script_manager) {
+    CHECK_IS_TEST();
+  }
+  bool user_scripts_allowed =
+      user_script_manager &&
+      user_script_manager->AreUserScriptsAllowed(extension);
+
   return mojom::ExtensionLoadedParams::New(
       extension.manifest()->value()->Clone(), extension.location(),
       extension.path(),
@@ -130,7 +205,8 @@ mojom::ExtensionLoadedParamsPtr CreateExtensionLoadedParams(
       std::move(tab_specific_permissions),
       permissions_data->policy_blocked_hosts(),
       permissions_data->policy_allowed_hosts(),
-      permissions_data->UsesDefaultPolicyHostRestrictions(), extension.id(),
+      permissions_data->UsesDefaultPolicyHostRestrictions(),
+      user_scripts_allowed, extension.id(),
       GetWorkerActivationToken(browser_context, extension),
       extension.creation_flags(), extension.guid());
 }
@@ -154,6 +230,64 @@ RendererStartupHelper::~RendererStartupHelper() {
 
 void RendererStartupHelper::OnRenderProcessHostCreated(
     content::RenderProcessHost* host) {
+#if !BUILDFLAG(IS_ANDROID)
+  if (host->IsForTopChromeWebUI() &&
+      base::FeatureList::IsEnabled(
+          blink::features::kInitialWebUIWithoutExtensions)) {
+    // We initialize extension for topchrome processes on DidStartNavigation or
+    // ReadyToCommitNavigation.
+    return;
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+  if (host->IsForGuestsOnly()) {
+    // GuestView initialization is done in OnRenderProcessLaunched()
+    // instead, because WebViewRendererState set up is not yet done at this
+    // point.
+    return;
+  }
+  InitializeProcess(host);
+}
+
+void RendererStartupHelper::OnRenderProcessLaunched(
+    content::RenderProcessHost* host) {
+#if !BUILDFLAG(IS_ANDROID)
+  if (host->IsForTopChromeWebUI() &&
+      base::FeatureList::IsEnabled(
+          blink::features::kInitialWebUIWithoutExtensions)) {
+    // We initialize extension for topchrome processes on DidStartNavigation or
+    // ReadyToCommitNavigation.
+    return;
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+  if (!host->IsForGuestsOnly()) {
+    // Any process that *isn't* for guests or an initial WebUI with disabled
+    // extensions should have already been initialized in
+    // OnRenderProcessHostCreated(), if it corresponds to the same context.
+    ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+    // On Android and ChromeOS, handle race condition during process restart:
+    // 1. OnRenderProcessHostCreated() initializes extensions and populates
+    // process_mojo_map_.
+    // 2. Process startup fails in some cases.
+    // 3. RenderProcessExited() clears process_mojo_map_ via UntrackProcess().
+    // 4. The process is reused and OnRenderProcessLaunched() is still called.
+    //
+    // Re-register the process to restore Mojo communication without
+    // re-initializing extensions to avoid duplicate loading.
+    if (GetRenderer(host) == nullptr &&
+        client->IsSameContext(browser_context_, host->GetBrowserContext())) {
+      RegisterProcess(host);
+    }
+#else
+    CHECK(GetRenderer(host) != nullptr ||
+          !client->IsSameContext(browser_context_, host->GetBrowserContext()));
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+    return;
+  }
+  // Otherwise, we should *not* have initialized the host yet.
+  CHECK_EQ(nullptr, GetRenderer(host));
   InitializeProcess(host);
 }
 
@@ -168,17 +302,27 @@ void RendererStartupHelper::RenderProcessHostDestroyed(
   UntrackProcess(host);
 }
 
+void RendererStartupHelper::RegisterProcess(
+    content::RenderProcessHost* process) {
+  process_mojo_map_.emplace(process, BindNewRendererRemote(process));
+  process->AddObserver(this);
+}
+
 void RendererStartupHelper::InitializeProcess(
     content::RenderProcessHost* process) {
+  // If the process is already initialized, we're done.
+  if (process_mojo_map_.contains(process)) {
+    return;
+  }
+
   ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
   if (!client->IsSameContext(browser_context_, process->GetBrowserContext())) {
     return;
   }
 
-  mojom::Renderer* renderer =
-      process_mojo_map_.emplace(process, BindNewRendererRemote(process))
-          .first->second.get();
-  process->AddObserver(this);
+  // Otherwise, initialize the process.
+  RegisterProcess(process);
+  mojom::Renderer* renderer = GetRenderer(process);
 
   bool activity_logging_enabled =
       client->IsActivityLoggingEnabled(process->GetBrowserContext());
@@ -188,6 +332,12 @@ void RendererStartupHelper::InitializeProcess(
     renderer->SetActivityLoggingEnabled(activity_logging_enabled);
   }
 
+  bool telemetry_logging_enabled =
+      client->IsTelemetryLoggingEnabled(process->GetBrowserContext());
+  if (telemetry_logging_enabled) {
+    renderer->SetPolicyActivityLoggingEnabled(telemetry_logging_enabled);
+  }
+
   // extensions need to know the developer mode value for api restrictions.
   renderer->SetDeveloperMode(
       GetCurrentDeveloperMode(util::GetBrowserContextId(browser_context_)));
@@ -195,10 +345,7 @@ void RendererStartupHelper::InitializeProcess(
   // Extensions need to know the channel and the session type for API
   // restrictions. The values are sent to all renderers, as the non-extension
   // renderers may have content scripts.
-  bool is_lock_screen_context =
-      client->IsLockScreenContext(process->GetBrowserContext());
-  renderer->SetSessionInfo(GetCurrentChannel(), GetCurrentFeatureSessionType(),
-                           is_lock_screen_context);
+  renderer->SetSessionInfo(GetCurrentChannel(), GetCurrentFeatureSessionType());
 
   // Platform apps need to know the system font.
   // TODO(dbeam): this is not the system font in all cases.
@@ -212,7 +359,8 @@ void RendererStartupHelper::InitializeProcess(
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
   // If the new render process is a WebView guest process, propagate the WebView
   // partition ID to it.
-  if (WebViewRendererState::GetInstance()->IsGuest(process->GetID())) {
+  if (WebViewRendererState::GetInstance()->IsGuest(
+          process->GetDeprecatedID())) {
     std::string webview_partition_id = WebViewGuest::GetPartitionID(process);
     renderer->SetWebViewPartitionID(webview_partition_id);
   }
@@ -237,8 +385,8 @@ void RendererStartupHelper::InitializeProcess(
       ExtensionRegistry::Get(browser_context_)->enabled_extensions();
   for (const auto& ext : extensions) {
     // OnExtensionLoaded should have already been called for the extension.
-    DCHECK(base::Contains(extension_process_map_, ext->id()));
-    DCHECK(!base::Contains(extension_process_map_[ext->id()], process));
+    DCHECK(extension_process_map_.contains(ext->id()));
+    DCHECK(!extension_process_map_[ext->id()].contains(process));
 
     if (!util::IsExtensionVisibleToContext(*ext, renderer_context)) {
       continue;
@@ -266,8 +414,8 @@ void RendererStartupHelper::InitializeProcess(
     for (const ExtensionId& id : iter->second) {
       // The extension should be loaded in the process.
       DCHECK(extensions.Contains(id));
-      DCHECK(base::Contains(extension_process_map_, id));
-      DCHECK(base::Contains(extension_process_map_[id], process));
+      DCHECK(extension_process_map_.contains(id));
+      DCHECK(extension_process_map_[id].contains(process));
       renderer->ActivateExtension(id);
     }
   }
@@ -293,8 +441,8 @@ void RendererStartupHelper::ActivateExtensionInProcess(
     const Extension& extension,
     content::RenderProcessHost* process) {
   // The extension should have been loaded already. Dump without crashing to
-  // debug crbug.com/528026.
-  if (!base::Contains(extension_process_map_, extension.id())) {
+  // debug crbug.com/40434302.
+  if (!extension_process_map_.contains(extension.id())) {
     DUMP_WILL_BE_NOTREACHED()
         << "Extension " << extension.id() << " activated before loading";
     return;
@@ -325,7 +473,7 @@ void RendererStartupHelper::ActivateExtensionInProcess(
 
   auto remote = process_mojo_map_.find(process);
   if (remote != process_mojo_map_.end()) {
-    DCHECK(base::Contains(extension_process_map_[extension.id()], process));
+    DCHECK(extension_process_map_[extension.id()].contains(process));
     remote->second->ActivateExtension(extension.id());
   } else {
     pending_active_extensions_[process].insert(extension.id());
@@ -333,7 +481,7 @@ void RendererStartupHelper::ActivateExtensionInProcess(
 }
 
 void RendererStartupHelper::OnExtensionLoaded(const Extension& extension) {
-  DCHECK(!base::Contains(extension_process_map_, extension.id()));
+  DCHECK(!extension_process_map_.contains(extension.id()));
 
   // Mark the extension as loaded.
   std::set<raw_ptr<content::RenderProcessHost, SetExperimental>>&
@@ -369,7 +517,7 @@ void RendererStartupHelper::OnExtensionLoaded(const Extension& extension) {
 }
 
 void RendererStartupHelper::OnExtensionUnloaded(const Extension& extension) {
-  DCHECK(base::Contains(extension_process_map_, extension.id()));
+  DCHECK(extension_process_map_.contains(extension.id()));
 
   const std::set<raw_ptr<content::RenderProcessHost, SetExperimental>>&
       loaded_process_set = extension_process_map_[extension.id()];
@@ -401,13 +549,21 @@ void RendererStartupHelper::OnDeveloperModeChanged(bool in_developer_mode) {
   }
 }
 
+void RendererStartupHelper::OnUserScriptsAllowedChanged(
+    const ExtensionId& extension_id,
+    bool allowed) {
+  for (auto& process_entry : process_mojo_map_) {
+    content::RenderProcessHost* process = process_entry.first;
+    mojom::Renderer* renderer = GetRenderer(process);
+    if (renderer) {
+      renderer->SetUserScriptsAllowed(extension_id, allowed);
+    }
+  }
+}
+
 void RendererStartupHelper::SetUserScriptWorldProperties(
     const Extension& extension,
-    std::optional<std::string> world_id,
-    std::optional<std::string> csp,
-    bool enable_messaging) {
-  mojom::UserScriptWorldInfoPtr info = mojom::UserScriptWorldInfo::New(
-      extension.id(), std::move(world_id), std::move(csp), enable_messaging);
+    mojom::UserScriptWorldInfoPtr world_info) {
   for (auto& process_entry : process_mojo_map_) {
     content::RenderProcessHost* process = process_entry.first;
     mojom::Renderer* renderer = GetRenderer(process);
@@ -421,7 +577,7 @@ void RendererStartupHelper::SetUserScriptWorldProperties(
     }
 
     std::vector<mojom::UserScriptWorldInfoPtr> worlds_info;
-    worlds_info.push_back(info.Clone());
+    worlds_info.push_back(world_info.Clone());
     renderer->UpdateUserScriptWorlds(std::move(worlds_info));
   }
 }
@@ -459,6 +615,7 @@ mojom::Renderer* RendererStartupHelper::GetRenderer(
   if (it == process_mojo_map_.end()) {
     return nullptr;
   }
+
   return it->second.get();
 }
 
@@ -474,9 +631,9 @@ BrowserContext* RendererStartupHelper::GetRendererBrowserContext() {
 }
 
 void RendererStartupHelper::AddAPIActionToActivityLog(
-    const ExtensionId& extension_id,
+    const std::optional<ExtensionId>& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const std::string& extra) {
   auto* browser_context = GetRendererBrowserContext();
   if (!browser_context) {
@@ -484,13 +641,14 @@ void RendererStartupHelper::AddAPIActionToActivityLog(
   }
 
   ExtensionsBrowserClient::Get()->AddAPIActionToActivityLog(
-      browser_context, extension_id, call_name, std::move(args), extra);
+      browser_context, extension_id.value_or(base::EmptyString()), call_name,
+      std::move(args), extra);
 }
 
 void RendererStartupHelper::AddEventToActivityLog(
-    const ExtensionId& extension_id,
+    const std::optional<ExtensionId>& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const std::string& extra) {
   auto* browser_context = GetRendererBrowserContext();
   if (!browser_context) {
@@ -498,13 +656,14 @@ void RendererStartupHelper::AddEventToActivityLog(
   }
 
   ExtensionsBrowserClient::Get()->AddEventToActivityLog(
-      browser_context, extension_id, call_name, std::move(args), extra);
+      browser_context, extension_id.value_or(base::EmptyString()), call_name,
+      std::move(args), extra);
 }
 
 void RendererStartupHelper::AddDOMActionToActivityLog(
     const ExtensionId& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const GURL& url,
     const std::u16string& url_title,
     int32_t call_type) {
@@ -520,7 +679,7 @@ void RendererStartupHelper::AddDOMActionToActivityLog(
 
 // static
 void RendererStartupHelper::BindForRenderer(
-    int process_id,
+    content::ChildProcessId process_id,
     mojo::PendingAssociatedReceiver<mojom::RendererHost> receiver) {
   auto* host = content::RenderProcessHost::FromID(process_id);
   if (!host) {
@@ -532,6 +691,12 @@ void RendererStartupHelper::BindForRenderer(
           host->GetBrowserContext());
   renderer_startup_helper->receivers_.Add(renderer_startup_helper,
                                           std::move(receiver), process_id);
+}
+
+void RendererStartupHelper::FlushAllForTesting() {
+  for (auto& it : process_mojo_map_) {
+    it.second.FlushForTesting();  // IN-TEST
+  }
 }
 
 void RendererStartupHelper::GetMessageBundle(
@@ -612,7 +777,8 @@ RendererStartupHelper* RendererStartupHelperFactory::GetForBrowserContext(
 
 // static
 RendererStartupHelperFactory* RendererStartupHelperFactory::GetInstance() {
-  return base::Singleton<RendererStartupHelperFactory>::get();
+  static base::NoDestructor<RendererStartupHelperFactory> instance;
+  return instance.get();
 }
 
 RendererStartupHelperFactory::RendererStartupHelperFactory()

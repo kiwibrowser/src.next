@@ -35,7 +35,7 @@
     LegacyNoInterfaceObject,
     RuntimeEnabled=PagePopup
 ] interface PagePopupController {
-    void setValueAndClosePopup(long numberValue, DOMString stringValue);
+    void setValueAndClosePopup(long numberValue, DOMString stringValue, boolean is_keyboard_event);
     void setValue(DOMString value);
     void closePopup();
     DOMString localizeNumberString(DOMString numberString);
@@ -47,4 +47,5 @@
     // positioned on other screens.
     void setWindowRect(long x, long y,long width, long height);
     void setMenuListOptionsBoundsInAXTree(sequence<DOMRect> options_bounds, boolean children_updated);
+    void debugLog(DOMString message);
 };

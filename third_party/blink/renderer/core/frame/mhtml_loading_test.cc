@@ -80,7 +80,7 @@ class MHTMLLoadingTest : public testing::Test {
 
   void LoadURLInTopFrame(const WebURL& url, const std::string& file_name) {
     std::optional<Vector<char>> data = test::ReadFromFile(
-        test::CoreTestDataPath(WebString::FromUTF8("mhtml/" + file_name)));
+        test::CoreTestDataPath(WebString::FromUtf8("mhtml/" + file_name)));
     ASSERT_TRUE(data);
     scoped_refptr<SharedBuffer> buffer = SharedBuffer::Create(std::move(*data));
     WebLocalFrameImpl* frame = helper_.GetWebView()->MainFrameImpl();
@@ -97,6 +97,12 @@ class MHTMLLoadingTest : public testing::Test {
     params->policy_container->policies.sandbox_flags = kMhtmlSandboxFlags;
     params->body_loader =
         StaticDataNavigationBodyLoader::CreateWithData(std::move(buffer));
+    if ((params->policy_container->policies.sandbox_flags &
+         network::mojom::blink::WebSandboxFlags::kOrigin) !=
+        network::mojom::blink::WebSandboxFlags::kNone) {
+      params->origin_to_commit =
+          SecurityOrigin::Create(url)->DeriveNewOpaqueOrigin();
+    }
     frame->CommitNavigation(std::move(params), nullptr /* extra_data */);
     frame_test_helpers::PumpPendingRequestsForFrameToLoad(frame);
   }

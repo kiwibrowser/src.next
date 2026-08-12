@@ -142,6 +142,14 @@ double CSSLengthResolver::ContainerMaxPercent() const {
   return std::max(ContainerWidthPercent(), ContainerHeightPercent());
 }
 
+DefaultAnchorData CSSLengthResolver::GetDefaultAnchorData() const {
+  using Holder = DisallowNewWrapper<StylePositionAnchor>;
+  DEFINE_STATIC_LOCAL(Persistent<Holder>, empty,
+                      (MakeGarbageCollected<Holder>(StylePositionAnchor(
+                          StylePositionAnchor::Initial()))));
+  return DefaultAnchorData(empty->Value(), PositionArea());
+}
+
 double CSSLengthResolver::ZoomedComputedPixels(
     double value,
     CSSPrimitiveValue::UnitType type) const {

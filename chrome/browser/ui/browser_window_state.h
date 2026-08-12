@@ -17,7 +17,6 @@ class Browser;
 
 namespace base {
 class CommandLine;
-class Value;
 }  // namespace base
 
 namespace gfx {
@@ -38,13 +37,13 @@ std::string GetWindowName(const Browser* browser);
 // dict. The returned dictionary may only be accessed while it's alive.
 // ScopedDictPrefUpdate::Get() may not match the returned reference, but rather
 // be an ancestor of it, so it should not be used directly.
-base::Value::Dict& GetWindowPlacementDictionaryReadWrite(
+base::DictValue& GetWindowPlacementDictionaryReadWrite(
     const std::string& window_name,
     PrefService* prefs,
     std::unique_ptr<ScopedDictPrefUpdate>& scoped_pref_update);
 // Returns NULL if the window corresponds to an app that doesn't have placement
 // information stored in the preferences system.
-const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(
+const base::DictValue* GetWindowPlacementDictionaryReadOnly(
     const std::string& window_name,
     PrefService* prefs);
 
@@ -54,13 +53,13 @@ bool ShouldSaveWindowPlacement(const Browser* browser);
 // bounds of the content area, not the whole window.
 bool SavedBoundsAreContentBounds(const Browser* browser);
 
-void SaveWindowPlacement(const Browser* browser,
+void SaveWindowPlacement(Browser* browser,
                          const gfx::Rect& bounds,
                          ui::mojom::WindowShowState show_state);
 
-void SaveWindowWorkspace(const Browser* browser, const std::string& workspace);
+void SaveWindowWorkspace(Browser* browser, const std::string& workspace);
 
-void SaveWindowVisibleOnAllWorkspaces(const Browser* browser,
+void SaveWindowVisibleOnAllWorkspaces(Browser* browser,
                                       bool visible_on_all_workspaces);
 
 // Return the |bounds| for the browser window to be used upon creation.

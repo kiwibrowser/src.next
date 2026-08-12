@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 
 
 /**
@@ -10,7 +10,7 @@ import {assert} from 'chrome://resources/js/assert.js';
  * Note: This must remain in sync with the page ids in manager.html!
  */
 export enum Page {
-  LIST = 'items-list',
+  LIST = 'itemsList',
   DETAILS = 'details-view',
   ACTIVITY_LOG = 'activity-log',
   SITE_PERMISSIONS = 'site-permissions',
@@ -209,6 +209,8 @@ export class NavigationHelper {
       case Page.ERRORS:
         path = '/?errors=' + entry.extensionId;
         break;
+      default:
+        assertNotReachedCase(entry.page);
     }
     assert(path);
     const state = {url: path};

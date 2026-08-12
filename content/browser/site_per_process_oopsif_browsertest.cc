@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/navigation_entry_restore_context_impl.h"
 #include "content/browser/site_per_process_browsertest.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/content_navigation_policy.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
@@ -411,7 +414,8 @@ IN_PROC_BROWSER_TEST_P(OriginKeyedProcessIsolatedSandboxedIframeTest,
                        DataUrlLoadsWithoutCrashing) {
   bool origin_keyed_processes_by_default_enabled = GetParam();
   EXPECT_EQ(origin_keyed_processes_by_default_enabled,
-            SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault());
+            SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+                shell()->web_contents()->GetBrowserContext()));
   GURL main_url(https_server()->GetURL("foo.a.com", "/title1.html"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
@@ -442,10 +446,17 @@ IN_PROC_BROWSER_TEST_P(OriginKeyedProcessIsolatedSandboxedIframeTest,
   GURL expected_root_site_url = origin_keyed_processes_by_default_enabled
                                     ? url::Origin::Create(main_url).GetURL()
                                     : GURL("https://a.com/");
-  EXPECT_EQ(origin_keyed_processes_by_default_enabled,
-            root_site_info.requires_origin_keyed_process());
+  if (origin_keyed_processes_by_default_enabled) {
+    EXPECT_TRUE(root_site_info.agent_cluster_key().IsOriginKeyed());
+    EXPECT_EQ(AgentClusterKey::OACStatus::kOriginKeyedByDefault,
+              root_site_info.oac_status());
+  } else {
+    EXPECT_FALSE(root_site_info.agent_cluster_key().IsOriginKeyed());
+    EXPECT_EQ(AgentClusterKey::OACStatus::kSiteKeyedByDefault,
+              root_site_info.oac_status());
+  }
   EXPECT_EQ(expected_root_site_url, root_site_info.site_url());
-  EXPECT_FALSE(root_site_info.is_sandboxed());
+  EXPECT_FALSE(root_site_info.IsSandboxed());
 
   // Note: unless IsolateSandboxedIframes is disabled, we expect the sandboxed
   // data-url frame to still have the full origin, since that is what the
@@ -455,12 +466,67 @@ IN_PROC_BROWSER_TEST_P(OriginKeyedProcessIsolatedSandboxedIframeTest,
        SiteIsolationPolicy::AreIsolatedSandboxedIframesEnabled())
           ? url::Origin::Create(main_url).GetURL()
           : GURL("https://a.com/");
-  EXPECT_EQ(origin_keyed_processes_by_default_enabled,
-            child_site_info.requires_origin_keyed_process());
+  if (origin_keyed_processes_by_default_enabled) {
+    EXPECT_TRUE(child_site_info.agent_cluster_key().IsOriginKeyed());
+    EXPECT_EQ(AgentClusterKey::OACStatus::kOriginKeyedByDefault,
+              root_site_info.oac_status());
+  } else {
+    EXPECT_FALSE(child_site_info.agent_cluster_key().IsOriginKeyed());
+    EXPECT_EQ(AgentClusterKey::OACStatus::kSiteKeyedByDefault,
+              root_site_info.oac_status());
+  }
   EXPECT_EQ(expected_child_site_url, child_site_info.site_url());
-  EXPECT_TRUE(child_site_info.is_sandboxed());
+  EXPECT_TRUE(child_site_info.IsSandboxed());
 }
 
+IN_PROC_BROWSER_TEST_P(OriginKeyedProcessIsolatedSandboxedIframeTest,
+                       DataUrlLoadsInFileURL) {
+  bool origin_keyed_processes_by_default_enabled = GetParam();
+  EXPECT_EQ(origin_keyed_processes_by_default_enabled,
+            SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+                shell()->web_contents()->GetBrowserContext()));
+  GURL main_url(GetTestUrl("", "title1.html"));
+  ASSERT_TRUE(main_url.SchemeIsFile());
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // Create sandboxed srcdoc child frame.
+  TestNavigationObserver iframe_observer(shell()->web_contents());
+  EXPECT_TRUE(ExecJs(shell(),
+                     "var frame = document.createElement('iframe'); "
+                     "frame.sandbox = ''; "
+                     "frame.src = 'data:text/html,foo'; "
+                     "document.body.appendChild(frame);"));
+  iframe_observer.Wait();
+  EXPECT_TRUE(iframe_observer.last_navigation_succeeded());
+
+  // Check frame-tree.
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
+  ASSERT_EQ(1U, root->child_count());
+  FrameTreeNode* child = root->child_at(0);
+  EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
+            child->current_frame_host()->active_sandbox_flags());
+  EXPECT_NE(root->current_frame_host()->GetSiteInstance(),
+            child->current_frame_host()->GetSiteInstance());
+
+  const SiteInfo& root_site_info =
+      root->current_frame_host()->GetSiteInstance()->GetSiteInfo();
+  const SiteInfo& child_site_info =
+      child->current_frame_host()->GetSiteInstance()->GetSiteInfo();
+
+  GURL expected_root_site_url = GURL("file:///");
+  EXPECT_FALSE(root_site_info.agent_cluster_key().IsOriginKeyed());
+  EXPECT_EQ(AgentClusterKey::OACStatus::kSiteKeyedByDefault,
+            root_site_info.oac_status());
+  EXPECT_EQ(expected_root_site_url, root_site_info.site_url());
+  EXPECT_FALSE(root_site_info.IsSandboxed());
+
+  GURL expected_child_site_url = GURL("file:///");
+  EXPECT_FALSE(child_site_info.agent_cluster_key().IsOriginKeyed());
+  EXPECT_EQ(AgentClusterKey::OACStatus::kSiteKeyedByDefault,
+            root_site_info.oac_status());
+  EXPECT_EQ(expected_child_site_url, child_site_info.site_url());
+  EXPECT_TRUE(child_site_info.IsSandboxed());
+}
 // Test that a srcdoc iframe that receives its sandbox flags from the CSP
 // attribute also gets process isolation. This test starts the same as
 // SitePerProcessNotIsolatedSandboxedIframeTest.SrcdocSandboxFlagsCheck, but in
@@ -489,12 +555,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // A test to verify that an iframe that is sandboxed using the 'csp' attribute
@@ -525,12 +591,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // A test to verify that an iframe with a fully-restrictive sandbox is rendered
@@ -565,12 +631,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // A test to verify that postMessages sent to/from sandboxed frames get
@@ -616,12 +682,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest, PostMessage) {
             child2->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child1->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_TRUE(child2->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
 
   // Verify that postMessage works between same-site sandboxed child and its
   // parent.
@@ -689,8 +755,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
   auto* parent_site_instance = root->current_frame_host()->GetSiteInstance();
   auto* child_site_instance = child->current_frame_host()->GetSiteInstance();
   EXPECT_NE(parent_site_instance, child_site_instance);
-  EXPECT_TRUE(child_site_instance->GetSiteInfo().is_sandboxed());
-  EXPECT_FALSE(parent_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
+  EXPECT_FALSE(parent_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_EQ(embedded_test_server()->GetURL("sub.a.com", "/"),
             child_site_instance->GetSiteInfo().site_url());
   EXPECT_EQ(GURL("http://a.com/"),
@@ -743,7 +809,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
   FrameTreeNode* grand_child = child->child_at(0);
   auto* grand_child_site_instance =
       grand_child->current_frame_host()->GetSiteInstance();
-  EXPECT_TRUE(grand_child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(grand_child_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_EQ(embedded_test_server()->GetURL("a.foo.com", "/"),
             grand_child_site_instance->GetSiteInfo().site_url());
   EXPECT_EQ(main_url, GetFrameBaseUrl(grand_child->current_frame_host()));
@@ -789,8 +855,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
       sibling->current_frame_host()->GetSiteInstance();
   auto* child_site_instance = child->current_frame_host()->GetSiteInstance();
   EXPECT_NE(sibling_site_instance, child_site_instance);
-  EXPECT_TRUE(child_site_instance->GetSiteInfo().is_sandboxed());
-  EXPECT_FALSE(sibling_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
+  EXPECT_FALSE(sibling_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_EQ(embedded_test_server()->GetURL("b.foo.com", "/"),
             child_site_instance->GetSiteInfo().site_url());
   EXPECT_EQ(GURL("http://foo.com/"),
@@ -840,12 +906,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
             child1->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child1->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   FrameTreeNode* child2 = root->child_at(1);  // sub.a.com
   EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
@@ -854,8 +920,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
             child2->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child2->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   // This is the key result for this test: the sandboxed iframes for 'a.com' and
   // 'sub.a.com' should be in different SiteInstances.
   auto* child1_site_instance1 = child1->current_frame_host()->GetSiteInstance();
@@ -900,8 +966,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
   scoped_refptr<SiteInstanceImpl> site_instance1 =
       child->current_frame_host()->GetSiteInstance();
   EXPECT_NE(site_instance_root, site_instance1);
-  EXPECT_TRUE(site_instance1->GetSiteInfo().is_sandboxed());
-  EXPECT_FALSE(site_instance_root->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(site_instance1->GetSecurityPrincipal().IsSandboxed());
+  EXPECT_FALSE(site_instance_root->GetSecurityPrincipal().IsSandboxed());
 
   // Navigate sandboxed frame cross-origin to b.foo.com.
   EXPECT_TRUE(NavigateIframeToURL(
@@ -912,7 +978,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
       child->current_frame_host()->GetSiteInstance();
   EXPECT_NE(site_instance_root, site_instance2);
   EXPECT_NE(site_instance1, site_instance2);
-  EXPECT_NE(site_instance1->GetProcess(), site_instance2->GetProcess());
+  EXPECT_NE(site_instance1->GetOrCreateProcessForTesting(),
+            site_instance2->GetProcess());
 }
 
 // Test that navigating cross-origin from a non-sandboxed iframe to a CSP
@@ -951,7 +1018,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
   scoped_refptr<SiteInstanceImpl> site_instance1 =
       child->current_frame_host()->GetSiteInstance();
   EXPECT_EQ(site_instance_root, site_instance1);
-  EXPECT_FALSE(site_instance1->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(site_instance1->GetSecurityPrincipal().IsSandboxed());
 
   // Navigate child frame cross-origin to CSP-isolated b.foo.com.
   EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test_frame",
@@ -963,7 +1030,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerOriginIsolatedSandboxedIframeTest,
       child->current_frame_host()->GetSiteInstance();
   EXPECT_NE(site_instance1, site_instance2);
   EXPECT_NE(site_instance1->GetProcess(), site_instance2->GetProcess());
-  EXPECT_TRUE(site_instance2->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(site_instance2->GetSecurityPrincipal().IsSandboxed());
 }
 
 // Check that two same-site sandboxed iframes in unrelated windows share the
@@ -994,12 +1061,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   // Set up an unrelated window with the same frame hierarchy.
   Shell* new_shell = CreateBrowser();
@@ -1013,12 +1080,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
   FrameTreeNode* new_child = new_root->child_at(0);
   EXPECT_TRUE(new_child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(new_root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   // Check that the two sandboxed subframes end up in separate
   // BrowsingInstances but in the same process.
@@ -1077,16 +1144,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child2->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child1->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_TRUE(child2->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
@@ -1127,12 +1194,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
   {
     std::string js_str("document.body.innerText;");
     EXPECT_EQ(child_inner_text, EvalJs(child->current_frame_host(), js_str));
@@ -1178,8 +1245,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   // Navigate to a page that should get process isolation.
   GURL isolated_child_url(
@@ -1189,8 +1256,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
 
   // Navigate back to about:blank, and verify it's put back into the parent's
   // SiteInstance.
@@ -1204,8 +1271,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_FALSE(child->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // Ensure a navigation that is from the initial empty document, is main frame,
@@ -1313,17 +1380,19 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
   // Because the subframe is a data: URL, the process should be locked to the
   // initiator origin's site, which is the parent in this case. Unlike the
   // parent, the data: subframe process should be sandboxed.
-  EXPECT_EQ(
-      child->current_frame_host()->GetProcess()->GetProcessLock().lock_url(),
-      root->current_frame_host()->GetLastCommittedOrigin().GetURL());
+  EXPECT_EQ(child->current_frame_host()
+                ->GetProcess()
+                ->GetProcessLock()
+                .GetProcessLockURL(),
+            root->current_frame_host()->GetLastCommittedOrigin().GetURL());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // Verify that a navigation from a sandboxed iframe, with an origin distinct
@@ -1357,7 +1426,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
   FrameTreeNode* child = root->child_at(0);
   scoped_refptr<SiteInstanceImpl> original_child_site_instance =
       child->current_frame_host()->GetSiteInstance();
-  EXPECT_TRUE(original_child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(
+      original_child_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   {
     TestNavigationObserver iframe_observer(shell()->web_contents());
@@ -1407,7 +1477,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
   FrameTreeNode* child = root->child_at(0);
   scoped_refptr<SiteInstanceImpl> original_child_site_instance =
       child->current_frame_host()->GetSiteInstance();
-  EXPECT_TRUE(original_child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(
+      original_child_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   // The parent removes the iframe's sandbox attribute before the child
   // self-navigates to about:blank.
@@ -1448,16 +1519,21 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
     ASSERT_TRUE(WaitForLoadStop(shell()->web_contents()));
   }
 
-  // Verify parent and child frames share a non-sandboxed SiteInstance.
+  // Verify parent and child frames share a non-sandboxed SiteInstanceGroup.
   FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   ASSERT_EQ(1U, root->child_count());
+  SiteInstanceImpl* root_site_instance =
+      root->current_frame_host()->GetSiteInstance();
   FrameTreeNode* child = root->child_at(0);
-  EXPECT_EQ(root->current_frame_host()->GetSiteInstance(),
-            child->current_frame_host()->GetSiteInstance());
-  EXPECT_FALSE(child->current_frame_host()
-                   ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+  SiteInstanceImpl* child_site_instance =
+      child->current_frame_host()->GetSiteInstance();
+  EXPECT_EQ(root_site_instance->group(), child_site_instance->group());
+  if (ShouldCreateSiteInstanceForDataUrls()) {
+    EXPECT_NE(root_site_instance, child_site_instance);
+  } else {
+    EXPECT_EQ(root_site_instance, child_site_instance);
+  }
+  EXPECT_FALSE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   // Now make the subframe sandboxed.
   {
@@ -1475,13 +1551,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
 
   // The child process should be in a process of its initiator origin.
-  EXPECT_EQ(
-      child->current_frame_host()->GetProcess()->GetProcessLock().lock_url(),
-      b_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL());
+  EXPECT_EQ(child->current_frame_host()
+                ->GetProcess()
+                ->GetProcessLock()
+                .agent_cluster_key()
+                .GetSite(),
+            b_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL());
 
   // Go back and ensure the data: URL remains sandboxed, and committed in a
   // different SiteInstance from the original navigation. From the spec:
@@ -1499,12 +1578,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_EQ(GURL(data_url_str),
             child->current_frame_host()->GetLastCommittedURL());
 }
@@ -1588,8 +1667,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessIsolatedSandboxedIframeTest,
             child->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
 
   // Check grandchild vs. child.
   ASSERT_EQ(1U, child->child_count());
@@ -1633,7 +1712,7 @@ IN_PROC_BROWSER_TEST_P(
             child->effective_frame_policy().sandbox_flags);
   EXPECT_FALSE(parent_site_instance->RequiresDedicatedProcess());
   EXPECT_EQ(parent_site_instance, child_site_instance);
-  EXPECT_FALSE(child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
 }
 
 // Similar to the NotIsolatedSandbox test, but using a site that requires a
@@ -1673,7 +1752,7 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_NE(parent_site_instance, child_site_instance);
   EXPECT_NE(parent_site_instance->GetProcess(),
             child_site_instance->GetProcess());
-  EXPECT_TRUE(child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
 }
 
 // In this test, a main frame requests sandbox isolation for a site that would
@@ -1706,7 +1785,7 @@ IN_PROC_BROWSER_TEST_P(
   auto* parent_site_instance = root->current_frame_host()->GetSiteInstance();
   auto* child_site_instance = child->current_frame_host()->GetSiteInstance();
   EXPECT_FALSE(parent_site_instance->RequiresDedicatedProcess());
-  EXPECT_FALSE(parent_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(parent_site_instance->GetSecurityPrincipal().IsSandboxed());
   // TODO(wjmaclean): It seems weird that the
   // effective_frame_policy().sandbox_flags don't get set in this case. Maybe
   // worth investigating this at some point. https://crbug.com/1346723
@@ -1747,7 +1826,7 @@ IN_PROC_BROWSER_TEST_P(
   auto* parent_site_instance = root->current_frame_host()->GetSiteInstance();
   auto* child_site_instance = child->current_frame_host()->GetSiteInstance();
   EXPECT_TRUE(parent_site_instance->RequiresDedicatedProcess());
-  EXPECT_TRUE(parent_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(parent_site_instance->GetSecurityPrincipal().IsSandboxed());
   // TODO(wjmaclean): It seems weird that the
   // effective_frame_policy().sandbox_flags don't get set in this case. Maybe
   // worth investigating this at some point. https://crbug.com/1346723
@@ -1770,7 +1849,7 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
   scoped_refptr<SiteInstanceImpl> site_instance_a =
       web_contents()->GetSiteInstance();
-  EXPECT_FALSE(site_instance_a->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(site_instance_a->GetSecurityPrincipal().IsSandboxed());
 
   // Force BrowsingInstance swap to a URL with a CSP sandbox header.
   GURL isolated_url(embedded_test_server()->GetURL(
@@ -1797,7 +1876,7 @@ IN_PROC_BROWSER_TEST_P(
   // This is an edge case we can live with since it only happens with the
   // main frame getting a CSP sandbox, and the main frame does get its own
   // process regardless in this case.
-  EXPECT_FALSE(site_instance_b->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(site_instance_b->GetSecurityPrincipal().IsSandboxed());
 }
 
 IN_PROC_BROWSER_TEST_P(
@@ -1837,7 +1916,7 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_EQ(expected_flags, child->effective_frame_policy().sandbox_flags);
   EXPECT_TRUE(parent_site_instance->RequiresDedicatedProcess());
   EXPECT_NE(parent_site_instance, child_site_instance);
-  EXPECT_TRUE(child_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   // Sandboxed child calls window.open.
   Shell* new_shell = OpenPopup(child, child_url, "");
@@ -1849,7 +1928,7 @@ IN_PROC_BROWSER_TEST_P(
   auto* new_window_site_instance =
       new_root->current_frame_host()->GetSiteInstance();
   EXPECT_TRUE(new_window_site_instance->RequiresDedicatedProcess());
-  EXPECT_TRUE(new_window_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(new_window_site_instance->GetSecurityPrincipal().IsSandboxed());
   // Note: this assumes per-site mode for sandboxed iframe isolation. If we
   // settle on per-document mode, this will change to EXPECT_NE.
   EXPECT_EQ(child_site_instance, new_window_site_instance);
@@ -1897,12 +1976,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerDocumentIsolatedSandboxedIframeTest,
             child1->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child1->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   EXPECT_FALSE(root->current_frame_host()
                    ->GetSiteInstance()
-                   ->GetSiteInfo()
-                   .is_sandboxed());
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   FrameTreeNode* child2 = root->child_at(1);  // sub.a.com
   EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
@@ -1911,8 +1990,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerDocumentIsolatedSandboxedIframeTest,
             child2->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(child2->current_frame_host()
                   ->GetSiteInstance()
-                  ->GetSiteInfo()
-                  .is_sandboxed());
+                  ->GetSecurityPrincipal()
+                  .IsSandboxed());
   // This is the key result for this test: the sandboxed iframes for both child
   // frames should be in different SiteInstances, even though they are
   // same-origin.
@@ -2072,14 +2151,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerDocumentIsolatedSandboxedIframeTest,
   FrameTreeNode* child = root->child_at(0);
   scoped_refptr<SiteInstanceImpl> root_site_instance =
       root->current_frame_host()->GetSiteInstance();
-  EXPECT_FALSE(root_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(root_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   scoped_refptr<SiteInstanceImpl> child_site_instance1 =
       child->current_frame_host()->GetSiteInstance();
   EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
             child->effective_frame_policy().sandbox_flags);
   EXPECT_NE(root_site_instance, child_site_instance1);
-  EXPECT_TRUE(child_site_instance1->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child_site_instance1->GetSecurityPrincipal().IsSandboxed());
 
   // Navigate child same-site, same-origin, same-document.
   {
@@ -2219,13 +2298,13 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessPerDocumentIsolatedSandboxedIframeTest,
   auto* child1_site_instance = child1->current_frame_host()->GetSiteInstance();
   auto* child2_site_instance = child2->current_frame_host()->GetSiteInstance();
 
-  EXPECT_FALSE(root_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(root_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
             child1->effective_frame_policy().sandbox_flags);
-  EXPECT_TRUE(child1_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child1_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_EQ(network::mojom::WebSandboxFlags::kAll,
             child2->effective_frame_policy().sandbox_flags);
-  EXPECT_TRUE(child2_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(child2_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_NE(root_site_instance, child1_site_instance);
   EXPECT_NE(root_site_instance, child2_site_instance);
   // Verify siblings have different SiteInstances and processes.

@@ -23,8 +23,9 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.RuntimeEnvironment;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.tasks.tab_management.MessageCardView.DismissActionProvider;
-import org.chromium.chrome.browser.tasks.tab_management.MessageCardView.ReviewActionProvider;
+import org.chromium.chrome.browser.tasks.tab_management.MessageCardView.ActionProvider;
+import org.chromium.chrome.browser.tasks.tab_management.MessageCardView.ServiceDismissActionProvider;
+import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageType;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
@@ -36,8 +37,8 @@ import org.chromium.ui.modelutil.PropertyModel;
 public class CollaborationActivityMessageCardViewModelUnitTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
-    @Mock private ReviewActionProvider mActionHandler;
-    @Mock private DismissActionProvider mDismissHandler;
+    @Mock private ActionProvider mActionHandler;
+    @Mock private ServiceDismissActionProvider<@MessageType Integer> mDismissHandler;
 
     private Context mContext;
     private CollaborationActivityMessageCardViewModel mModel;
@@ -54,8 +55,8 @@ public class CollaborationActivityMessageCardViewModelUnitTest {
     public void testActionHandlers() {
         PropertyModel model = mModel.getPropertyModel();
 
-        model.get(MESSAGE_SERVICE_ACTION_PROVIDER).review();
-        verify(mActionHandler).review();
+        model.get(MESSAGE_SERVICE_ACTION_PROVIDER).action();
+        verify(mActionHandler).action();
 
         int messageType = 3423;
         model.get(MESSAGE_SERVICE_DISMISS_ACTION_PROVIDER).dismiss(messageType);
@@ -66,57 +67,22 @@ public class CollaborationActivityMessageCardViewModelUnitTest {
     public void testUpdateTextDescription() {
         PropertyModel model = mModel.getPropertyModel();
 
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 0, /* tabsClosed= */ 0);
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 0, /* tabsClosed= */ 0);
         assertEquals("No tab updates", model.get(DESCRIPTION_TEXT));
 
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 1, /* tabsChanged= */ 0, /* tabsClosed= */ 0);
-        assertEquals("1 tab added", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 2, /* tabsChanged= */ 0, /* tabsClosed= */ 0);
-        assertEquals("2 tabs added", model.get(DESCRIPTION_TEXT));
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 1, /* tabsClosed= */ 0);
+        assertEquals("1 new tab", model.get(DESCRIPTION_TEXT));
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 2, /* tabsClosed= */ 0);
+        assertEquals("2 new tabs", model.get(DESCRIPTION_TEXT));
 
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 1, /* tabsClosed= */ 0);
-        assertEquals("1 tab changed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 2, /* tabsClosed= */ 0);
-        assertEquals("2 tabs changed", model.get(DESCRIPTION_TEXT));
-
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 0, /* tabsClosed= */ 1);
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 0, /* tabsClosed= */ 1);
         assertEquals("1 tab closed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 0, /* tabsClosed= */ 2);
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 0, /* tabsClosed= */ 2);
         assertEquals("2 tabs closed", model.get(DESCRIPTION_TEXT));
 
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 1, /* tabsChanged= */ 2, /* tabsClosed= */ 0);
-        assertEquals("1 tab added, 2 changed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 2, /* tabsChanged= */ 3, /* tabsClosed= */ 0);
-        assertEquals("2 tabs added, 3 changed", model.get(DESCRIPTION_TEXT));
-
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 1, /* tabsChanged= */ 0, /* tabsClosed= */ 2);
-        assertEquals("1 tab added, 2 closed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 2, /* tabsChanged= */ 0, /* tabsClosed= */ 3);
-        assertEquals("2 tabs added, 3 closed", model.get(DESCRIPTION_TEXT));
-
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 1, /* tabsClosed= */ 2);
-        assertEquals("1 tab changed, 2 closed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 0, /* tabsChanged= */ 2, /* tabsClosed= */ 3);
-        assertEquals("2 tabs changed, 3 closed", model.get(DESCRIPTION_TEXT));
-
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 1, /* tabsChanged= */ 2, /* tabsClosed= */ 3);
-        assertEquals("1 tab added, 2 changed, 3 closed", model.get(DESCRIPTION_TEXT));
-        mModel.updateDescriptionText(
-                mContext, /* tabsAdded= */ 2, /* tabsChanged= */ 3, /* tabsClosed= */ 4);
-        assertEquals("2 tabs added, 3 changed, 4 closed", model.get(DESCRIPTION_TEXT));
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 1, /* tabsClosed= */ 2);
+        assertEquals("1 new tab, 2 closed", model.get(DESCRIPTION_TEXT));
+        mModel.updateDescriptionText(mContext, /* tabsAdded= */ 2, /* tabsClosed= */ 3);
+        assertEquals("2 new tabs, 3 closed", model.get(DESCRIPTION_TEXT));
     }
 }

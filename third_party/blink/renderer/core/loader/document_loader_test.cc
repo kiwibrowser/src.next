@@ -2,13 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 
+#include <string_view>
 #include <utility>
 
 #include "base/auto_reset.h"
@@ -17,6 +13,8 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/unguessable_token.h"
+#include "gin/public/gin_embedders.h"
+#include "net/base/features.h"
 #include "net/storage_access_api/status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
@@ -32,6 +30,7 @@
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/core/testing/scoped_fake_plugin_registry.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
@@ -63,7 +62,7 @@ class DecodedBodyLoader : public StaticDataNavigationBodyLoader {
 
     void BodyDataReceived(base::span<const char> data) override {
       client_->DecodedBodyDataReceived(
-          String(base::as_bytes(data)).UpperASCII(),
+          String(base::as_bytes(data)).ToAsciiUpper(),
           WebEncodingData{.encoding = "utf-8"}, base::SpanOrSize(data));
     }
 
@@ -107,8 +106,8 @@ class BodyLoaderTestDelegate : public URLLoaderTestDelegate {
     return true;
   }
 
-  void Write(const char* data) {
-    body_loader_raw_->Write(base::make_span(data, strlen(data)));
+  void Write(std::string_view data) {
+    body_loader_raw_->Write(base::span(data));
   }
 
   void Finish() { body_loader_raw_->Finish(); }
@@ -241,13 +240,9 @@ class VisitedLinkPlatform : public TestingPlatformSupport {
 
 enum TestMode {
   kUnpartitionedStorageAndLinks,
-  kUnpartitionedStoragePartitionedNoSelfLinks,
   kUnpartitionedStorageParttionedWithSelfLinks,
-  kUnpartitionedStoragePartitionedLinksBothEnabled,
   kPartitionedStorageUnpartitionedLinks,
-  kPartitionedStorageAndLinksNoSelfLinks,
-  kPartitionedStorageAndLinksWithSelfLinks,
-  kPartitionedAllEnabled
+  kPartitionedStorageAndLinksWithSelfLinks
 };
 
 class DocumentLoaderTest : public testing::Test,
@@ -258,49 +253,21 @@ class DocumentLoaderTest : public testing::Test,
       case TestMode::kUnpartitionedStorageAndLinks:
         scoped_feature_list_.InitWithFeatures(
             {}, {net::features::kThirdPartyStoragePartitioning,
-                 blink::features::kPartitionVisitedLinkDatabase,
                  blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks});
-        break;
-      case TestMode::kUnpartitionedStoragePartitionedNoSelfLinks:
-        scoped_feature_list_.InitWithFeatures(
-            {blink::features::kPartitionVisitedLinkDatabase},
-            {net::features::kThirdPartyStoragePartitioning,
-             blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks});
         break;
       case TestMode::kUnpartitionedStorageParttionedWithSelfLinks:
         scoped_feature_list_.InitWithFeatures(
             {blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks},
-            {net::features::kThirdPartyStoragePartitioning,
-             blink::features::kPartitionVisitedLinkDatabase});
-        break;
-      case TestMode::kUnpartitionedStoragePartitionedLinksBothEnabled:
-        scoped_feature_list_.InitWithFeatures(
-            {blink::features::kPartitionVisitedLinkDatabase,
-             blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks},
             {net::features::kThirdPartyStoragePartitioning});
         break;
       case TestMode::kPartitionedStorageUnpartitionedLinks:
         scoped_feature_list_.InitWithFeatures(
             {net::features::kThirdPartyStoragePartitioning},
-            {blink::features::kPartitionVisitedLinkDatabase,
-             blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks});
-        break;
-      case TestMode::kPartitionedStorageAndLinksNoSelfLinks:
-        scoped_feature_list_.InitWithFeatures(
-            {net::features::kThirdPartyStoragePartitioning,
-             blink::features::kPartitionVisitedLinkDatabase},
             {blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks});
         break;
       case TestMode::kPartitionedStorageAndLinksWithSelfLinks:
         scoped_feature_list_.InitWithFeatures(
             {net::features::kThirdPartyStoragePartitioning,
-             blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks},
-            {blink::features::kPartitionVisitedLinkDatabase});
-        break;
-      case TestMode::kPartitionedAllEnabled:
-        scoped_feature_list_.InitWithFeatures(
-            {net::features::kThirdPartyStoragePartitioning,
-             blink::features::kPartitionVisitedLinkDatabase,
              blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks},
             {});
         break;
@@ -327,19 +294,19 @@ class DocumentLoaderTest : public testing::Test,
         test::CoreTestDataPath("foo.html"));
     url_test_helpers::RegisterMockedURLLoad(
         url_test_helpers::ToKURL("http://192.168.1.1/foo.html"),
-        test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
-        URLLoaderMockFactory::GetSingletonInstance(),
-        network::mojom::IPAddressSpace::kPrivate);
-    url_test_helpers::RegisterMockedURLLoad(
-        url_test_helpers::ToKURL("https://192.168.1.1/foo.html"),
-        test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
-        URLLoaderMockFactory::GetSingletonInstance(),
-        network::mojom::IPAddressSpace::kPrivate);
-    url_test_helpers::RegisterMockedURLLoad(
-        url_test_helpers::ToKURL("http://somethinglocal/foo.html"),
-        test::CoreTestDataPath("foo.html"), WebString::FromUTF8("text/html"),
+        test::CoreTestDataPath("foo.html"), WebString("text/html"),
         URLLoaderMockFactory::GetSingletonInstance(),
         network::mojom::IPAddressSpace::kLocal);
+    url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("https://192.168.1.1/foo.html"),
+        test::CoreTestDataPath("foo.html"), WebString("text/html"),
+        URLLoaderMockFactory::GetSingletonInstance(),
+        network::mojom::IPAddressSpace::kLocal);
+    url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("http://somethinglocal/foo.html"),
+        test::CoreTestDataPath("foo.html"), WebString("text/html"),
+        URLLoaderMockFactory::GetSingletonInstance(),
+        network::mojom::IPAddressSpace::kLoopback);
   }
 
   void TearDown() override {
@@ -347,12 +314,8 @@ class DocumentLoaderTest : public testing::Test,
   }
 
   bool are_visited_links_partitioned() {
-    return GetParam() == kUnpartitionedStoragePartitionedNoSelfLinks ||
-           (GetParam() == kUnpartitionedStorageParttionedWithSelfLinks) ||
-           (GetParam() == kUnpartitionedStoragePartitionedLinksBothEnabled) ||
-           (GetParam() == kPartitionedStorageAndLinksNoSelfLinks) ||
-           (GetParam() == kPartitionedStorageAndLinksWithSelfLinks) ||
-           (GetParam() == kPartitionedAllEnabled);
+    return GetParam() == kUnpartitionedStorageParttionedWithSelfLinks ||
+           (GetParam() == kPartitionedStorageAndLinksWithSelfLinks);
   }
 
   class ScopedLoaderDelegate {
@@ -375,150 +338,9 @@ INSTANTIATE_TEST_SUITE_P(
     DocumentLoaderTest,
     DocumentLoaderTest,
     testing::Values(TestMode::kUnpartitionedStorageAndLinks,
-                    TestMode::kUnpartitionedStoragePartitionedNoSelfLinks,
                     TestMode::kUnpartitionedStorageParttionedWithSelfLinks,
-                    TestMode::kUnpartitionedStoragePartitionedLinksBothEnabled,
                     TestMode::kPartitionedStorageUnpartitionedLinks,
-                    TestMode::kPartitionedStorageAndLinksNoSelfLinks,
-                    TestMode::kPartitionedStorageAndLinksWithSelfLinks,
-                    TestMode::kPartitionedAllEnabled));
-
-TEST_P(DocumentLoaderTest, SingleChunk) {
-  class TestDelegate : public URLLoaderTestDelegate {
-   public:
-    void DidReceiveData(URLLoaderClient* original_client,
-                        base::span<const char> data) override {
-      EXPECT_EQ(34u, data.size())
-          << "foo.html was not served in a single chunk";
-      original_client->DidReceiveDataForTesting(data);
-    }
-  } delegate;
-
-  ScopedLoaderDelegate loader_delegate(&delegate);
-  frame_test_helpers::LoadFrame(MainFrame(), "https://example.com/foo.html");
-
-  // TODO(dcheng): How should the test verify that the original callback is
-  // invoked? The test currently still passes even if the test delegate
-  // forgets to invoke the callback.
-}
-
-// Test normal case of DocumentLoader::dataReceived(): data in multiple chunks,
-// with no reentrancy.
-TEST_P(DocumentLoaderTest, MultiChunkNoReentrancy) {
-  class TestDelegate : public URLLoaderTestDelegate {
-   public:
-    void DidReceiveData(URLLoaderClient* original_client,
-                        base::span<const char> data) override {
-      EXPECT_EQ(34u, data.size())
-          << "foo.html was not served in a single chunk";
-      // Chunk the reply into one byte chunks.
-      for (size_t i = 0; i < data.size(); ++i) {
-        original_client->DidReceiveDataForTesting(data.subspan(i, 1));
-      }
-    }
-  } delegate;
-
-  ScopedLoaderDelegate loader_delegate(&delegate);
-  frame_test_helpers::LoadFrame(MainFrame(), "https://example.com/foo.html");
-}
-
-// Finally, test reentrant callbacks to DocumentLoader::BodyDataReceived().
-TEST_P(DocumentLoaderTest, MultiChunkWithReentrancy) {
-  // This test delegate chunks the response stage into three distinct stages:
-  // 1. The first BodyDataReceived() callback, which triggers frame detach
-  //    due to committing a provisional load.
-  // 2. The middle part of the response, which is dispatched to
-  //    BodyDataReceived() reentrantly.
-  // 3. The final chunk, which is dispatched normally at the top-level.
-  class MainFrameClient : public URLLoaderTestDelegate,
-                          public frame_test_helpers::TestWebFrameClient {
-   public:
-    // URLLoaderTestDelegate overrides:
-    bool FillNavigationParamsResponse(WebNavigationParams* params) override {
-      params->response = WebURLResponse(params->url);
-      params->response.SetMimeType("application/x-webkit-test-webplugin");
-      params->response.SetHttpStatusCode(200);
-
-      String data("<html><body>foo</body></html>");
-      for (wtf_size_t i = 0; i < data.length(); i++)
-        data_.push_back(data[i]);
-
-      auto body_loader = std::make_unique<StaticDataNavigationBodyLoader>();
-      body_loader_ = body_loader.get();
-      params->body_loader = std::move(body_loader);
-      return true;
-    }
-
-    void Serve() {
-      {
-        // Serve the first byte to the real URLLoaderClient, which should
-        // trigger frameDetach() due to committing a provisional load.
-        base::AutoReset<bool> dispatching(&dispatching_did_receive_data_, true);
-        DispatchOneByte();
-      }
-
-      // Serve the remaining bytes to complete the load.
-      EXPECT_FALSE(data_.empty());
-      while (!data_.empty())
-        DispatchOneByte();
-
-      body_loader_->Finish();
-      body_loader_ = nullptr;
-    }
-
-    // WebLocalFrameClient overrides:
-    void RunScriptsAtDocumentElementAvailable() override {
-      if (dispatching_did_receive_data_) {
-        // This should be called by the first BodyDataReceived() call, since
-        // it should create a plugin document structure and trigger this.
-        EXPECT_GT(data_.size(), 10u);
-        // Dispatch BodyDataReceived() callbacks for part of the remaining
-        // data, saving the rest to be dispatched at the top-level as
-        // normal.
-        while (data_.size() > 10)
-          DispatchOneByte();
-        served_reentrantly_ = true;
-      }
-      TestWebFrameClient::RunScriptsAtDocumentElementAvailable();
-    }
-
-    void DispatchOneByte() {
-      char c = data_.TakeFirst();
-      body_loader_->Write(base::make_span(&c, static_cast<size_t>(1)));
-    }
-
-    bool ServedReentrantly() const { return served_reentrantly_; }
-
-   private:
-    Deque<char> data_;
-    bool dispatching_did_receive_data_ = false;
-    bool served_reentrantly_ = false;
-    StaticDataNavigationBodyLoader* body_loader_ = nullptr;
-  };
-
-  // We use a plugin document triggered by "application/x-webkit-test-webplugin"
-  // mime type, because that gives us reliable way to get a WebLocalFrameClient
-  // callback from inside BodyDataReceived() call.
-  ScopedFakePluginRegistry fake_plugins;
-  MainFrameClient main_frame_client;
-  web_view_helper_.Initialize(&main_frame_client);
-  web_view_helper_.GetWebView()->GetPage()->GetSettings().SetPluginsEnabled(
-      true);
-
-  {
-    ScopedLoaderDelegate loader_delegate(&main_frame_client);
-    frame_test_helpers::LoadFrameDontWait(
-        MainFrame(), url_test_helpers::ToKURL("https://example.com/foo.html"));
-    main_frame_client.Serve();
-    frame_test_helpers::PumpPendingRequestsForFrameToLoad(MainFrame());
-  }
-
-  // Sanity check that we did actually test reeentrancy.
-  EXPECT_TRUE(main_frame_client.ServedReentrantly());
-
-  // MainFrameClient is stack-allocated, so manually Reset to avoid UAF.
-  web_view_helper_.Reset();
-}
+                    TestMode::kPartitionedStorageAndLinksWithSelfLinks));
 
 TEST_P(DocumentLoaderTest, isCommittedButEmpty) {
   WebViewImpl* web_view_impl =
@@ -529,7 +351,159 @@ TEST_P(DocumentLoaderTest, isCommittedButEmpty) {
                   ->IsCommittedButEmpty());
 }
 
-class DocumentLoaderSimTest : public SimTest {};
+class DocumentLoaderSimTest : public SimTest {
+ protected:
+  void InstallReenterHelper(WebLocalFrameImpl& frame) {
+    v8::Isolate* isolate = frame.GetAgentGroupScheduler()->Isolate();
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Context> context = frame.MainWorldScriptContext();
+    v8::Context::Scope context_scope(context);
+    v8::MicrotasksScope microtasks_scope(
+        isolate, context->GetMicrotaskQueue(),
+        v8::MicrotasksScope::kDoNotRunMicrotasks);
+
+    v8::Local<v8::External> external_this = v8::External::New(
+        isolate, this, gin::kExternalPointerTypeTagDefaultTag);
+
+    context->Global()
+        ->Set(context,
+              v8::String::NewFromUtf8(isolate, "reenter").ToLocalChecked(),
+              v8::Function::New(context, &DocumentLoaderSimTest::ReenterThunk,
+                                external_this)
+                  .ToLocalChecked())
+        .ToChecked();
+  }
+
+  SimRequest* main_resource_for_reenter_ = nullptr;
+  int reenter_call_count_ = 0;
+
+ private:
+  static void ReenterThunk(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Local<v8::External> external_that = info.Data().As<v8::External>();
+    DocumentLoaderSimTest* that = static_cast<DocumentLoaderSimTest*>(
+        external_that->Value(gin::kExternalPointerTypeTagDefaultTag));
+    that->Reenter();
+  }
+
+  void Reenter() {
+    ++reenter_call_count_;
+    LocalFrame* frame = GetDocument().GetFrame();
+    DocumentLoader* loader = frame->Loader().GetDocumentLoader();
+
+    EXPECT_TRUE(loader->IsInCommitDataForTesting());
+
+    // Operations like print preview or a devtools debugger breakpoint
+    // instantiate a `ScopedPagePauser` to prevent loading and other work from
+    // making forward progress inside a nested loop.
+    ScopedPagePauser pauser;
+
+    if (main_resource_for_reenter_) {
+      main_resource_for_reenter_->Write("<div id='reentered'></div>");
+
+      // The reentered chunk should be buffered, not processed yet.
+      EXPECT_FALSE(
+          frame->GetDocument()->getElementById(AtomicString("reentered")));
+    }
+
+    // If any writes to the main resource were queued above, destroying the
+    // ScopedPagePauser will undefer loading–which will immediately flush any
+    // pending received data to DocumentLoader while DocumentLoader is still
+    // in the `CommitData()` call.
+  }
+};
+
+// Standard case: each chunk arrives and is processed immediately in its own
+// top-level commit call.
+TEST_F(DocumentLoaderSimTest, ProcessDataBuffer_Streaming) {
+  SimRequest main_resource("https://example.com", "text/html");
+  LoadURL("https://example.com");
+
+  main_resource.Write("<html><body><div id='a'></div>");
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("a")));
+
+  main_resource.Write("<div id='b'></div>");
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("b")));
+
+  main_resource.Write("</body></html>");
+  main_resource.Finish();
+}
+
+// Test the case where multiple chunks arrive while the parser is blocked.
+// They should be accumulated and then processed in a single 'drain' iteration.
+TEST_F(DocumentLoaderSimTest, ProcessDataBuffer_Buffered) {
+  SimRequest main_resource("https://example.com", "text/html");
+  LoadURL("https://example.com");
+
+  // BlockParser() ensures chunks are accumulated in DocumentLoader's buffer.
+  GetDocument().Loader()->BlockParser();
+
+  main_resource.Write("<html><body><div id='a'></div>");
+  main_resource.Write("<div id='b'></div>");
+  main_resource.Finish();
+
+  // Chunks should be buffered, not processed yet.
+  EXPECT_FALSE(GetDocument().getElementById(AtomicString("a")));
+  EXPECT_FALSE(GetDocument().getElementById(AtomicString("b")));
+
+  GetDocument().Loader()->ResumeParser();
+
+  // All chunks should have been processed now.
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("a")));
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("b")));
+}
+
+// Test reentrancy into DocumentLoader during the initial `CommitData()` call.
+TEST_F(DocumentLoaderSimTest, ProcessDataBuffer_ReentrancyFromInitialCommit) {
+  SimRequest main_resource("https://example.com", "text/html");
+  base::AutoReset<SimRequest*> main_resource_reset(&main_resource_for_reenter_,
+                                                   &main_resource);
+  LoadURL("https://example.com");
+
+  InstallReenterHelper(MainFrame());
+
+  main_resource.Write("<html><body><script>reenter();</script>");
+  EXPECT_EQ(1, reenter_call_count_);
+
+  main_resource.Finish();
+
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("reentered")));
+}
+
+// Test reentrancy into DocumentLoader from a `CommitData()` call while draining
+// buffered data.
+TEST_F(DocumentLoaderSimTest, ProcessDataBuffer_ReentrancyDuringIteration) {
+  SimRequest main_resource("https://example.com", "text/html");
+  base::AutoReset<SimRequest*> main_resource_reset(&main_resource_for_reenter_,
+                                                   &main_resource);
+  LoadURL("https://example.com");
+
+  // `BlockParser()` ensures DocumentLoader buffers data, which is necessary to
+  // trigger reentrancy in a `CommitData()` call while draining buffered data:
+  // this is somewhat of an edge case, but can happen if an OOPIF local root
+  // hasn't received its size yet.
+  //
+  // This is different from "normal" parser-blocking for scripts or stylesheets,
+  // which buffer inside `HTMLDocumentParser`.
+  GetDocument().Loader()->BlockParser();
+
+  InstallReenterHelper(MainFrame());
+
+  main_resource.Write("<html><body><script>reenter();</script>");
+  // Queue a second distinct chunk; if reentrancy in `DocumentLoader` is not
+  // correctly handled, this will trigger iterator invalidation DCHECKs (and
+  // potentially ASan failures if the Vector's backing store is resized).
+  main_resource.Write("<div id='chunk2'></div>");
+  // Since `DocumentLoader` is buffering, the chunks written above should not
+  // have been parsed yet.
+  EXPECT_EQ(0, reenter_call_count_);
+
+  GetDocument().Loader()->ResumeParser();
+  EXPECT_EQ(1, reenter_call_count_);
+  main_resource.Finish();
+
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("chunk2")));
+  EXPECT_TRUE(GetDocument().getElementById(AtomicString("reentered")));
+}
 
 TEST_F(DocumentLoaderSimTest, DocumentOpenUpdatesUrl) {
   SimRequest main_resource("https://example.com", "text/html");
@@ -582,17 +556,17 @@ TEST_F(DocumentLoaderSimTest, FramePolicyIntegrityOnNavigationCommit) {
   auto* child_window = child_frame->GetFrame()->DomWindow();
 
   EXPECT_TRUE(child_window->IsFeatureEnabled(
-      mojom::blink::PermissionsPolicyFeature::kPayment));
+      network::mojom::PermissionsPolicyFeature::kPayment));
 }
 
 TEST_P(DocumentLoaderTest, CommitsDeferredOnSameOriginNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& same_origin_url =
-      KURL(NullURL(), "https://www.example.com/bar.html");
+      KURL(NullUrl(), "https://www.example.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(same_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -605,12 +579,12 @@ TEST_P(DocumentLoaderTest, CommitsDeferredOnSameOriginNavigation) {
 
 TEST_P(DocumentLoaderTest, CommitsDeferredOnDifferentOriginNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& other_origin_url =
-      KURL(NullURL(), "https://www.another.com/bar.html");
+      KURL(NullUrl(), "https://www.another.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(other_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -623,12 +597,12 @@ TEST_P(DocumentLoaderTest, CommitsDeferredOnDifferentOriginNavigation) {
 
 TEST_P(DocumentLoaderTest, CommitsDeferredOnDifferentPortNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com:8000/foo.html");
+      KURL(NullUrl(), "https://www.example.com:8000/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com:8000/foo.html");
 
   const KURL& different_port_url =
-      KURL(NullURL(), "https://www.example.com:8080/bar.html");
+      KURL(NullUrl(), "https://www.example.com:8080/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(different_port_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -641,11 +615,11 @@ TEST_P(DocumentLoaderTest, CommitsDeferredOnDifferentPortNavigation) {
 
 TEST_P(DocumentLoaderTest, CommitsNotDeferredOnDataURLNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
-  const KURL& data_url = KURL(NullURL(), "data:,Hello%2C%20World!");
+  const KURL& data_url = KURL(NullUrl(), "data:,Hello%2C%20World!");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(data_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -658,11 +632,11 @@ TEST_P(DocumentLoaderTest, CommitsNotDeferredOnDataURLNavigation) {
 
 TEST_P(DocumentLoaderTest, NavigationToAboutBlank) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://subdomain.example.com/foo.html");
+      KURL(NullUrl(), "https://subdomain.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
-  const KURL& about_blank_url = KURL(NullURL(), "about:blank");
+  const KURL& about_blank_url = KURL(NullUrl(), "about:blank");
   std::unique_ptr<WebNavigationParams> params =
       std::make_unique<WebNavigationParams>();
   params->url = about_blank_url;
@@ -679,12 +653,12 @@ TEST_P(DocumentLoaderTest, NavigationToAboutBlank) {
 
 TEST_P(DocumentLoaderTest, SameOriginNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& same_origin_url =
-      KURL(NullURL(), "https://www.example.com/bar.html");
+      KURL(NullUrl(), "https://www.example.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(same_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -708,12 +682,12 @@ TEST_P(DocumentLoaderTest, SameOriginNavigation) {
 
 TEST_P(DocumentLoaderTest, SameOriginNavigation_WithStorageAccess) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& same_origin_url =
-      KURL(NullURL(), "https://www.example.com/bar.html");
+      KURL(NullUrl(), "https://www.example.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(same_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -740,12 +714,12 @@ TEST_P(DocumentLoaderTest, SameOriginNavigation_WithStorageAccess) {
 
 TEST_P(DocumentLoaderTest, CrossOriginNavigation) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& other_origin_url =
-      KURL(NullURL(), "https://www.another.com/bar.html");
+      KURL(NullUrl(), "https://www.another.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(other_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -774,12 +748,12 @@ TEST_P(DocumentLoaderTest, CrossOriginNavigation) {
 
 TEST_P(DocumentLoaderTest, StorageKeyFromNavigationParams) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& other_origin_url =
-      KURL(NullURL(), "https://www.another.com/bar.html");
+      KURL(NullUrl(), "https://www.another.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(other_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -801,12 +775,12 @@ TEST_P(DocumentLoaderTest, StorageKeyFromNavigationParams) {
 
 TEST_P(DocumentLoaderTest, StorageKeyCrossSiteFromNavigationParams) {
   const KURL& requestor_url =
-      KURL(NullURL(), "https://www.example.com/foo.html");
+      KURL(NullUrl(), "https://www.example.com/foo.html");
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://example.com/foo.html");
 
   const KURL& other_origin_url =
-      KURL(NullURL(), "https://www.another.com/bar.html");
+      KURL(NullUrl(), "https://www.another.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(other_origin_url);
   params->requestor_origin = WebSecurityOrigin::Create(WebURL(requestor_url));
@@ -889,8 +863,8 @@ TEST_P(DocumentLoaderTest, PublicNonSecureNotCounted) {
       WebFeature::kMainFrameNonSecurePrivateAddressSpace));
 }
 
-TEST_P(DocumentLoaderTest, PrivateSecureNotCounted) {
-  // Checking to make sure secure pages served in the private address space
+TEST_P(DocumentLoaderTest, LocalSecureNotCounted) {
+  // Checking to make sure secure pages served in the local address space
   // aren't counted for WebFeature::kMainFrameNonSecurePrivateAddressSpace
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("https://192.168.1.1/foo.html");
@@ -900,8 +874,8 @@ TEST_P(DocumentLoaderTest, PrivateSecureNotCounted) {
       WebFeature::kMainFrameNonSecurePrivateAddressSpace));
 }
 
-TEST_P(DocumentLoaderTest, PrivateNonSecureIsCounted) {
-  // Checking to make sure non-secure pages served in the private address space
+TEST_P(DocumentLoaderTest, LocalNonSecureIsCounted) {
+  // Checking to make sure non-secure pages served in the local address space
   // are counted for WebFeature::kMainFrameNonSecurePrivateAddressSpace
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("http://192.168.1.1/foo.html");
@@ -911,8 +885,8 @@ TEST_P(DocumentLoaderTest, PrivateNonSecureIsCounted) {
       WebFeature::kMainFrameNonSecurePrivateAddressSpace));
 }
 
-TEST_P(DocumentLoaderTest, LocalNonSecureIsCounted) {
-  // Checking to make sure non-secure pages served in the local address space
+TEST_P(DocumentLoaderTest, LoopbackNonSecureIsCounted) {
+  // Checking to make sure non-secure pages served in the loopback address space
   // are counted for WebFeature::kMainFrameNonSecurePrivateAddressSpace
   WebViewImpl* web_view_impl =
       web_view_helper_.InitializeAndLoad("http://somethinglocal/foo.html");
@@ -922,8 +896,8 @@ TEST_P(DocumentLoaderTest, LocalNonSecureIsCounted) {
       WebFeature::kMainFrameNonSecurePrivateAddressSpace));
 }
 
-TEST_F(DocumentLoaderSimTest, PrivateNonSecureChildFrameNotCounted) {
-  // Checking to make sure non-secure iframes served in the private address
+TEST_F(DocumentLoaderSimTest, LocalNonSecureChildFrameNotCounted) {
+  // Checking to make sure non-secure iframes served in the local address
   // space are not counted for
   // WebFeature::kMainFrameNonSecurePrivateAddressSpace
   SimRequest main_resource("http://example.com", "text/html");
@@ -1011,7 +985,7 @@ TEST_P(DocumentLoaderTest, EmbeddedCredentialsNavigation) {
 TEST_P(DocumentLoaderTest, VisitedLinkSalt) {
   // Generate the constants.
   const uint64_t kSalt = base::RandUint64();
-  const KURL& kUrl = KURL(NullURL(), "https://www.example.com/foo.html");
+  const KURL& kUrl = KURL(NullUrl(), "https://www.example.com/foo.html");
 
   // Load a blank slate.
   WebViewImpl* web_view_impl =

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_SIGNIN_IDENTITY_MANAGER_FACTORY_H_
 #define CHROME_BROWSER_SIGNIN_IDENTITY_MANAGER_FACTORY_H_
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "base/observer_list.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
@@ -26,7 +26,7 @@ class IdentityManagerFactory : public ProfileKeyedServiceFactory {
         signin::IdentityManager* identity_manager) {}
 
    protected:
-    ~Observer() override {}
+    ~Observer() override = default;
   };
 
   static signin::IdentityManager* GetForProfile(Profile* profile);
@@ -48,7 +48,7 @@ class IdentityManagerFactory : public ProfileKeyedServiceFactory {
   void RemoveObserver(Observer* observer);
 
  private:
-  friend struct base::DefaultSingletonTraits<IdentityManagerFactory>;
+  friend base::NoDestructor<IdentityManagerFactory>;
 
   IdentityManagerFactory();
   ~IdentityManagerFactory() override;
@@ -60,7 +60,9 @@ class IdentityManagerFactory : public ProfileKeyedServiceFactory {
       user_prefs::PrefRegistrySyncable* registry) override;
 
   // List of observers. Checks that list is empty on destruction.
-  base::ObserverList<Observer, /*check_empty=*/true, /*allow_reentrancy=*/false>
+  base::ObserverList<Observer,
+                     /*check_empty=*/true,
+                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
       observer_list_;
 };
 

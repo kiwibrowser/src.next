@@ -21,7 +21,7 @@ namespace extensions {
 TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyUnpacked) {
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kUnpacked,
-           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
+           base::DictValue().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
       .ValidateManifest(&warnings);
   EXPECT_EQ(1uL, warnings.size());
@@ -31,7 +31,7 @@ TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyUnpacked) {
 TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyCommandLine) {
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kCommandLine,
-           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
+           base::DictValue().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
       .ValidateManifest(&warnings);
   EXPECT_EQ(1uL, warnings.size());
@@ -41,7 +41,7 @@ TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyCommandLine) {
 TEST(ManifestTest, ValidateSilentOnDiffFingerprintKeyInternal) {
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kInternal,
-           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
+           base::DictValue().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
       .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
@@ -49,7 +49,7 @@ TEST(ManifestTest, ValidateSilentOnDiffFingerprintKeyInternal) {
 
 TEST(ManifestTest, ValidateSilentOnNoDiffFingerprintKeyUnpacked) {
   std::vector<InstallWarning> warnings;
-  Manifest(ManifestLocation::kUnpacked, base::Value::Dict(),
+  Manifest(ManifestLocation::kUnpacked, base::DictValue(),
            crx_file::id_util::GenerateId("extid"))
       .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
@@ -57,7 +57,7 @@ TEST(ManifestTest, ValidateSilentOnNoDiffFingerprintKeyUnpacked) {
 
 TEST(ManifestTest, ValidateSilentOnNoDiffFingerprintKeyInternal) {
   std::vector<InstallWarning> warnings;
-  Manifest(ManifestLocation::kInternal, base::Value::Dict(),
+  Manifest(ManifestLocation::kInternal, base::DictValue(),
            crx_file::id_util::GenerateId("extid"))
       .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
@@ -74,7 +74,7 @@ TEST(ManifestTest, AvailableValues) {
   {
     // In manifest version 2, "host_permissions" key is not available.
     // Additionally "background.service_worker" key is not available to hosted
-    // apps.
+    // apps. On all manifest versions "nacl_modules" key is not recognized.
     {R"(
       {
         "name": "Test Extension",
@@ -100,7 +100,6 @@ TEST(ManifestTest, AvailableValues) {
         "nacl_modules": ""
       }
     )"},
-    // In manifest version 3, "nacl_modules" key is not available.
     {R"(
       {
         "name": "Test Extension",
@@ -113,15 +112,16 @@ TEST(ManifestTest, AvailableValues) {
       {
         "name": "Test Extension",
         "manifest_version": 3,
-        "host_permissions": []
+        "host_permissions": [],
+        "nacl_modules": ""
       }
     )"}
   };
   // clang-format on
 
   for (const auto& test_case : test_cases) {
-    std::optional<base::Value> manifest_value =
-        base::JSONReader::Read(test_case.input_manifest);
+    std::optional<base::Value> manifest_value = base::JSONReader::Read(
+        test_case.input_manifest, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
     ASSERT_TRUE(manifest_value) << test_case.input_manifest;
     ASSERT_TRUE(manifest_value->is_dict()) << test_case.input_manifest;
 
@@ -130,7 +130,8 @@ TEST(ManifestTest, AvailableValues) {
                       crx_file::id_util::GenerateId("extid"));
 
     std::optional<base::Value> expected_value =
-        base::JSONReader::Read(test_case.expected_available_manifest);
+        base::JSONReader::Read(test_case.expected_available_manifest,
+                               base::JSON_PARSE_CHROMIUM_EXTENSIONS);
     ASSERT_TRUE(expected_value) << test_case.expected_available_manifest;
     ASSERT_TRUE(expected_value->is_dict());
     EXPECT_EQ(expected_value->GetDict(), manifest.available_values());

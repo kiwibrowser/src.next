@@ -12,6 +12,7 @@ include_rules = [
     "+base/memory/scoped_refptr.h",
     "+base/profiler/sample_metadata.h",
     "+base/strings/pattern.h",
+    "+base/strings/string_split.h",
     "+base/strings/stringprintf.h",
     "+base/substring_set_matcher/substring_set_matcher.h",
     "+base/task/sequence_manager/task_time_observer.h",
@@ -24,15 +25,20 @@ include_rules = [
     "+base/unguessable_token.h",
     "+base/uuid.h",
     "+base/values.h",
+    "+cc/animation/animation.h",
     "+cc/animation/animation_host.h",
     "+cc/animation/animation_id_provider.h",
     "+cc/animation/animation_timeline.h",
+    "+cc/animation/animation_trigger.h",
+    "+cc/animation/animation_trigger_delegate.h",
     "+cc/animation/filter_animation_curve.h",
+    "+cc/animation/keyframe_effect.h",
     "+cc/animation/keyframe_model.h",
     "+cc/animation/scroll_offset_animation_curve.h",
     "+cc/animation/scroll_offset_animation_curve_factory.h",
     "+cc/animation/scroll_offset_animations.h",
     "+cc/animation/scroll_timeline.h",
+    "+cc/animation/timeline_trigger.h",
     "+cc/base/features.h",
     "+cc/base/region.h",
     "+cc/input/browser_controls_state.h",
@@ -55,17 +61,19 @@ include_rules = [
     "+cc/metrics/begin_main_frame_metrics.h",
     "+cc/metrics/frame_sequence_tracker_collection.h",
     "+cc/trees/browser_controls_params.h",
+    "+cc/trees/layer_tree_frame_sink.h",
     "+cc/trees/layer_tree_host.h",
-    "+cc/trees/paint_holding_commit_trigger.h",
     "+cc/trees/paint_holding_reason.h",
+    "+cc/trees/scroll_source_type.h",
     "+cc/trees/target_property.h",
     "+cc/trees/ukm_manager.h",
+    "+components/subresource_filter/core/common/scoped_rule.h",
     "+components/attribution_reporting/features.h",
-    "+components/miracle_parameter",
     "+components/performance_manager/public/mojom/coordination_unit.mojom-blink.h",
     "+components/performance_manager/public/mojom/web_memory.mojom-blink.h",
     "+components/viz/common/frame_timing_details.h",
     "+components/viz/common/navigation_id.h",
+    "+components/viz/common/surfaces/tracked_element_rects.h",
     "+gpu/config/gpu_feature_info.h",
     "-inspector/v8",
     "+mojo/public/cpp/base",
@@ -80,11 +88,14 @@ include_rules = [
     "+services/device/public/mojom/device_posture_provider.mojom-blink.h",
     "+services/device/public/mojom/wake_lock.mojom-blink.h",
     "+services/metrics/public",
+    "+services/network/public/cpp/connection_allowlist.h",
     "+services/network/public/cpp/cors/cors_error_status.h",
     "+services/network/public/cpp/cross_origin_embedder_policy.h",
     "+services/network/public/cpp/features.h",
     "+services/network/public/cpp/header_util.h",
+    "+services/network/public/cpp/integrity_policy.h",
     "+services/network/public/cpp/is_potentially_trustworthy.h",
+    "+services/network/public/cpp/ip_address_space_util.h",
     "+services/network/public/cpp/request_destination.h",
     "+services/network/public/cpp/request_mode.h",
     "+services/network/public/cpp/resource_request.h",
@@ -108,6 +119,7 @@ include_rules = [
     "+ui/accessibility/ax_event.h",
     "+ui/accessibility/ax_event_intent.h",
     "+ui/accessibility/ax_mode.h",
+    "+ui/base/clipboard/clipboard_constants.h",
     "+ui/base/cursor/cursor.h",
     "+ui/base/ime/ime_text_span.h",
     "+ui/base/ime/mojom/ime_types.mojom-blink-forward.h",
@@ -115,6 +127,8 @@ include_rules = [
     "+ui/base/ime/mojom/text_input_state.mojom-blink.h",
     "+ui/base/ime/mojom/virtual_keyboard_types.mojom-blink.h",
     "+ui/base/mojom/attributed_string.mojom-blink.h",
+    "+ui/base/mojom/menu_source_type.mojom-blink.h",
+    "+ui/base/mojom/menu_source_type.mojom-blink-forward.h",
     "+ui/base/pointer/pointer_device.h",
     "+ui/base/resource/resource_scale_factor.h",
     "+ui/base/ui_base_features.h",
@@ -127,6 +141,7 @@ include_rules = [
     "+ui/events/types/scroll_types.h",
     "+ui/gfx/animation/keyframe/animation_curve.h",
     "+ui/gfx/animation/keyframe/keyframed_animation_curve.h",
+    "+ui/gfx/animation/keyframe/keyframe_model.h",
     "+ui/gfx/animation/keyframe/timing_function.h",
     "+ui/gfx/codec/png_codec.h",
     "+ui/gfx/geometry",
@@ -135,18 +150,11 @@ include_rules = [
     "+ui/gfx/selection_bound.h",
     "+ui/strings/grit/ax_strings.h",
     "-web",
-    # We do not want any new dependencies into core/exported until we resolve
-    # controller layer.
-    "!third_party/blink/renderer/core/exported",
-    # We do not want any new dependencies on Web(Local|Remote)FrameBase.h until
-    # we resolve the control layer.
-    "!third_party/blink/renderer/core/frame/web_local_frame_impl.h",
-    "!third_party/blink/renderer/core/frame/web_remote_frame_impl.h",
 ]
 
 specific_include_rules = {
     # Additional allowed includes for tests.
-    ".*_(perf)?test(_.*)?\.(cc|h|mm)" : [
+    ".*_(perf)?test(_.*)?\\.(cc|h|mm)" : [
         "+base/command_line.h",
         "+base/json/json_reader.h",
         "+base/timer/lap_timer.h",
@@ -155,6 +163,9 @@ specific_include_rules = {
         "+base/threading/thread_task_runner_handle.h",
         # Test harness may use cc directly instead of going through WebViewImpl etc.
         "+cc",
+        "+components/subresource_filter/content/renderer",
+        "+components/subresource_filter/core/common",
+        "+components/subresource_filter/core/mojom",
         "+components/ukm/test_ukm_recorder.h",
         "+components/viz/test",
 	# TODO(crbug.com/838693): Test harnesses use LayerTreeView
@@ -163,7 +174,6 @@ specific_include_rules = {
         "+content/renderer/compositor",
         "+content/test",
         # Unit tests may use gpu/ for mocking and faking and for config tweaks.
-        "+gpu/command_buffer/client/raster_implementation_gles.h",
         "+gpu/config",
         "+testing/perf/perf_test.h",
         "+testing/perf/perf_result_reporter.h",
@@ -181,7 +191,7 @@ specific_include_rules = {
         "+components/viz/common/surfaces/frame_sink_id.h",
     ],
     "clipboard_utilities.cc" : [ "+base/strings/escape.h" ],
-    "css_parsing_utils.cc|html_permission_element.cc": [ "+ui/gfx/color_utils.h" ],
+    "html_capability_element_base.cc|style_color.cc": [ "+ui/gfx/color_utils.h" ],
     "find_in_page.cc" : [
         "+third_party/blink/renderer/core/frame/web_local_frame_impl.h",
     ],
@@ -200,7 +210,7 @@ specific_include_rules = {
     "local_dom_window.cc" : [
         "+net/base/registry_controlled_domains/registry_controlled_domain.h",
     ],
-    "(computed_style|computed_style_test)\.cc" : [
+    "(computed_style|computed_style_test)\\.cc" : [
         "+ui/base/ui_base_features.h"
     ],
     "media_query_evaluator.cc": [

@@ -17,12 +17,9 @@
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/dbus/utils/connect_to_signal.h"
 #include "components/memory_pressure/system_memory_pressure_evaluator.h"
 #include "dbus/bus.h"
-
-namespace dbus {
-class Signal;
-}  // namespace dbus
 
 namespace memory_pressure {
 class MemoryPressureVoter;
@@ -86,20 +83,16 @@ class DbusMemoryPressureEvaluatorLinux
   // Handles the availability response from above.
   void CheckIfPortalIsAvailableResponse(std::optional<bool> is_available);
 
-  // Shuts down the given bus on the D-Bus thread and clears the pointer.
-  void ResetBus(scoped_refptr<dbus::Bus>& bus);
-
   void OnSignalConnected(const std::string& interface,
                          const std::string& signal,
                          bool connected);
 
-  void OnLowMemoryWarning(dbus::Signal* signal);
+  void OnLowMemoryWarning(dbus_utils::ConnectToSignalResultSig<"y"> result);
 
   // Converts a pressure level from LMM to base's memory pressure constants.
-  base::MemoryPressureListener::MemoryPressureLevel LmmToBasePressureLevel(
-      uint8_t lmm_level);
+  base::MemoryPressureLevel LmmToBasePressureLevel(uint8_t lmm_level);
 
-  void UpdateLevel(base::MemoryPressureListener::MemoryPressureLevel new_level);
+  void UpdateLevel(base::MemoryPressureLevel new_level);
 
   scoped_refptr<dbus::Bus> system_bus_;
   scoped_refptr<dbus::Bus> session_bus_;

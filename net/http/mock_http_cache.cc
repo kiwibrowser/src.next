@@ -2,29 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/http/mock_http_cache.h"
+
+#include <stdint.h>
 
 #include <algorithm>
 #include <limits>
 #include <memory>
 #include <utility>
 
+#include "base/byte_size.h"
+#include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/pickle.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/types/expected.h"
 #include "net/base/features.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 #include "net/http/http_cache_writers.h"
+#include "net/http/no_vary_search_cache_storage_file_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -60,7 +63,9 @@ struct MockDiskEntry::CallbackInfo {
 };
 
 MockDiskEntry::MockDiskEntry(const std::string& key)
-    : key_(key), max_file_size_(std::numeric_limits<int>::max()) {
+    : key_(key),
+      max_file_size_(std::numeric_limits<int>::max()),
+      last_used_time_(base::Time::Now()) {
   test_mode_ = GetTestModeForEntry(key);
 }
 
@@ -77,20 +82,16 @@ std::string MockDiskEntry::GetKey() const {
 }
 
 base::Time MockDiskEntry::GetLastUsed() const {
-  return base::Time::Now();
+  return last_used_time_;
 }
 
-base::Time MockDiskEntry::GetLastModified() const {
-  return base::Time::Now();
-}
-
-int32_t MockDiskEntry::GetDataSize(int index) const {
+int64_t MockDiskEntry::GetDataSize(int index) const {
   DCHECK(index >= 0 && index < kNumCacheEntryDataIndices);
-  return static_cast<int32_t>(data_[index].size());
+  return static_cast<int64_t>(data_[index].size());
 }
 
 int MockDiskEntry::ReadData(int index,
-                            int offset,
+                            int64_t offset,
                             IOBuffer* buf,
                             int buf_len,
                             CompletionOnceCallback callback) {
@@ -104,12 +105,17 @@ int MockDiskEntry::ReadData(int index,
   if (offset < 0 || offset > static_cast<int>(data_[index].size())) {
     return ERR_FAILED;
   }
-  if (static_cast<size_t>(offset) == data_[index].size()) {
+
+  // `offset` is not larger than int max so it's in size_t range.
+  if (base::checked_cast<size_t>(offset) == data_[index].size()) {
     return 0;
   }
 
-  int num = std::min(buf_len, static_cast<int>(data_[index].size()) - offset);
-  memcpy(buf->data(), &data_[index][offset], num);
+  int num = std::min(buf_len, static_cast<int>(data_[index].size()) -
+                                  base::checked_cast<int>(offset));
+  buf->span().copy_prefix_from(base::span(data_[index])
+                                   .subspan(base::checked_cast<size_t>(offset),
+                                            base::checked_cast<size_t>(num)));
 
   if (MockHttpCache::GetTestMode(test_mode_) & TEST_MODE_SYNC_CACHE_READ) {
     return num;
@@ -134,7 +140,7 @@ void MockDiskEntry::ResumeDiskEntryOperation() {
 }
 
 int MockDiskEntry::WriteData(int index,
-                             int offset,
+                             int64_t offset,
                              IOBuffer* buf,
                              int buf_len,
                              CompletionOnceCallback callback,
@@ -152,14 +158,21 @@ int MockDiskEntry::WriteData(int index,
     return ERR_FAILED;
   }
 
-  DCHECK_LT(offset + buf_len, kMaxMockCacheEntrySize);
-  if (offset + buf_len > max_file_size_ && index == 1) {
+  if (offset + buf_len > kMaxMockCacheEntrySize) {
+    return net::ERR_INVALID_ARGUMENT;
+  }
+
+  // `offset` is not larger than int max so it's in size_t range.
+  if (base::checked_cast<int>(offset) + buf_len > max_file_size_ &&
+      index == 1) {
     return ERR_FAILED;
   }
 
   data_[index].resize(offset + buf_len);
   if (buf_len) {
-    memcpy(&data_[index][offset], buf->data(), buf_len);
+    base::span(data_[index])
+        .subspan(base::checked_cast<size_t>(offset))
+        .copy_prefix_from(buf->first(buf_len));
   }
 
   if (MockHttpCache::GetTestMode(test_mode_) & TEST_MODE_SYNC_CACHE_WRITE) {
@@ -203,7 +216,9 @@ int MockDiskEntry::ReadSparseData(int64_t offset,
   }
 
   int num = std::min(static_cast<int>(data_[1].size()) - real_offset, buf_len);
-  memcpy(buf->data(), &data_[1][real_offset], num);
+  buf->span().copy_prefix_from(
+      base::span(data_[1]).subspan(base::checked_cast<size_t>(real_offset),
+                                   base::checked_cast<size_t>(num)));
 
   if (MockHttpCache::GetTestMode(test_mode_) & TEST_MODE_SYNC_CACHE_READ) {
     return num;
@@ -251,7 +266,9 @@ int MockDiskEntry::WriteSparseData(int64_t offset,
     data_[1].resize(real_offset + buf_len);
   }
 
-  memcpy(&data_[1][real_offset], buf->data(), buf_len);
+  base::span(data_[1])
+      .subspan(base::checked_cast<size_t>(real_offset))
+      .copy_prefix_from(buf->first(buf_len));
   if (MockHttpCache::GetTestMode(test_mode_) & TEST_MODE_SYNC_CACHE_WRITE) {
     return buf_len;
   }
@@ -339,8 +356,12 @@ Error MockDiskEntry::ReadyForSparseIO(CompletionOnceCallback callback) {
   return ERR_IO_PENDING;
 }
 
+void MockDiskEntry::SetEntryInMemoryData(uint8_t data) {
+  in_memory_data_ = data;
+}
+
 void MockDiskEntry::SetLastUsedTimeForTest(base::Time time) {
-  NOTREACHED();
+  last_used_time_ = time;
 }
 
 // If |value| is true, don't deliver any completion callbacks until called
@@ -424,8 +445,9 @@ MockDiskCache::~MockDiskCache() {
   ReleaseAll();
 }
 
-int32_t MockDiskCache::GetEntryCount() const {
-  return static_cast<int32_t>(entries_.size());
+base::expected<int32_t, net::Error> MockDiskCache::GetEntryCount(
+    GetEntryCountCallback callback) const {
+  return base::ok(entries_.size());
 }
 
 disk_cache::EntryResult MockDiskCache::OpenOrCreateEntry(
@@ -651,15 +673,16 @@ uint8_t MockDiskCache::GetEntryInMemoryData(const std::string& key) {
   return 0;
 }
 
-void MockDiskCache::SetEntryInMemoryData(const std::string& key, uint8_t data) {
-  auto it = entries_.find(key);
-  if (it != entries_.end()) {
-    it->second->set_in_memory_data(data);
-  }
-}
-
 int64_t MockDiskCache::MaxFileSize() const {
   return max_file_size_;
+}
+
+base::ByteSize MockDiskCache::GetMaxBytesForTesting() const {
+  return base::ByteSize(base::checked_cast<uint64_t>(max_bytes_));
+}
+
+void MockDiskCache::SetMaxBytes(base::ByteSize max_bytes) {
+  max_bytes_ = max_bytes.InBytes();
 }
 
 void MockDiskCache::ReleaseAll() {
@@ -703,10 +726,34 @@ const std::vector<std::string>& MockDiskCache::GetExternalCacheHits() const {
 
 //-----------------------------------------------------------------------------
 
+MockBackendFactory::MockBackendFactory() = default;
+
+MockBackendFactory::~MockBackendFactory() = default;
+
 disk_cache::BackendResult MockBackendFactory::CreateBackend(
     NetLog* net_log,
     disk_cache::BackendResultCallback callback) {
-  return disk_cache::BackendResult::Make(std::make_unique<MockDiskCache>());
+  auto backend = std::make_unique<MockDiskCache>();
+  backend->SetMaxBytes(
+      base::ByteSize(base::checked_cast<uint64_t>(max_bytes_)));
+  if (callback_later_) {
+    CHECK(pending_callback_.is_null());
+    pending_callback_ = std::move(callback);
+    pending_backend_ = std::move(backend);
+    return disk_cache::BackendResult::MakeError(net::ERR_IO_PENDING);
+  }
+  return disk_cache::BackendResult::Make(std::move(backend));
+}
+
+void MockBackendFactory::SetMaxBytes(int max_bytes) {
+  max_bytes_ = max_bytes;
+}
+
+void MockBackendFactory::CompleteCreateBackend() {
+  CHECK(!pending_callback_.is_null());
+  CHECK(pending_backend_);
+  std::move(pending_callback_)
+      .Run(disk_cache::BackendResult::Make(std::move(pending_backend_)));
 }
 
 //-----------------------------------------------------------------------------
@@ -715,9 +762,11 @@ MockHttpCache::MockHttpCache()
     : MockHttpCache(std::make_unique<MockBackendFactory>()) {}
 
 MockHttpCache::MockHttpCache(
-    std::unique_ptr<HttpCache::BackendFactory> disk_cache_factory)
+    std::unique_ptr<HttpCache::BackendFactory> disk_cache_factory,
+    std::unique_ptr<NoVarySearchCacheStorageFileOperations> file_operations)
     : http_cache_(std::make_unique<MockNetworkLayer>(),
-                  std::move(disk_cache_factory)) {}
+                  std::move(disk_cache_factory),
+                  std::move(file_operations)) {}
 
 disk_cache::Backend* MockHttpCache::backend() {
   TestGetBackendCompletionCallback cb;
@@ -730,8 +779,8 @@ MockDiskCache* MockHttpCache::disk_cache() {
   return static_cast<MockDiskCache*>(backend());
 }
 
-int MockHttpCache::CreateTransaction(std::unique_ptr<HttpTransaction>* trans) {
-  return http_cache_.CreateTransaction(DEFAULT_PRIORITY, trans);
+std::unique_ptr<HttpTransaction> MockHttpCache::CreateTransaction() {
+  return http_cache_.CreateTransaction(DEFAULT_PRIORITY);
 }
 
 void MockHttpCache::SimulateCacheLockTimeout() {
@@ -765,16 +814,14 @@ bool MockHttpCache::WriteResponseInfo(disk_cache::Entry* disk_entry,
                                       const HttpResponseInfo* response_info,
                                       bool skip_transient_headers,
                                       bool response_truncated) {
-  base::Pickle pickle;
-  response_info->Persist(&pickle, skip_transient_headers, response_truncated);
+  auto data = base::MakeRefCounted<PickledIOBuffer>(
+      response_info->MakePickle(skip_transient_headers, response_truncated));
 
   TestCompletionCallback cb;
-  int len = static_cast<int>(pickle.size());
-  auto data = base::MakeRefCounted<WrappedIOBuffer>(pickle);
-
-  int rv = disk_entry->WriteData(0, 0, data.get(), len, cb.callback(), true);
+  int rv = disk_entry->WriteData(0, 0, data.get(), data->size(), cb.callback(),
+                                 true);
   rv = cb.GetResult(rv);
-  return (rv == len);
+  return rv == data->size();
 }
 
 bool MockHttpCache::OpenBackendEntry(const std::string& key,

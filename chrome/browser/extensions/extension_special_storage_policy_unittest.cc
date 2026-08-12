@@ -2,15 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 
 #include <stddef.h>
 
+#include <array>
 #include <utility>
 
 #include "base/memory/scoped_refptr.h"
@@ -24,11 +20,16 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/test/browser_task_environment.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+namespace {
 
 using content::BrowserThread;
 using extensions::Extension;
@@ -45,11 +46,12 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
  protected:
   class PolicyChangeObserver : public SpecialStoragePolicy::Observer {
    public:
-    PolicyChangeObserver()
-        : expected_type_(NOTIFICATION_TYPE_NONE), expected_change_flags_(0) {}
+    PolicyChangeObserver() = default;
 
     PolicyChangeObserver(const PolicyChangeObserver&) = delete;
     PolicyChangeObserver& operator=(const PolicyChangeObserver&) = delete;
+
+    ~PolicyChangeObserver() override = default;
 
     void OnGranted(const url::Origin& origin, int change_flags) override {
       EXPECT_EQ(expected_type_, NOTIFICATION_TYPE_GRANT);
@@ -92,10 +94,10 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
       NOTIFICATION_TYPE_GRANT,
       NOTIFICATION_TYPE_REVOKE,
       NOTIFICATION_TYPE_CLEAR,
-    } expected_type_;
+    } expected_type_ = NOTIFICATION_TYPE_NONE;
 
     GURL expected_origin_;
-    int expected_change_flags_;
+    int expected_change_flags_ = 0;
   };
 
   void SetUp() override {
@@ -108,16 +110,16 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
 #elif BUILDFLAG(IS_POSIX)
     base::FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-    base::Value::Dict manifest;
+    base::DictValue manifest;
     manifest.Set(keys::kName, "Protected");
     manifest.Set(keys::kVersion, "1");
     manifest.SetByDottedPath(keys::kLaunchWebURL,
                              "http://explicit/protected/start");
-    base::Value::List list;
+    base::ListValue list;
     list.Append("http://explicit/protected");
     list.Append("*://*.wildcards/protected");
     manifest.SetByDottedPath(keys::kWebURLs, std::move(list));
-    std::string error;
+    std::u16string error;
     scoped_refptr<Extension> protected_app =
         Extension::Create(path, ManifestLocation::kInvalidLocation, manifest,
                           Extension::NO_FLAGS, &error);
@@ -131,19 +133,19 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
 #elif BUILDFLAG(IS_POSIX)
     base::FilePath path(FILE_PATH_LITERAL("/bar"));
 #endif
-    base::Value::Dict manifest;
+    base::DictValue manifest;
     manifest.Set(keys::kName, "Unlimited");
     manifest.Set(keys::kVersion, "1");
     manifest.SetByDottedPath(keys::kLaunchWebURL,
                              "http://explicit/unlimited/start");
-    base::Value::List list1;
+    base::ListValue list1;
     list1.Append("unlimitedStorage");
     manifest.Set(keys::kPermissions, std::move(list1));
-    base::Value::List list2;
+    base::ListValue list2;
     list2.Append("http://explicit/unlimited");
     list2.Append("*://*.wildcards/unlimited");
     manifest.SetByDottedPath(keys::kWebURLs, std::move(list2));
-    std::string error;
+    std::u16string error;
     scoped_refptr<Extension> unlimited_app =
         Extension::Create(path, ManifestLocation::kInvalidLocation, manifest,
                           Extension::NO_FLAGS, &error);
@@ -157,12 +159,12 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
 #elif BUILDFLAG(IS_POSIX)
     base::FilePath path(FILE_PATH_LITERAL("/app"));
 #endif
-    base::Value::Dict manifest;
+    base::DictValue manifest;
     manifest.Set(keys::kName, "App");
     manifest.Set(keys::kVersion, "1");
     manifest.SetByDottedPath(keys::kPlatformAppBackgroundPage,
                              "background.html");
-    std::string error;
+    std::u16string error;
     scoped_refptr<Extension> app =
         Extension::Create(path, ManifestLocation::kInvalidLocation, manifest,
                           Extension::NO_FLAGS, &error);
@@ -360,7 +362,7 @@ TEST_F(ExtensionSpecialStoragePolicyTest, HasSessionOnlyOrigins) {
   EXPECT_FALSE(policy_->HasSessionOnlyOrigins());
 }
 
-TEST_F(ExtensionSpecialStoragePolicyTest, IsStorageDurableTest) {
+TEST_F(ExtensionSpecialStoragePolicyTest, IsStoragePersistentTest) {
   TestingProfile profile;
   content_settings::CookieSettings* cookie_settings =
       CookieSettingsFactory::GetForProfile(&profile).get();
@@ -368,15 +370,15 @@ TEST_F(ExtensionSpecialStoragePolicyTest, IsStorageDurableTest) {
       base::MakeRefCounted<ExtensionSpecialStoragePolicy>(cookie_settings);
   const GURL kHttpUrl("http://foo.com");
 
-  EXPECT_FALSE(policy_->IsStorageDurable(kHttpUrl));
+  EXPECT_FALSE(policy_->IsStoragePersistent(kHttpUrl));
 
   HostContentSettingsMap* content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(&profile);
   content_settings_map->SetContentSettingDefaultScope(
-      kHttpUrl, GURL(), ContentSettingsType::DURABLE_STORAGE,
+      kHttpUrl, GURL(), ContentSettingsType::PERSISTENT_STORAGE,
       CONTENT_SETTING_ALLOW);
 
-  EXPECT_TRUE(policy_->IsStorageDurable(kHttpUrl));
+  EXPECT_TRUE(policy_->IsStoragePersistent(kHttpUrl));
 }
 
 TEST_F(ExtensionSpecialStoragePolicyTest, NotificationTest) {
@@ -384,17 +386,17 @@ TEST_F(ExtensionSpecialStoragePolicyTest, NotificationTest) {
   PolicyChangeObserver observer;
   policy_->AddObserver(&observer);
 
-  scoped_refptr<Extension> apps[] = {
+  auto apps = std::to_array<scoped_refptr<Extension>>({
       CreateProtectedApp(),
       CreateUnlimitedApp(),
-  };
+  });
 
-  int change_flags[] = {
+  auto change_flags = std::to_array<int>({
       SpecialStoragePolicy::STORAGE_PROTECTED,
 
       SpecialStoragePolicy::STORAGE_PROTECTED |
           SpecialStoragePolicy::STORAGE_UNLIMITED,
-  };
+  });
 
   ASSERT_EQ(std::size(apps), std::size(change_flags));
   for (size_t i = 0; i < std::size(apps); ++i) {
@@ -434,3 +436,5 @@ TEST_F(ExtensionSpecialStoragePolicyTest, NotificationTest) {
 
   policy_->RemoveObserver(&observer);
 }
+
+}  // namespace

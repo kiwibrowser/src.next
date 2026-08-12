@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -77,10 +78,11 @@ class SegmentScorerTest : public ::testing::Test {
 
   std::vector<std::string> GetTestDataRankingUsingScorer(
       std::vector<SegmentTestItem>&& test_items,
-      std::unique_ptr<SegmentScorer> scorer) {
+      std::unique_ptr<SegmentScorer> scorer,
+      std::optional<size_t> recency_window_days = std::nullopt) {
     for (auto& item : test_items) {
-      item.score =
-          scorer->Compute(item.time_slots, item.visit_counts, fake_now);
+      item.score = scorer->Compute(item.time_slots, item.visit_counts, fake_now,
+                                   recency_window_days);
     }
 
     // Sort to make items with highest score appear first.
@@ -111,9 +113,9 @@ class SegmentScorerTest : public ::testing::Test {
 
 TEST_F(SegmentScorerTest, RankByDefaultScorer) {
   base::FieldTrialParams params;
-  params[history::kMvtScoringParamRecencyFactor] =
-      history::kMvtScoringParamRecencyFactor_Default;
-  params[history::kMvtScoringParamDailyVisitCountCap] =
+  params[history::kMvtScoringParamRecencyFactor.name] =
+      history::kMvtScoringParamRecencyFactor_Classic;
+  params[history::kMvtScoringParamDailyVisitCountCap.name] =
       base::NumberToString(INT_MAX);
 
   base::test::ScopedFeatureList feature_list;
@@ -136,11 +138,11 @@ TEST_F(SegmentScorerTest, RankByDefaultScorer) {
 
 TEST_F(SegmentScorerTest, RankByDecayCap1Scorer) {
   base::FieldTrialParams params;
-  params[history::kMvtScoringParamRecencyFactor] =
+  params[history::kMvtScoringParamRecencyFactor.name] =
       history::kMvtScoringParamRecencyFactor_Decay;
   // exp(-1.0 / 11).
-  params[history::kMvtScoringParamDecayPerDay] = "0.9131007162822623";
-  params[history::kMvtScoringParamDailyVisitCountCap] = "1";
+  params[history::kMvtScoringParamDecayPerDay.name] = "0.9131007162822623";
+  params[history::kMvtScoringParamDailyVisitCountCap.name] = "1";
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeatureWithParameters(
@@ -162,9 +164,9 @@ TEST_F(SegmentScorerTest, RankByDecayCap1Scorer) {
 
 TEST_F(SegmentScorerTest, RankByDecayStaircaseCap10Scorer) {
   base::FieldTrialParams params;
-  params[history::kMvtScoringParamRecencyFactor] =
+  params[history::kMvtScoringParamRecencyFactor.name] =
       history::kMvtScoringParamRecencyFactor_DecayStaircase;
-  params[history::kMvtScoringParamDailyVisitCountCap] = "10";
+  params[history::kMvtScoringParamDailyVisitCountCap.name] = "10";
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeatureWithParameters(
@@ -181,6 +183,31 @@ TEST_F(SegmentScorerTest, RankByDecayStaircaseCap10Scorer) {
   ASSERT_EQ("10 last 2 days", names_by_rank[cur++]);
   ASSERT_EQ("10 over 2 days week apart", names_by_rank[cur++]);
   ASSERT_EQ("10 today", names_by_rank[cur++]);
+  ASSERT_EQ("1 today", names_by_rank[cur++]);
+}
+
+TEST_F(SegmentScorerTest, DesktopRankByDecayDefaultVisitCap10DayCap5Scorer) {
+  base::FieldTrialParams params;
+  params[history::kMvtScoringParamDailyVisitCountCap.name] = "10";
+
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      history::kMostVisitedTilesNewScoring, params);
+
+  // Consider last 5 days of data using classic decay.
+  std::vector<std::string> names_by_rank = GetTestDataRankingUsingScorer(
+      MakeTestItems(),
+      SegmentScorer::Create(history::kMvtScoringParamRecencyFactor_Classic),
+      4u);
+  int cur = 0;
+  ASSERT_EQ("10 last 5 days", names_by_rank[cur++]);
+  ASSERT_EQ("10 increase last 4 days", names_by_rank[cur++]);
+  ASSERT_EQ("10 decrease last 4 days", names_by_rank[cur++]);
+  ASSERT_EQ("10 last 2 days", names_by_rank[cur++]);
+  ASSERT_EQ("10 last 10 days", names_by_rank[cur++]);
+  ASSERT_EQ("10 today", names_by_rank[cur++]);
+  ASSERT_EQ("10 over 2 days week apart", names_by_rank[cur++]);
+  ASSERT_EQ("10 last 19 days", names_by_rank[cur++]);
   ASSERT_EQ("1 today", names_by_rank[cur++]);
 }
 

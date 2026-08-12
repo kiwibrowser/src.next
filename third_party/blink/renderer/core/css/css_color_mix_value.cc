@@ -59,68 +59,93 @@ bool CSSColorMixValue::NormalizePercentages(
   return true;
 }
 
-Color CSSColorMixValue::Mix(const Color& color1,
-                            const Color& color2,
-                            const CSSLengthResolver& length_resolver) const {
-  double alpha_multiplier;
-  double mix_amount;
-  if (!NormalizePercentages(mix_amount, alpha_multiplier, length_resolver)) {
-    return Color();
-  }
-  return Color::FromColorMix(ColorInterpolationSpace(),
-                             HueInterpolationMethod(), color1, color2,
-                             mix_amount, alpha_multiplier);
-}
-
 bool CSSColorMixValue::Equals(const CSSColorMixValue& other) const {
-  return color1_ == other.color1_ && color2_ == other.color2_ &&
-         percentage1_ == other.percentage1_ &&
-         percentage2_ == other.percentage2_ &&
+  return *color1_ == *other.color1_ && *color2_ == *other.color2_ &&
+         base::ValuesEquivalent(percentage1_, other.percentage1_) &&
+         base::ValuesEquivalent(percentage2_, other.percentage2_) &&
          color_interpolation_space_ == other.color_interpolation_space_ &&
          hue_interpolation_method_ == other.hue_interpolation_method_;
 }
 
-// https://drafts.csswg.org/css-color-5/#serial-color-mix
+std::pair<const CSSPrimitiveValue*, const CSSPrimitiveValue*>
+CSSColorMixValue::PercentageValuesForSerialization(
+    const CSSPrimitiveValue* p1,
+    const CSSPrimitiveValue* p2) {
+  if (p1) {
+    if (auto* p1_literal = DynamicTo<CSSNumericLiteralValue>(*p1)) {
+      const double p1_literal_percent = p1_literal->ComputePercentage();
+      if (p2) {
+        if (auto* p2_literal = DynamicTo<CSSNumericLiteralValue>(*p2)) {
+          const double p2_literal_percent = p2_literal->ComputePercentage();
+          if (p1_literal_percent == 50.0 && p2_literal_percent == 50.0) {
+            return {nullptr, nullptr};
+          }
+          if (p1_literal_percent + p2_literal_percent == 100.0) {
+            return {p1, nullptr};
+          }
+        }
+      } else {
+        if (p1_literal_percent == 50.0) {
+          return {nullptr, nullptr};
+        }
+      }
+    }
+    return {p1, p2};
+  }
+  if (p2) {
+    if (auto* p2_literal = DynamicTo<CSSNumericLiteralValue>(*p2)) {
+      if (p2_literal->ComputePercentage() == 50.0) {
+        return {nullptr, nullptr};
+      }
+      return {p2->SubtractFrom(100.0, CSSPrimitiveValue::UnitType::kPercentage),
+              nullptr};
+    }
+    return {nullptr, p2};
+  }
+  return {nullptr, nullptr};
+}
+
 String CSSColorMixValue::CustomCSSText() const {
   StringBuilder result;
-  result.Append("color-mix(in ");
-  result.Append(Color::SerializeInterpolationSpace(color_interpolation_space_,
-                                                   hue_interpolation_method_));
-  result.Append(", ");
+  result.Append("color-mix(");
+
+  // Per CSS Color 5, the default interpolation space is oklab with shorter hue.
+  // Default values are omitted from serialization.
+  // https://drafts.csswg.org/css-color-5/#color-mix-space
+  const bool is_default_interpolation =
+      color_interpolation_space_ == Color::ColorSpace::kOklab &&
+      hue_interpolation_method_ == Color::HueInterpolationMethod::kShorter;
+
+  if (!is_default_interpolation) {
+    result.Append("in ");
+    result.Append(Color::SerializeInterpolationSpace(
+        color_interpolation_space_, hue_interpolation_method_));
+    result.Append(", ");
+  }
+
+  auto [percentage1_value, percentage2_value] =
+      PercentageValuesForSerialization(percentage1_, percentage2_);
+
   result.Append(color1_->CssText());
-  bool percentagesNormalized = true;
-  if (percentage1_ && percentage2_ && percentage1_->IsNumericLiteralValue() &&
-      percentage2_->IsNumericLiteralValue() &&
-      (To<CSSNumericLiteralValue>(*percentage1_).ComputePercentage() +
-           To<CSSNumericLiteralValue>(*percentage2_).ComputePercentage() !=
-       100.0)) {
-    percentagesNormalized = false;
-  }
-  if (percentage1_ &&
-      (!percentage1_->IsNumericLiteralValue() ||
-       To<CSSNumericLiteralValue>(*percentage1_).ComputePercentage() != 50.0 ||
-       !percentagesNormalized)) {
-    result.Append(" ");
-    result.Append(percentage1_->CssText());
-  }
-  if (!percentage1_ && percentage2_ &&
-      (!percentage2_->IsNumericLiteralValue() ||
-       To<CSSNumericLiteralValue>(*percentage2_).ComputePercentage() != 50.0)) {
-    result.Append(" ");
-    result.Append(
-        percentage2_
-            ->SubtractFrom(100.0, CSSPrimitiveValue::UnitType::kPercentage)
-            ->CustomCSSText());
+  if (percentage1_value) {
+    result.Append(' ');
+    result.Append(percentage1_value->CssText());
   }
   result.Append(", ");
   result.Append(color2_->CssText());
-  if (!percentagesNormalized) {
-    result.Append(" ");
-    result.Append(percentage2_->CssText());
+  if (percentage2_value) {
+    result.Append(' ');
+    result.Append(percentage2_value->CssText());
   }
-  result.Append(")");
-
+  result.Append(')');
   return result.ReleaseString();
+}
+
+bool CSSColorMixValue::HasRandomFunctions() const {
+  return (color1_ && color1_->HasRandomFunctions()) ||
+         (color2_ && color2_->HasRandomFunctions()) ||
+         (percentage1_ && percentage1_->HasRandomFunctions()) ||
+         (percentage2_ && percentage2_->HasRandomFunctions());
 }
 
 void CSSColorMixValue::TraceAfterDispatch(blink::Visitor* visitor) const {

@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_ANDROID_MOCK_DOWNLOAD_CONTROLLER_H_
 #define CHROME_BROWSER_DOWNLOAD_ANDROID_MOCK_DOWNLOAD_CONTROLLER_H_
 
-#include "base/functional/callback.h"
 #include "chrome/browser/download/android/download_controller_base.h"
 
 namespace android {
@@ -22,12 +21,10 @@ class MockDownloadController : public DownloadControllerBase {
 
   // DownloadControllerBase implementation.
   void OnDownloadStarted(download::DownloadItem* download_item) override;
-  void StartContextMenuDownload(const content::ContextMenuParams& params,
+  void StartContextMenuDownload(const GURL& url,
+                                const content::ContextMenuParams& params,
                                 content::WebContents* web_contents,
-                                bool is_link) override;
-  void AcquireFileAccessPermission(
-      const content::WebContents::Getter& wc_getter,
-      AcquireFileAccessPermissionCallback callback) override;
+                                bool is_media) override;
   void SetApproveFileAccessRequestForTesting(bool approve) override;
   void CreateAndroidDownload(const content::WebContents::Getter& wc_getter,
                              const DownloadInfo& info) override;

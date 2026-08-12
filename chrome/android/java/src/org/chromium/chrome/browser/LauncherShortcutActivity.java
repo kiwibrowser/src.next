@@ -4,54 +4,111 @@
 
 package org.chromium.chrome.browser;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.drawable.Icon;
-import android.os.Build;
 import android.os.Bundle;
 
-import androidx.annotation.RequiresApi;
+import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ResettersForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.shared_preferences.SharedPreferencesManager;
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.SequencedTaskRunner;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /** A helper activity for routing launcher shortcut intents. */
+@NullMarked
 public class LauncherShortcutActivity extends Activity {
     public static final String ACTION_OPEN_NEW_TAB = "chromium.shortcut.action.OPEN_NEW_TAB";
+    public static final String ACTION_OPEN_NEW_WINDOW = "chromium.shortcut.action.OPEN_NEW_WINDOW";
     public static final String ACTION_OPEN_NEW_INCOGNITO_TAB =
             "chromium.shortcut.action.OPEN_NEW_INCOGNITO_TAB";
+    public static final String ACTION_OPEN_NEW_INCOGNITO_WINDOW =
+            "chromium.shortcut.action.OPEN_NEW_INCOGNITO_WINDOW";
 
     @VisibleForTesting
+    static final String DYNAMIC_OPEN_NEW_WINDOW_ID = "dynamic-new-window-shortcut";
+
     static final String DYNAMIC_OPEN_NEW_INCOGNITO_TAB_ID = "dynamic-new-incognito-tab-shortcut";
 
-    private static String sLabelForTesting;
+    private static final String TAG = "LauncherShortcut";
+
+    private static final SequencedTaskRunner sTaskRunner =
+            PostTask.createSequencedTaskRunner(TaskTraits.USER_VISIBLE_MAY_BLOCK);
+
+    // LINT.IfChange(UpdateFailure)
+    @IntDef({UpdateFailure.RATE_LIMITED, UpdateFailure.LIMIT_EXCEEDED})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface UpdateFailure {
+        int RATE_LIMITED = 0;
+        int LIMIT_EXCEEDED = 1;
+        int NUM_ENTRIES = 2;
+    }
+
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/android/enums.xml:LauncherShortcutUpdateFailure)
+
+    private static @Nullable volatile String sLabelForTesting;
+
+    private boolean mIsProcessingIntent;
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
+    public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        mIsProcessingIntent = false;
+        handleIntent(getIntent());
+    }
 
-        Intent intent = getIntent();
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
+
+        // Guard: Drop incoming duplicate intents if we are already handling a routing pipeline.
+        if (mIsProcessingIntent || isFinishing()) {
+            return;
+        }
+
         String intentAction = intent.getAction();
+        assumeNonNull(intentAction);
 
         // Exit early if the original intent action isn't for opening a new tab.
         if (!intentAction.equals(ACTION_OPEN_NEW_TAB)
-                && !intentAction.equals(ACTION_OPEN_NEW_INCOGNITO_TAB)) {
+                && !intentAction.equals(ACTION_OPEN_NEW_WINDOW)
+                && !intentAction.equals(ACTION_OPEN_NEW_INCOGNITO_TAB)
+                && !intentAction.equals(ACTION_OPEN_NEW_INCOGNITO_WINDOW)) {
             finish();
             return;
         }
+
+        mIsProcessingIntent = true;
 
         Intent newIntent = getChromeLauncherActivityIntent(this, intentAction);
         // Retain FLAG_ACTIVITY_MULTIPLE_TASK in the intent if present, to support multi-instance
@@ -65,91 +122,160 @@ public class LauncherShortcutActivity extends Activity {
     }
 
     /**
-     * Adds or removes the "New incognito tab" launcher shortcut based on whether incognito mode is
-     * enabled.
+     * Updates the dynamic launcher shortcuts based on whether incognito mode is enabled.
      *
-     * @param context The context used to retrieve the system {@link ShortcutManager}.
+     * <p>This method performs the ShortcutManager updates asynchronously on a background thread to
+     * avoid blocking the main thread. However, the shortcut info itself is pre-built on the UI
+     * thread to comply with thread constraints of display utilities.
+     *
      * @param profile The profile used to check whether incognito mode is enabled.
      */
-    public static void updateIncognitoShortcut(Context context, Profile profile) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
-
-        SharedPreferencesManager preferences = ChromeSharedPreferences.getInstance();
+    public static void updateIncognitoShortcut(Profile profile) {
         boolean incognitoEnabled = IncognitoUtils.isIncognitoModeEnabled(profile);
-        boolean incognitoShortcutAdded =
-                preferences.readBoolean(ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, false);
+        List<ShortcutInfo> shortcuts = incognitoEnabled ? getExtraLauncherShortcuts() : null;
+        sTaskRunner.execute(
+                () -> {
+                    SharedPreferencesManager preferences = ChromeSharedPreferences.getInstance();
+                    boolean incognitoShortcutAdded =
+                            preferences.readBoolean(
+                                    ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, false);
 
-        // Add the shortcut regardless of whether it was previously added in case the locale has
-        // changed since the last addition.
-        // TODO(crbug.com/40125673): Investigate better locale change handling.
-        if (incognitoEnabled) {
-            boolean success = LauncherShortcutActivity.addIncognitoLauncherShortcut(context);
-
-            // Save a shared preference indicating the incognito shortcut has been added.
-            if (success) {
-                preferences.writeBoolean(ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, true);
-            }
-        } else if (!incognitoEnabled && incognitoShortcutAdded) {
-            LauncherShortcutActivity.removeIncognitoLauncherShortcut(context);
-            preferences.writeBoolean(ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, false);
-        }
+                    // Add the shortcut regardless of whether it was previously added in case the
+                    // locale has changed since the last addition.
+                    // TODO(crbug.com/40125673): Investigate better locale change handling.
+                    if (incognitoEnabled) {
+                        assumeNonNull(shortcuts);
+                        ShortcutManager shortcutManager =
+                                ContextUtils.getApplicationContext()
+                                        .getSystemService(ShortcutManager.class);
+                        try {
+                            if (shortcutManager.setDynamicShortcuts(shortcuts)) {
+                                preferences.writeBoolean(
+                                        ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, true);
+                            } else {
+                                Log.e(TAG, "setDynamicShortcuts is rate-limited");
+                                RecordHistogram.recordEnumeratedHistogram(
+                                        "Android.LauncherShortcut.UpdateFailure",
+                                        UpdateFailure.RATE_LIMITED,
+                                        UpdateFailure.NUM_ENTRIES);
+                            }
+                        } catch (IllegalArgumentException e) {
+                            Log.e(TAG, "Max number of dynamic shortcuts exceeded", e);
+                            RecordHistogram.recordEnumeratedHistogram(
+                                    "Android.LauncherShortcut.UpdateFailure",
+                                    UpdateFailure.LIMIT_EXCEEDED,
+                                    UpdateFailure.NUM_ENTRIES);
+                        } catch (IllegalStateException e) {
+                            Log.e(TAG, "Failed to set dynamic shortcuts", e);
+                        }
+                    } else if (incognitoShortcutAdded) {
+                        removeLauncherShortcuts();
+                        preferences.writeBoolean(
+                                ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED, false);
+                    }
+                });
     }
 
     /**
-     * Adds a "New incognito tab" dynamic launcher shortcut.
-     * @param context The context used to retrieve the system {@link ShortcutManager}.
-     * @return True if adding the shortcut has succeeded. False if the call fails due to rate
-     *         limiting. See {@link ShortcutManager#addDynamicShortcuts}.
+     * Builds a list of "New incognito tab" or "New window" and "New incognito window" dynamic
+     * launcher shortcuts based on whether mixed windows are supported.
+     *
+     * @return List of shortcuts to be set.
      */
-    @RequiresApi(Build.VERSION_CODES.N_MR1)
-    private static boolean addIncognitoLauncherShortcut(Context context) {
-        Intent intent = new Intent(LauncherShortcutActivity.ACTION_OPEN_NEW_INCOGNITO_TAB);
+    private static List<ShortcutInfo> getExtraLauncherShortcuts() {
+        List<ShortcutInfo> shortcuts = new ArrayList<>();
+        boolean supportedMixedWindows = !IncognitoUtils.shouldOpenIncognitoAsWindow();
+        if (supportedMixedWindows) {
+            shortcuts.add(
+                    buildLauncherShortcut(
+                            DYNAMIC_OPEN_NEW_INCOGNITO_TAB_ID,
+                            LauncherShortcutActivity.ACTION_OPEN_NEW_INCOGNITO_TAB,
+                            R.string.accessibility_incognito_tab,
+                            R.string.menu_new_incognito_tab,
+                            R.drawable.shortcut_incognito));
+        } else {
+            shortcuts.add(
+                    buildLauncherShortcut(
+                            DYNAMIC_OPEN_NEW_WINDOW_ID,
+                            LauncherShortcutActivity.ACTION_OPEN_NEW_WINDOW,
+                            R.string.menu_new_window,
+                            R.string.menu_new_window,
+                            R.drawable.shortcut_newwindow));
+            shortcuts.add(
+                    buildLauncherShortcut(
+                            DYNAMIC_OPEN_NEW_INCOGNITO_TAB_ID,
+                            LauncherShortcutActivity.ACTION_OPEN_NEW_INCOGNITO_WINDOW,
+                            R.string.menu_incognito_window,
+                            R.string.menu_new_incognito_window,
+                            R.drawable.shortcut_incognito));
+        }
+        return shortcuts;
+    }
+
+    private static ShortcutInfo buildLauncherShortcut(
+            String shortcutId,
+            String action,
+            int shortLabelResId,
+            int longLabelResId,
+            int iconResId) {
+        Context context = ContextUtils.getApplicationContext();
+        Intent intent = new Intent(action);
         intent.setPackage(context.getPackageName());
         intent.setClass(context, LauncherShortcutActivity.class);
 
-        ShortcutInfo shortcut =
-                new ShortcutInfo.Builder(context, DYNAMIC_OPEN_NEW_INCOGNITO_TAB_ID)
-                        .setShortLabel(
-                                context.getString(
-                                        R.string.accessibility_tabstrip_incognito_identifier))
-                        .setLongLabel(
-                                sLabelForTesting != null
-                                        ? sLabelForTesting
-                                        : context.getString(R.string.menu_new_incognito_tab))
-                        .setIcon(Icon.createWithResource(context, R.drawable.shortcut_incognito))
-                        .setIntent(intent)
-                        .build();
-
-        ShortcutManager shortcutManager = context.getSystemService(ShortcutManager.class);
-        return shortcutManager.addDynamicShortcuts(Arrays.asList(shortcut));
+        return new ShortcutInfo.Builder(context, shortcutId)
+                .setShortLabel(context.getString(shortLabelResId))
+                .setLongLabel(
+                        sLabelForTesting != null
+                                ? sLabelForTesting
+                                : context.getString(longLabelResId))
+                .setIcon(Icon.createWithResource(context, iconResId))
+                .setIntent(intent)
+                .build();
     }
 
-    /**
-     * Removes the dynamic "New incognito tab" launcher shortcut.
-     * @param context The context used to retrieve the system {@link ShortcutManager}.
-     */
-    @RequiresApi(Build.VERSION_CODES.N_MR1)
-    private static void removeIncognitoLauncherShortcut(Context context) {
+    /** Removes the dynamic "New incognito tab" and "New window" launcher shortcut. */
+    private static void removeLauncherShortcuts() {
         List<String> shortcutList = new ArrayList<>();
         shortcutList.add(DYNAMIC_OPEN_NEW_INCOGNITO_TAB_ID);
+        shortcutList.add(DYNAMIC_OPEN_NEW_WINDOW_ID);
 
-        ShortcutManager shortcutManager = context.getSystemService(ShortcutManager.class);
-        shortcutManager.disableShortcuts(shortcutList);
-        shortcutManager.removeDynamicShortcuts(shortcutList);
+        ShortcutManager shortcutManager =
+                ContextUtils.getApplicationContext().getSystemService(ShortcutManager.class);
+        try {
+            shortcutManager.disableShortcuts(shortcutList);
+            shortcutManager.removeDynamicShortcuts(shortcutList);
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Failed to remove dynamic shortcuts", e);
+        }
     }
 
     /**
      * @param context The context used to get the package and set the intent class.
      * @param launcherShortcutIntentAction The intent action that launched the
-     *                                     LauncherShortcutActivity.
+     *     LauncherShortcutActivity.
      * @return An intent for ChromeLauncherActivity that will open a new regular or incognito tab.
      */
     private static Intent getChromeLauncherActivityIntent(
             Context context, String launcherShortcutIntentAction) {
-        Intent newIntent =
-                IntentHandler.createTrustedOpenNewTabIntent(
-                        context,
-                        launcherShortcutIntentAction.equals(ACTION_OPEN_NEW_INCOGNITO_TAB));
+        Intent newIntent;
+        boolean isIncognito = launcherShortcutIntentAction.equals(ACTION_OPEN_NEW_INCOGNITO_TAB);
+        if (launcherShortcutIntentAction.equals(ACTION_OPEN_NEW_TAB) || isIncognito) {
+            if (!isIncognito && IncognitoUtils.shouldOpenIncognitoAsWindow()) {
+                @SupportedProfileType
+                int lastActiveProfileType =
+                        MultiWindowUtils.getLastActiveTabbedActivityProfileType(context);
+                if (lastActiveProfileType == SupportedProfileType.OFF_THE_RECORD) {
+                    isIncognito = true;
+                }
+            }
+            newIntent = IntentHandler.createTrustedOpenNewTabIntent(context, isIncognito);
+        } else {
+            newIntent =
+                    IntentHandler.createTrustedOpenNewWindowIntent(
+                            context,
+                            launcherShortcutIntentAction.equals(ACTION_OPEN_NEW_INCOGNITO_WINDOW));
+        }
         newIntent.putExtra(IntentHandler.EXTRA_INVOKED_FROM_SHORTCUT, true);
 
         return newIntent;

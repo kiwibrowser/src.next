@@ -6,18 +6,21 @@
 #define CHROME_BROWSER_EXTENSIONS_OMAHA_ATTRIBUTES_HANDLER_H_
 
 #include "base/memory/raw_ptr.h"
-#include "chrome/browser/extensions/blocklist.h"
+#include "extensions/browser/blocklist.h"
 #include "extensions/browser/blocklist_state.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_id.h"
 
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
 namespace base {
-class Value;
+class DictValue;
 }
 
 namespace extensions {
 class ExtensionPrefs;
-class ExtensionService;
+class ExtensionRegistrar;
 
 // These values are logged to UMA. Entries should not be renumbered and
 // numeric values should never be reused. Please keep in sync with
@@ -43,14 +46,14 @@ class OmahaAttributesHandler {
  public:
   OmahaAttributesHandler(ExtensionPrefs* extension_prefs,
                          ExtensionRegistry* registry,
-                         ExtensionService* extension_service);
+                         ExtensionRegistrar* registrar);
   OmahaAttributesHandler(const OmahaAttributesHandler&) = delete;
   OmahaAttributesHandler& operator=(const OmahaAttributesHandler&) = delete;
   ~OmahaAttributesHandler() = default;
 
   // Performs action based on Omaha attributes for the extension.
   void PerformActionBasedOnOmahaAttributes(const ExtensionId& extension_id,
-                                           const base::Value::Dict& attributes);
+                                           const base::DictValue& attributes);
 
  private:
   // Performs action based on `attributes` for the `extension_id`. If the
@@ -58,20 +61,20 @@ class OmahaAttributesHandler {
   // malware blocklist state and maybe reload it. Otherwise, add it to the Omaha
   // malware blocklist state and maybe unload it.
   void HandleMalwareOmahaAttribute(const ExtensionId& extension_id,
-                                   const base::Value::Dict& attributes);
+                                   const base::DictValue& attributes);
   // Performs action based on `attributes` for the `extension_id`. If the
   // extension is not in the `greylist_state`, remove it from the Omaha
   // blocklist state and maybe re-enable it. Otherwise, add it to the Omaha
   // blocklist state and maybe disable it. `reason` is used for logging UMA
   // metrics.
   void HandleGreylistOmahaAttribute(const ExtensionId& extension_id,
-                                    const base::Value::Dict& attributes,
+                                    const base::DictValue& attributes,
                                     BitMapBlocklistState greylist_state,
                                     ExtensionUpdateCheckDataKey reason);
 
   raw_ptr<ExtensionPrefs> extension_prefs_ = nullptr;
   raw_ptr<ExtensionRegistry> registry_ = nullptr;
-  raw_ptr<ExtensionService> extension_service_ = nullptr;
+  raw_ptr<ExtensionRegistrar> registrar_ = nullptr;
 };
 
 }  // namespace extensions

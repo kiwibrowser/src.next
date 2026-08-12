@@ -4,14 +4,15 @@
 
 package org.chromium.content.browser.selection;
 
-import androidx.annotation.Nullable;
-
+import org.chromium.base.SelectionActionMenuClientWrapper.MenuType;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.content_public.browser.PendingSelectionMenu;
 import org.chromium.content_public.browser.SelectionClient;
-import org.chromium.content_public.browser.SelectionMenuGroup;
 import org.chromium.content_public.browser.selection.SelectionActionMenuDelegate;
+import org.chromium.ui.base.Clipboard;
 
 import java.util.Objects;
-import java.util.SortedSet;
 
 /**
  * Stores text selection state and corresponding menu items for caching purposes. The {@link
@@ -25,28 +26,54 @@ import java.util.SortedSet;
  *       compare other params.
  * </ol>
  */
+@NullMarked
 public class SelectionMenuCachedResult {
-    private final @Nullable SelectionClient.Result mClassificationResult;
+    private final SelectionClient.@Nullable Result mClassificationResult;
     private final boolean mIsSelectionPassword;
     private final boolean mIsSelectionReadOnly;
     private final String mSelectedText;
-    private final SortedSet<SelectionMenuGroup> mLastSelectionMenuItems;
+    private final int mSelectionOffset;
+    private final @MenuType int mMenuType;
+    private final PendingSelectionMenu mLastSelectionMenu;
+    private final boolean mHasClipboardItemToPaste;
 
     public SelectionMenuCachedResult(
-            @Nullable SelectionClient.Result classificationResult,
+            SelectionClient.@Nullable Result classificationResult,
             boolean isSelectionPassword,
             boolean isSelectionReadOnly,
             String selectedText,
-            SortedSet<SelectionMenuGroup> lastSelectionMenuItems) {
+            int selectionOffset,
+            @MenuType int menuType,
+            PendingSelectionMenu lastSelectionMenu) {
         mClassificationResult = classificationResult;
         mIsSelectionPassword = isSelectionPassword;
         mIsSelectionReadOnly = isSelectionReadOnly;
         mSelectedText = selectedText;
-        mLastSelectionMenuItems = lastSelectionMenuItems;
+        mSelectionOffset = selectionOffset;
+        mMenuType = menuType;
+        mLastSelectionMenu = lastSelectionMenu;
+        mHasClipboardItemToPaste = Clipboard.getInstance().canPaste();
     }
 
-    public SortedSet<SelectionMenuGroup> getResult() {
-        return mLastSelectionMenuItems;
+    public PendingSelectionMenu getResult() {
+        return mLastSelectionMenu;
+    }
+
+    public boolean isSameSelection(
+            String selectedText,
+            int selectionOffset,
+            boolean isSelectionPassword,
+            boolean isSelectionReadOnly,
+            @MenuType int menuType) {
+        return mSelectionOffset == selectionOffset
+                && mIsSelectionPassword == isSelectionPassword
+                && mIsSelectionReadOnly == isSelectionReadOnly
+                && Objects.equals(mSelectedText, selectedText)
+                && mMenuType == menuType;
+    }
+
+    SelectionClient.@Nullable Result getClassificationResult() {
+        return mClassificationResult;
     }
 
     /**
@@ -62,18 +89,23 @@ public class SelectionMenuCachedResult {
      * @return true if params are equivalent otherwise false.
      */
     public boolean canReuseResult(
-            @Nullable SelectionClient.Result classificationResult,
+            SelectionClient.@Nullable Result classificationResult,
             boolean isSelectionPassword,
             boolean isSelectionReadOnly,
             String selectedText,
-            SelectionActionMenuDelegate selectionActionMenuDelegate) {
+            @MenuType int menuType,
+            @Nullable SelectionActionMenuDelegate selectionActionMenuDelegate) {
         if (selectionActionMenuDelegate != null
-                && !selectionActionMenuDelegate.canReuseCachedSelectionMenu()) {
+                && !selectionActionMenuDelegate.canReuseCachedSelectionMenu(menuType)) {
             return false;
         }
         if (mIsSelectionPassword != isSelectionPassword
                 || mIsSelectionReadOnly != isSelectionReadOnly
-                || !Objects.equals(mSelectedText, selectedText)) {
+                || !Objects.equals(mSelectedText, selectedText)
+                || mMenuType != menuType) {
+            return false;
+        }
+        if (Clipboard.getInstance().canPaste() != mHasClipboardItemToPaste) {
             return false;
         }
         if ((mClassificationResult == null) != (classificationResult == null)) {

@@ -19,14 +19,18 @@ void IconLoader::LoadIcon(const base::FilePath& file_path,
                           IconSize size,
                           float scale,
                           IconLoadedCallback callback) {
-  (new IconLoader(file_path, size, scale, std::move(callback)))->Start();
+  base::MakeSelfDeleting<IconLoader>(file_path, size, scale,
+                                     std::move(callback))
+      ->Start();
 }
 
 IconLoader::IconLoader(const base::FilePath& file_path,
                        IconSize size,
                        float scale,
-                       IconLoadedCallback callback)
-    : file_path_(file_path),
+                       IconLoadedCallback callback,
+                       base::SelfDeletingPassKey key)
+    : base::SelfDeleting(key),
+      file_path_(file_path),
 #if !BUILDFLAG(IS_ANDROID)
       icon_size_(size),
 #endif

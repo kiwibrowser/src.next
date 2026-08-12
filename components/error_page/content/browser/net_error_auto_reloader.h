@@ -7,14 +7,15 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <memory>
 #include <optional>
-#include <set>
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/types/strong_alias.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "net/base/net_errors.h"
@@ -24,7 +25,7 @@
 
 namespace content {
 class NavigationHandle;
-class NavigationThrottle;
+class NavigationThrottleRegistry;
 class WebContents;
 }  // namespace content
 
@@ -35,8 +36,8 @@ namespace error_page {
 // excludes errors that aren't connectivity related since a reload doesn't
 // generally fix them (e.g. SSL errors or when the client blocked the request).
 // To use this behavior as a Content embedder, simply call the static
-// `MaybeCreateNavigationThrottle()` method from within your implementation of
-// ContentBrowserClient::CreateThrottlesForNavigation.
+// `MaybeCreateAndAddNavigationThrottle()` method from within your
+// implementation of ContentBrowserClient::CreateThrottlesForNavigation.
 class NetErrorAutoReloader
     : public content::WebContentsObserver,
       public content::WebContentsUserData<NetErrorAutoReloader>,
@@ -46,13 +47,13 @@ class NetErrorAutoReloader
   NetErrorAutoReloader& operator=(const NetErrorAutoReloader&) = delete;
   ~NetErrorAutoReloader() override;
 
-  // Maybe installs a throttle for the given navigation, lazily initializing the
+  // Maybe install a throttle for the given navigation, lazily initializing the
   // appropriate WebContents' NetErrorAutoReloader instance if necessary. For
   // embedders wanting to use NetErrorAutoReload's behavior, it's sufficient to
   // call this from ContentBrowserClient::CreateThrottlesForNavigation for each
   // navigation processed.
-  static std::unique_ptr<content::NavigationThrottle> MaybeCreateThrottleFor(
-      content::NavigationHandle* handle);
+  static void MaybeCreateAndAddNavigationThrottle(
+      content::NavigationThrottleRegistry& registry);
 
   // content::WebContentsObserver:
   void DidStartNavigation(content::NavigationHandle* handle) override;
@@ -61,7 +62,8 @@ class NetErrorAutoReloader
   void OnVisibilityChanged(content::Visibility visibility) override;
 
   // network::NetworkConnectionTracker::NetworkConnectionObserver:
-  void OnConnectionChanged(network::mojom::ConnectionType type) override;
+  void OnConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override;
 
   // Returns the delay applied when scheduling the next auto-reload of a page
   // after it's already been auto-reloaded `reload_count` times.
@@ -82,15 +84,16 @@ class NetErrorAutoReloader
 
   explicit NetErrorAutoReloader(content::WebContents* web_contents);
 
-  void SetInitialConnectionType(network::mojom::ConnectionType type);
+  void SetInitialConnectionType(
+      net::NetworkChangeNotifier::ConnectionType type);
   bool IsWebContentsVisible();
   void Reset();
   void PauseAutoReloadTimerIfRunning();
   void ResumeAutoReloadIfPaused();
   void ScheduleNextAutoReload();
   void ReloadMainFrame();
-  std::unique_ptr<content::NavigationThrottle> MaybeCreateThrottle(
-      content::NavigationHandle* handle);
+  void MaybeCreateAndAdd(
+      content::NavigationThrottleRegistry& registry);
   bool ShouldSuppressErrorPage(content::NavigationHandle* handle);
 
   struct ErrorPageInfo {
@@ -101,9 +104,15 @@ class NetErrorAutoReloader
     net::Error error;
   };
 
+  // True if a NavigationHandle corresponds to a load that was suppressed due to
+  // being a redundant error page load.
+  using IsSuppressedErrorPage =
+      base::StrongAlias<struct IsSuppressedErrorPageTag, bool>;
+
   raw_ptr<network::NetworkConnectionTracker> connection_tracker_;
   bool is_online_ = true;
-  std::set<raw_ptr<content::NavigationHandle, SetExperimental>>
+  std::map<raw_ptr<content::NavigationHandle, SetExperimental>,
+           IsSuppressedErrorPage>
       pending_navigations_;
   std::optional<base::OneShotTimer> next_reload_timer_;
   std::optional<ErrorPageInfo> current_reloadable_error_page_info_;

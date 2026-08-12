@@ -15,21 +15,24 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
+#include "third_party/blink/renderer/core/paint/border_shape_utils.h"
 #include "third_party/blink/renderer/core/paint/box_background_paint_context.h"
 #include "third_party/blink/renderer/core/paint/box_decoration_data.h"
+#include "third_party/blink/renderer/core/paint/box_fragment_painter.h"
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
 #include "third_party/blink/renderer/core/paint/box_painter.h"
 #include "third_party/blink/renderer/core/paint/box_painter_base.h"
+#include "third_party/blink/renderer/core/paint/contoured_border_geometry.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
-#include "third_party/blink/renderer/core/paint/rounded_border_geometry.h"
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
 #include "third_party/blink/renderer/core/paint/selection_bounds_recorder.h"
 #include "third_party/blink/renderer/core/paint/theme_painter.h"
+#include "third_party/blink/renderer/platform/geometry/contoured_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_cache_skipper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -121,14 +124,13 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
 
   const auto& local_paint_info = paint_state.GetPaintInfo();
   auto paint_offset = paint_state.PaintOffset();
-  PhysicalRect border_rect(paint_offset, layout_replaced_.Size());
+  PhysicalRect border_rect(paint_offset, layout_replaced_.StitchedSize());
 
   if (ShouldPaintBoxDecorationBackground(local_paint_info)) {
     bool should_paint_background = false;
-    if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled() &&
-        // TODO(crbug.com/1477914): Without this condition, scaled canvas
-        // would become pixelated on Linux.
-        !layout_replaced_.IsCanvas()) {
+    // TODO(crbug.com/40280438): Without this condition, scaled canvas would
+    // become pixelated on Linux.
+    if (!layout_replaced_.IsCanvas()) {
       should_paint_background = true;
     } else if (layout_replaced_.HasBoxDecorationBackground()) {
       should_paint_background = true;
@@ -181,7 +183,17 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
                                                         layout_replaced_);
     layout_replaced_.PaintReplaced(content_paint_state.GetPaintInfo(),
                                    content_paint_state.PaintOffset());
-    MeasureOverflowMetrics();
+
+    // Ad Highlight Logic
+    //
+    // Guard against empty fragments, because the layout results may be missing
+    // in certain paint phases or states.
+    if (!layout_replaced_.PhysicalFragments().IsEmpty()) {
+      const auto& fragment = layout_replaced_.PhysicalFragments().front();
+      BoxFragmentPainter::PaintAdHighlightIfNeeded(
+          local_paint_info, paint_offset, fragment, layout_replaced_,
+          local_paint_info.phase);
+    }
   }
 
   if (layout_replaced_.StyleRef().Visibility() == EVisibility::kVisible &&
@@ -190,7 +202,7 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
     DCHECK(scrollable_area);
     if (!scrollable_area->HasLayerForScrollCorner()) {
       ScrollableAreaPainter(*scrollable_area)
-          .PaintResizer(local_paint_info.context, paint_offset,
+          .PaintResizer(local_paint_info, paint_offset,
                         local_paint_info.GetCullRect());
     }
     // Otherwise the resizer will be painted by the scroll corner layer.
@@ -216,8 +228,7 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
     const ComputedStyle& style = layout_replaced_.StyleRef();
     selection_recorder.emplace(selection_state, selection_rect,
                                local_paint_info.context.GetPaintController(),
-                               style.Direction(), style.GetWritingMode(),
-                               layout_replaced_);
+                               style.Direction(), style.GetWritingMode());
   }
 
   if (!DrawingRecorder::UseCachedDrawingIfPossible(
@@ -235,7 +246,7 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
     Color selection_bg = HighlightStyleUtils::HighlightBackgroundColor(
         layout_replaced_.GetDocument(), layout_replaced_.StyleRef(),
         layout_replaced_.GetNode(), std::nullopt, kPseudoIdSelection,
-        SearchTextIsActiveMatch::kNo);
+        paint_info.IsPrivacyPreserving(), SearchTextIsActiveMatch::kNo);
     local_paint_info.context.FillRect(
         selection_painting_int_rect, selection_bg,
         PaintAutoDarkMode(layout_replaced_.StyleRef(),
@@ -270,40 +281,6 @@ bool ReplacedPainter::ShouldPaint(const ScopedPaintState& paint_state) const {
     return false;
 
   return true;
-}
-
-void ReplacedPainter::MeasureOverflowMetrics() const {
-  if (!layout_replaced_.BelongsToElementChangingOverflowBehaviour() ||
-      layout_replaced_.ClipsToContentBox() ||
-      !layout_replaced_.HasVisualOverflow()) {
-    return;
-  }
-
-  auto overflow_size = layout_replaced_.VisualOverflowRect().size;
-  auto overflow_area = overflow_size.width * overflow_size.height;
-
-  auto content_size = layout_replaced_.Size();
-  auto content_area = content_size.width * content_size.height;
-
-  DCHECK_GE(overflow_area, content_area);
-  if (overflow_area == content_area)
-    return;
-
-  const float device_pixel_ratio =
-      layout_replaced_.GetDocument().DevicePixelRatio();
-  const int overflow_outside_content_rect =
-      (overflow_area - content_area).ToInt() / pow(device_pixel_ratio, 2);
-  UMA_HISTOGRAM_COUNTS_100000(
-      "Blink.Overflow.ReplacedElementAreaOutsideContentRect",
-      overflow_outside_content_rect);
-
-  UseCounter::Count(layout_replaced_.GetDocument(),
-                    WebFeature::kReplacedElementPaintedWithOverflow);
-  constexpr int kMaxContentBreakageHeuristic = 5000;
-  if (overflow_outside_content_rect > kMaxContentBreakageHeuristic) {
-    UseCounter::Count(layout_replaced_.GetDocument(),
-                      WebFeature::kReplacedElementPaintedWithLargeOverflow);
-  }
 }
 
 void ReplacedPainter::PaintBoxDecorationBackground(
@@ -357,7 +334,8 @@ void ReplacedPainter::PaintBoxDecorationBackground(
       .RecordHitTestData(paint_info, ToPixelSnappedRect(paint_rect),
                          *background_client);
   BoxPainter(layout_replaced_)
-      .RecordRegionCaptureData(paint_info, paint_rect, *background_client);
+      .RecordTrackedElementAndRegionCaptureData(paint_info, paint_rect,
+                                                *background_client);
 
   // Record the scroll hit test after the non-scrolling background so
   // background squashing is not affected. Hit test order would be equivalent
@@ -403,17 +381,20 @@ void ReplacedPainter::PaintBoxDecorationBackgroundWithRect(
   // shadow should paint, since controls could have custom shadows of their
   // own.
   if (box_decoration_data.ShouldPaintShadow()) {
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        ComputeBorderShapeReferenceRects(paint_rect, style, layout_replaced_);
     BoxPainterBase::PaintNormalBoxShadow(
-        paint_info, paint_rect, style, PhysicalBoxSides(),
+        paint_info, paint_rect, style, border_shape_rects, PhysicalBoxSides(),
         !box_decoration_data.ShouldPaintBackground());
   }
 
   if (BleedAvoidanceIsClipping(
           box_decoration_data.GetBackgroundBleedAvoidance())) {
     state_saver.Save();
-    FloatRoundedRect border =
-        RoundedBorderGeometry::PixelSnappedRoundedBorder(style, paint_rect);
-    paint_info.context.ClipRoundedRect(border);
+
+    ContouredRect border =
+        ContouredBorderGeometry::PixelSnappedContouredBorder(style, paint_rect);
+    paint_info.context.ClipContouredRect(border);
 
     if (box_decoration_data.GetBackgroundBleedAvoidance() ==
         kBackgroundBleedClipLayer) {
@@ -444,8 +425,10 @@ void ReplacedPainter::PaintBoxDecorationBackgroundWithRect(
   }
 
   if (box_decoration_data.ShouldPaintShadow()) {
-    BoxPainterBase::PaintInsetBoxShadowWithBorderRect(paint_info, paint_rect,
-                                                      style);
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        ComputeBorderShapeReferenceRects(paint_rect, style, layout_replaced_);
+    BoxPainterBase::PaintInsetBoxShadowWithBorderRect(
+        paint_info, paint_rect, style, border_shape_rects);
   }
 
   // The theme will tell us whether or not we should also paint the CSS
@@ -458,10 +441,13 @@ void ReplacedPainter::PaintBoxDecorationBackgroundWithRect(
                                          paint_info, snapped_paint_rect);
     }
     if (!theme_painted) {
+      std::optional<BorderShapeReferenceRects> border_shape_rects =
+          ComputeBorderShapeReferenceRects(paint_rect, style, layout_replaced_);
       BoxPainterBase::PaintBorder(
           layout_replaced_, layout_replaced_.GetDocument(),
           layout_replaced_.GeneratingNode(), paint_info, paint_rect, style,
-          box_decoration_data.GetBackgroundBleedAvoidance());
+          box_decoration_data.GetBackgroundBleedAvoidance(), PhysicalBoxSides(),
+          border_shape_rects ? &*border_shape_rects : nullptr);
     }
   }
 
@@ -503,7 +489,7 @@ void ReplacedPainter::PaintMask(const PaintInfo& paint_info,
     return;
   }
 
-  PhysicalRect paint_rect(paint_offset, layout_replaced_.Size());
+  PhysicalRect paint_rect(paint_offset, layout_replaced_.StitchedSize());
   BoxDrawingRecorder recorder(paint_info.context, layout_replaced_,
                               paint_info.phase, paint_offset);
   PaintMaskImages(paint_info, paint_rect);

@@ -52,10 +52,21 @@ TEST(ContentUriUtilsTest, Test) {
 TEST(ContentUriUtilsTest, TranslateOpenFlagsToJavaMode) {
   constexpr auto kTranslations = MakeFixedFlatMap<uint32_t, std::string>({
       {File::FLAG_OPEN | File::FLAG_READ, "r"},
+      {File::FLAG_OPEN_ALWAYS | File::FLAG_READ, "r"},
+      {File::FLAG_CREATE | File::FLAG_READ, "r"},
+      {File::FLAG_OPEN | File::FLAG_READ | File::FLAG_WRITE, "rw"},
       {File::FLAG_OPEN_ALWAYS | File::FLAG_READ | File::FLAG_WRITE, "rw"},
+      {File::FLAG_CREATE | File::FLAG_READ | File::FLAG_WRITE, "rw"},
+      {File::FLAG_OPEN | File::FLAG_APPEND, "wa"},
+      {File::FLAG_OPEN | File::FLAG_APPEND | File::FLAG_WRITE, "wa"},
       {File::FLAG_OPEN_ALWAYS | File::FLAG_APPEND, "wa"},
+      {File::FLAG_OPEN_ALWAYS | File::FLAG_APPEND | File::FLAG_WRITE, "wa"},
       {File::FLAG_CREATE_ALWAYS | File::FLAG_READ | File::FLAG_WRITE, "rwt"},
+      {File::FLAG_OPEN_TRUNCATED | File::FLAG_READ | File::FLAG_WRITE, "rwt"},
       {File::FLAG_CREATE_ALWAYS | File::FLAG_WRITE, "wt"},
+      {File::FLAG_CREATE_ALWAYS | File::FLAG_APPEND, "wt"},
+      {File::FLAG_CREATE_ALWAYS | File::FLAG_APPEND | File::FLAG_WRITE, "wt"},
+      {File::FLAG_OPEN_TRUNCATED | File::FLAG_WRITE, "wt"},
   });
 
   for (const auto open_or_create : std::vector<uint32_t>(
@@ -63,18 +74,17 @@ TEST(ContentUriUtilsTest, TranslateOpenFlagsToJavaMode) {
             File::FLAG_CREATE_ALWAYS, File::FLAG_OPEN_TRUNCATED})) {
     for (const auto read_write_append : std::vector<uint32_t>(
              {0u, File::FLAG_READ, File::FLAG_WRITE, File::FLAG_APPEND,
-              File::FLAG_READ | File::FLAG_WRITE})) {
+              File::FLAG_READ | File::FLAG_WRITE,
+              File::FLAG_APPEND | File::FLAG_WRITE})) {
       for (const auto other : std::vector<uint32_t>(
                {0u, File::FLAG_DELETE_ON_CLOSE, File::FLAG_TERMINAL_DEVICE})) {
         uint32_t open_flags = open_or_create | read_write_append | other;
         auto mode = internal::TranslateOpenFlagsToJavaMode(open_flags);
-        auto it = kTranslations.find(open_flags);
+        auto it = kTranslations.find(open_or_create | read_write_append);
         if (it != kTranslations.end()) {
           EXPECT_TRUE(mode.has_value()) << "flag=0x" << std::hex << open_flags;
           EXPECT_EQ(mode.value(), it->second)
               << "flag=0x" << std::hex << open_flags;
-        } else {
-          EXPECT_FALSE(mode.has_value()) << "flag=0x" << std::hex << open_flags;
         }
       }
     }
@@ -94,11 +104,17 @@ TEST(ContentUriUtilsTest, GetFileInfo) {
       *test::android::GetContentUriFromCacheDirFilePath(file);
   FilePath content_uri_dir =
       *test::android::GetContentUriFromCacheDirFilePath(dir);
+  FilePath content_uri_document =
+      *test::android::GetInMemoryContentDocumentUriFromCacheDirFilePath(file);
+  FilePath content_uri_tree =
+      *test::android::GetInMemoryContentTreeUriFromCacheDirDirectory(dir);
   FilePath content_uri_not_exists =
       *test::android::GetContentUriFromCacheDirFilePath(not_exists);
 
   EXPECT_TRUE(PathExists(content_uri_file));
   EXPECT_TRUE(PathExists(content_uri_dir));
+  EXPECT_TRUE(PathExists(content_uri_document));
+  EXPECT_TRUE(PathExists(content_uri_tree));
   EXPECT_FALSE(PathExists(content_uri_not_exists));
 
   File::Info info;
@@ -109,7 +125,18 @@ TEST(ContentUriUtilsTest, GetFileInfo) {
   EXPECT_FALSE(content_uri_info.is_directory);
   EXPECT_EQ(content_uri_info.last_modified, info.last_modified);
 
+  EXPECT_TRUE(GetFileInfo(content_uri_document, &content_uri_info));
+  EXPECT_FALSE(content_uri_info.is_directory);
+  // Java DocumentProvider only does resolution to seconds.
+  EXPECT_EQ(content_uri_info.last_modified.ToTimeT(),
+            info.last_modified.ToTimeT());
+
   EXPECT_TRUE(GetFileInfo(dir, &info));
+  EXPECT_TRUE(GetFileInfo(content_uri_tree, &content_uri_info));
+  EXPECT_TRUE(content_uri_info.is_directory);
+  EXPECT_EQ(content_uri_info.last_modified.ToTimeT(),
+            info.last_modified.ToTimeT());
+
   EXPECT_TRUE(GetFileInfo(content_uri_dir, &content_uri_info));
   EXPECT_TRUE(content_uri_info.is_directory);
   EXPECT_EQ(content_uri_info.last_modified, info.last_modified);

@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_DATA_URL_LOADER_FACTORY_H_
 #define CONTENT_BROWSER_DATA_URL_LOADER_FACTORY_H_
 
+#include "base/memory/self_deleting.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/self_deleting_url_loader_factory.h"
@@ -28,18 +29,19 @@ class DataURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
   static mojo::PendingRemote<network::mojom::URLLoaderFactory>
   CreateForOneSpecificUrl(const GURL& url);
 
-  DataURLLoaderFactory(const DataURLLoaderFactory&) = delete;
-  DataURLLoaderFactory& operator=(const DataURLLoaderFactory&) = delete;
-
- private:
   // Initializes a factory with a GURL, which is useful if this factory will
   // be used only once with a GURL that can be larger than the GURL
   // serialization limit. The factory will check that the passed in url to
   // CreateLoaderAndStart either matches or is empty (because it was truncated).
   DataURLLoaderFactory(
       const GURL& url,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver);
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver,
+      base::SelfDeletingPassKey key);
 
+  DataURLLoaderFactory(const DataURLLoaderFactory&) = delete;
+  DataURLLoaderFactory& operator=(const DataURLLoaderFactory&) = delete;
+
+ private:
   // network::mojom::URLLoaderFactory:
   ~DataURLLoaderFactory() override;
   void CreateLoaderAndStart(

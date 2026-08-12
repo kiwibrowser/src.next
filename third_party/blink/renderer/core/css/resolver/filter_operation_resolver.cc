@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/css/resolver/filter_operation_resolver.h"
 
 #include "third_party/blink/renderer/core/css/css_function_value.h"
-#include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
 #include "third_party/blink/renderer/core/css/css_uri_value.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
@@ -139,10 +138,21 @@ double FilterOperationResolver::ResolveNumericArgumentForFunction(
     case CSSValueID::kOpacity: {
       if (filter.length() == 1) {
         const CSSPrimitiveValue& value = To<CSSPrimitiveValue>(filter.Item(0));
+        double computed_value;
         if (value.IsPercentage()) {
-          return value.ComputePercentage(length_resolver) / 100;
+          computed_value = value.ComputePercentage(length_resolver) / 100;
+        } else {
+          computed_value = value.ComputeNumber(length_resolver);
         }
-        return value.ComputeNumber(length_resolver);
+        if (filter.FunctionType() != CSSValueID::kBrightness &&
+            filter.FunctionType() != CSSValueID::kSaturate &&
+            filter.FunctionType() != CSSValueID::kContrast) {
+          // Most values will be clamped at parse time, but the ones within
+          // calc() will not, so we need to clamp them again here.
+          return std::clamp(computed_value, 0.0, 1.0);
+        } else {
+          return computed_value;
+        }
       }
       return 1;
     }
@@ -157,6 +167,26 @@ double FilterOperationResolver::ResolveNumericArgumentForFunction(
     default:
       return 0;
   }
+}
+
+// To avoid unnecessary filter invalidations, preserve the filter pointer from
+// the old style if the URL and resource match.
+static Filter* GetFilterFromOldStyle(const ComputedStyle* old_style,
+                                     const ReferenceFilterOperation& new_ref,
+                                     size_t index) {
+  if (!old_style || !old_style->HasFilter()) {
+    return nullptr;
+  }
+  const auto& ops = old_style->Filter().Operations();
+  if (index >= ops.size()) {
+    return nullptr;
+  }
+  auto* old_ref = DynamicTo<ReferenceFilterOperation>(ops[index].Get());
+  if (old_ref && old_ref->Url() == new_ref.Url() &&
+      old_ref->Resource() == new_ref.Resource()) {
+    return old_ref->GetFilter();
+  }
+  return nullptr;
 }
 
 FilterOperations FilterOperationResolver::CreateFilterOperations(
@@ -179,12 +209,12 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
       CountFilterUse(FilterOperation::OperationType::kReference,
                      state.GetDocument());
 
-      SVGResource* resource =
-          state.GetElementStyleResources().GetSVGResourceFromValue(property_id,
-                                                                   *url_value);
-      operations.Operations().push_back(
-          MakeGarbageCollected<ReferenceFilterOperation>(
-              url_value->ValueForSerialization(), resource));
+      auto* new_op = MakeGarbageCollected<ReferenceFilterOperation>(
+          url_value->ValueForSerialization(),
+          state.GetSVGResource(property_id, *url_value));
+      new_op->SetFilter(
+          GetFilterFromOldStyle(state.OldStyle(), *new_op, operations.size()));
+      operations.Operations().push_back(new_op);
       continue;
     }
 
@@ -244,7 +274,7 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
 
 FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
     const CSSValue& in_value,
-    const Font& font) {
+    const Font* font) {
   FilterOperations operations;
 
   if (auto* in_identifier_value = DynamicTo<CSSIdentifierValue>(in_value)) {
@@ -255,7 +285,7 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   // TODO(layout-dev): Should document zoom factor apply for offscreen canvas?
   float zoom = 1.0f;
   CSSToLengthConversionData::FontSizes font_sizes(
-      kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, &font, zoom);
+      kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, font, zoom);
   CSSToLengthConversionData::LineHeightSize line_height_size;
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
   CSSToLengthConversionData::ContainerSizes container_sizes;
@@ -263,7 +293,8 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   CSSToLengthConversionData::Flags ignored_flags = 0;
   CSSToLengthConversionData conversion_data(
       WritingMode::kHorizontalTb, font_sizes, line_height_size, viewport_size,
-      container_sizes, anchor_data, 1 /* zoom */, ignored_flags);
+      container_sizes, anchor_data, 1 /* zoom */, ignored_flags,
+      /*element=*/nullptr);
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {
     if (curr_value->IsURIValue()) {

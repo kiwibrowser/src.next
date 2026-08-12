@@ -10,13 +10,11 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
-#include "net/base/host_mapping_rules.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_anonymization_key.h"
@@ -48,13 +46,11 @@ namespace net {
 
 namespace {
 const char kAlternativeServiceHeader[] = "Alt-Svc";
-
 }  // namespace
 
 // static
 SpdySessionKey HttpStreamFactory::GetSpdySessionKey(
     const ProxyChain& proxy_chain,
-    const GURL& origin_url,
     const StreamRequestInfo& request_info) {
   // In the case that we'll be sending a GET request to the proxy, look for an
   // HTTP/2 proxy session *to* the proxy, instead of to the origin server. The
@@ -63,7 +59,7 @@ SpdySessionKey HttpStreamFactory::GetSpdySessionKey(
   // SpdySession pool, and uses it directly (completely ignoring the result of
   // the ConnectJob, and in fact cancelling it). So we need to create the same
   // key used by the HttpProxyConnectJob for the last proxy in the chain.
-  if (IsGetToProxy(proxy_chain, origin_url)) {
+  if (IsGetToProxy(proxy_chain, request_info.url)) {
     // For this to work as expected, the whole chain should be HTTPS.
     for (const auto& proxy_server : proxy_chain.proxy_servers()) {
       CHECK(proxy_server.is_https());
@@ -78,13 +74,14 @@ SpdySessionKey HttpStreamFactory::GetSpdySessionKey(
         last_proxy_host_port_pair, PRIVACY_MODE_DISABLED,
         last_proxy_partial_chain, SessionUsage::kProxy, request_info.socket_tag,
         request_info.network_anonymization_key, request_info.secure_dns_policy,
-        /*disable_cert_network_fetches=*/true);
+        /*disable_cert_network_fetches=*/true, request_info.target_network);
   }
   return SpdySessionKey(
-      HostPortPair::FromURL(origin_url), request_info.privacy_mode, proxy_chain,
-      SessionUsage::kDestination, request_info.socket_tag,
+      HostPortPair::FromURL(request_info.url), request_info.privacy_mode,
+      proxy_chain, SessionUsage::kDestination, request_info.socket_tag,
       request_info.network_anonymization_key, request_info.secure_dns_policy,
-      request_info.load_flags & LOAD_DISABLE_CERT_NETWORK_FETCHES);
+      request_info.load_flags & LOAD_DISABLE_CERT_NETWORK_FETCHES,
+      request_info.target_network);
 }
 
 // static
@@ -100,14 +97,17 @@ HttpStreamFactory::StreamRequestInfo::StreamRequestInfo() = default;
 
 HttpStreamFactory::StreamRequestInfo::StreamRequestInfo(
     const HttpRequestInfo& http_request_info)
-    : method(http_request_info.method),
+    : url(RemoveCredentialsFromUrl(http_request_info.url)),
+      method(http_request_info.method),
       network_anonymization_key(http_request_info.network_anonymization_key),
+      traffic_annotation(http_request_info.traffic_annotation),
       is_http1_allowed(!http_request_info.upload_data_stream ||
                        http_request_info.upload_data_stream->AllowHTTP1()),
       load_flags(http_request_info.load_flags),
       privacy_mode(http_request_info.privacy_mode),
       secure_dns_policy(http_request_info.secure_dns_policy),
-      socket_tag(http_request_info.socket_tag) {}
+      socket_tag(http_request_info.socket_tag),
+      target_network(http_request_info.target_network) {}
 
 HttpStreamFactory::StreamRequestInfo::StreamRequestInfo(
     const StreamRequestInfo& other) = default;
@@ -146,21 +146,11 @@ void HttpStreamFactory::ProcessAlternativeServices(
   }
 
   session->http_server_properties()->SetAlternativeServices(
-      RewriteHost(http_server), network_anonymization_key,
+      http_server, network_anonymization_key,
       net::ProcessAlternativeServices(
           alternative_service_vector, session->params().enable_http2,
           session->params().enable_quic,
           session->context().quic_context->params()->supported_versions));
-}
-
-url::SchemeHostPort HttpStreamFactory::RewriteHost(
-    const url::SchemeHostPort& server) {
-  HostPortPair host_port_pair(server.host(), server.port());
-  const HostMappingRules* mapping_rules = GetHostMappingRules();
-  if (mapping_rules)
-    mapping_rules->RewriteHost(&host_port_pair);
-  return url::SchemeHostPort(server.scheme(), host_port_pair.host(),
-                             host_port_pair.port());
 }
 
 std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStream(
@@ -168,14 +158,14 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStream(
     RequestPriority priority,
     const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
     HttpStreamRequest::Delegate* delegate,
-    bool enable_ip_based_pooling,
+    bool enable_ip_based_pooling_for_h2,
     bool enable_alternative_services,
     const NetLogWithSource& net_log) {
-  return RequestStreamInternal(request_info, priority, allowed_bad_certs,
-                               delegate, nullptr,
-                               HttpStreamRequest::HTTP_STREAM,
-                               /*is_websocket=*/false, enable_ip_based_pooling,
-                               enable_alternative_services, net_log);
+  return RequestStreamInternal(
+      request_info, priority, allowed_bad_certs, delegate, nullptr,
+      HttpStreamRequest::HTTP_STREAM,
+      /*is_websocket=*/false, enable_ip_based_pooling_for_h2,
+      enable_alternative_services, net_log);
 }
 
 std::unique_ptr<HttpStreamRequest>
@@ -185,15 +175,15 @@ HttpStreamFactory::RequestWebSocketHandshakeStream(
     const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
     HttpStreamRequest::Delegate* delegate,
     WebSocketHandshakeStreamBase::CreateHelper* create_helper,
-    bool enable_ip_based_pooling,
+    bool enable_ip_based_pooling_for_h2,
     bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   DCHECK(create_helper);
-  return RequestStreamInternal(request_info, priority, allowed_bad_certs,
-                               delegate, create_helper,
-                               HttpStreamRequest::HTTP_STREAM,
-                               /*is_websocket=*/true, enable_ip_based_pooling,
-                               enable_alternative_services, net_log);
+  return RequestStreamInternal(
+      request_info, priority, allowed_bad_certs, delegate, create_helper,
+      HttpStreamRequest::HTTP_STREAM,
+      /*is_websocket=*/true, enable_ip_based_pooling_for_h2,
+      enable_alternative_services, net_log);
 }
 
 std::unique_ptr<HttpStreamRequest>
@@ -202,16 +192,16 @@ HttpStreamFactory::RequestBidirectionalStreamImpl(
     RequestPriority priority,
     const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
     HttpStreamRequest::Delegate* delegate,
-    bool enable_ip_based_pooling,
+    bool enable_ip_based_pooling_for_h2,
     bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   DCHECK(request_info.url.SchemeIs(url::kHttpsScheme));
 
-  return RequestStreamInternal(request_info, priority, allowed_bad_certs,
-                               delegate, nullptr,
-                               HttpStreamRequest::BIDIRECTIONAL_STREAM,
-                               /*is_websocket=*/false, enable_ip_based_pooling,
-                               enable_alternative_services, net_log);
+  return RequestStreamInternal(
+      request_info, priority, allowed_bad_certs, delegate, nullptr,
+      HttpStreamRequest::BIDIRECTIONAL_STREAM,
+      /*is_websocket=*/false, enable_ip_based_pooling_for_h2,
+      enable_alternative_services, net_log);
 }
 
 std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
@@ -223,7 +213,7 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
         websocket_handshake_stream_create_helper,
     HttpStreamRequest::StreamType stream_type,
     bool is_websocket,
-    bool enable_ip_based_pooling,
+    bool enable_ip_based_pooling_for_h2,
     bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   // This is only needed in the non-preconnect path, as preconnects do not
@@ -232,7 +222,7 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
 
   auto job_controller = std::make_unique<JobController>(
       this, delegate, session_, job_factory_.get(), request_info,
-      /* is_preconnect = */ false, is_websocket, enable_ip_based_pooling,
+      /* is_preconnect = */ false, is_websocket, enable_ip_based_pooling_for_h2,
       enable_alternative_services,
       session_->context()
           .quic_context->params()
@@ -246,13 +236,16 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
 }
 
 void HttpStreamFactory::PreconnectStreams(int num_streams,
-                                          HttpRequestInfo& request_info) {
+                                          HttpRequestInfo& request_info,
+                                          base::OnceClosure callback) {
   // Ignore invalid URLs. This matches the behavior of
   // URLRequestJobFactory::CreateJob(). Passing very long valid GURLs over Mojo
   // can result in invalid URLs, so can't rely on callers sending only valid
   // URLs.
   if (!request_info.url.is_valid()) {
-    OnPreconnectsCompleteInternal();
+    if (callback) {
+      std::move(callback).Run();
+    }
     return;
   }
 
@@ -260,7 +253,7 @@ void HttpStreamFactory::PreconnectStreams(int num_streams,
       this, nullptr, session_, job_factory_.get(), request_info,
       /*is_preconnect=*/true,
       /*is_websocket=*/false,
-      /*enable_ip_based_pooling=*/true,
+      /*enable_ip_based_pooling_for_h2=*/true,
       /*enable_alternative_services=*/true,
       session_->context()
           .quic_context->params()
@@ -268,11 +261,7 @@ void HttpStreamFactory::PreconnectStreams(int num_streams,
       /*allowed_bad_certs=*/std::vector<SSLConfig::CertAndStatus>());
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));
-  job_controller_raw_ptr->Preconnect(num_streams);
-}
-
-const HostMappingRules* HttpStreamFactory::GetHostMappingRules() const {
-  return &session_->params().host_mapping_rules;
+  job_controller_raw_ptr->Preconnect(num_streams, std::move(callback));
 }
 
 void HttpStreamFactory::OnJobControllerComplete(JobController* controller) {

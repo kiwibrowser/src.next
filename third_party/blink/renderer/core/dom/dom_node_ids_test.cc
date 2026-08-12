@@ -58,6 +58,24 @@ TEST_F(DOMNodeIdsTest, Null) {
   EXPECT_EQ(nullptr, DOMNodeIds::NodeForId(kInvalidDOMNodeId));
 }
 
+TEST_F(DOMNodeIdsTest, Overflow) {
+  SetBodyContent("<div id='a'></div><div id='b'></div>");
+  Node* a = GetDocument().getElementById(AtomicString("a"));
+  Node* b = GetDocument().getElementById(AtomicString("b"));
+
+  DOMNodeId id_a = a->GetDomNodeId();
+  EXPECT_EQ(a, DOMNodeIds::NodeForId(id_a));
+
+  // Simulate the counter having wrapped around back to just before |id_a|. The
+  // next assigned id must skip over |id_a| while |a| is still alive.
+  DOMNodeIds::SetLastIdForTesting(id_a - 1);
+
+  DOMNodeId id_b = b->GetDomNodeId();
+  EXPECT_NE(id_a, id_b);
+  EXPECT_EQ(a, DOMNodeIds::NodeForId(id_a));
+  EXPECT_EQ(b, DOMNodeIds::NodeForId(id_b));
+}
+
 TEST_F(DOMNodeIdsTest, ExistingIdForNode) {
   SetBodyContent("<div id='a'></div>");
   Node* a = GetDocument().getElementById(AtomicString("a"));

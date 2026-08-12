@@ -106,16 +106,18 @@ bool HttpBasicStream::CanReuseConnection() const {
   return state_.CanReuseConnection();
 }
 
-int64_t HttpBasicStream::GetTotalReceivedBytes() const {
-  if (parser())
+base::ByteSize HttpBasicStream::GetTotalReceivedBytes() const {
+  if (parser()) {
     return parser()->received_bytes();
-  return 0;
+  }
+  return base::ByteSize(0);
 }
 
-int64_t HttpBasicStream::GetTotalSentBytes() const {
-  if (parser())
+base::ByteSize HttpBasicStream::GetTotalSentBytes() const {
+  if (parser()) {
     return parser()->sent_bytes();
-  return 0;
+  }
+  return base::ByteSize(0);
 }
 
 bool HttpBasicStream::GetLoadTimingInfo(
@@ -192,6 +194,15 @@ void HttpBasicStream::OnHandshakeConfirmed(CompletionOnceCallback callback,
     confirm_handshake_end_ = base::TimeTicks::Now();
   }
   std::move(callback).Run(rv);
+}
+
+void HttpBasicStream::PopulateLoadTimingInternalInfo(
+    LoadTimingInternalInfo* load_timing_internal_info) const {
+  CHECK(load_timing_internal_info);
+  if (state_.connection()) {
+    load_timing_internal_info->resolution_details =
+        state_.connection()->resolution_details();
+  }
 }
 
 }  // namespace net

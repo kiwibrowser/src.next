@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<grit-part>
+  <!-- IPH prompting users on Smart Tab Sharing the first time they add context to a prompt -->
+  <message name="IDS_STS_IPH_PROMPT_FIRST_TIME_ADDING_CONTEXT_HEADER" desc="IPH help bubble header text for smart tab sharing toggle in composebox context menu.">
+    Automatically share relevant tabs for this thread?
+  </message>
+  <message name="IDS_STS_IPH_PROMPT_FIRST_TIME_ADDING_CONTEXT_HEADER_V2" desc="IPH help bubble header text for smart tab sharing toggle in composebox context menu.">
+    Automatically share relevant tabs for better responses in this thread?
+  </message>
+  <message name="IDS_STS_IPH_PROMPT_FIRST_TIME_ADDING_CONTEXT_MESSAGE_BODY" desc="IPH help bubble body text for smart tab sharing toggle in composebox context menu.">
+    When on, Chrome will share relevant tabs in this window to help you get more relevant responses.
+  </message>
+  <message name="IDS_STS_IPH_PROMPT_FIRST_TIME_ADDING_CONTEXT_MESSAGE_BODY_V2" desc="IPH help bubble body text for smart tab sharing toggle in composebox context menu.">
+    Get more tailored responses by automatically sharing relevant tabs in this window if they’re related to this thread.
+  </message>
+  <message name="IDS_STS_IPH_PROMPT_FIRST_TIME_ADDING_CONTEXT_TURN_ON" desc="No implementation or screenshot yet. See http://crbug.com/490510281 for context.">
+    Share relevant tabs
+  </message>
+
+  <!-- Settings: Option 1: When On / Things To Consider -->
+  <message name="IDS_STS_SETTINGS_OPTION_1_SHARE_OPEN_TABS_FOR_EVERY_THREAD_V3" desc="Label for a setting that allows users to share relevant tabs in every Google Search AI Mode thread.">
+    Automatically share relevant open tabs in every thread
+  </message>
+  <message name="IDS_STS_SETTINGS_OPTION_1_CHOOSE_HOW_RELEVANT_OPEN_TABS_CAN_BE_USED_V3" desc="This string is the subheading of a setting for 'Share relevant tabs in every thread'. This string explains what Chrome shares with Google Search AI Mode when turned on.">
+    Chrome will automatically send the page content and URLs of open tabs that may be relevant to your question to Google to get more personalized responses. Chrome will only share tabs from the window you're working in.
+  </message>
+  <message name="IDS_STS_SETTINGS_OPTION_1_LEARN_MORE" desc="No implementation or screenshot yet. See http://crbug.com/490510281 for context.">
+    Learn more
+  </message>
+  <message name="IDS_STS_SETTINGS_OPTION_1_NEVER_SHARE_THESE_SITES" desc="Header for the exclusion list for smart tab sharing. Sites added here will not be referenced for responses.">
+    Never share these sites
+  </message>
+  <message name="IDS_STS_SETTINGS_OPTION_1_SITES_ADDED_HERE_WONT_BE_REFERENCED_V2" desc="This string is a subheading of a label for how a user can exclude certain sites from being shared with Google Search AI Mode when 'Share relevant tabs in every thread' is on.">
+    Sites you add here won't be referenced for responses, even if the tab is open.
+  </message>
+  <message name="IDS_STS_SETTINGS_OPTION_1_SITES_ADDED_HERE_WONT_BE_REFERENCED_V3" desc="This string is a subheading of a label for how a user can exclude certain sites from being shared with Google Search AI Mode when 'Share relevant tabs in every thread' is on.">
+    Sites you add here won't be referenced for responses, even if the tab is open. If a site you add is currently being used in a thread, it can take up to 30 minutes for the thread to stop referencing it.
+  </message>
+
+  <!-- Settings entrypoint -->
+  <message name="IDS_STS_SETTINGS_ENTRYPOINT_GOOGLE_SEARCH_AI_MODE" desc="Title of the page of the settings for Google Search AI Mode.">
+    Google Search AI Mode
+  </message>
+  <message name="IDS_STS_SETTINGS_ENTRYPOINT_GET_RESPONSES_WITH_CONTEXT" desc="No implementation or screenshot yet. See http://crbug.com/490510281 for context.">
+    Get AI-powered responses with context from the web.
+  </message>
+
+  <!-- Megaplus menu: Location where user can turn Smart Tab Sharing on and off (per thread only) -->
+  <message name="IDS_STS_MEGAPLUS_SHARE_RELEVANT_OPEN_TABS" desc="Label for the toggle to share open tabs in the composebox context menu.">
+    Share open tabs
+  </message>
+  <message name="IDS_STS_MEGAPLUS_SHARE_RELEVANT_OPEN_TABS_V2" desc="Label for the toggle to share open tabs in the composebox context menu.">
+    Share relevant tabs
+  </message>
+  <message name="IDS_STS_MEGAPLUS_SHARE_RELEVANT_OPEN_TABS_V3" desc="Label for the toggle to share open tabs in the composebox context menu.">
+    Automatically share tabs
+  </message>
+
+  <!-- SmartTabSharingTryIt custom IPH promo -->
+  <message name="IDS_STS_IPH_TRY_IT_HEADER" desc="Header for the custom IPH promoting smart tab sharing.">
+    Automatically share relevant tabs for this thread?
+  </message>
+  <message name="IDS_STS_IPH_TRY_IT_HEADER_V2" desc="Header for the custom IPH promoting smart tab sharing.">
+    Automatically share relevant tabs for better responses in this thread?
+  </message>
+  <message name="IDS_STS_IPH_TRY_IT_BODY" desc="Body text before the link for the custom IPH promoting smart tab sharing.">
+    When on, Chrome will share relevant tabs in this window to help you get more relevant responses.
+  </message>
+  <message name="IDS_STS_IPH_TRY_IT_BODY_V2" desc="Body text before the link for the custom IPH promoting smart tab sharing.">
+    Get more tailored responses by automatically sharing open tabs in this window if they’re related to this thread.
+  </message>
+  <message name="IDS_STS_IPH_TRY_IT_TURN_ON" desc="Primary button to turn on tab sharing in the custom IPH promo.">
+    Share relevant tabs
+  </message>
+  <message name="IDS_STS_IPH_TRY_IT_NOT_NOW" desc="Secondary button to dismiss the custom IPH promo.">
+    Not now
+  </message>
+
+  <!-- SmartTabSharingDefaultOn custom IPH promo -->
+  <message name="IDS_STS_IPH_DEFAULT_ON_HEADER" desc="Header for the custom IPH promoting enablement of smart tab sharing by default.">
+    Automatically share relevant tabs in every thread?
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_HEADER_V2" desc="Header for the custom IPH promoting enablement of smart tab sharing by default.">
+    Always share relevant tabs for better responses?
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_BODY" desc="Body text before the link for the custom IPH promoting enablement of smart tab sharing by default.">
+    Chrome will share relevant open tabs in each new thread to get better responses. Learn more about
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_BODY_V2" desc="Body text before the link for the custom IPH promoting enablement of smart tab sharing by default.">
+    You can save time by turning on automatic tab sharing for all threads. Learn more about
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_LINK" desc="Link text for settings in the custom IPH promoting enablement of smart tab sharing by default.">
+    sharing your tabs
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_BODY_END" desc="Body text after the link for the custom IPH promoting enablement of smart tab sharing by default.">
+    .
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_TURN_ON" desc="Primary button to turn on smart tab sharing by default in the custom IPH promo.">
+    Turn on
+  </message>
+  <message name="IDS_STS_IPH_DEFAULT_ON_NOT_NOW" desc="Secondary button to dismiss the custom IPH promo.">
+    Not now
+  </message>
+</grit-part>

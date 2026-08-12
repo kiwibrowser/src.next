@@ -4,35 +4,42 @@
 
 // This file exposes services in the browser to child processes.
 
-#include "content/browser/browser_child_process_host_impl.h"
-
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "components/discardable_memory/public/mojom/discardable_shared_memory_manager.mojom.h"
 #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
+#include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/field_trial_recorder.h"
+#include "content/common/features.h"
 #include "content/common/field_trial_recorder.mojom.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/device_service.h"
 #include "content/public/common/content_features.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
 #include "services/device/public/mojom/power_monitor.mojom.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 #include "services/metrics/ukm_recorder_factory_impl.h"
 
 #if BUILDFLAG(IS_MAC)
-#include "content/browser/sandbox_support_mac_impl.h"
-#include "content/common/sandbox_support_mac.mojom.h"
+#include "content/browser/sandbox_support_impl.h"
+#include "content/common/sandbox_support.mojom.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
 #include "content/browser/renderer_host/dwrite_font_proxy_impl_win.h"
+#include "content/browser/sandbox_support_impl.h"
+#include "content/common/sandbox_support.mojom.h"
 #include "content/public/common/font_cache_dispatcher_win.h"
 #include "content/public/common/font_cache_win.mojom.h"
+#endif
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#include "components/services/font_data/font_data_service_impl.h"
 #endif
 
 namespace content {
@@ -78,8 +85,8 @@ void BrowserChildProcessHostImpl::BindHostReceiver(
   }
 
 #if BUILDFLAG(IS_MAC)
-  if (auto r = receiver.As<mojom::SandboxSupportMac>()) {
-    static base::NoDestructor<SandboxSupportMacImpl> sandbox_support;
+  if (auto r = receiver.As<mojom::SandboxSupport>()) {
+    static base::NoDestructor<SandboxSupportImpl> sandbox_support;
     sandbox_support->BindReceiver(std::move(r));
     return;
   }
@@ -90,13 +97,37 @@ void BrowserChildProcessHostImpl::BindHostReceiver(
     FontCacheDispatcher::Create(std::move(r));
     return;
   }
-
-  if (auto r = receiver.As<blink::mojom::DWriteFontProxy>()) {
-    base::ThreadPool::CreateSequencedTaskRunner(
-        {base::TaskPriority::USER_BLOCKING, base::MayBlock()})
-        ->PostTask(FROM_HERE,
-                   base::BindOnce(&DWriteFontProxyImpl::Create, std::move(r)));
+  if (auto r = receiver.As<mojom::SandboxSupport>()) {
+    static base::NoDestructor<SandboxSupportImpl> sandbox_support;
+    sandbox_support->BindReceiver(std::move(r));
     return;
+  }
+  if (!base::FeatureList::IsEnabled(
+          features::kFontDataServiceForCSSLocalFonts)) {
+    if (auto r = receiver.As<blink::mojom::DWriteFontProxy>()) {
+      // Skip DWriteFontProxy when FontDataService handles all font lookups. CSS
+      // Local fonts are the last remaining use-case requiring DWriteFontProxy.
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::TaskPriority::USER_BLOCKING, base::MayBlock()})
+          ->PostTask(FROM_HERE, base::BindOnce(&DWriteFontProxyImpl::Create,
+                                               std::move(r)));
+      return;
+    }
+  } else {
+    // If we don't initialize DWriteFontProxy, we should have FontDataService
+    // enabled.
+    CHECK(features::IsFontDataServiceEnabled());
+  }
+#endif
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  if (features::IsFontDataServiceEnabled()) {
+    if (auto font_data_receiver =
+            receiver.As<font_data_service::mojom::FontDataService>()) {
+      font_data_service::FontDataServiceImpl::ConnectToFontService(
+          std::move(font_data_receiver));
+      return;
+    }
   }
 #endif
 
@@ -127,6 +158,10 @@ void BrowserChildProcessHostImpl::BindHostReceiver(
   if (auto r = receiver.As<ukm::mojom::UkmRecorderFactory>()) {
     metrics::UkmRecorderFactoryImpl::Create(ukm::UkmRecorder::Get(),
                                             std::move(r));
+    return;
+  }
+
+  if (binder_map_.TryBind(this, &receiver)) {
     return;
   }
 

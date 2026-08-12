@@ -2,13 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/chromeos/ui_mode.gni")
 import("//remoting/build/config/remoting_build.gni")
 
 group("remoting_all") {
   testonly = true
 
   deps = [ ":remoting_unittests" ]
+
+  if (!is_component_build && (is_win || is_linux)) {
+    deps += [ "//remoting/codec:webrtc_video_encoder_benchmark" ]
+  }
 
   if (is_win) {
     deps += [
@@ -22,12 +25,9 @@ group("remoting_all") {
   }
 
   if (enable_remoting_host) {
-    deps += [
-      ":remoting_perftests",
-      "//remoting/host",
-    ]
+    deps += [ "//remoting/host" ]
 
-    if (!is_chromeos_ash && !is_android) {
+    if (!is_chromeos && !is_android) {
       deps += [
         "//remoting/host:remoting_native_messaging_manifests",
         "//remoting/host:remoting_start_host",
@@ -42,9 +42,8 @@ group("remoting_all") {
 
     if (is_linux) {
       deps += [
-        "//remoting/host/crash:remoting_crash_uploader",
+        "//remoting/host/crash:crash_tools",
         "//remoting/host/linux:remoting_dev_me2me_host",
-        "//remoting/host/linux:remoting_user_session",
       ]
     }
 
@@ -59,6 +58,13 @@ group("remoting_all") {
       deps += [ "//remoting/host:remoting_me2me_host_archive" ]
     }
   }
+
+  if (enable_remoting_client) {
+    deps += [ "//remoting/client/common" ]
+    if (is_linux) {
+      deps += [ "//remoting/client/cli:remoting_client_main" ]
+    }
+  }
 }
 
 group("test_support") {
@@ -68,7 +74,6 @@ group("test_support") {
     "//base",
     "//net",
     "//remoting/base:test_support",
-    "//remoting/codec:decoder",
     "//remoting/codec:encoder",
     "//remoting/protocol:test_support",
     "//remoting/resources",
@@ -107,6 +112,9 @@ test("remoting_unittests") {
       "//remoting/host:unit_tests",
       "//ui/gfx",
     ]
+    if (is_posix) {
+      deps += [ "//remoting/base:security_key_socket_name" ]
+    }
   }
 
   deps += [ "//third_party/webrtc_overrides:webrtc_component" ]
@@ -125,43 +133,5 @@ test("remoting_unittests") {
       "rpcrt4.lib",
       "wtsapi32.lib",
     ]
-  }
-}
-
-if (enable_remoting_host) {
-  test("remoting_perftests") {
-    defines = []
-    libs = []
-
-    sources = [ "test/codec_perftest.cc" ]
-
-    configs += [ "//remoting/build/config:version" ]
-
-    deps = [
-      ":test_support",
-      "//base",
-      "//base/test:run_all_unittests",
-      "//base/test:test_support",
-      "//components/webrtc:thread_wrapper",
-      "//net:test_support",
-      "//remoting/base",
-      "//remoting/codec:encoder",
-      "//remoting/host:common",
-      "//remoting/host:test_support",
-      "//remoting/protocol:protocol",
-      "//remoting/signaling:test_support",
-      "//remoting/test:test_support",
-      "//testing/gtest",
-      "//third_party/webrtc_overrides:webrtc_component",
-    ]
-
-    if (is_win) {
-      defines += [ "_ALT_NO_EXCEPTIONS" ]
-
-      libs += [
-        "rpcrt4.lib",
-        "wtsapi32.lib",
-      ]
-    }
   }
 }

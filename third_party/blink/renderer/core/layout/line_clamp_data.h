@@ -7,42 +7,85 @@
 
 #include <optional>
 
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/geometry/margin_strut.h"
+#include "third_party/blink/renderer/core/layout/min_max_sizes.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
+class LayoutObject;
 
 struct LineClampData {
   DISALLOW_NEW();
 
-  LineClampData() {}
+  LineClampData() = default;
+
+  CORE_EXPORT LineClampData(const LineClampData&);
+
+  CORE_EXPORT LineClampData& operator=(const LineClampData&);
 
   enum State {
     kDisabled,
+
+    // Clamps after a given number of lines.
     kClampByLines,
+
+    // Clamps just after the end of a given layout object.
+    kClampAfterLayoutObject,
+
+    // Doesn't clamp. Instead it counts the number of lines upwards until the
+    // clamp BFC offset is reached, at which point it relayouts to clamp.
     kMeasureLinesUntilBfcOffset,
-    // The line-clamp context is enabled, but no forced truncation
-    // will happen. This is different from kDisabled in that
-    // `text-overflow: ellipsis` will not take effect inside it.
-    kDontTruncate,
+
+    // Doesn't clamp. Instead it just counts the number of lines upwards. Used
+    // when this box can't clamp, but its ancestors use
+    // `kMeasureLinesUntilBfcOffset`.
+    kCountLines,
+
+    // Combines `kClampByLines` and `kMeasureLinesUntilBfcOffset`. Clamps after
+    // a number of lines, unless the BFC offset is reached before that point, in
+    // which case it relayouts with `kClampByLines`.
+    kClampByLinesWithBfcOffset,
   };
 
   bool IsLineClampContext() const { return state != kDisabled; }
 
+  // Returns true if we're clamping after a given number of lines.
+  bool IsClampByLines() const {
+    return state == kClampByLines || state == kClampByLinesWithBfcOffset;
+  }
+
+  // Returns true if we're measuring the BFC offset to relayout there.
+  bool IsMeasureUntilBfcOffset() const {
+    return state == kMeasureLinesUntilBfcOffset ||
+           state == kClampByLinesWithBfcOffset;
+  }
+
+  // Returns true if we're counting the number of lines in this box upwards.
+  bool IsCountLines() const {
+    return state == kMeasureLinesUntilBfcOffset || state == kCountLines;
+  }
+
+  // If we're clamping by lines, returns the number of lines until clamp.
+  // Otherwise, if `show_measured_lines` is true, it also returns the number of
+  // lines counted upwards so far, if we are counting lines.
   std::optional<int> LinesUntilClamp(bool show_measured_lines = false) const {
-    if (state == kClampByLines ||
-        (show_measured_lines && state == kMeasureLinesUntilBfcOffset)) {
+    if (IsClampByLines() || (show_measured_lines && IsCountLines())) {
       return lines_until_clamp;
     }
     return std::optional<int>();
   }
 
   bool IsAtClampPoint() const {
-    return state == kClampByLines && lines_until_clamp == 1;
+    return IsClampByLines() && lines_until_clamp == 1;
   }
 
   bool IsPastClampPoint() const {
-    return state == kClampByLines && lines_until_clamp <= 0;
+    return IsClampByLines() && lines_until_clamp <= 0;
   }
 
   bool ShouldHideForPaint() const {
@@ -50,13 +93,17 @@ struct LineClampData {
   }
 
   bool operator==(const LineClampData& other) const {
-    if (state != other.state) {
+    if (state != other.state || block_ellipsis != other.block_ellipsis) {
       return false;
     }
     switch (state) {
       case kClampByLines:
+      case kCountLines:
         return lines_until_clamp == other.lines_until_clamp;
+      case kClampAfterLayoutObject:
+        return clamp_after_layout_object == other.clamp_after_layout_object;
       case kMeasureLinesUntilBfcOffset:
+      case kClampByLinesWithBfcOffset:
         return lines_until_clamp == other.lines_until_clamp &&
                clamp_bfc_offset == other.clamp_bfc_offset;
       default:
@@ -64,19 +111,116 @@ struct LineClampData {
     }
   }
 
-  // The BFC offset where the current block container should clamp.
-  // (Might not be the same BFC offset as other block containers in the same
-  // BFC, depending on the bottom bmp).
-  // Only valid if state == kClampByBfcOffset
-  LayoutUnit clamp_bfc_offset;
-
-  // If state == kClampByLines, the number of lines until the clamp point.
-  // A value of 1 indicates the current line should be clamped. May go negative.
-  // With state == kMeasureLinesUntilBfcOffset, the number of lines found in the
-  // BFC so far.
+  // When `IsClampByLines()`, the number of lines until the clamp point. A value
+  // of 1 indicates the current line should be clamped. May go negative.
+  // When `IsCountLines()`, the number of lines found in the BFC so far.
   int lines_until_clamp = 0;
 
+  // The BFC offset where the current block container should clamp.
+  // Only valid when `IsMeasureUntilBfcOffset()`.
+  LayoutUnit clamp_bfc_offset;
+
+  // A LayoutObject immediately after which the container should clamp.
+  // This is used to clamp after a lineless block when clamping by a height.
+  //
+  // This UntracedMember should not be dereferenced, it should only ever be used
+  // to compare pointer equality.
+  //
+  // Even though it should not be dereferenced, we don't expect LineClampData
+  // objects to live past the end of the layout phase; and the LayoutObject is
+  // part of the input to that phase. So we can be somewhat confident that the
+  // LayoutObject won't be GC'd and therefore that its address won't be reused
+  // for a different LayoutObject during the LineClampData's lifetime. So using
+  // it for pointer equality should not run into false positives.
+  //
+  // Only valid when `state == kClampAfterLayoutObject`.
+  UntracedMember<const LayoutObject> clamp_after_layout_object;
+
   State state = kDisabled;
+
+  // When the `CSSLineClamp` runtime flag is disabled, whether to ellipsize the
+  // line before clamp. When that flag is enabled, use the `block-ellipsis`
+  // property value on the inline formatting context root.
+  EBlockEllipsis block_ellipsis = EBlockEllipsis::kEllipsis;
+};
+
+// This class is a linked list containing the data to compute the block size the
+// line-clamp container would have if we clamped at a particular clamp point.
+//
+// If a `LineClampAncestorChain` instance has `parent` set to null, it
+// represents the data for the line-clamp container. Otherwise, it represents
+// the data for one of its descendent block boxes, and `parent` points to its
+// parent's data.
+//
+// An instance of this class might be created when the corresponding block box's
+// BFC offset hasn't been resolved yet. To deal with this, the `bfc_offset`
+// field is mutable. If the BFC offset isn't known, calling `ResolveBfcOffset`
+// will update that field with the resolved value for this node and its
+// ancestors in the chain. (If it *is* known, calling `ResolveBfcOffset` will
+// DCHECK that the passed offset is correct.)
+class CORE_EXPORT LineClampAncestorChain final
+    : public GarbageCollected<LineClampAncestorChain> {
+ public:
+  explicit LineClampAncestorChain(LayoutUnit end_border_padding)
+      : bfc_offset_(LayoutUnit()),
+        end_border_padding_(end_border_padding),
+        block_min_max_sizes_(
+            {.min_size = LayoutUnit(), .max_size = LayoutUnit::Max()}) {}
+  LineClampAncestorChain(std::optional<LayoutUnit> bfc_offset,
+                         LayoutUnit end_border_padding,
+                         LayoutUnit end_margin,
+                         MinMaxSizes block_size_constraints,
+                         const LineClampAncestorChain* parent)
+      : bfc_offset_(bfc_offset),
+        end_border_padding_(end_border_padding),
+        end_margin_(end_margin),
+        block_min_max_sizes_(block_size_constraints),
+        parent_(parent) {
+    DCHECK(parent);
+  }
+
+  bool HasBfcOffset() const { return bfc_offset_.has_value(); }
+
+  const LineClampAncestorChain* WithResolvedBfcOffset(
+      LayoutUnit new_bfc_offset) const {
+    if (bfc_offset_.has_value()) {
+      DCHECK_EQ(*bfc_offset_, new_bfc_offset);
+      return this;
+    } else {
+      return MakeGarbageCollected<LineClampAncestorChain>(
+          new_bfc_offset, end_border_padding_, end_margin_,
+          block_min_max_sizes_, parent_);
+    }
+  }
+
+  // Computes the block size that the line-clamp container would have for a
+  // clamp point directly contained in the block box corresponding to this node,
+  // with the passed inflow block offset and margin strut.
+  LayoutUnit FinalLineClampBlockSize(LayoutUnit inflow_block_offset,
+                                     MarginStrut margin_strut) const {
+    DCHECK(bfc_offset_);
+    return InnerFinalLineClampBlockSize(*bfc_offset_, inflow_block_offset,
+                                        margin_strut);
+  }
+
+  void Trace(Visitor*) const;
+
+  bool operator==(const LineClampAncestorChain& other) const {
+    return bfc_offset_ == other.bfc_offset_ &&
+           end_border_padding_ == other.end_border_padding_ &&
+           end_margin_ == other.end_margin_ && parent_ == other.parent_;
+  }
+
+ private:
+  LayoutUnit InnerFinalLineClampBlockSize(LayoutUnit bfc_offset_override,
+                                          LayoutUnit inflow_block_offset,
+                                          MarginStrut margin_strut) const;
+
+  const std::optional<LayoutUnit> bfc_offset_;
+  const LayoutUnit end_border_padding_;
+  const LayoutUnit end_margin_;
+  const MinMaxSizes block_min_max_sizes_;
+  const Member<const LineClampAncestorChain> parent_;
 };
 
 }  // namespace blink

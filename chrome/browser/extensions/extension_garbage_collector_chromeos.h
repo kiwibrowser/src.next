@@ -26,7 +26,7 @@ class ExtensionGarbageCollectorChromeOS : public ExtensionGarbageCollector {
   static ExtensionGarbageCollectorChromeOS* Get(
       content::BrowserContext* context);
 
-  // Enable or disable garbage collection. See |disable_garbage_collection_|.
+  // Enable or disable garbage collection. See `disable_garbage_collection_`.
   void disable_garbage_collection() { disable_garbage_collection_ = true; }
   void enable_garbage_collection() { disable_garbage_collection_ = false; }
 
@@ -47,7 +47,7 @@ class ExtensionGarbageCollectorChromeOS : public ExtensionGarbageCollector {
   // TODO(rkc): HACK alert - this is only in place to allow the
   // kiosk_mode_screensaver to prevent its extension from getting garbage
   // collected. Remove this once KioskModeScreensaver is removed.
-  // See crbug.com/280363
+  // See crbug.com/41042294
   bool disable_garbage_collection_;
 
   // Shared extensions need to be processed only once but instances of this

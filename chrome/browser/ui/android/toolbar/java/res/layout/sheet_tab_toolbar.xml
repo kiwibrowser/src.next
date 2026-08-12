@@ -43,7 +43,9 @@ found in the LICENSE file.
             android:layout_gravity="center_horizontal|top"
             android:layout_marginTop="4dp"
             android:layout_centerHorizontal="true"
-            android:importantForAccessibility="no"
+            android:focusable="true"
+            android:clickable="true"
+            android:contentDescription="@string/accessibility_custom_tab_drag_handle"
             android:src="@drawable/drag_handlebar" />
 
         <org.chromium.ui.widget.ChromeImageView

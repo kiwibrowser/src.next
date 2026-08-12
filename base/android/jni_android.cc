@@ -10,24 +10,27 @@
 #include "base/android/java_exception_reporter.h"
 #include "base/android/jni_string.h"
 #include "base/android/jni_utils.h"
-#include "base/android_runtime_jni_headers/Throwable_jni.h"
 #include "base/debug/debugging_buildflags.h"
+#include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "build/robolectric_buildflags.h"
 #include "third_party/jni_zero/jni_zero.h"
+#include "third_party/jni_zero/system_jni/Throwable_jni.h"
 
-#if BUILDFLAG(IS_ROBOLECTRIC)
-#include "base/base_robolectric_jni/JniAndroid_jni.h"  // nogncheck
-#else
-#include "base/base_jni/JniAndroid_jni.h"
-#endif
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "base/jni_android_jni/JniAndroid_jni.h"
 
 namespace base {
 namespace android {
 namespace {
+
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+thread_local const JNINativeInterface* g_previous_functions = nullptr;
+thread_local JNINativeInterface g_hooked_functions;
+#endif
 
 // If disabled, we LOG(FATAL) immediately in native code when faced with an
 // uncaught Java exception (historical behavior). If enabled, we give the Java
@@ -42,36 +45,23 @@ BASE_FEATURE(kHandleExceptionsInJava,
 jclass g_out_of_memory_error_class = nullptr;
 
 #if !BUILDFLAG(IS_ROBOLECTRIC)
-jmethodID g_class_loader_load_class_method_id = nullptr;
-// ClassLoader.loadClass() accepts either slashes or dots on Android, but JVM
-// requires dots. We could translate, but there is no need to go through
-// ClassLoaders in Robolectric anyways.
-// https://cs.android.com/search?q=symbol:DexFile_defineClassNative
-jclass GetClassFromSplit(JNIEnv* env,
-                         const char* class_name,
-                         const char* split_name) {
-  DCHECK(IsStringASCII(class_name));
-  ScopedJavaLocalRef<jstring> j_class_name(env, env->NewStringUTF(class_name));
-  return static_cast<jclass>(env->CallObjectMethod(
-      GetSplitClassLoader(env, split_name), g_class_loader_load_class_method_id,
-      j_class_name.obj()));
-}
-
-// Must be called before using GetClassFromSplit - we need to set the global,
-// and we need to call GetClassLoader at least once to allow the default
-// resolver (env->FindClass()) to get our main ClassLoader class instance, which
-// we then cache use for all future calls to GetSplitClassLoader.
-void PrepareClassLoaders(JNIEnv* env) {
-  if (g_class_loader_load_class_method_id == nullptr) {
-    GetClassLoader(env);
-    ScopedJavaLocalRef<jclass> class_loader_clazz = ScopedJavaLocalRef<jclass>(
-        env, env->FindClass("java/lang/ClassLoader"));
-    CHECK(!ClearException(env));
-    g_class_loader_load_class_method_id =
-        env->GetMethodID(class_loader_clazz.obj(), "loadClass",
-                         "(Ljava/lang/String;)Ljava/lang/Class;");
-    CHECK(!ClearException(env));
+jclass FindClassHook(JNIEnv* env, const char* class_name) {
+  // * For env->FindClass(), class_name with be in the form "foo/bar/Baz".
+  // * jni_zero::GetClass() expects "foo.bar.Baz" because it uses
+  //   ClassLoader.load() to load classes.
+  // * ClassLoader.load() does not work with foo/bar/Baz on JVM, nor on
+  //   Android code in the boot classpath (like Cronet), but does work for
+  //   normal Android apps.
+  // This hook is currently used only in Chrome for non-bootclasspath
+  // cases, so we do not bother with the / -> . translation.
+  jclass clazz = jni_zero::GetClass(env, class_name).Release();
+  if (clazz) {
+    return clazz;
   }
+  // ClassLoader.loadClass() throws ClassNotFoundException, but FindClass()
+  // throws only NoClassDefFoundError.
+  ClearException(env);
+  return g_previous_functions->FindClass(env, class_name);
 }
 #endif  // !BUILDFLAG(IS_ROBOLECTRIC)
 }  // namespace
@@ -100,18 +90,10 @@ void InitVM(JavaVM* vm) {
   jni_zero::InitVM(vm);
   jni_zero::SetExceptionHandler(CheckException);
   JNIEnv* env = jni_zero::AttachCurrentThread();
-#if !BUILDFLAG(IS_ROBOLECTRIC)
-  // Warm-up needed for GetClassFromSplit, must be called before we set the
-  // resolver, since GetClassFromSplit won't work until after
-  // PrepareClassLoaders has happened.
-  PrepareClassLoaders(env);
-  jni_zero::SetClassResolver(GetClassFromSplit);
-#endif
   g_out_of_memory_error_class = static_cast<jclass>(
       env->NewGlobalRef(env->FindClass("java/lang/OutOfMemoryError")));
   DCHECK(g_out_of_memory_error_class);
 }
-
 
 void CheckException(JNIEnv* env) {
   if (!jni_zero::HasException(env)) {
@@ -181,7 +163,7 @@ void CheckException(JNIEnv* env) {
   // The reference returned by `ExceptionOccurred()` is a local reference.
   // `ExceptionClear()` merely removes the exception information from `env`;
   // it doesn't delete the reference, which is why this call is valid.
-  auto throwable = ScopedJavaLocalRef<jthrowable>::Adopt(env, raw_throwable);
+  auto throwable = jni_zero::AdoptRef(env, raw_throwable);
 
   if (!handle_exception_in_java) {
     base::android::SetJavaException(
@@ -204,8 +186,7 @@ void CheckException(JNIEnv* env) {
   LOG(ERROR) << "Native stack trace:" << std::endl << native_stack_trace;
 
   ScopedJavaLocalRef<jthrowable> secondary_exception =
-      Java_JniAndroid_handleException(
-          env, throwable, ConvertUTF8ToJavaString(env, native_stack_trace));
+      Java_JniAndroid_handleException(env, throwable, native_stack_trace);
 
   // Ideally handleException() should have terminated the process and we should
   // not get here. This can happen in the case of OutOfMemoryError or if the
@@ -227,11 +208,11 @@ void CheckException(JNIEnv* env) {
 
 std::string GetJavaExceptionInfo(JNIEnv* env,
                                  const JavaRef<jthrowable>& throwable) {
-  ScopedJavaLocalRef<jstring> sanitized_exception_string =
+  std::string sanitized_exception_string =
       Java_JniAndroid_sanitizedStacktraceForUnhandledException(env, throwable);
   // Returns null when PiiElider results in an OutOfMemoryError.
-  return sanitized_exception_string
-             ? ConvertJavaStringToUTF8(sanitized_exception_string)
+  return !sanitized_exception_string.empty()
+             ? sanitized_exception_string
              : kOomInGetJavaExceptionInfoMessage;
 }
 
@@ -268,5 +249,36 @@ std::string GetJavaStackTraceIfPresent() {
   return ret.substr(newline_idx + 1);
 }
 
+void HookJniFindClass(JNIEnv* env) {
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+  if (g_previous_functions) {
+    return;
+  }
+  g_previous_functions = env->functions;
+  g_hooked_functions = *g_previous_functions;
+  env->functions = &g_hooked_functions;
+  g_hooked_functions.FindClass = &FindClassHook;
+#endif
+}
+
+void UnhookJniFindClassForTesting(JNIEnv* env) {
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+  if (g_previous_functions == nullptr) {
+    return;
+  }
+  env->functions = g_previous_functions;
+  g_previous_functions = nullptr;
+  g_hooked_functions = {};
+#endif
+}
+
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+const JNINativeInterface* GetOriginalJniFunctionsForTesting() {
+  return g_previous_functions;
+}
+#endif
+
 }  // namespace android
 }  // namespace base
+
+DEFINE_JNI(JniAndroid)

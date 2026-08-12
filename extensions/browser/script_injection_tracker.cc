@@ -4,11 +4,12 @@
 
 #include "extensions/browser/script_injection_tracker.h"
 
+#include <algorithm>
+
 #include "base/check_is_test.h"
-#include "base/containers/contains.h"
+#include "base/debug/crash_logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ref.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/typed_macros.h"
 #include "components/guest_view/buildflags/buildflags.h"
@@ -29,9 +30,11 @@
 #include "extensions/common/content_script_injection_url_getter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/content_scripts_handler.h"
+#include "extensions/common/mojom/match_origin_as_fallback.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/trace_util.h"
 #include "extensions/common/user_script.h"
+#include "net/base/net_errors.h"
 #include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 
@@ -97,7 +100,7 @@ class RenderProcessHostUserData : public base::SupportsUserData::Data {
 
   bool HasScript(ScriptInjectionTracker::ScriptType script_type,
                  const ExtensionId& extension_id) const {
-    return base::Contains(GetScripts(script_type), extension_id);
+    return GetScripts(script_type).contains(extension_id);
   }
 
   void AddScript(ScriptInjectionTracker::ScriptType script_type,
@@ -196,7 +199,7 @@ std::vector<const UserScript*> GetLoadedDynamicScripts(
 GURL GetEffectiveDocumentURL(
     content::RenderFrameHost* frame,
     const GURL& document_url,
-    MatchOriginAsFallbackBehavior match_origin_as_fallback) {
+    mojom::MatchOriginAsFallbackBehavior match_origin_as_fallback) {
   // This is a simplification to avoid calling
   // `BrowserFrameContextData::CanAccess` which is unable to replicate all of
   // WebSecurityOrigin::CanAccess checks (e.g. universal access or file
@@ -293,7 +296,7 @@ bool DoScriptsMatch(const Extension& extension,
                     const std::vector<const UserScript*>& scripts,
                     content::RenderFrameHost& frame,
                     const GURL& url) {
-  return base::ranges::any_of(
+  return std::ranges::any_of(
       scripts.begin(), scripts.end(),
       [&extension, &frame, &url](const UserScript* script) {
         return DoesScriptMatch(extension, *script, frame, url);
@@ -302,11 +305,11 @@ bool DoScriptsMatch(const Extension& extension,
 
 // Returns whether an `extension` can inject JavaScript web view scripts into
 // the `frame` / `url`.
-bool DoWebViewScripstMatch(const Extension& extension,
+bool DoWebViewScriptsMatch(const Extension& extension,
                            content::RenderFrameHost& frame) {
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
   content::RenderProcessHost& process = *frame.GetProcess();
-  TRACE_EVENT("extensions", "ScriptInjectionTracker/DoWebViewScripstMatch",
+  TRACE_EVENT("extensions", "ScriptInjectionTracker/DoWebViewScriptsMatch",
               ChromeTrackEvent::kRenderProcessHost, process,
               ChromeTrackEvent::kChromeExtensionId,
               ExtensionIdForTracing(extension.id()));
@@ -317,14 +320,20 @@ bool DoWebViewScripstMatch(const Extension& extension,
     return false;
   }
 
+  if (!guest->owner_rfh()) {
+    // If the owner RenderFrameHost is no longer around, the URL can't match.
+    return false;
+  }
+
   // Return true if `extension` is an owner of `guest` and it registered
   // content scripts using the `webview.addContentScripts` API.
   GURL owner_site_url = guest->GetOwnerSiteURL();
   if (owner_site_url.SchemeIs(kExtensionScheme) &&
-      owner_site_url.host_piece() == extension.id()) {
+      owner_site_url.host() == extension.id()) {
     WebViewContentScriptManager* script_manager =
         WebViewContentScriptManager::Get(frame.GetBrowserContext());
-    int embedder_process_id = guest->owner_rfh()->GetProcess()->GetID();
+    int embedder_process_id =
+        guest->owner_rfh()->GetProcess()->GetDeprecatedID();
     std::set<std::string> script_ids = script_manager->GetContentScriptIDSet(
         embedder_process_id, guest->view_instance_id());
 
@@ -332,7 +341,7 @@ bool DoWebViewScripstMatch(const Extension& extension,
     // for performance (to avoid creating unnecessary URLLoaderFactory via
     // URLLoaderFactoryManager), but not necessarily for security (because
     // there are anyway no OOPIFs inside the webView process -
-    // https://crbug.com/614463).  At the same time, more granular checks are
+    // https://crbug.com/40470541).  At the same time, more granular checks are
     // difficult to achieve, because the UserScript objects are not retained
     // (i.e. only UserScriptIDs are available) by WebViewContentScriptManager.
     if (!script_ids.empty()) {
@@ -418,7 +427,7 @@ std::vector<const Extension*> GetExtensionsInjectingContentScripts(
   std::vector<const Extension*> extensions_injecting_scripts;
   for (const auto& it : extensions) {
     const Extension& extension = *it;
-    if (DoWebViewScripstMatch(extension, frame) ||
+    if (DoWebViewScriptsMatch(extension, frame) ||
         DoStaticContentScriptsMatch(extension, frame, url) ||
         DoDynamicContentScriptsMatch(extension, frame, url)) {
       extensions_injecting_scripts.push_back(&extension);
@@ -438,9 +447,16 @@ void AddMatchingScriptsToProcess(const Extension& extension,
                                   &any_frame_matches_user_scripts,
                                   &extension](content::RenderFrameHost* frame) {
     const GURL& url = frame->GetLastCommittedURL();
+    // Ignore error documents, which don't allow scripts to inject.
+    // We need to check whether the committed URL is empty first to avoid a
+    // CHECK in RenderFrameHostImpl:
+    // https://source.chromium.org/chromium/chromium/src/+/main:content/browser/renderer_host/render_frame_host_impl.cc;l=3630-3637;drc=6c12109a8d828bb032f4307523753f0c9660a425.
+    if (!url.is_empty() && frame->IsErrorDocument()) {
+      return;
+    }
     if (!any_frame_matches_content_scripts) {
       any_frame_matches_content_scripts =
-          DoWebViewScripstMatch(extension, *frame) ||
+          DoWebViewScriptsMatch(extension, *frame) ||
           DoStaticContentScriptsMatch(extension, *frame, url) ||
           DoDynamicContentScriptsMatch(extension, *frame, url);
     }
@@ -629,6 +645,25 @@ bool DidProcessRunScriptFromExtension(
 }  // namespace
 
 // static
+void ScriptInjectionTracker::
+    AddExtensionThatRanContentScriptsInProcessForTesting(
+        const content::RenderProcessHost& process,
+        const ExtensionId& extension_id) {
+  RenderProcessHostUserData::GetOrCreate(
+      const_cast<content::RenderProcessHost&>(process))
+      .AddScript(ScriptType::kContentScript, extension_id);
+}
+
+// static
+void ScriptInjectionTracker::AddExtensionThatRanUserScriptsInProcessForTesting(
+    const content::RenderProcessHost& process,
+    const ExtensionId& extension_id) {
+  RenderProcessHostUserData::GetOrCreate(
+      const_cast<content::RenderProcessHost&>(process))
+      .AddScript(ScriptType::kUserScript, extension_id);
+}
+
+// static
 ExtensionIdSet
 ScriptInjectionTracker::GetExtensionsThatRanContentScriptsInProcess(
     const content::RenderProcessHost& process) {
@@ -663,6 +698,11 @@ void ScriptInjectionTracker::ReadyToCommitNavigation(
     base::PassKey<ExtensionWebContentsObserver> pass_key,
     content::NavigationHandle* navigation) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Ignore error pages. They won't allow script injection.
+  if (navigation->GetNetErrorCode() != net::OK) {
+    return;
+  }
 
   content::RenderFrameHost& frame = *navigation->GetRenderFrameHost();
   content::RenderProcessHost& process = *frame.GetProcess();
@@ -717,14 +757,14 @@ void ScriptInjectionTracker::DidFinishNavigation(
 
   // Only consider cross-document navigations that actually commit.  (Documents
   // associated with same-document navigations should have already been
-  // processed by an earlier DidFinishNavigation.  Navigations that don't
-  // commit/load won't inject content scripts.  Content script injections are
+  // processed by an earlier DidFinishNavigation. Navigations that don't
+  // commit/load won't inject content scripts. Content script injections are
   // primarily driven by URL matching and therefore failed navigations may still
   // end up injecting content scripts into the error page. Pre-rendered pages
   // already ran content scripts at the initial navigation and don't need to
-  // run them again on activation.)
+  // run them again on activation. Error pages don't allow script injection.)
   if (!navigation->HasCommitted() || navigation->IsSameDocument() ||
-      navigation->IsPrerenderedPageActivation()) {
+      navigation->IsPrerenderedPageActivation() || navigation->IsErrorPage()) {
     return;
   }
 
@@ -986,7 +1026,7 @@ ScopedScriptInjectionTrackerFailureCrashKeys::
   if (extension) {
     do_web_view_scripts_match_crash_key_.emplace(
         GetDoWebViewScriptsMatchCrashKey(),
-        BoolToCrashKeyValue(DoWebViewScripstMatch(*extension, frame)));
+        BoolToCrashKeyValue(DoWebViewScriptsMatch(*extension, frame)));
     do_static_content_scripts_match_crash_key_.emplace(
         GetDoStaticContentScriptsMatchCrashKey(),
         BoolToCrashKeyValue(

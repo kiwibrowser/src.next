@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "base/byte_size.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/load_states.h"
@@ -27,8 +28,8 @@ class HttpResponseInfo;
 class IOBuffer;
 struct TransportInfo;
 struct LoadTimingInfo;
+struct LoadTimingInternalInfo;
 class NetLogWithSource;
-class QuicServerInfo;
 class SSLPrivateKey;
 class X509Certificate;
 
@@ -37,10 +38,6 @@ class X509Certificate;
 // answered.  Cookies are assumed to be managed by the caller.
 class NET_EXPORT_PRIVATE HttpTransaction {
  public:
-  // If |*defer| is set to true, the transaction will wait until
-  // ResumeNetworkStart is called before establishing a connection.
-  using BeforeNetworkStartCallback = base::OnceCallback<void(bool* defer)>;
-
   // Called each time a connection is obtained, before any data is sent.
   //
   // |info| describes the newly-obtained connection.
@@ -140,13 +137,13 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   virtual void StopCaching() = 0;
 
   // Get the number of bytes received from network.
-  virtual int64_t GetTotalReceivedBytes() const = 0;
+  virtual base::ByteSize GetTotalReceivedBytes() const = 0;
 
   // Get the number of bytes sent over the network.
-  virtual int64_t GetTotalSentBytes() const = 0;
+  virtual base::ByteSize GetTotalSentBytes() const = 0;
 
   // Get the number of bytes of the body received from network.
-  virtual int64_t GetReceivedBodyBytes() const = 0;
+  virtual base::ByteSize GetReceivedBodyBytes() const = 0;
 
   // Called to tell the transaction that we have successfully reached the end
   // of the stream. This is equivalent to performing an extra Read() at the end
@@ -164,16 +161,16 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   // Returns the load state for this transaction.
   virtual LoadState GetLoadState() const = 0;
 
-  // SetQuicServerInfo sets a object which reads and writes public information
-  // about a QUIC server.
-  virtual void SetQuicServerInfo(QuicServerInfo* quic_server_info) = 0;
-
   // Populates all of load timing, except for request start times and receive
   // headers time.
   // |load_timing_info| must have all null times when called.  Returns false and
   // does not modify |load_timing_info| if there's no timing information to
   // provide.
   virtual bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const = 0;
+
+  // Populates load timing internal info.
+  virtual void PopulateLoadTimingInternalInfo(
+      LoadTimingInternalInfo* load_timing_internal_info) const = 0;
 
   // Gets the remote endpoint of the socket that the transaction's underlying
   // stream is using or did use, if any. Returns true and fills in |endpoint|
@@ -193,10 +190,6 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   virtual void SetWebSocketHandshakeStreamCreateHelper(
       WebSocketHandshakeStreamBase::CreateHelper* create_helper) = 0;
 
-  // Sets the callback to receive notification just before network use.
-  virtual void SetBeforeNetworkStartCallback(
-      BeforeNetworkStartCallback callback) = 0;
-
   // Sets the callback to receive a notification upon connection.
   virtual void SetConnectedCallback(const ConnectedCallback& callback) = 0;
 
@@ -213,9 +206,6 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   virtual void SetIsSharedDictionaryReadAllowedCallback(
       base::RepeatingCallback<bool()> callback) = 0;
 
-  // Resumes the transaction after being deferred.
-  virtual int ResumeNetworkStart() = 0;
-
   virtual ConnectionAttempts GetConnectionAttempts() const = 0;
 
   // Configures the transaction to close the network connection, if any, on
@@ -230,18 +220,6 @@ class NET_EXPORT_PRIVATE HttpTransaction {
   // byte of the response body has been read, as the connection is no longer in
   // use at that point.
   virtual void CloseConnectionOnDestruction() = 0;
-
-  // Returns true if ProxyInfo has been determined for the transaction and that
-  // the ProxyInfo indicates the origin's domain is on the IP Protection Masked
-  // Domain List. Note that this may not be determined if no network request is
-  // actually made (and thus no ProxyInfo computed). However, the metrics we're
-  // interested in focus on requests which actually reach out to the network, so
-  // this is not a problem. See also HttpResponseInfo's was_mdl_match as a
-  // secondary signal.
-  //
-  // Only use this method for metrics. It may be removed when associated
-  // histograms are removed.
-  virtual bool IsMdlMatchForMetrics() const = 0;
 };
 
 }  // namespace net

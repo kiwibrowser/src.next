@@ -5,10 +5,13 @@
 #ifndef BASE_AUTO_RESET_H_
 #define BASE_AUTO_RESET_H_
 
+// Necessary per <utility>'s usage of `sizeof(std::intmax_t)` without IWYU.
+#include <stdint.h>
+
 #include <utility>
 
 #include "base/check_op.h"
-#include "base/memory/raw_ptr_exclusion.h"
+#include "base/memory/raw_ptr.h"
 
 // base::AutoReset<> is useful for setting a variable to a new value only within
 // a particular scope. An base::AutoReset<> object resets a variable to its
@@ -45,21 +48,22 @@ class [[maybe_unused, nodiscard]] AutoReset {
         original_value_(std::move(other.original_value_)) {}
 
   AutoReset& operator=(AutoReset&& rhs) {
+    Reset();
     scoped_variable_ = std::exchange(rhs.scoped_variable_, nullptr);
     original_value_ = std::move(rhs.original_value_);
     return *this;
   }
 
-  ~AutoReset() {
-    if (scoped_variable_)
-      *scoped_variable_ = std::move(original_value_);
-  }
+  ~AutoReset() { Reset(); }
 
  private:
-  // `scoped_variable_` is not a raw_ptr<T> for performance reasons: Large
-  // number of non-PartitionAlloc pointees + AutoReset is typically short-lived
-  // (e.g. allocated on the stack).
-  RAW_PTR_EXCLUSION T* scoped_variable_;
+  void Reset() {
+    if (scoped_variable_) {
+      *scoped_variable_ = std::move(original_value_);
+    }
+  }
+
+  raw_ptr<T> scoped_variable_;
 
   T original_value_;
 };

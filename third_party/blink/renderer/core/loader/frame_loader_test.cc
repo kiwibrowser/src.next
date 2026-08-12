@@ -101,7 +101,11 @@ TEST_F(FrameLoaderSimTest, LoadEventProgressBeforeUnloadCanceled) {
     // beforeunload event is dispatched from content's RenderFrameImpl, Blink
     // tests mock this out using a WebFrameTestProxy which doesn't check
     // beforeunload before navigating.
-    ASSERT_FALSE(frame_a->Loader().ShouldClose());
+    base::TimeTicks before_unload_dialog_opened_time;
+    base::TimeTicks before_unload_dialog_closed_time;
+    ASSERT_FALSE(frame_a->Loader().ShouldClose(
+        /*is_reload=*/false, /*force_to_proceed=*/false,
+        before_unload_dialog_opened_time, before_unload_dialog_closed_time));
 
     EXPECT_FALSE(main_frame->GetDocument()->BeforeUnloadStarted());
     EXPECT_FALSE(frame_a->GetDocument()->BeforeUnloadStarted());
@@ -112,7 +116,11 @@ TEST_F(FrameLoaderSimTest, LoadEventProgressBeforeUnloadCanceled) {
   // Now test the opposite, the user allowing the navigation away.
   {
     chrome_client.SetBeforeUnloadConfirmPanelResultForTesting(true);
-    ASSERT_TRUE(frame_a->Loader().ShouldClose());
+    base::TimeTicks before_unload_dialog_opened_time;
+    base::TimeTicks before_unload_dialog_closed_time;
+    ASSERT_TRUE(frame_a->Loader().ShouldClose(
+        /*is_reload=*/false, /*force_to_proceed=*/false,
+        before_unload_dialog_opened_time, before_unload_dialog_closed_time));
 
     // The navigation was in frame a so it shouldn't affect the parent.
     EXPECT_FALSE(main_frame->GetDocument()->BeforeUnloadStarted());
@@ -251,15 +259,18 @@ class FrameLoaderTest : public testing::Test {
 TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
   WebViewImpl* web_view_impl = web_view_helper_.Initialize();
 
-  const KURL& url = KURL(NullURL(), "https://www.example.com/bar.html");
+  const KURL& url = KURL(NullUrl(), "https://www.example.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(url);
   MockPolicyContainerHost mock_policy_container_host;
   params->policy_container = std::make_unique<WebPolicyContainer>(
       WebPolicyContainerPolicies{
+          network::ConnectionAllowlists(),
           network::mojom::CrossOriginEmbedderPolicyValue::kNone,
+          network::IntegrityPolicy(),
+          network::IntegrityPolicy(),
           network::mojom::ReferrerPolicy::kAlways,
-          WebVector<WebContentSecurityPolicy>(),
+          std::vector<WebContentSecurityPolicy>(),
       },
       mock_policy_container_host.BindNewEndpointAndPassDedicatedRemote());
   LocalFrame* local_frame =
@@ -267,15 +278,16 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
   local_frame->Loader().CommitNavigation(std::move(params), nullptr);
 
   EXPECT_EQ(*mojom::blink::PolicyContainerPolicies::New(
+                network::ConnectionAllowlists(),
                 network::CrossOriginEmbedderPolicy(
                     network::mojom::CrossOriginEmbedderPolicyValue::kNone),
+                network::IntegrityPolicy(), network::IntegrityPolicy(),
                 network::mojom::ReferrerPolicy::kAlways,
                 Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
                 /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone,
                 network::mojom::blink::IPAddressSpace::kUnknown,
                 /*can_navigate_top_without_user_gesture=*/true,
-                /*allow_cross_origin_isolation_under_initial_empty_document=*/
-                false),
+                /*cross_origin_isolation_enabled_by_dip=*/false),
             local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
 }
 

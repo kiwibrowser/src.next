@@ -11,6 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/api/oauth2.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/utils/extension_utils.h"
 
 namespace extensions {
 
@@ -35,7 +36,7 @@ OAuth2ManifestHandler::~OAuth2ManifestHandler() = default;
 const OAuth2Info& OAuth2ManifestHandler::GetOAuth2Info(
     const Extension& extension) {
   static const base::NoDestructor<OAuth2Info> empty_oauth2_info;
-  OAuth2ManifestData* data = static_cast<OAuth2ManifestData*>(
+  const OAuth2ManifestData* data = static_cast<const OAuth2ManifestData*>(
       extension.GetManifestData(OAuth2ManifestKeys::kOauth2));
   return data ? data->info : *empty_oauth2_info;
 }
@@ -47,14 +48,17 @@ bool OAuth2ManifestHandler::Parse(Extension* extension, std::u16string* error) {
     return false;
   }
 
-  OAuth2Info& info = manifest_keys.oauth2;
+  CHECK(manifest_keys.oauth2.has_value());
+  OAuth2Info& info = *manifest_keys.oauth2;
 
-  // Allowlisted component apps (where the allowlisting is enforced by the
-  // features files) using `auto_approve` may use Chrome's client ID by omitting
-  // the field.
+  const bool can_use_auto_approve =
+      extension->location() == mojom::ManifestLocation::kComponent ||
+      IsExtensionAllowlistedByCommandLine(*extension);
+
+  // Component extensions using `auto_approve` may use Chrome's client ID by
+  // omitting the field.
   bool can_omit_client_id =
-      extension->location() == mojom::ManifestLocation::kComponent &&
-      info.auto_approve && *info.auto_approve;
+      can_use_auto_approve && info.auto_approve && *info.auto_approve;
 
   if ((!info.client_id || info.client_id->empty()) && !can_omit_client_id) {
     *error = errors::kInvalidOAuth2ClientId;

@@ -23,6 +23,7 @@
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
@@ -84,7 +85,8 @@ class DragControllerTest : public RenderingTest {
                   static_cast<DragOperationsMask>(kDragOperationMove), false);
     GetFrame().GetPage()->GetDragController().DragEnteredOrUpdated(&data,
                                                                    GetFrame());
-    GetFrame().GetPage()->GetDragController().PerformDrag(&data, GetFrame());
+    GetFrame().GetPage()->GetDragController().PerformDrop(
+        &data, GetFrame(), DragController::Operation());
   }
 
  private:
@@ -137,7 +139,7 @@ TEST_F(DragControllerSimTest, DropURLOnNonNavigatingClearsState) {
   WebDragData drag_data;
   WebDragData::StringItem item;
   item.type = "text/uri-list";
-  item.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item.data = WebString("https://www.example.com/index.html");
   drag_data.AddItem(item);
 
   const gfx::PointF client_point(10, 10);
@@ -193,10 +195,127 @@ TEST_F(DragControllerSimTest, ThrottledDocumentHandled) {
       ->GetFrameView()
       ->SetLifecycleUpdatesThrottledForTesting();
 
-  WebView().GetPage()->GetDragController().PerformDrag(
-      &data, *GetDocument().GetFrame());
+  WebView().GetPage()->GetDragController().PerformDrop(
+      &data, *GetDocument().GetFrame(), DragController::Operation());
 
   // Test passes if we don't crash.
+}
+
+// Dragging an image whose intrinsic area exceeds `kMaxOriginalImageArea`
+// (1500*1500) causes `DragImageForImage()` to return null. The drag should
+// still proceed even with no image overlay.
+TEST_F(DragControllerSimTest, ImageTooLargeForPreviewStillStartsDrag) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest image_resource("https://example.com/big.png", "image/png");
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>* { margin: 0; }</style>
+    <img id="big" src="big.png">
+  )HTML");
+
+  // The 3000x2000.png test image exceeds the `kMaxOriginalImageArea` cap,
+  // so `DragImageForImage()` returns nullptr, but the image still passes
+  // `CanDragImage()`.
+  image_resource.Complete(*test::ReadFromFile(
+      test::CoreTestDataPath("notifications/3000x2000.png")));
+  test::RunPendingTasks();
+  Compositor().BeginFrame();
+
+  Element* image_element = GetDocument().getElementById(AtomicString("big"));
+  ASSERT_TRUE(image_element);
+
+  const gfx::Point drag_origin(50, 50);
+  WebMouseEvent mouse_event(WebInputEvent::Type::kMouseDown,
+                            WebInputEvent::kNoModifiers,
+                            WebInputEvent::GetStaticTimeStampForTests());
+  mouse_event.button = WebMouseEvent::Button::kLeft;
+  mouse_event.SetPositionInWidget(drag_origin.x(), drag_origin.y());
+
+  DragController& drag_controller = WebView().GetPage()->GetDragController();
+  DragState& drag_state = drag_controller.GetDragState();
+  drag_state.drag_type_ = kDragSourceActionImage;
+  drag_state.drag_src_ = image_element;
+  drag_state.drag_data_transfer_ = DataTransfer::Create(
+      DataTransfer::kDragAndDrop, DataTransferAccessPolicy::kWritable,
+      DataObject::Create());
+
+  EXPECT_TRUE(drag_controller.StartDrag(GetDocument().GetFrame(), drag_state,
+                                        mouse_event, drag_origin));
+}
+
+// An image drag whose source `<img>` has no image URL should not start a
+// drag at all.
+TEST_F(DragControllerSimTest, ImageDragWithEmptyUrlDoesNotStartDrag) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  // `<img>` with no `src` and explicit dimensions so the element is still
+  // hittable. `HitTestResult::AbsoluteImageURL()` is empty in this case.
+  main_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>* { margin: 0; }</style>
+    <img id="empty" width="200" height="200">
+  )HTML");
+  Compositor().BeginFrame();
+
+  Element* image_element = GetDocument().getElementById(AtomicString("empty"));
+  ASSERT_TRUE(image_element);
+
+  const gfx::Point drag_origin(50, 50);
+  WebMouseEvent mouse_event(WebInputEvent::Type::kMouseDown,
+                            WebInputEvent::kNoModifiers,
+                            WebInputEvent::GetStaticTimeStampForTests());
+  mouse_event.button = WebMouseEvent::Button::kLeft;
+  mouse_event.SetPositionInWidget(drag_origin.x(), drag_origin.y());
+
+  DragController& drag_controller = WebView().GetPage()->GetDragController();
+  DragState& drag_state = drag_controller.GetDragState();
+  drag_state.drag_type_ = kDragSourceActionImage;
+  drag_state.drag_src_ = image_element;
+  drag_state.drag_data_transfer_ = DataTransfer::Create(
+      DataTransfer::kDragAndDrop, DataTransferAccessPolicy::kWritable,
+      DataObject::Create());
+
+  EXPECT_FALSE(drag_controller.StartDrag(GetDocument().GetFrame(), drag_state,
+                                         mouse_event, drag_origin));
+}
+
+// Verifies that a link drag whose source `<a>` has no `href` does not start a
+// drag.
+TEST_F(DragControllerSimTest, LinkDragWithEmptyHrefDoesNotStartDrag) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>* { margin: 0; }
+           a { display: inline-block; width: 100px; height: 30px; }</style>
+    <a id="link">click</a>
+  )HTML");
+  Compositor().BeginFrame();
+
+  Element* link_element = GetDocument().getElementById(AtomicString("link"));
+  ASSERT_TRUE(link_element);
+
+  const gfx::Point drag_origin(10, 10);
+  WebMouseEvent mouse_event(WebInputEvent::Type::kMouseDown,
+                            WebInputEvent::kNoModifiers,
+                            WebInputEvent::GetStaticTimeStampForTests());
+  mouse_event.button = WebMouseEvent::Button::kLeft;
+  mouse_event.SetPositionInWidget(drag_origin.x(), drag_origin.y());
+
+  DragController& drag_controller = WebView().GetPage()->GetDragController();
+  DragState& drag_state = drag_controller.GetDragState();
+  drag_state.drag_type_ = kDragSourceActionLink;
+  drag_state.drag_src_ = link_element;
+  drag_state.drag_data_transfer_ = DataTransfer::Create(
+      DataTransfer::kDragAndDrop, DataTransferAccessPolicy::kWritable,
+      DataObject::Create());
+
+  EXPECT_FALSE(drag_controller.StartDrag(GetDocument().GetFrame(), drag_state,
+                                         mouse_event, drag_origin));
 }
 
 TEST_F(DragControllerTest, DragImageForSelectionClipsToViewport) {
@@ -245,7 +364,8 @@ TEST_F(DragControllerTest, DragImageForSelectionClipsToViewport) {
   int scroll_offset = 500;
   LocalFrameView* frame_view = GetDocument().View();
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 0, node_width, viewport_height_css);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(GetFrame()));
   selection_image = DragController::DragImageForSelection(GetFrame(), 1);
@@ -257,7 +377,8 @@ TEST_F(DragControllerTest, DragImageForSelectionClipsToViewport) {
   // the bottom of the node is now visible.
   scroll_offset = 800;
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(
       0, 0, node_width, node_height + node_margin_top - scroll_offset);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(GetFrame()));
@@ -313,7 +434,8 @@ TEST_F(DragControllerTest, DragImageForSelectionClipsChildFrameToViewport) {
   int scroll_offset = 50;
   LocalFrameView* frame_view = GetDocument().View();
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 5, 30, 20);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -325,7 +447,8 @@ TEST_F(DragControllerTest, DragImageForSelectionClipsChildFrameToViewport) {
   // the visual viewport.
   scroll_offset = 210;
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 10, 30, 15);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -337,7 +460,7 @@ TEST_F(DragControllerTest, DragImageForSelectionClipsChildFrameToViewport) {
   int iframe_scroll_offset = 7;
   child_frame.View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(0, iframe_scroll_offset),
-      mojom::blink::ScrollType::kProgrammatic);
+      mojom::blink::ScrollType::kProgrammatic, cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 10, 30, 8);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -395,7 +518,8 @@ TEST_F(DragControllerTest,
   int scroll_offset = 50;
   LocalFrameView* frame_view = GetDocument().View();
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 5, 30, 20);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -408,7 +532,8 @@ TEST_F(DragControllerTest,
   // the visual viewport.
   scroll_offset = 210;
   frame_view->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, scroll_offset), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 10, 30, 15);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -421,7 +546,7 @@ TEST_F(DragControllerTest,
   int iframe_scroll_offset = 7;
   child_frame.View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(0, iframe_scroll_offset),
-      mojom::blink::ScrollType::kProgrammatic);
+      mojom::blink::ScrollType::kProgrammatic, cc::ScrollSourceType::kNone);
   expected_selection = gfx::RectF(0, 10, 30, 8);
   EXPECT_EQ(expected_selection, DragController::ClippedSelection(child_frame));
   selection_image = DragController::DragImageForSelection(child_frame, 1);
@@ -542,7 +667,7 @@ TEST_F(DragControllerTest, DragAndDropUrlFromTextareaToTextarea) {
   WebDragData web_drag_data;
   WebDragData::StringItem item1;
   item1.type = "text/uri-list";
-  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.data = WebString("https://www.example.com/index.html");
   item1.title = "index.html";
   WebDragData::StringItem item2;
   item2.type = "text/plain";
@@ -581,7 +706,7 @@ TEST_F(DragControllerTest, DragAndDropUrlFromTextareaToRichlyEditableDiv) {
   WebDragData web_drag_data;
   WebDragData::StringItem item1;
   item1.type = "text/uri-list";
-  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.data = WebString("https://www.example.com/index.html");
   item1.title = "index.html";
   WebDragData::StringItem item2;
   item2.type = "text/plain";
@@ -600,7 +725,7 @@ TEST_F(DragControllerTest, DragAndDropUrlFromTextareaToRichlyEditableDiv) {
   PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
                                                 drop_div_rich);
   EXPECT_EQ("<a href=\"https://www.example.com/index.html\">index.html</a>",
-            drop_div_rich->innerHTML());
+            drop_div_rich->GetInnerHTMLString());
   EXPECT_EQ("", drag_text_area->Value());
 }
 
@@ -622,7 +747,7 @@ TEST_F(DragControllerTest,
   WebDragData web_drag_data;
   WebDragData::StringItem item1;
   item1.type = "text/uri-list";
-  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.data = WebString("https://www.example.com/index.html");
   item1.title = "index.html";
   WebDragData::StringItem item2;
   item2.type = "text/plain";
@@ -640,7 +765,8 @@ TEST_F(DragControllerTest,
 
   PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
                                                 drop_div_plain);
-  EXPECT_EQ("https://www.example.com/index.html", drop_div_plain->innerHTML());
+  EXPECT_EQ("https://www.example.com/index.html",
+            drop_div_plain->GetInnerHTMLString());
   EXPECT_EQ("", drag_text_area->Value());
 }
 
@@ -661,7 +787,7 @@ TEST_F(DragControllerTest,
   WebDragData web_drag_data;
   WebDragData::StringItem item1;
   item1.type = "text/uri-list";
-  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.data = WebString("https://www.example.com/index.html");
   item1.title = "index.html";
   WebDragData::StringItem item2;
   item2.type = "text/plain";
@@ -680,7 +806,7 @@ TEST_F(DragControllerTest,
   PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
                                                 drop_paragraph_rich);
   EXPECT_EQ("<a href=\"https://www.example.com/index.html\">index.html</a>",
-            drop_paragraph_rich->innerHTML());
+            drop_paragraph_rich->GetInnerHTMLString());
   EXPECT_EQ("", drag_text_area->Value());
 }
 
@@ -701,7 +827,7 @@ TEST_F(DragControllerTest,
   WebDragData web_drag_data;
   WebDragData::StringItem item1;
   item1.type = "text/uri-list";
-  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.data = WebString("https://www.example.com/index.html");
   item1.title = "index.html";
   WebDragData::StringItem item2;
   item2.type = "text/plain";
@@ -720,8 +846,46 @@ TEST_F(DragControllerTest,
   PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
                                                 drop_paragraph_plain);
   EXPECT_EQ("https://www.example.com/index.html",
-            drop_paragraph_plain->innerHTML());
+            drop_paragraph_plain->GetInnerHTMLString());
   EXPECT_EQ("", drag_text_area->Value());
+}
+
+// https://issues.chromium.org/issues/379761996
+TEST_F(DragControllerTest, ResumeCaretBlinkingAfterDrag) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <p id='drop' contenteditable='plaintext-only'></p>
+  )HTML");
+  auto* drag_text_area = DynamicTo<HTMLTextAreaElement>(GetElementById("drag"));
+  Element* drop_paragraph_plain = GetElementById("drop");
+  WebDragData web_drag_data;
+  WebDragData::StringItem item;
+  item.type = "text/plain";
+  item.data = WebString("hello");
+  item.title = "index.html";
+  web_drag_data.AddItem(item);
+
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  DragController& drag_controller = GetPage().GetDragController();
+  auto& drag_state = drag_controller.GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+  // The mousedown event does not trigger, manually set the caret blinking state
+  // to suspended.
+  Selection().SetCaretBlinkingSuspended(true);
+  EXPECT_TRUE(Selection().IsCaretBlinkingSuspended());
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_paragraph_plain);
+  EXPECT_TRUE(Selection().IsCaretBlinkingSuspended());
+  drag_controller.DragEnded();
+  EXPECT_FALSE(Selection().IsCaretBlinkingSuspended());
 }
 
 }  // namespace blink

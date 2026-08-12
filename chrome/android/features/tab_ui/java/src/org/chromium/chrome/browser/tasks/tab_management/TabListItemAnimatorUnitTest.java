@@ -4,10 +4,12 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -22,39 +24,51 @@ import static org.chromium.chrome.browser.tasks.tab_management.TabListModel.Card
 import static org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.ModelType.TAB;
 import static org.chromium.chrome.browser.tasks.tab_management.TabProperties.USE_SHRINK_CLOSE_ANIMATION;
 
+import android.content.res.Resources;
 import android.util.Pair;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InOrder;
-import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.Callback;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.ModelType;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
-import org.chromium.ui.modelutil.SimpleRecyclerViewAdapter;
 import org.chromium.ui.modelutil.SimpleRecyclerViewAdapter.ViewHolder;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Unit tests for {@link TabListItemAnimator}. */
 @RunWith(BaseRobolectricTestRunner.class)
 public class TabListItemAnimatorUnitTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
-    @Mock private SimpleRecyclerViewAdapter mAdapter;
+    private final SettableNonNullObservableSupplier<Boolean> mIsAnimatorRunningSupplier =
+            ObservableSuppliers.createNonNull(false);
+    private final List<Boolean> mIsAnimatorRunningValues = new ArrayList<>();
+
     private TabListItemAnimator mItemAnimator;
 
     @Before
     public void setUp() {
-        mItemAnimator = spy(new TabListItemAnimator());
+        mIsAnimatorRunningSupplier.addSyncObserver(mIsAnimatorRunningValues::add);
+        mItemAnimator =
+                spy(
+                        new TabListItemAnimator(
+                                mIsAnimatorRunningSupplier, /* useClipAnimations= */ false));
     }
 
     private static void emptyBind(PropertyModel model, View view, PropertyKey key) {}
@@ -65,6 +79,9 @@ public class TabListItemAnimatorUnitTest {
         when(itemView.getTranslationX()).thenReturn(0f);
         when(itemView.getTranslationY()).thenReturn(0f);
         when(itemView.getVisibility()).thenReturn(View.VISIBLE);
+        Resources resources = mock(Resources.class);
+        when(resources.getDimensionPixelSize(anyInt())).thenReturn(8);
+        when(itemView.getResources()).thenReturn(resources);
         var viewHolder = new ViewHolder(itemView, TabListItemAnimatorUnitTest::emptyBind);
         PropertyModel model =
                 new PropertyModel.Builder(new PropertyKey[] {CARD_TYPE, USE_SHRINK_CLOSE_ANIMATION})
@@ -77,7 +94,7 @@ public class TabListItemAnimatorUnitTest {
 
     private void runAnimationToCompletion() {
         mItemAnimator.runPendingAnimations();
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
     }
 
     private void animateAddWithCompletionTrigger(Callback<ViewHolder> completionTrigger) {
@@ -437,6 +454,147 @@ public class TabListItemAnimatorUnitTest {
         inOrder.verify(mItemAnimator).dispatchChangeFinished(changedHolder, true);
 
         inOrder.verify(mItemAnimator).dispatchAddStarting(addedHolder);
+        inOrder.verify(mItemAnimator).dispatchAddFinished(addedHolder);
+
+        verify(mItemAnimator, times(4)).dispatchFinishedWhenAllAnimationsDone();
+        assertFalse(mItemAnimator.isRunning());
+    }
+
+    @Test
+    public void animatorRunningSupplier_RunAnimations() {
+        var removedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ true);
+        mItemAnimator.animateAdd(removedHolder);
+
+        mItemAnimator.runPendingAnimations();
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        assertEquals(List.of(true, false), mIsAnimatorRunningValues);
+    }
+
+    @Test
+    public void animatorRunningSupplier_EndAnimations() {
+        var removedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ true);
+        mItemAnimator.animateAdd(removedHolder);
+
+        mItemAnimator.endAnimations();
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        assertEquals(List.of(true, false), mIsAnimatorRunningValues);
+    }
+
+    @Test
+    public void animateAdd_WithClipAnimations_RunToCompletion() {
+        mItemAnimator =
+                spy(
+                        new TabListItemAnimator(
+                                mIsAnimatorRunningSupplier, /* useClipAnimations= */ true));
+        assertEquals(TabListItemAnimator.DEFAULT_REMOVE_DURATION, mItemAnimator.getMoveDuration());
+        assertEquals(TabListItemAnimator.DEFAULT_REMOVE_DURATION, mItemAnimator.getAddDuration());
+        assertEquals(
+                TabListItemAnimator.DEFAULT_REMOVE_DURATION, mItemAnimator.getChangeDuration());
+
+        var holder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        when(holder.itemView.getClipToOutline()).thenReturn(true);
+
+        assertTrue(mItemAnimator.animateAdd(holder));
+        verify(holder.itemView).setAlpha(0f);
+        verify(holder.itemView).setClipToOutline(true);
+        verify(holder.itemView).setOutlineProvider(any(ViewOutlineProvider.class));
+
+        assertTrue(mItemAnimator.isRunning());
+
+        runAnimationToCompletion();
+
+        verify(holder.itemView, atLeastOnce()).setAlpha(1f);
+        verify(holder.itemView).setOutlineProvider(eq(ViewOutlineProvider.BACKGROUND));
+        verify(holder.itemView).setClipToOutline(false);
+        verify(mItemAnimator).dispatchAddFinished(holder);
+        assertFalse(mItemAnimator.isRunning());
+    }
+
+    @Test
+    public void animateRemove_WithClipAnimations_RunToCompletion() {
+        mItemAnimator =
+                spy(
+                        new TabListItemAnimator(
+                                mIsAnimatorRunningSupplier, /* useClipAnimations= */ true));
+
+        var holder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        when(holder.itemView.getClipToOutline()).thenReturn(true);
+
+        assertTrue(mItemAnimator.animateRemove(holder));
+        verify(holder.itemView).setClipToOutline(true);
+        verify(holder.itemView).setOutlineProvider(any(ViewOutlineProvider.class));
+
+        assertTrue(mItemAnimator.isRunning());
+
+        runAnimationToCompletion();
+
+        verify(holder.itemView, atLeastOnce()).setAlpha(1f);
+        verify(holder.itemView).setOutlineProvider(eq(ViewOutlineProvider.BACKGROUND));
+        verify(holder.itemView).setClipToOutline(false);
+        verify(mItemAnimator).dispatchRemoveFinished(holder);
+        assertFalse(mItemAnimator.isRunning());
+    }
+
+    @Test
+    public void animateRemove_WithClipAnimations_ClipFromTop_RunToCompletion() {
+        mItemAnimator =
+                spy(
+                        new TabListItemAnimator(
+                                mIsAnimatorRunningSupplier, /* useClipAnimations= */ true));
+
+        var holder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        when(holder.itemView.getTag(R.id.tab_clip_from_top)).thenReturn(true);
+        when(holder.itemView.getClipToOutline()).thenReturn(true);
+
+        assertTrue(mItemAnimator.animateRemove(holder));
+        verify(holder.itemView).setClipToOutline(true);
+        verify(holder.itemView).setOutlineProvider(any(ViewOutlineProvider.class));
+
+        assertTrue(mItemAnimator.isRunning());
+
+        runAnimationToCompletion();
+
+        verify(holder.itemView, atLeastOnce()).setAlpha(1f);
+        verify(holder.itemView).setOutlineProvider(eq(ViewOutlineProvider.BACKGROUND));
+        verify(holder.itemView).setClipToOutline(false);
+        verify(mItemAnimator).dispatchRemoveFinished(holder);
+        assertFalse(mItemAnimator.isRunning());
+    }
+
+    @Test
+    public void multipleAnimationSequencing_WithClipAnimations() {
+        mItemAnimator =
+                spy(
+                        new TabListItemAnimator(
+                                mIsAnimatorRunningSupplier, /* useClipAnimations= */ true));
+
+        var removedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        var movedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        var changedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+        var addedHolder = buildViewHolder(TAB, /* useShrinkCloseAnimation= */ false);
+
+        mItemAnimator.animateRemove(removedHolder);
+        mItemAnimator.animateMove(movedHolder, 1, 2, 3, 4);
+        mItemAnimator.animateChange(changedHolder, null, 1, 2, 3, 4);
+        mItemAnimator.animateAdd(addedHolder);
+
+        assertTrue(mItemAnimator.isRunning());
+
+        InOrder inOrder = Mockito.inOrder(mItemAnimator);
+
+        runAnimationToCompletion();
+
+        // In concurrent clip mode, all animations start immediately together.
+        inOrder.verify(mItemAnimator).dispatchRemoveStarting(removedHolder);
+        inOrder.verify(mItemAnimator).dispatchMoveStarting(movedHolder);
+        inOrder.verify(mItemAnimator).dispatchChangeStarting(changedHolder, true);
+        inOrder.verify(mItemAnimator).dispatchAddStarting(addedHolder);
+
+        inOrder.verify(mItemAnimator).dispatchRemoveFinished(removedHolder);
+        inOrder.verify(mItemAnimator).dispatchMoveFinished(movedHolder);
+        inOrder.verify(mItemAnimator).dispatchChangeFinished(changedHolder, true);
         inOrder.verify(mItemAnimator).dispatchAddFinished(addedHolder);
 
         verify(mItemAnimator, times(4)).dispatchFinishedWhenAllAnimationsDone();

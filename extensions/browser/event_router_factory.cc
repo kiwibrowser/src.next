@@ -10,7 +10,9 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry_factory.h"
+#include "extensions/browser/extension_user_activation_service_factory.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/process_manager_factory.h"
 
 using content::BrowserContext;
 
@@ -24,7 +26,8 @@ EventRouter* EventRouterFactory::GetForBrowserContext(BrowserContext* context) {
 
 // static
 EventRouterFactory* EventRouterFactory::GetInstance() {
-  return base::Singleton<EventRouterFactory>::get();
+  static base::NoDestructor<EventRouterFactory> instance;
+  return instance.get();
 }
 
 EventRouterFactory::EventRouterFactory()
@@ -33,10 +36,11 @@ EventRouterFactory::EventRouterFactory()
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(ExtensionRegistryFactory::GetInstance());
   DependsOn(ExtensionPrefsFactory::GetInstance());
+  DependsOn(ExtensionUserActivationServiceFactory::GetInstance());
+  DependsOn(ProcessManagerFactory::GetInstance());
 }
 
-EventRouterFactory::~EventRouterFactory() {
-}
+EventRouterFactory::~EventRouterFactory() = default;
 
 std::unique_ptr<KeyedService>
 EventRouterFactory::BuildServiceInstanceForBrowserContext(

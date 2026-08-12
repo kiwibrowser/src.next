@@ -8,6 +8,7 @@
 #include "third_party/blink/public/common/frame/frame_policy.h"
 #include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_owner_properties.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -37,7 +38,9 @@ class CORE_EXPORT RemoteFrameOwner final
   const FramePolicy& GetFramePolicy() const override { return frame_policy_; }
   void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr) override;
   void DispatchLoad() override;
-  void IntrinsicSizingInfoChanged() override;
+  void NaturalSizingInfoChanged() override;
+  void ClearLastNaturalSizingInfo() override;
+  void ClearAllNaturalSizingInfo() override;
   void SetNeedsOcclusionTracking(bool) override;
 
   AtomicString BrowsingContextContainerName() const override {
@@ -51,6 +54,9 @@ class CORE_EXPORT RemoteFrameOwner final
   bool AllowFullscreen() const override { return allow_fullscreen_; }
   bool AllowPaymentRequest() const override { return allow_payment_request_; }
   bool IsDisplayNone() const override { return is_display_none_; }
+  mojom::blink::FrameResponsiveSizing GetResponsiveSizing() const override {
+    return responsive_sizing_;
+  }
   mojom::blink::ColorScheme GetColorScheme() const override {
     return color_scheme_;
   }
@@ -77,6 +83,10 @@ class CORE_EXPORT RemoteFrameOwner final
   void SetIsDisplayNone(bool is_display_none) {
     is_display_none_ = is_display_none;
   }
+  void SetResponsiveSizing(
+      mojom::blink::FrameResponsiveSizing responsive_sizing) {
+    responsive_sizing_ = responsive_sizing;
+  }
   void SetColorScheme(mojom::blink::ColorScheme color_scheme) {
     color_scheme_ = color_scheme;
   }
@@ -102,6 +112,7 @@ class CORE_EXPORT RemoteFrameOwner final
   bool allow_fullscreen_;
   bool allow_payment_request_;
   bool is_display_none_;
+  mojom::blink::FrameResponsiveSizing responsive_sizing_;
   mojom::blink::ColorScheme color_scheme_;
   mojom::blink::PreferredColorScheme preferred_color_scheme_;
   bool needs_occlusion_tracking_;

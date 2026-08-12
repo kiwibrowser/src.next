@@ -40,11 +40,6 @@ struct LayoutObjectWithDepth {
     return depth > other.depth;
   }
 
-  void operator=(LayoutObject* obj) {
-    object = obj;
-    depth = DetermineDepth(obj);
-  }
-
  private:
   static unsigned DetermineDepth(LayoutObject*);
 };
@@ -64,6 +59,7 @@ class DepthOrderedLayoutObjectList {
   int size() const;
   CORE_EXPORT bool IsEmpty() const;
 
+  bool Contains(LayoutObject&) const;
   const HeapHashSet<Member<LayoutObject>>& Unordered() const;
   const HeapVector<LayoutObjectWithDepth>& Ordered();
 

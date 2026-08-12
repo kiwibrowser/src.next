@@ -32,7 +32,6 @@
 
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -166,7 +165,7 @@ Node* SmartClip::FindBestOverlappingNode(
     gfx::Rect node_rect = node->PixelSnappedBoundingBox();
     auto* element = DynamicTo<Element>(node);
     if (element &&
-        EqualIgnoringASCIICase(
+        EqualIgnoringAsciiCase(
             element->FastGetAttribute(html_names::kAriaHiddenAttr), "true")) {
       node = NodeTraversal::NextSkippingChildren(*node, root_node);
       continue;

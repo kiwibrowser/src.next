@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
@@ -144,7 +145,7 @@ void CSSSelectorWatch::UpdateSelectorMatches(
 static bool AllCompound(const StyleRule* style_rule) {
   for (const CSSSelector* selector = style_rule->FirstSelector(); selector;
        selector = CSSSelectorList::Next(*selector)) {
-    if (!selector->IsCompound()) {
+    if (!selector->IsFullyCompound()) {
       return false;
     }
   }
@@ -165,7 +166,7 @@ void CSSSelectorWatch::WatchCSSSelectors(const Vector<String>& selectors) {
   for (const auto& selector : selectors) {
     base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
         context, CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr,
-        /*is_within_scope=*/false, nullptr, selector, arena);
+        nullptr, selector, arena);
     if (selector_vector.empty()) {
       continue;
     }

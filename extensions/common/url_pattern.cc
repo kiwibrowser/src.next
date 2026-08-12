@@ -2,19 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "extensions/common/url_pattern.h"
 
 #include <stddef.h>
 
+#include <array>
 #include <ostream>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,7 +28,7 @@ namespace {
 
 // TODO(aa): What about more obscure schemes like javascript: ?
 // Note: keep this array in sync with kValidSchemeMasks.
-const char* const kValidSchemes[] = {
+constexpr std::array kValidSchemes = {
     url::kHttpScheme,          url::kHttpsScheme,
     url::kFileScheme,          url::kFtpScheme,
     content::kChromeUIScheme,  extensions::kExtensionScheme,
@@ -42,7 +37,7 @@ const char* const kValidSchemes[] = {
     url::kUuidInPackageScheme,
 };
 
-const int kValidSchemeMasks[] = {
+constexpr std::array kValidSchemeMasks = {
     URLPattern::SCHEME_HTTP,
     URLPattern::SCHEME_HTTPS,
     URLPattern::SCHEME_FILE,
@@ -70,16 +65,16 @@ const char kParseErrorInvalidPort[] = "Invalid port.";
 const char kParseErrorInvalidHost[] = "Invalid host.";
 
 // Message explaining each URLPattern::ParseResult.
-const char* const kParseResultMessages[] = {
-  kParseSuccess,
-  kParseErrorMissingSchemeSeparator,
-  kParseErrorInvalidScheme,
-  kParseErrorWrongSchemeType,
-  kParseErrorEmptyHost,
-  kParseErrorInvalidHostWildcard,
-  kParseErrorEmptyPath,
-  kParseErrorInvalidPort,
-  kParseErrorInvalidHost,
+constexpr std::array kParseResultMessages = {
+    kParseSuccess,
+    kParseErrorMissingSchemeSeparator,
+    kParseErrorInvalidScheme,
+    kParseErrorWrongSchemeType,
+    kParseErrorEmptyHost,
+    kParseErrorInvalidHostWildcard,
+    kParseErrorEmptyPath,
+    kParseErrorInvalidPort,
+    kParseErrorInvalidHost,
 };
 
 static_assert(static_cast<int>(URLPattern::ParseResult::kNumParseResults) ==
@@ -94,8 +89,7 @@ bool IsStandardScheme(std::string_view scheme) {
     return true;
   }
 
-  return url::IsStandard(scheme.data(),
-                         url::Component(0, static_cast<int>(scheme.length())));
+  return url::IsStandard(scheme);
 }
 
 bool IsValidPortForScheme(std::string_view scheme, std::string_view port) {
@@ -129,12 +123,9 @@ std::string_view StripTrailingWildcard(std::string_view path) {
   return path;
 }
 
-// Removes trailing dot from |host_piece| if any.
+// Removes trailing dot(s) from |host_piece| if any.
 std::string_view CanonicalizeHostForMatching(std::string_view host_piece) {
-  if (base::EndsWith(host_piece, ".")) {
-    host_piece.remove_suffix(1);
-  }
-  return host_piece;
+  return base::TrimString(host_piece, ".", base::TRIM_TRAILING);
 }
 
 }  // namespace
@@ -192,18 +183,6 @@ URLPattern::~URLPattern() = default;
 URLPattern& URLPattern::operator=(const URLPattern& other) = default;
 
 URLPattern& URLPattern::operator=(URLPattern&& other) = default;
-
-bool URLPattern::operator<(const URLPattern& other) const {
-  return GetAsString() < other.GetAsString();
-}
-
-bool URLPattern::operator>(const URLPattern& other) const {
-  return GetAsString() > other.GetAsString();
-}
-
-bool URLPattern::operator==(const URLPattern& other) const {
-  return GetAsString() == other.GetAsString();
-}
 
 std::ostream& operator<<(std::ostream& out, const URLPattern& url_pattern) {
   return out << '"' << url_pattern.GetAsString() << '"';
@@ -343,7 +322,7 @@ URLPattern::ParseResult URLPattern::Parse(std::string_view pattern) {
   // No other '*' can occur in the host, though. This isn't necessary, but is
   // done as a convenience to developers who might otherwise be confused and
   // think '*' works as a glob in the host.
-  if (base::Contains(host_, '*')) {
+  if (host_.contains('*')) {
     return ParseResult::kInvalidHostWildcard;
   }
 
@@ -359,7 +338,7 @@ URLPattern::ParseResult URLPattern::Parse(std::string_view pattern) {
   }
 
   // Null characters are not allowed in hosts.
-  if (base::Contains(host_, '\0')) {
+  if (host_.contains('\0')) {
     return ParseResult::kInvalidHost;
   }
 
@@ -414,8 +393,8 @@ bool URLPattern::IsValidScheme(std::string_view scheme) const {
   }
 
   for (size_t i = 0; i < std::size(kValidSchemes); ++i) {
-    if (scheme == kValidSchemes[i] && (valid_schemes_ & kValidSchemeMasks[i])) {
-      return true;
+    if (scheme == kValidSchemes[i]) {
+      return valid_schemes_ & kValidSchemeMasks[i];
     }
   }
 
@@ -457,7 +436,7 @@ bool URLPattern::MatchesURL(const GURL& test) const {
 
   // Ensure the scheme matches first, since <all_urls> may not match this URL if
   // the scheme is excluded.
-  if (!MatchesScheme(test_url->scheme_piece())) {
+  if (!MatchesScheme(test_url->scheme())) {
     return false;
   }
 
@@ -473,7 +452,7 @@ bool URLPattern::MatchesURL(const GURL& test) const {
 
   std::string path_for_request = test.PathForRequest();
   if (has_inner_url) {
-    path_for_request = base::StrCat({test_url->path_piece(), path_for_request});
+    path_for_request = base::StrCat({test_url->path(), path_for_request});
   }
 
   return MatchesSecurityOriginHelper(*test_url) &&
@@ -491,7 +470,7 @@ bool URLPattern::MatchesSecurityOrigin(const GURL& test) const {
     test_url = test.inner_url();
   }
 
-  if (!MatchesScheme(test_url->scheme())) {
+  if (!MatchesScheme(test_url->GetScheme())) {
     return false;
   }
 
@@ -520,7 +499,7 @@ bool URLPattern::MatchesHost(std::string_view host) const {
 }
 
 bool URLPattern::MatchesHost(const GURL& test) const {
-  std::string_view test_host(CanonicalizeHostForMatching(test.host_piece()));
+  std::string_view test_host(CanonicalizeHostForMatching(test.host()));
   const std::string_view pattern_host(CanonicalizeHostForMatching(host_));
 
   // If the hosts are exactly equal, we have a match.
@@ -717,7 +696,17 @@ std::optional<URLPattern> URLPattern::CreateIntersection(
       }
       URLPattern result(intersection_schemes);
       ParseResult parse_result = result.Parse(copy_source->GetAsString());
-      CHECK_EQ(ParseResult::kSuccess, parse_result);
+      // It is possible for parsing to fail if the intersected scheme mask
+      // excludes the scheme present in `copy_source`. For example, this happens
+      // when taking the intersection of policy-allowed hosts and the hosts on
+      // the extension's permissions data, and the policy pattern corresponds
+      // to a scheme that isn't present in the intersected schemes (like an
+      // extension without extension scheme access intersecting with a policy
+      // allowing an extension scheme URL). In this case, the intersection is
+      // empty.
+      if (parse_result != ParseResult::kSuccess) {
+        return std::nullopt;
+      }
       return result;
     }
   }

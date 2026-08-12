@@ -5,7 +5,6 @@
 #include "extensions/browser/lazy_background_task_queue.h"
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/functional/callback.h"
 #include "base/notreached.h"
 #include "content/public/browser/browser_context.h"
@@ -214,7 +213,7 @@ void LazyBackgroundTaskQueue::OnExtensionLoaded(
   // If there are pending tasks for a lazy background page, and its background
   // host has not been created yet, then create it. This can happen if a pending
   // task was added while the extension is not yet enabled (e.g., component
-  // extension crashed and waiting to reload, https://crbug.com/835017).
+  // extension crashed and waiting to reload, https://crbug.com/40572722).
   if (!BackgroundInfo::HasLazyBackgroundPage(extension)) {
     return;
   }
@@ -241,7 +240,7 @@ void LazyBackgroundTaskQueue::CreateLazyBackgroundHostOnExtensionLoaded(
     const Extension* extension) {
   const auto key = LazyContextId::ForExtension(browser_context, extension);
   CHECK(key.IsForBackgroundPage());
-  if (!base::Contains(pending_tasks_, key)) {
+  if (!pending_tasks_.contains(key)) {
     return;
   }
 

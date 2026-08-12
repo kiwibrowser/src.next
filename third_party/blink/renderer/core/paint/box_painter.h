@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/paint/rounded_inner_rect_clipper.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/region_capture_data.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -21,10 +20,11 @@ class BoxPainter {
   BoxPainter(const LayoutBox& layout_box) : layout_box_(layout_box) {}
 
   // Records the bounds of the current paint chunk for potential cropping later
-  // as part of tab capture.
-  void RecordRegionCaptureData(const PaintInfo& paint_info,
-                               const PhysicalRect& paint_rect,
-                               const DisplayItemClient& background_client);
+  // as part of tab capture. Record the bounds of the tracked element.
+  void RecordTrackedElementAndRegionCaptureData(
+      const PaintInfo& paint_info,
+      const PhysicalRect& paint_rect,
+      const DisplayItemClient& background_client);
 
   // This should be called in the background paint phase even if there is no
   // other painted content.

@@ -9,12 +9,14 @@
 
 #include <string>
 
+#include "base/observer_list_types.h"
+
 namespace extensions {
 class ExtensionHost;
 
-class ExtensionHostObserver {
+class ExtensionHostObserver : public base::CheckedObserver {
  public:
-  virtual ~ExtensionHostObserver() {}
+  ~ExtensionHostObserver() override = default;
 
   // TODO(kalman): Why do these all return const ExtensionHosts? It seems
   // perfectly reasonable for an Observer implementation to mutate any
@@ -26,23 +28,23 @@ class ExtensionHostObserver {
   // Called when the ExtensionHost has finished the first load.
   virtual void OnExtensionHostDidStopFirstLoad(const ExtensionHost* host) {}
 
-  // Called when a message has been disptached to the event page corresponding
-  // to |host|.
+  // Called when a message has been dispatched to the event page corresponding
+  // to `host`.
   virtual void OnBackgroundEventDispatched(const ExtensionHost* host,
                                            const std::string& event_name,
                                            int event_id) {}
 
   // Called when a previously dispatched message has been acked by the
-  // event page for |host|.
+  // event page for `host`.
   virtual void OnBackgroundEventAcked(const ExtensionHost* host, int event_id) {
   }
 
-  // Called when the extension associated with |host| starts a new network
+  // Called when the extension associated with `host` starts a new network
   // request.
   virtual void OnNetworkRequestStarted(const ExtensionHost* host,
                                        uint64_t request_id) {}
 
-  // Called when the network request with |request_id| is done.
+  // Called when the network request with `request_id` is done.
   virtual void OnNetworkRequestDone(const ExtensionHost* host,
                                     uint64_t request_id) {}
 };

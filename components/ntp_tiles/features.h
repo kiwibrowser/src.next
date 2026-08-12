@@ -6,6 +6,7 @@
 #define COMPONENTS_NTP_TILES_FEATURES_H_
 
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 
 namespace ntp_tiles {
 
@@ -21,8 +22,12 @@ BASE_DECLARE_FEATURE(kPopularSitesBakedInContentFeature);
 // Likely tiles on the New Tab Page.
 BASE_DECLARE_FEATURE(kNtpMostLikelyFaviconsFromServerFeature);
 
-// If this feature is enabled, we enable popular sites in the suggestions UI.
-BASE_DECLARE_FEATURE(kUsePopularSitesSuggestions);
+// Feature to refresh popular sites for the US region.
+BASE_DECLARE_FEATURE(kPopularSitesRefreshUs);
+
+// Parameter determining the experimental arm. 0 means off, 1, 2, 3 are valid
+// arms.
+extern const base::FeatureParam<int> kPopularSitesRefreshUsArm;
 
 }  // namespace ntp_tiles
 

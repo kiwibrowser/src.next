@@ -4,8 +4,12 @@
 
 #include "third_party/blink/renderer/core/paint/background_image_geometry.h"
 
+#include "third_party/blink/renderer/core/layout/geometry/box_strut.h"
+#include "third_party/blink/renderer/core/paint/border_shape_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/svg_background_paint_context.h"
+#include "third_party/blink/renderer/core/style/style_border_shape.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -38,20 +42,18 @@ LayoutUnit ComputeTilePhase(LayoutUnit position, LayoutUnit tile_extent) {
                      : LayoutUnit();
 }
 
-LayoutUnit ResolveWidthForRatio(LayoutUnit height,
-                                const PhysicalSize& natural_ratio) {
-  LayoutUnit resolved_width =
-      height.MulDiv(natural_ratio.width, natural_ratio.height);
+LayoutUnit ResolveClampedWidthForRatio(LayoutUnit height,
+                                       const PhysicalSize& natural_ratio) {
+  LayoutUnit resolved_width = ResolveWidthForRatio(height, natural_ratio);
   if (natural_ratio.width >= 1 && resolved_width < 1) {
     return LayoutUnit(1);
   }
   return resolved_width;
 }
 
-LayoutUnit ResolveHeightForRatio(LayoutUnit width,
-                                 const PhysicalSize& natural_ratio) {
-  LayoutUnit resolved_height =
-      width.MulDiv(natural_ratio.height, natural_ratio.width);
+LayoutUnit ResolveClampedHeightForRatio(LayoutUnit width,
+                                        const PhysicalSize& natural_ratio) {
+  LayoutUnit resolved_height = ResolveHeightForRatio(width, natural_ratio);
   if (natural_ratio.height >= 1 && resolved_height < 1) {
     return LayoutUnit(1);
   }
@@ -270,6 +272,8 @@ SnappedAndUnsnappedOutsets BackgroundImageGeometry::ComputeDestRectAdjustments(
       break;
     }
     case EFillBox::kText:
+    case EFillBox::kBorderArea:
+    case EFillBox::kBorderAreaText:
       break;
   }
   return dest_adjust;
@@ -323,6 +327,8 @@ BackgroundImageGeometry::ComputePositioningAreaAdjustments(
       break;
     case EFillBox::kNoClip:
     case EFillBox::kText:
+    case EFillBox::kBorderArea:
+    case EFillBox::kBorderAreaText:
       // These are not supported mask-origin values.
       NOTREACHED();
   }
@@ -359,6 +365,7 @@ void BackgroundImageGeometry::AdjustPositioningArea(
   //   has collapsed borders
   // * We are painting a block-fragmented box.
   // * There is a border image, because it may not be opaque or may be outset.
+  // * There is a border shape, because the border geometry is not rectangular.
   bool disallow_border_derived_adjustment =
       !ShouldPaintSelfBlockBackground(paint_info.phase) ||
       fill_layer.Composite() != CompositeOperator::kCompositeSourceOver ||
@@ -408,7 +415,7 @@ void BackgroundImageGeometry::CalculateFillTileSize(
   // generated content) and unsnapped for content that has intrinsic
   // dimensions. Once we choose here we stop tracking whether the tile size is
   // snapped or unsnapped.
-  IntrinsicSizingInfo sizing_info = image->GetNaturalSizingInfo(
+  NaturalSizingInfo sizing_info = image->GetNaturalSizingInfo(
       style.EffectiveZoom(), style.ImageOrientation());
   PhysicalSize image_aspect_ratio =
       PhysicalSize::FromSizeFFloor(sizing_info.aspect_ratio);
@@ -423,14 +430,14 @@ void BackgroundImageGeometry::CalculateFillTileSize(
       const Length& layer_height = fill_layer.SizeLength().Height();
 
       if (layer_width.IsFixed()) {
-        tile_size_.width = LayoutUnit(layer_width.Value());
+        tile_size_.width = LayoutUnit(layer_width.Pixels());
       } else if (layer_width.IsPercent() || layer_width.IsCalculated()) {
         tile_size_.width =
             ValueForLength(layer_width, positioning_area_size.width);
       }
 
       if (layer_height.IsFixed()) {
-        tile_size_.height = LayoutUnit(layer_height.Value());
+        tile_size_.height = LayoutUnit(layer_height.Pixels());
       } else if (layer_height.IsPercent() || layer_height.IsCalculated()) {
         tile_size_.height =
             ValueForLength(layer_height, positioning_area_size.height);
@@ -446,8 +453,8 @@ void BackgroundImageGeometry::CalculateFillTileSize(
       // natural size, its size is determined as for contain.
       if (layer_width.IsAuto() && !layer_height.IsAuto()) {
         if (!image_aspect_ratio.IsEmpty()) {
-          tile_size_.width =
-              ResolveWidthForRatio(tile_size_.height, image_aspect_ratio);
+          tile_size_.width = ResolveClampedWidthForRatio(tile_size_.height,
+                                                         image_aspect_ratio);
         } else if (sizing_info.has_width) {
           tile_size_.width =
               LayoutUnit::FromFloatFloor(sizing_info.size.width());
@@ -456,8 +463,8 @@ void BackgroundImageGeometry::CalculateFillTileSize(
         }
       } else if (!layer_width.IsAuto() && layer_height.IsAuto()) {
         if (!image_aspect_ratio.IsEmpty()) {
-          tile_size_.height =
-              ResolveHeightForRatio(tile_size_.width, image_aspect_ratio);
+          tile_size_.height = ResolveClampedHeightForRatio(tile_size_.width,
+                                                           image_aspect_ratio);
         } else if (sizing_info.has_height) {
           tile_size_.height =
               LayoutUnit::FromFloatFloor(sizing_info.size.height());
@@ -545,7 +552,8 @@ void BackgroundImageGeometry::CalculateRepeatAndPosition(
     // Maintain aspect ratio if background-size: auto is set
     if (fill_layer.SizeLength().Height().IsAuto() &&
         background_repeat_y != EFillRepeat::kRoundFill) {
-      tile_size_.height = ResolveHeightForRatio(rounded_width, tile_size_);
+      tile_size_.height =
+          ResolveClampedHeightForRatio(rounded_width, tile_size_);
     }
     tile_size_.width = rounded_width;
 
@@ -565,7 +573,8 @@ void BackgroundImageGeometry::CalculateRepeatAndPosition(
     // Maintain aspect ratio if background-size: auto is set
     if (fill_layer.SizeLength().Width().IsAuto() &&
         background_repeat_x != EFillRepeat::kRoundFill) {
-      tile_size_.width = ResolveWidthForRatio(rounded_height, tile_size_);
+      tile_size_.width =
+          ResolveClampedWidthForRatio(rounded_height, tile_size_);
     }
     tile_size_.height = rounded_height;
 
@@ -634,9 +643,18 @@ void BackgroundImageGeometry::CalculateRepeatAndPosition(
   }
 }
 
+void BackgroundImageGeometry::SetBorderShapeState(
+    const ComputedStyle& style,
+    const BorderShapeReferenceRects& rects) {
+  border_shape_rects_ = rects;
+  border_shape_outer_bounds_ =
+      BorderShapePainter::OuterPath(style, rects.outer).BoundingRect();
+}
+
 void BackgroundImageGeometry::Calculate(
     const FillLayer& fill_layer,
     const BoxBackgroundPaintContext& paint_context,
+    const PhysicalRect& border_rect,
     const PhysicalRect& paint_rect,
     const PaintInfo& paint_info) {
   // Unsnapped positioning area is used to derive quantities
@@ -689,12 +707,50 @@ void BackgroundImageGeometry::Calculate(
     phase_ += fixed_adjustment;
   }
 
+  // Compute border-shape state and expand dest rects if needed.
+  const ComputedStyle& style = paint_context.Style();
+  if (const StyleBorderShape* border_shape = style.BorderShape()) {
+    BorderShapeReferenceRects rects =
+        paint_context.ComputeBorderShapeReferenceRects(border_rect,
+                                                       *border_shape);
+    const EFillBox effective_clip = paint_context.EffectiveClip(fill_layer);
+    if ((effective_clip == EFillBox::kBorderArea ||
+         effective_clip == EFillBox::kBorderAreaText) &&
+        RuntimeEnabledFeatures::CSSBackgroundClipBorderAreaEnabled()) {
+      SetBorderShapeState(style, rects);
+      // Expand the dest rect to cover the parts of the border-shape outer
+      // path that extend beyond paint_rect. Uniting with the full outer
+      // bounds would reset the origin and undo the offset applied for
+      // background-position when the outer path sits inside paint_rect.
+      const PhysicalRect outer =
+          PhysicalRect::EnclosingRect(*border_shape_outer_bounds_);
+      const PhysicalBoxStrut overflow(
+          (paint_rect.Y() - outer.Y()).ClampNegativeToZero(),
+          (outer.Right() - paint_rect.Right()).ClampNegativeToZero(),
+          (outer.Bottom() - paint_rect.Bottom()).ClampNegativeToZero(),
+          (paint_rect.X() - outer.X()).ClampNegativeToZero());
+      unsnapped_dest_rect_.Expand(overflow);
+      snapped_dest_rect_.Expand(overflow);
+      // Compensate the phase for the dest-origin shift so the visual tile
+      // position stays where it was computed against paint_rect.
+      phase_ -= overflow.Offset();
+    } else {
+      border_shape_rects_ = rects;
+    }
+  }
+
   // The actual painting area can be bigger than the provided background
   // geometry (`paint_rect`) for `mask-clip: no-clip`, so avoid clipping.
   if (fill_layer.Clip() != EFillBox::kNoClip) {
-    // Clip the final output rect to the paint rect.
-    unsnapped_dest_rect_.Intersect(paint_rect);
-    snapped_dest_rect_.Intersect(paint_rect);
+    // Clip the final output rect to the paint rect. For border-area clips
+    // with border-shape, include the outer bounds in the clipping rect.
+    PhysicalRect clipping_rect = paint_rect;
+    if (border_shape_outer_bounds_) {
+      clipping_rect.Unite(
+          PhysicalRect::EnclosingRect(*border_shape_outer_bounds_));
+    }
+    unsnapped_dest_rect_.Intersect(clipping_rect);
+    snapped_dest_rect_.Intersect(clipping_rect);
   }
   // Re-snap the dest rect as we may have adjusted it with unsnapped values.
   snapped_dest_rect_ = PhysicalRect(ToPixelSnappedRect(snapped_dest_rect_));
@@ -706,6 +762,8 @@ gfx::RectF BackgroundImageGeometry::ComputePositioningArea(
   switch (layer.Origin()) {
     case EFillBox::kNoClip:
     case EFillBox::kText:
+    case EFillBox::kBorderAreaText:
+    case EFillBox::kBorderArea:
       NOTREACHED();
     case EFillBox::kBorder:
     case EFillBox::kContent:
@@ -731,6 +789,8 @@ gfx::RectF BackgroundImageGeometry::ComputePaintingArea(
     case EFillBox::kFillBox:
     case EFillBox::kPadding:
       return positioning_area;
+    case EFillBox::kBorderArea:
+    case EFillBox::kBorderAreaText:
     case EFillBox::kStrokeBox:
     case EFillBox::kBorder:
       return paint_context.ReferenceBox(GeometryBox::kStrokeBox);

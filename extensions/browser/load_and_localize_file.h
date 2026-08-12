@@ -20,12 +20,12 @@ class ExtensionResource;
 // `data` is a vector that contains the result of the localized content of the
 // files. `error` indicates the error, if any.
 using LoadAndLocalizeResourcesCallback =
-    base::OnceCallback<void(std::vector<std::unique_ptr<std::string>> data,
+    base::OnceCallback<void(std::vector<std::string> data,
                             std::optional<std::string> error)>;
 
-// Loads |resources| from |extension|, optionally localizing the content, and
-// invokes |callback| with the result. Handles both component and non-component
-// extension resources. |resources| must be valid. Note: |callback| is always
+// Loads `resources` from `extension`, optionally localizing the content, and
+// invokes `callback` with the result. Handles both component and non-component
+// extension resources. `resources` must be valid. Note: `callback` is always
 // invoked asynchronously.
 void LoadAndLocalizeResources(const Extension& extension,
                               std::vector<ExtensionResource> resources,

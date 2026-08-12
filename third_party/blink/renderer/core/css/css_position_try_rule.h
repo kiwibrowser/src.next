@@ -15,25 +15,17 @@ class StyleRuleCSSStyleDeclaration;
 class StyleRulePositionTry final : public StyleRuleBase {
  public:
   StyleRulePositionTry(const AtomicString& name, CSSPropertyValueSet*);
-  StyleRulePositionTry(const StyleRulePositionTry&) = default;
+  StyleRulePositionTry(const StyleRulePositionTry&) = delete;
   ~StyleRulePositionTry();
-
-  StyleRulePositionTry* Copy() const {
-    return MakeGarbageCollected<StyleRulePositionTry>(*this);
-  }
 
   const AtomicString& Name() const { return name_; }
   const CSSPropertyValueSet& Properties() const { return *properties_; }
   MutableCSSPropertyValueSet& MutableProperties();
 
-  void SetCascadeLayer(const CascadeLayer* layer) { layer_ = layer; }
-  const CascadeLayer* GetCascadeLayer() const { return layer_.Get(); }
-
   void TraceAfterDispatch(Visitor*) const;
 
  private:
   AtomicString name_;
-  Member<const CascadeLayer> layer_;
   Member<CSSPropertyValueSet> properties_;
 };
 
@@ -54,7 +46,7 @@ class CSSPositionTryRule final : public CSSRule {
   CSSStyleDeclaration* style() const;
   Type GetType() const final { return kPositionTryRule; }
 
-  String name() const { return position_try_rule_->Name(); }
+  String name() const;
   String cssText() const final;
   void Reattach(StyleRuleBase*) final;
 

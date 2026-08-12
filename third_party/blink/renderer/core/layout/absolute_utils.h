@@ -9,13 +9,14 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_size.h"
 #include "third_party/blink/renderer/core/layout/min_max_sizes.h"
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/physical_size.h"
 
 namespace blink {
 
+enum class AutoSizeBehavior : uint8_t;
 class BlockNode;
 class ConstraintSpace;
 class LayoutResult;
@@ -59,7 +60,6 @@ struct LogicalAlignment {
 
 LogicalAlignment ComputeAlignment(
     const ComputedStyle& style,
-    bool is_containing_block_scrollable,
     WritingDirectionMode container_writing_direction,
     WritingDirectionMode self_writing_direction);
 
@@ -73,14 +73,12 @@ struct LogicalAnchorCenterPosition {
 LogicalAnchorCenterPosition ComputeAnchorCenterPosition(
     const ComputedStyle& style,
     const LogicalAlignment& alignment,
-    WritingDirectionMode writing_direction,
     LogicalSize available_size);
 
 CORE_EXPORT LogicalOofInsets
 ComputeOutOfFlowInsets(const ComputedStyle& style,
                        const LogicalSize& available_size,
-                       const LogicalAlignment&,
-                       WritingDirectionMode self_writing_direction);
+                       const LogicalAlignment&);
 
 struct CORE_EXPORT InsetModifiedContainingBlock {
   // The original containing block size that the insets refer to.
@@ -96,11 +94,19 @@ struct CORE_EXPORT InsetModifiedContainingBlock {
   bool has_auto_inline_inset = false;
   bool has_auto_block_inset = false;
 
-  // Indicates how the insets were calculated. Besides, when we need to clamp
-  // the IMCB size, the stronger inset (i.e., the inset we are biased towards)
-  // stays at the same place, and the weaker inset is moved; If both insets are
-  // equally strong, both are moved by the same amount.
+  // If the special "default alignment overflow" behaviour applies.
+  bool inline_has_default_alignment_overflow = false;
+  bool block_has_default_alignment_overflow = false;
+
+  // The InsetBias is used to indicate which side(s) of the IMCB should be moved
+  // when calculating the insets.
+  // If both insets are equally strong, they are moved by the same amount.
   enum class InsetBias { kStart, kEnd, kEqual };
+
+  // The primary bias, this is dependent on which insets are set:
+  //  - If no insets (statically positioned), it is the static position bias.
+  //  - If a single inset, it is the bias for that inset.
+  //  - If both insets, it is based off the alignment.
   InsetBias inline_inset_bias = InsetBias::kStart;
   InsetBias block_inset_bias = InsetBias::kStart;
 
@@ -163,14 +169,12 @@ ComputeIMCBForPositionFallback(const LogicalSize& available_size,
 // It needs to be computed in 2 stages:
 // 1. The inline-dimensions with |ComputeOofInlineDimensions|.
 // 2. The block-dimensions with |ComputeOofBlockDimensions|.
-//
-// NOTE: |ComputeOofInlineDimensions| may call |ComputeOofBlockDimensions| if
-// its required to correctly determine the min/max content sizes.
 
 // |replaced_size| should be set if and only if element is replaced element.
 // Will return true if |BlockNode::ComputeMinMaxSizes| was called.
 CORE_EXPORT bool ComputeOofInlineDimensions(
     const BlockNode&,
+    const BlockBreakToken*,
     const ComputedStyle& style,
     const ConstraintSpace&,
     const InsetModifiedContainingBlock&,
@@ -179,6 +183,8 @@ CORE_EXPORT bool ComputeOofInlineDimensions(
     const BoxStrut& border_padding,
     const std::optional<LogicalSize>& replaced_size,
     const BoxStrut& container_insets,
+    AutoSizeBehavior inline_auto_size_behavior,
+    AutoSizeBehavior block_auto_size_behavior,
     WritingDirectionMode container_writing_direction,
     LogicalOofDimensions* dimensions);
 
@@ -186,6 +192,7 @@ CORE_EXPORT bool ComputeOofInlineDimensions(
 // otherwise it will return nullptr.
 CORE_EXPORT const LayoutResult* ComputeOofBlockDimensions(
     const BlockNode&,
+    const BlockBreakToken*,
     const ComputedStyle& style,
     const ConstraintSpace&,
     const InsetModifiedContainingBlock&,
@@ -194,6 +201,7 @@ CORE_EXPORT const LayoutResult* ComputeOofBlockDimensions(
     const BoxStrut& border_padding,
     const std::optional<LogicalSize>& replaced_size,
     const BoxStrut& container_insets,
+    AutoSizeBehavior block_auto_size_behavior,
     WritingDirectionMode container_writing_direction,
     LogicalOofDimensions* dimensions);
 

@@ -3,13 +3,18 @@
 // found in the LICENSE file.
 
 #include "extensions/browser/permissions_manager.h"
+
 #include "base/memory/raw_ptr.h"
 #include "base/test/gtest_util.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/threading/platform_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/extensions_test.h"
+#include "extensions/browser/permissions/scripting_permissions_modifier.h"
 #include "extensions/browser/pref_types.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_features.h"
@@ -35,7 +40,8 @@ using UserSiteAccess = PermissionsManager::UserSiteAccess;
 
 class PermissionsManagerUnittest : public ExtensionsTest {
  public:
-  PermissionsManagerUnittest() = default;
+  PermissionsManagerUnittest()
+      : ExtensionsTest(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
   ~PermissionsManagerUnittest() override = default;
   PermissionsManagerUnittest(const PermissionsManagerUnittest&) = delete;
   PermissionsManagerUnittest& operator=(const PermissionsManagerUnittest&) =
@@ -102,7 +108,6 @@ PermissionsManagerUnittest::AddExtensionWithAPIPermission(
     extensions::mojom::ManifestLocation location) {
   scoped_refptr<const extensions::Extension> extension =
       extensions::ExtensionBuilder(name)
-          .SetManifestVersion(3)
           .AddAPIPermission(permission)
           .SetLocation(location)
           .Build();
@@ -120,7 +125,6 @@ PermissionsManagerUnittest::AddExtensionWithHostPermission(
     const std::string& host_permission) {
   scoped_refptr<const extensions::Extension> extension =
       extensions::ExtensionBuilder(name)
-          .SetManifestVersion(3)
           .AddHostPermission(host_permission)
           .Build();
 
@@ -138,13 +142,13 @@ PermissionsManagerUnittest::AddExtensionWithActiveTab(
 }
 
 const base::Value* PermissionsManagerUnittest::GetRestrictedSitesFromPrefs() {
-  const base::Value::Dict& permissions =
+  const base::DictValue& permissions =
       extension_prefs_->GetPrefAsDictionary(kUserPermissions);
   return permissions.Find("restricted_sites");
 }
 
 const base::Value* PermissionsManagerUnittest::GetPermittedSitesFromPrefs() {
-  const base::Value::Dict& permissions =
+  const base::DictValue& permissions =
       extension_prefs_->GetPrefAsDictionary(kUserPermissions);
   return permissions.Find("permitted_sites");
 }
@@ -188,7 +192,7 @@ TEST_F(PermissionsManagerUnittest, AddAndRemoveRestrictedSite) {
   const std::string expected_url_pattern = "http://a.example.com/*";
   std::set<url::Origin> set_with_url;
   set_with_url.insert(url);
-  base::Value::List value_with_url;
+  base::ListValue value_with_url;
   value_with_url.Append(url.Serialize());
 
   // Verify the restricted sites list is empty.
@@ -582,7 +586,7 @@ TEST_F(PermissionsManagerWithPermittedSitesUnitTest,
   const std::string expected_url_pattern = "http://a.example.com/*";
   std::set<url::Origin> set_with_url;
   set_with_url.insert(url);
-  base::Value::List value_with_url;
+  base::ListValue value_with_url;
   value_with_url.Append(url.Serialize());
 
   // Verify the permitted sites list is empty.
@@ -680,6 +684,169 @@ TEST_F(PermissionsManagerWithPermittedSitesUnitTest,
     EXPECT_EQ(manager_->GetUserSiteSetting(url),
               PermissionsManager::UserSiteSetting::kBlockAllExtensions);
   }
+}
+
+TEST_F(PermissionsManagerUnittest, HostAccessRequestCooldown) {
+  auto extension =
+      AddExtensionWithHostPermission("Extension", "https://example.com/*");
+  ScriptingPermissionsModifier(browser_context(), extension)
+      .SetWithholdHostPermissions(true);
+
+  std::unique_ptr<content::WebContents> web_contents(
+      content::WebContentsTester::CreateTestWebContents(browser_context(),
+                                                        nullptr));
+  int tab_id = 1;
+
+  content::WebContentsTester::For(web_contents.get())
+      ->NavigateAndCommit(GURL("https://example.com"));
+
+  // Add request.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_TRUE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // Remove request immediately. Should fail due to cooldown.
+  auto result = manager_->RemoveHostAccessRequest(tab_id, extension->id());
+  EXPECT_EQ(result, PermissionsManager::RemoveRequestResult::kThrottled);
+  EXPECT_TRUE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // Wait for cooldown to expire.
+  task_environment()->FastForwardBy(base::Seconds(2));
+
+  // Remove request again. Should succeed.
+  result = manager_->RemoveHostAccessRequest(tab_id, extension->id());
+  EXPECT_EQ(result, PermissionsManager::RemoveRequestResult::kSuccess);
+  EXPECT_FALSE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+}
+
+TEST_F(PermissionsManagerUnittest, HostAccessRequestCooldownBypass) {
+  auto extension =
+      AddExtensionWithHostPermission("Extension", "https://example.com/*");
+  ScriptingPermissionsModifier(browser_context(), extension)
+      .SetWithholdHostPermissions(true);
+
+  std::unique_ptr<content::WebContents> web_contents(
+      content::WebContentsTester::CreateTestWebContents(browser_context(),
+                                                        nullptr));
+  int tab_id = 1;
+
+  content::WebContentsTester::For(web_contents.get())
+      ->NavigateAndCommit(GURL("https://example.com"));
+
+  // Add request.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_TRUE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // Remove request immediately with bypass_cooldown=true. Should succeed.
+  auto result =
+      manager_->RemoveHostAccessRequest(tab_id, extension->id(), std::nullopt,
+                                        /*bypass_cooldown=*/true);
+  EXPECT_EQ(result, PermissionsManager::RemoveRequestResult::kSuccess);
+  EXPECT_FALSE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+}
+
+TEST_F(PermissionsManagerUnittest,
+       HostAccessRequestDismissalBypassesAndThrottles) {
+  auto extension =
+      AddExtensionWithHostPermission("Extension", "https://example.com/*");
+  ScriptingPermissionsModifier(browser_context(), extension)
+      .SetWithholdHostPermissions(true);
+
+  std::unique_ptr<content::WebContents> web_contents(
+      content::WebContentsTester::CreateTestWebContents(browser_context(),
+                                                        nullptr));
+  int tab_id = 1;
+
+  content::WebContentsTester::For(web_contents.get())
+      ->NavigateAndCommit(GURL("https://example.com"));
+
+  // Add request.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_TRUE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // Dismiss request. Dismissal bypasses cooldown for removal.
+  manager_->UserDismissedHostAccessRequest(web_contents.get(), tab_id,
+                                           extension->id());
+  EXPECT_FALSE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // However, trying to immediately re-add the request should fail (cooldown
+  // applies).
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kThrottled,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_FALSE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+
+  // Wait for cooldown to expire.
+  task_environment()->FastForwardBy(base::Seconds(2));
+
+  // Adding the request should succeed now.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_FALSE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+}
+
+TEST_F(PermissionsManagerUnittest, HostAccessRequestUpdateCooldown) {
+  auto extension =
+      AddExtensionWithHostPermission("Extension", "https://example.com/*");
+  ScriptingPermissionsModifier(browser_context(), extension)
+      .SetWithholdHostPermissions(true);
+
+  std::unique_ptr<content::WebContents> web_contents(
+      content::WebContentsTester::CreateTestWebContents(browser_context(),
+                                                        nullptr));
+  int tab_id = 1;
+
+  content::WebContentsTester::For(web_contents.get())
+      ->NavigateAndCommit(GURL("https://example.com"));
+
+  class TestObserver : public PermissionsManager::Observer {
+   public:
+    explicit TestObserver(PermissionsManager* manager) : manager_(manager) {
+      manager_->AddObserver(this);
+    }
+    ~TestObserver() override { manager_->RemoveObserver(this); }
+
+    void OnHostAccessRequestUpdated(const ExtensionId& extension_id,
+                                    int tab_id) override {
+      updated_count_++;
+    }
+
+    int updated_count() const { return updated_count_; }
+
+   private:
+    raw_ptr<PermissionsManager> manager_;
+    int updated_count_ = 0;
+  };
+
+  TestObserver observer(manager_);
+
+  // Add request. Should succeed.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_TRUE(manager_->HasActiveHostAccessRequest(tab_id, extension->id()));
+  EXPECT_EQ(observer.updated_count(), 0);
+
+  // Update request immediately. Should fail due to cooldown.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kThrottled,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_EQ(observer.updated_count(), 0);
+
+  // Wait for cooldown to expire.
+  task_environment()->FastForwardBy(base::Seconds(2));
+
+  // Update request again. Should succeed.
+  EXPECT_EQ(
+      PermissionsManager::AddRequestResult::kSuccess,
+      manager_->AddHostAccessRequest(web_contents.get(), tab_id, *extension));
+  EXPECT_EQ(observer.updated_count(), 1);
 }
 
 }  // namespace extensions

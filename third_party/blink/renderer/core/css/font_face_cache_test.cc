@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/css/font_face_cache.h"
 
+#include <array>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
@@ -21,8 +23,6 @@
 namespace blink {
 
 class FontFaceCacheTest : public PageTestBase {
-  USING_FAST_MALLOC(FontFaceCacheTest);
-
  protected:
   FontFaceCacheTest() = default;
   ~FontFaceCacheTest() override = default;
@@ -78,8 +78,11 @@ void FontFaceCacheTest::AppendTestFaceForCapabilities(const CSSValue& stretch,
 
   auto* style_rule_font_face =
       MakeGarbageCollected<StyleRuleFontFace>(font_face_descriptor);
-  FontFace* font_face = FontFace::Create(&GetDocument(), style_rule_font_face,
-                                         false /* is_user_style */);
+  CascadeLayered<const StyleRuleFontFace> layered_style_rule_font_face(
+      style_rule_font_face,
+      /*layer=*/nullptr);
+  FontFace* font_face = FontFace::Create(
+      &GetDocument(), layered_style_rule_font_face, false /* is_user_style */);
   CHECK(font_face);
   cache_->Add(style_rule_font_face, font_face);
 }
@@ -338,17 +341,17 @@ TEST_F(FontFaceCacheTest, WidthRangeMatchingBetween400500) {
   CSSIdentifierValue* style_value =
       CSSIdentifierValue::Create(CSSValueID::kNormal);
 
-  CSSPrimitiveValue* weight_values_lower[] = {
+  auto weight_values_lower = std::to_array<CSSPrimitiveValue*>({
       CSSNumericLiteralValue::Create(600, CSSPrimitiveValue::UnitType::kNumber),
       CSSNumericLiteralValue::Create(415, CSSPrimitiveValue::UnitType::kNumber),
       CSSNumericLiteralValue::Create(475, CSSPrimitiveValue::UnitType::kNumber),
-  };
+  });
 
-  CSSPrimitiveValue* weight_values_upper[] = {
+  auto weight_values_upper = std::to_array<CSSPrimitiveValue*>({
       CSSNumericLiteralValue::Create(610, CSSPrimitiveValue::UnitType::kNumber),
       CSSNumericLiteralValue::Create(425, CSSPrimitiveValue::UnitType::kNumber),
       CSSNumericLiteralValue::Create(485, CSSPrimitiveValue::UnitType::kNumber),
-  };
+  });
 
   // From https://drafts.csswg.org/css-fonts-4/#font-style-matching: "If the
   // desired weight is inclusively between 400 and 500, weights greater than or

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<!--
+Height, visibility and background color of this node are set programmatically
+by DocumentPictureInPictureHeaderViewBinder.
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/document_picture_in_picture_header"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal" >
+
+    <!-- src & content description are set programmatically by the mediator. -->
+    <org.chromium.ui.widget.ChromeImageButton
+        android:id="@+id/document_picture_in_picture_header_security_icon"
+        android:tooltipText="@string/accessibility_menu_info"
+        android:background="@drawable/default_icon_background"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:scaleType="center" />
+
+    <!-- Ellipsize START is set as the default here for layout editor previewing and
+         initial inflation. The behavior is overridden programmatically:
+         - START (head) elision for web URLs to prevent origin spoofing.
+         - END (tail) elision for file URLs to prevent local path spoofing. -->
+    <TextView
+        android:id="@+id/document_picture_in_picture_header_url_bar"
+        android:background="@null"
+        android:singleLine="true"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart=
+            "@dimen/document_picture_in_picture_url_bar_margin"
+        android:layout_marginEnd=
+            "@dimen/document_picture_in_picture_url_bar_margin"
+        android:layout_weight="1"
+        android:enabled="false"
+        android:ellipsize="start"
+        android:scrollHorizontally="false"
+        android:gravity="center_vertical"
+        android:focusable="false"
+        style="@style/TextAppearance.TextSmallThick.Primary" />
+
+    <org.chromium.ui.widget.ChromeImageButton
+        android:id="@+id/document_picture_in_picture_header_back_to_tab"
+        android:src="@drawable/ic_back_to_tab_20dp"
+        android:contentDescription=
+            "@string/document_picture_in_picture_back_to_tab"
+        android:tooltipText="@string/document_picture_in_picture_back_to_tab"
+        android:background="@drawable/default_icon_background"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:scaleType="center" />
+</LinearLayout>

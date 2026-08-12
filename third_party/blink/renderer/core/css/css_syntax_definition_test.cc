@@ -14,16 +14,17 @@
 
 namespace blink {
 
-const char* kUniversalStr[] = {"*", "* ", "*\r\n", "*\f", "*\n\t\r\f"};
+constexpr const char* kUniversalStr[] = {"*", "* ", "*\r\n", "*\f",
+                                         "*\n\t\r\f"};
 
-const char* kValidSyntaxStr[] = {"<number>+",
-                                 "<length> | <percentage>#",
-                                 "ident | <angle>+ | ident#",
-                                 "<time> | time",
-                                 "<angle>",
-                                 "<number>",
-                                 "ident"};
-const char* kInvalidSyntaxStr[] = {
+constexpr const char* kValidSyntaxStr[] = {"<number>+",
+                                           "<length> | <percentage>#",
+                                           "ident | <angle>+ | ident#",
+                                           "<time> | time",
+                                           "<angle>",
+                                           "<number>",
+                                           "ident"};
+constexpr const char* kInvalidSyntaxStr[] = {
     "",  "<transform-list>+", "[abc]", ")",        "<abc>", "<abc",
     "+", "< number>",         "! ",    "<number >"};
 
@@ -226,19 +227,19 @@ TEST_F(CSSSyntaxDefinitionTest, ConsumeMultipleTypes) {
                                CSSSyntaxRepeat::kSpaceSeparated));
 }
 
-class SyntaxStreamAndSyntaxStringComparissionTest
+class SyntaxStreamAndSyntaxStringComparisonTest
     : public CSSSyntaxDefinitionTest,
       public testing::WithParamInterface<const char*> {};
 
 INSTANTIATE_TEST_SUITE_P(CSSSyntaxDefinitionTestValid,
-                         SyntaxStreamAndSyntaxStringComparissionTest,
+                         SyntaxStreamAndSyntaxStringComparisonTest,
                          testing::ValuesIn(kValidSyntaxStr));
 
 INSTANTIATE_TEST_SUITE_P(CSSSyntaxDefinitionTestInvalid,
-                         SyntaxStreamAndSyntaxStringComparissionTest,
+                         SyntaxStreamAndSyntaxStringComparisonTest,
                          testing::ValuesIn(kInvalidSyntaxStr));
 
-TEST_P(SyntaxStreamAndSyntaxStringComparissionTest, TestEquality) {
+TEST_P(SyntaxStreamAndSyntaxStringComparisonTest, TestEquality) {
   String str(GetParam());
   CSSParserTokenStream stream(str);
   std::optional<CSSSyntaxDefinition> string_syntax =
@@ -246,6 +247,88 @@ TEST_P(SyntaxStreamAndSyntaxStringComparissionTest, TestEquality) {
   std::optional<CSSSyntaxDefinition> stream_syntax =
       CSSSyntaxDefinition::Consume(stream);
   EXPECT_EQ(stream_syntax, string_syntax);
+}
+
+namespace {
+
+constexpr const char* kValidComponentData[] = {
+    // clang-format off
+    "auto",
+    "<angle>",
+    "<color>",
+    "<custom-ident>",
+    "<image>",
+    "<integer>",
+    "<length>",
+    "<length-percentage>",
+    "<number>",
+    "<percentage>",
+    "<resolution>",
+    "<string>",
+    "<time>",
+    "<url>",
+    "<transform-function>",
+    "<transform-list>",
+    "<angle>+",
+    "<angle>#",
+    "<length>#",
+    "<length>#",
+    // clang-format on
+};
+
+}  // namespace
+
+class ValidComponentTest : public CSSSyntaxDefinitionTest,
+                           public testing::WithParamInterface<const char*> {};
+
+INSTANTIATE_TEST_SUITE_P(CSSSyntaxDefinitionTest,
+                         ValidComponentTest,
+                         testing::ValuesIn(kValidComponentData));
+
+TEST_P(ValidComponentTest, All) {
+  String str(GetParam());
+  CSSParserTokenStream stream(str);
+  std::optional<CSSSyntaxDefinition> syntax =
+      CSSSyntaxDefinition::ConsumeComponent(stream);
+  ASSERT_TRUE(syntax.has_value());
+  EXPECT_EQ(1u, syntax->Components().size());
+  EXPECT_TRUE(stream.AtEnd());
+}
+
+namespace {
+
+constexpr const char* kInvalidComponentData[] = {
+    // clang-format off
+    "*",
+    "<angle>++",
+    "<angle>##",
+    "<angle> | <color>",
+    "<length> | auto",
+    "auto | length",
+    // <transform-list> is special: it's already a list, and can't be followed
+    // by a <syntax-multiplier>.
+    "<transform-list>#",
+    "<transform-list>+",
+    // clang-format on
+};
+
+}  // namespace
+
+class InvalidComponentTest : public CSSSyntaxDefinitionTest,
+                             public testing::WithParamInterface<const char*> {};
+
+INSTANTIATE_TEST_SUITE_P(CSSSyntaxDefinitionTest,
+                         InvalidComponentTest,
+                         testing::ValuesIn(kInvalidComponentData));
+
+TEST_P(InvalidComponentTest, All) {
+  String str(GetParam());
+  CSSParserTokenStream stream(str);
+  std::optional<CSSSyntaxDefinition> syntax =
+      CSSSyntaxDefinition::ConsumeComponent(stream);
+  // There are two acceptable failure modes: either not returning
+  // a value, or not leaving the stream at the end.
+  EXPECT_FALSE(syntax.has_value() && stream.AtEnd());
 }
 
 }  // namespace blink

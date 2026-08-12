@@ -5,8 +5,16 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_HOST_DELEGATE_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_HOST_DELEGATE_H_
 
+#include <memory>
+
+#include "base/memory/weak_ptr.h"
 #include "extensions/browser/extension_host_delegate.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_id.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+class BrowserWindowInterface;
 
 namespace extensions {
 
@@ -18,9 +26,8 @@ class ChromeExtensionHostDelegate : public ExtensionHostDelegate {
 
   // ExtensionHostDelegate implementation.
   void OnExtensionHostCreated(content::WebContents* web_contents) override;
-  void OnMainFrameCreatedForBackgroundPage(ExtensionHost* host) override;
-  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
   void CreateTab(std::unique_ptr<content::WebContents> web_contents,
+                 const GURL& target_url,
                  const ExtensionId& extension_id,
                  WindowOpenDisposition disposition,
                  const blink::mojom::WindowFeatures& window_features,
@@ -36,6 +43,19 @@ class ChromeExtensionHostDelegate : public ExtensionHostDelegate {
   content::PictureInPictureResult EnterPictureInPicture(
       content::WebContents* web_contents) override;
   void ExitPictureInPicture() override;
+
+ private:
+  // Callback function for `CreateTab()`.
+  void NavigateBrowser(bool browser_created,
+                       std::unique_ptr<content::WebContents> web_contents,
+                       GURL target_url,
+                       ExtensionId extension_id,
+                       WindowOpenDisposition disposition,
+                       blink::mojom::WindowFeatures window_features,
+                       bool user_gesture,
+                       BrowserWindowInterface* browser);
+
+  base::WeakPtrFactory<ChromeExtensionHostDelegate> weak_factory_{this};
 };
 
 }  // namespace extensions

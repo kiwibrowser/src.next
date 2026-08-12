@@ -16,21 +16,28 @@ namespace {
 // Array of features exposed through the Java BaseFeatureMap API. Entries in
 // this array may either refer to features defined in //base features.
 const base::Feature* const kFeaturesExposedToJava[] = {
+    &features::kBackgroundNotPerceptibleBinding,
     &features::kPostPowerMonitorBroadcastReceiverInitToBackground,
     &features::kPostGetMyMemoryStateToBackground,
+    &features::kRebindingChildServiceConnectionController,
+    &features::kRebindServiceBatchApi,
+    &features::kUseSharedRebindServiceConnection,
+    &features::kShutdownPreNativeThreadPoolAfterStartup,
 };
 
 // static
 base::android::FeatureMap* GetFeatureMap() {
-  static base::NoDestructor<base::android::FeatureMap> kFeatureMap(std::vector(
-      std::begin(kFeaturesExposedToJava), std::end(kFeaturesExposedToJava)));
+  static base::NoDestructor<base::android::FeatureMap> kFeatureMap(
+      kFeaturesExposedToJava);
   return kFeatureMap.get();
 }
 
 }  // namespace
 
-static jlong JNI_BaseFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_BaseFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace base::android
+
+DEFINE_JNI(BaseFeatureMap)

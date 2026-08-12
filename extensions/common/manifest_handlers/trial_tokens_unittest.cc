@@ -31,16 +31,16 @@ class TrialTokensManifestTest : public ManifestTest {
   static constexpr char kValidToken2[] = "valid_token_2";
   static constexpr char kValidToken3[] = "valid_token_3";
 
-  base::Value::Dict CreateManifest(const std::string& trial_tokens) {
-    return base::Value::Dict()
+  base::DictValue CreateManifest(const std::string& trial_tokens) {
+    return base::DictValue()
         .Set("name", "test")
         .Set("version", "1")
         .Set("manifest_version", 3)
         .Set("trial_tokens", base::test::ParseJson(trial_tokens));
   }
 
-  base::Value::Dict CreateManifestNoTrialTokens() {
-    return base::Value::Dict()
+  base::DictValue CreateManifestNoTrialTokens() {
+    return base::DictValue()
         .Set("name", "test")
         .Set("version", "1")
         .Set("manifest_version", 3);
@@ -48,7 +48,7 @@ class TrialTokensManifestTest : public ManifestTest {
 
   scoped_refptr<Extension> LoadExtension(
       const std::string& manifest_trial_tokens) {
-    std::string error;
+    std::u16string error;
     base::FilePath test_data_dir = GetTestDataDir();
     scoped_refptr<Extension> extension = Extension::Create(
         test_data_dir.DirName(), mojom::ManifestLocation::kInternal,

@@ -15,15 +15,17 @@
   <message name="IDS_VERSION_UI_64BIT" desc="64-bit on the chrome://version page">
     (64-bit)
   </message>
-  <if expr="is_macosx">
+  <if expr="is_macosx or is_linux">
     <message name="IDS_VERSION_UI_64BIT_INTEL" desc="On the chrome://version page, an indicator that this is an instance of Chromium built for the 64-bit x86 processor. Translation is not needed; this is a technical term.">
       (x86_64)
     </message>
+  </if>
+  <if expr="is_macosx">
     <message name="IDS_VERSION_UI_64BIT_TRANSLATED_INTEL" desc="On the chrome://version page, an indicator that this is an instance of Chromium built for the 64-bit x86 processor, but being run on an Arm processor. Do not translate 'x86_64' as that is a technical term. The 'translated' in this string refers to the fact that these two processors use different languages, so the sense of 'translated' for this string is as in a language translation.">
       (x86_64 translated)
     </message>
   </if>
-  <if expr="is_macosx or is_win">
+  <if expr="is_macosx or is_win or is_linux">
     <message name="IDS_VERSION_UI_64BIT_ARM" desc="On the chrome://version page, an indicator that this is an instance of Chromium built for the 64-bit Arm processor. Translation is not needed; this is a technical term.">
       (arm64)
     </message>
@@ -82,6 +84,9 @@
   <message name="IDS_VERSION_UI_VARIATIONS" desc="label for the variations list on the about:version page">
     Active Variations
   </message>
+  <message name="IDS_VERSION_UI_VARIATIONS_SOURCE_NAME" desc="label for the variations source on the about:version page">
+    Variations Source
+  </message>
   <message name="IDS_VERSION_UI_VARIATIONS_SEED_NAME" desc="label for the variations seed type on the about:version page">
     Variations Seed Type
   </message>
@@ -97,28 +102,6 @@
   <if expr="is_win">
     <message translateable="false" name="IDS_VERSION_UI_COHORT_NAME" desc="Update cohort substring included in the version number line on the about:version page.">
       (cohort: <ph name="UPDATE_COHORT_NAME">$1<ex>Stable</ex></ph>)
-    </message>
-  </if>
-  <if expr="chromeos_ash">
-    <message name="IDS_VERSION_UI_OS_TEXT1_LABEL" desc="Begin label text on the os://version page from ChromeOS which directs a user to a dialog showing Chrome browser specific version - enclosing url link.">
-      Looking for browser version? Visit
-    </message>
-    <message name="IDS_VERSION_UI_OS_TEXT2_LABEL" desc="End label text on the os://version page from ChromeOS which directs a user to a dialog showing Chrome browser specific version - enclosing url link.">
-      .
-    </message>
-    <message name="IDS_VERSION_UI_OS_LINK" translateable="false" desc="Anchor tag on the os://version page from ChromeOS that will open a new browser tab which shows Chrome browser version.">
-      <ph name="BEGIN_LINK">&lt;a href="#" id="os-link-href" aria-describedby="os-link-desc"&gt;</ph>chrome://version<ph name="END_LINK">&lt;/a&gt;</ph>
-    </message>
-  </if>
-  <if expr="chromeos_lacros">
-    <message name="IDS_VERSION_UI_OS_TEXT1_LABEL" desc="Begin label text on the chrome://version page from ChromeOS which directs a user to a dialog showing OS specific version - enclosing url link.">
-      Looking for system version? Visit
-    </message>
-    <message name="IDS_VERSION_UI_OS_TEXT2_LABEL" desc="End label text on the chrome://version page from ChromeOS which directs a user to a dialog showing OS specific version - enclosing url link.">
-      .
-    </message>
-    <message name="IDS_VERSION_UI_OS_LINK" translateable="false" desc="Anchor tag on the chrome://version page in Lacros that will open a new window which shows the os version.">
-      <ph name="BEGIN_LINK">&lt;a href="os://version" id="os-link-href" aria-describedby="os-link-desc"&gt;</ph>os://version<ph name="END_LINK">&lt;/a&gt;</ph>
     </message>
   </if>
 </grit-part>

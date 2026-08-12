@@ -40,23 +40,26 @@ QuotaService::~QuotaService() {
 
 std::string QuotaService::Assess(const ExtensionId& extension_id,
                                  ExtensionFunction* function,
-                                 const base::Value::List& args,
+                                 const base::ListValue& args,
                                  const base::TimeTicks& event_time) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  if (function->ShouldSkipQuotaLimiting())
+  if (function->ShouldSkipQuotaLimiting()) {
     return std::string();
+  }
 
   // Lookup function list for extension.
   FunctionHeuristicsMap& functions = function_heuristics_[extension_id];
 
   // Lookup heuristics for function, create if necessary.
   QuotaLimitHeuristics& heuristics = functions[function->name()];
-  if (heuristics.empty())
+  if (heuristics.empty()) {
     function->GetQuotaLimitHeuristics(&heuristics);
+  }
 
-  if (heuristics.empty())
+  if (heuristics.empty()) {
     return std::string();  // No heuristic implies no limit.
+  }
 
   QuotaLimitHeuristic* failed_heuristic = nullptr;
   for (const auto& heuristic : heuristics) {
@@ -67,8 +70,9 @@ std::string QuotaService::Assess(const ExtensionId& extension_id,
     }
   }
 
-  if (!failed_heuristic)
+  if (!failed_heuristic) {
     return std::string();
+  }
 
   std::string error = failed_heuristic->GetError();
   DCHECK_GT(error.length(), 0u);
@@ -100,7 +104,7 @@ void QuotaLimitHeuristic::Bucket::Reset(const Config& config,
 }
 
 void QuotaLimitHeuristic::SingletonBucketMapper::GetBucketsForArgs(
-    const base::Value::List& args,
+    const base::ListValue& args,
     BucketList* buckets) {
   buckets->push_back(&bucket_);
 }
@@ -112,15 +116,16 @@ QuotaLimitHeuristic::QuotaLimitHeuristic(const Config& config,
 
 QuotaLimitHeuristic::~QuotaLimitHeuristic() = default;
 
-bool QuotaLimitHeuristic::ApplyToArgs(const base::Value::List& args,
+bool QuotaLimitHeuristic::ApplyToArgs(const base::ListValue& args,
                                       const base::TimeTicks& event_time) {
   BucketList buckets;
   bucket_mapper_->GetBucketsForArgs(args, &buckets);
   for (auto i = buckets.begin(); i != buckets.end(); ++i) {
     if ((*i)->expiration().is_null())  // A brand new bucket.
       (*i)->Reset(config_, event_time);
-    if (!Apply(*i, event_time))
+    if (!Apply(*i, event_time)) {
       return false;  // It only takes one to spoil it for everyone.
+    }
   }
   return true;
 }
@@ -131,8 +136,9 @@ std::string QuotaLimitHeuristic::GetError() const {
 
 bool QuotaService::TimedLimit::Apply(Bucket* bucket,
                                      const base::TimeTicks& event_time) {
-  if (event_time > bucket->expiration())
+  if (event_time > bucket->expiration()) {
     bucket->Reset(config(), event_time);
+  }
 
   return bucket->DeductToken();
 }

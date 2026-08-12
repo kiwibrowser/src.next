@@ -6,9 +6,10 @@ package org.chromium.chrome.browser.gesturenav;
 
 import android.view.ViewGroup;
 
-/**
- * Shows overscroll-like glow on the right edge when forward navigation reaches the end.
- */
+import org.chromium.build.annotations.NullMarked;
+
+/** Shows overscroll-like glow on the right edge when forward navigation reaches the end. */
+@NullMarked
 abstract class NavigationGlow {
     protected final ViewGroup mParentView;
 
@@ -18,6 +19,7 @@ abstract class NavigationGlow {
 
     /**
      * Prepares glow rendering by initialization of necessary objects and values.
+     *
      * @param startX X position of the touch event at the beginning.
      * @param startY Y position of the touch event at the beginning.
      */
@@ -25,22 +27,20 @@ abstract class NavigationGlow {
 
     /**
      * Called when user scroll is performed.
+     *
      * @param offset Newly updated pull offset.
      */
     public abstract void onScroll(float offset);
 
-    /**
-     * Releases the glow UI in action.
-     */
+    /** Releases the glow UI in action. */
     public abstract void release();
 
-    /**
-     * Cancels the glow UI in action.
-     */
+    /** Cancels the glow UI in action. */
     public abstract void reset();
 
-    /**
-     * Destroys internal objects when navigation logic is destroyed.
-     */
+    /** Whether the glow is showing. */
+    public abstract boolean isShowing();
+
+    /** Destroys internal objects when navigation logic is destroyed. */
     public abstract void destroy();
 }

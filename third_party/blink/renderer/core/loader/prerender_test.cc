@@ -111,15 +111,15 @@ class PrerenderTest : public testing::Test {
     // TODO(crbug.com/751425): We should use the mock functionality
     // via |web_view_helper_|.
     url_test_helpers::RegisterMockedURLLoadFromBase(
-        WebString::FromUTF8(base_url), test::CoreTestDataPath(),
-        WebString::FromUTF8(file_name));
+        WebString::FromUtf8(base_url), test::CoreTestDataPath(),
+        WebString::FromUtf8(file_name));
     web_view_helper_.Initialize();
     web_view_helper_.GetWebView()->SetNoStatePrefetchClient(
         &no_state_prefetch_client_);
 
     GetBrowserInterfaceBroker().SetBinderForTesting(
         mojom::blink::NoStatePrefetchProcessor::Name_,
-        WTF::BindRepeating(&PrerenderTest::Bind, WTF::Unretained(this)));
+        BindRepeating(&PrerenderTest::Bind, Unretained(this)));
 
     frame_test_helpers::LoadFrame(
         web_view_helper_.GetWebView()->MainFrameImpl(),
@@ -151,7 +151,7 @@ class PrerenderTest : public testing::Test {
 
   void ExecuteScript(const char* code) {
     web_view_helper_.LocalMainFrame()->ExecuteScript(
-        WebScriptSource(WebString::FromUTF8(code)));
+        WebScriptSource(WebString::FromUtf8(code)));
     test::RunPendingTasks();
   }
 

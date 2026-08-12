@@ -29,11 +29,13 @@
 
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/geometry/path.h"
+#include "third_party/blink/renderer/platform/geometry/path_builder.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
-#include "third_party/blink/renderer/platform/graphics/path.h"
 #include "third_party/blink/renderer/platform/testing/font_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
@@ -128,9 +130,10 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped) {
 
   // Draw a path that gets clipped. This should destroy the opaque area, but
   // only inside the clip.
-  Path path;
-  path.MoveTo(gfx::PointF(10, 10));
-  path.AddLineTo(gfx::PointF(40, 40));
+  const Path path = PathBuilder()
+      .MoveTo(gfx::PointF(10, 10))
+      .LineTo(gfx::PointF(40, 40))
+      .Finalize();
   cc::PaintFlags flags;
   flags.setColor(transparent.Rgb());
   flags.setBlendMode(SkBlendMode::kSrcOut);
@@ -148,25 +151,25 @@ class GraphicsContextDarkModeTest : public testing::Test {
     canvas_ = std::make_unique<SkiaPaintCanvas>(bitmap_);
   }
 
-  void DrawColorsToContext(bool is_dark_mode_on,
-                           const DarkModeSettings& settings) {
+  void DrawColorsToContext(bool is_dark_mode_on) {
     PaintController paint_controller;
     GraphicsContext context(paint_controller);
-    if (is_dark_mode_on)
-      context.UpdateDarkModeSettingsForTest(settings);
+    AutoDarkMode auto_dark_mode = AutoDarkMode::Disabled();
+    if (is_dark_mode_on) {
+      DarkModeSettings settings;
+      context.SetDarkModeFilterForTest(
+          std::make_unique<DarkModeFilter>(settings));
+
+      auto_dark_mode = AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
+                                    /*enabled=*/true);
+    }
     context.BeginRecording();
-    context.FillRect(gfx::RectF(0, 0, 1, 1), Color::kBlack,
-                     AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
-                                  is_dark_mode_on));
-    context.FillRect(gfx::RectF(1, 0, 1, 1), Color::kWhite,
-                     AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
-                                  is_dark_mode_on));
+    context.FillRect(gfx::RectF(0, 0, 1, 1), Color::kBlack, auto_dark_mode);
+    context.FillRect(gfx::RectF(1, 0, 1, 1), Color::kWhite, auto_dark_mode);
     context.FillRect(gfx::RectF(2, 0, 1, 1), Color::FromSkColor(SK_ColorRED),
-                     AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
-                                  is_dark_mode_on));
+                     auto_dark_mode);
     context.FillRect(gfx::RectF(3, 0, 1, 1), Color::FromSkColor(SK_ColorGRAY),
-                     AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
-                                  is_dark_mode_on));
+                     auto_dark_mode);
     // Capture the result in the bitmap.
     canvas_->drawPicture(context.EndRecording());
   }
@@ -178,9 +181,7 @@ class GraphicsContextDarkModeTest : public testing::Test {
 // This is a baseline test where dark mode is turned off. Compare other variants
 // of the test where dark mode is enabled.
 TEST_F(GraphicsContextDarkModeTest, DarkModeOff) {
-  DarkModeSettings settings;
-
-  DrawColorsToContext(false, settings);
+  DrawColorsToContext(false);
 
   EXPECT_EQ(SK_ColorBLACK, bitmap_.getColor(0, 0));
   EXPECT_EQ(SK_ColorWHITE, bitmap_.getColor(1, 0));
@@ -188,60 +189,13 @@ TEST_F(GraphicsContextDarkModeTest, DarkModeOff) {
   EXPECT_EQ(SK_ColorGRAY, bitmap_.getColor(3, 0));
 }
 
-// Simple invert for testing. Each color component |c|
-// is replaced with |255 - c| for easy testing.
-TEST_F(GraphicsContextDarkModeTest, SimpleInvertForTesting) {
-  DarkModeSettings settings;
-  settings.mode = DarkModeInversionAlgorithm::kSimpleInvertForTesting;
-  settings.contrast = 0;
-
-  DrawColorsToContext(true, settings);
+TEST_F(GraphicsContextDarkModeTest, InvertLightnessLAB) {
+  DrawColorsToContext(true);
 
   EXPECT_EQ(SK_ColorWHITE, bitmap_.getColor(0, 0));
-  EXPECT_EQ(SK_ColorBLACK, bitmap_.getColor(1, 0));
-  EXPECT_EQ(SK_ColorCYAN, bitmap_.getColor(2, 0));
-  EXPECT_EQ(0xff777777, bitmap_.getColor(3, 0));
-}
-
-// Invert brightness (with gamma correction).
-TEST_F(GraphicsContextDarkModeTest, InvertBrightness) {
-  DarkModeSettings settings;
-  settings.mode = DarkModeInversionAlgorithm::kInvertBrightness;
-  settings.contrast = 0;
-
-  DrawColorsToContext(true, settings);
-
-  EXPECT_EQ(SK_ColorWHITE, bitmap_.getColor(0, 0));
-  EXPECT_EQ(SK_ColorBLACK, bitmap_.getColor(1, 0));
-  EXPECT_EQ(SK_ColorCYAN, bitmap_.getColor(2, 0));
-  EXPECT_EQ(0xffe1e1e1, bitmap_.getColor(3, 0));
-}
-
-// Invert lightness (in HSL space).
-TEST_F(GraphicsContextDarkModeTest, InvertLightness) {
-  DarkModeSettings settings;
-  settings.mode = DarkModeInversionAlgorithm::kInvertLightness;
-  settings.contrast = 0;
-
-  DrawColorsToContext(true, settings);
-
-  EXPECT_EQ(SK_ColorWHITE, bitmap_.getColor(0, 0));
-  EXPECT_EQ(SK_ColorBLACK, bitmap_.getColor(1, 0));
-  EXPECT_EQ(SK_ColorRED, bitmap_.getColor(2, 0));
-  EXPECT_EQ(0xffe1e1e1, bitmap_.getColor(3, 0));
-}
-
-TEST_F(GraphicsContextDarkModeTest, InvertLightnessPlusContrast) {
-  DarkModeSettings settings;
-  settings.mode = DarkModeInversionAlgorithm::kInvertLightness;
-  settings.contrast = 0.2;
-
-  DrawColorsToContext(true, settings);
-
-  EXPECT_EQ(SK_ColorWHITE, bitmap_.getColor(0, 0));
-  EXPECT_EQ(SK_ColorBLACK, bitmap_.getColor(1, 0));
-  EXPECT_EQ(SK_ColorRED, bitmap_.getColor(2, 0));
-  EXPECT_EQ(0xfff1f1f1, bitmap_.getColor(3, 0));
+  EXPECT_EQ(0xff121212, bitmap_.getColor(1, 0));
+  EXPECT_EQ(0xffff1203, bitmap_.getColor(2, 0));
+  EXPECT_EQ(0xff7f7f7f, bitmap_.getColor(3, 0));
 }
 
 }  // namespace

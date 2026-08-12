@@ -19,7 +19,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/path_service.h"
-#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "net/base/io_buffer.h"
@@ -96,6 +95,12 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
 
 class TestDelegate : public URLRequest::Delegate {
  public:
+  enum class PlatformNetworkAccessBehavior {
+    kDefault,
+    kGrant,
+    kDeny,
+  };
+
   TestDelegate();
   ~TestDelegate() override;
 
@@ -128,6 +133,13 @@ class TestDelegate : public URLRequest::Delegate {
   void set_credentials(const AuthCredentials& credentials) {
     credentials_ = credentials;
   }
+  void set_platform_network_access_behavior(
+      PlatformNetworkAccessBehavior behavior) {
+    platform_network_access_behavior_ = behavior;
+  }
+  void set_async_platform_local_network_access_decision(bool val) {
+    async_platform_local_network_access_decision_ = val;
+  }
 
   // If true, the delegate will asynchronously run the callback passed in from
   // URLRequest with `on_connected_result_`
@@ -158,6 +170,7 @@ class TestDelegate : public URLRequest::Delegate {
   bool auth_required_called() const { return auth_required_; }
   bool response_completed() const { return response_completed_; }
   int request_status() const { return request_status_; }
+  std::optional<int> response_code() const { return response_code_; }
 
   // URLRequest::Delegate:
   int OnConnected(URLRequest* request,
@@ -175,6 +188,8 @@ class TestDelegate : public URLRequest::Delegate {
                              int net_error,
                              const SSLInfo& ssl_info,
                              bool fatal) override;
+  void OnPlatformLocalNetworkAccessPermissionRequired(
+      URLRequest* request) override;
   void OnResponseStarted(URLRequest* request, int net_error) override;
   void OnReadCompleted(URLRequest* request, int bytes_read) override;
 
@@ -191,6 +206,9 @@ class TestDelegate : public URLRequest::Delegate {
   bool cancel_in_rd_pending_ = false;
   bool allow_certificate_errors_ = false;
   AuthCredentials credentials_;
+  PlatformNetworkAccessBehavior platform_network_access_behavior_ =
+      PlatformNetworkAccessBehavior::kDefault;
+  bool async_platform_local_network_access_decision_ = false;
 
   // Used to register RunLoop quit closures, to implement the Until*() closures.
   base::OnceClosure on_complete_;
@@ -213,6 +231,9 @@ class TestDelegate : public URLRequest::Delegate {
 
   // tracks status of request
   int request_status_ = ERR_IO_PENDING;
+
+  // tracks status of response
+  std::optional<int> response_code_;
 
   // our read buffer
   scoped_refptr<IOBuffer> buf_;
@@ -294,10 +315,6 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
     storage_access_status_ = status;
   }
 
-  void set_is_storage_access_header_enabled(bool enabled) {
-    is_storage_access_header_enabled_ = enabled;
-  }
-
  protected:
   // NetworkDelegate:
   int OnBeforeURLRequest(URLRequest* request,
@@ -313,7 +330,8 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& endpoint,
-      std::optional<GURL>* preserve_fragment_on_redirect_url) override;
+      std::optional<GURL>* preserve_fragment_on_redirect_url,
+      const std::optional<net::SSLInfo>& ssl_info) override;
   void OnBeforeRedirect(URLRequest* request, const GURL& new_location) override;
   void OnBeforeRetry(URLRequest* request) override;
   void OnResponseStarted(URLRequest* request, int net_error) override;
@@ -339,8 +357,6 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   std::optional<cookie_util::StorageAccessStatus> OnGetStorageAccessStatus(
       const URLRequest& request,
       base::optional_ref<const RedirectInfo> redirect_info) const override;
-  bool OnIsStorageAccessHeaderEnabled(const url::Origin* top_frame_origin,
-                                      const GURL& url) const override;
 
   void InitRequestStatesIfNew(int request_id);
 
@@ -393,8 +409,6 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
 
   std::optional<cookie_util::StorageAccessStatus> storage_access_status_ =
       std::nullopt;
-
-  bool is_storage_access_header_enabled_ = false;
 };
 
 // ----------------------------------------------------------------------------

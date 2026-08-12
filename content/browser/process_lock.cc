@@ -4,9 +4,12 @@
 
 #include "content/browser/process_lock.h"
 
+#include "base/feature_list.h"
 #include "base/strings/stringprintf.h"
 #include "content/browser/agent_cluster_key.h"
+#include "content/common/features.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_exposed_isolation_level.h"
 
 namespace content {
@@ -14,37 +17,41 @@ namespace content {
 // static
 ProcessLock ProcessLock::CreateAllowAnySite(
     const StoragePartitionConfig& storage_partition_config,
-    const WebExposedIsolationInfo& web_exposed_isolation_info) {
+    const WebExposedIsolationInfo& web_exposed_isolation_info,
+    const std::optional<AgentClusterKey::CrossOriginIsolationKey>&
+        cross_origin_isolation_key,
+    const base::UnguessableToken& browser_context_id) {
   WebExposedIsolationLevel web_exposed_isolation_level =
       SiteInfo::ComputeWebExposedIsolationLevelForEmptySite(
           web_exposed_isolation_info);
 
+  AgentClusterKey agent_cluster_key =
+      cross_origin_isolation_key.has_value()
+          ? AgentClusterKey::CreateWithCrossOriginIsolationKey(
+                SiteInfo::GetOriginForUnlockedProcess(),
+                cross_origin_isolation_key.value(),
+                AgentClusterKey::OACStatus::kSiteKeyedByDefault)
+          : AgentClusterKey::CreateSiteKeyed(
+                GURL(), AgentClusterKey::OACStatus::kSiteKeyedByDefault);
+
   return ProcessLock(SiteInfo(
-      /*site_url=*/GURL(), /*process_lock_url=*/GURL(),
-      /*requires_origin_keyed_process=*/false,
-      /*requires_origin_keyed_process_by_default=*/false,
+      agent_cluster_key,
+      /*site_url=*/GURL(),
       /*is_sandboxed=*/false, UrlInfo::kInvalidUniqueSandboxId,
       storage_partition_config, web_exposed_isolation_info,
       web_exposed_isolation_level, /*is_guest=*/false,
       /*does_site_request_dedicated_process_for_coop=*/false,
       /*is_jit_disabled=*/false, /*are_v8_optimizations_disabled=*/false,
-      /*is_pdf=*/false, /*is_fenced=*/false, std::nullopt));
+      /*is_fenced=*/false, browser_context_id,
+      EmbedderIsolationInfo::CreateNone()));
 }
 
 // static
 ProcessLock ProcessLock::Create(const IsolationContext& isolation_context,
                                 const UrlInfo& url_info) {
   DCHECK(url_info.storage_partition_config.has_value());
-  if (BrowserThread::CurrentlyOn(BrowserThread::UI))
-    return ProcessLock(SiteInfo::Create(isolation_context, url_info));
-
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  // On the IO thread we need to use a special SiteInfo creation method because
-  // we cannot properly compute some SiteInfo fields on that thread.
-  // ProcessLocks must always match no matter which thread they were created on,
-  // but the SiteInfo objects used to create them may not always match.
-  return ProcessLock(SiteInfo::CreateOnIOThread(isolation_context, url_info));
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return ProcessLock(SiteInfo::Create(isolation_context, url_info));
 }
 
 // static
@@ -62,9 +69,42 @@ ProcessLock& ProcessLock::operator=(const ProcessLock&) = default;
 
 ProcessLock::~ProcessLock() = default;
 
+bool ProcessLock::AllowsAnySite() const {
+  if (!site_info_.has_value()) {
+    return false;
+  }
+
+  if (agent_cluster_key().IsSiteKeyed()) {
+    return agent_cluster_key().GetSite().is_empty();
+  }
+
+  return agent_cluster_key().GetOrigin() ==
+         SiteInfo::GetOriginForUnlockedProcess();
+}
+
+bool ProcessLock::IsLockedToSite() const {
+  if (!site_info_.has_value()) {
+    return false;
+  }
+
+  if (agent_cluster_key().IsSiteKeyed()) {
+    return !agent_cluster_key().GetSite().is_empty();
+  }
+
+  return agent_cluster_key().GetOrigin() !=
+         SiteInfo::GetOriginForUnlockedProcess();
+}
+
+GURL ProcessLock::GetProcessLockURL() const {
+  if (!site_info_.has_value()) {
+    return GURL();
+  }
+  return agent_cluster_key().GetURL();
+}
+
 StoragePartitionConfig ProcessLock::GetStoragePartitionConfig() const {
   DCHECK(site_info_.has_value());
-  return site_info_->storage_partition_config();
+  return site_info_->GetStoragePartitionConfig();
 }
 
 WebExposedIsolationInfo ProcessLock::GetWebExposedIsolationInfo() const {
@@ -78,17 +118,37 @@ WebExposedIsolationLevel ProcessLock::GetWebExposedIsolationLevel() const {
 }
 
 bool ProcessLock::IsASiteOrOrigin() const {
-  const GURL lock_url = ProcessLock::lock_url();
-  return lock_url.has_scheme() && lock_url.has_host() && lock_url.is_valid();
+  if (agent_cluster_key().IsSiteKeyed()) {
+    const GURL lock_url = agent_cluster_key().GetSite();
+    return lock_url.has_scheme() && lock_url.has_host() && lock_url.is_valid();
+  }
+
+  return agent_cluster_key().GetOrigin() !=
+         SiteInfo::GetOriginForUnlockedProcess();
+}
+
+bool ProcessLock::MatchesScheme(const std::string& scheme) const {
+  std::string agent_cluster_key_scheme =
+      agent_cluster_key().IsOriginKeyed()
+          ? agent_cluster_key().GetOrigin().scheme()
+          : agent_cluster_key().GetSite().GetScheme();
+  return agent_cluster_key_scheme == scheme;
 }
 
 bool ProcessLock::HasOpaqueOrigin() const {
-  DCHECK(is_locked_to_site());
-  return url::Origin::Create(lock_url()).opaque();
+  DCHECK(IsLockedToSite());
+  if (agent_cluster_key().IsOriginKeyed()) {
+    return agent_cluster_key().GetOrigin().opaque();
+  }
+  return url::Origin::Create(agent_cluster_key().GetSite()).opaque();
 }
 
 bool ProcessLock::MatchesOrigin(const url::Origin& origin) const {
-  url::Origin process_lock_origin = url::Origin::Create(lock_url());
+  if (agent_cluster_key().IsOriginKeyed()) {
+    return agent_cluster_key().GetOrigin().IsSameOriginWith(origin);
+  }
+  url::Origin process_lock_origin =
+      url::Origin::Create(agent_cluster_key().GetSite());
   return origin == process_lock_origin;
 }
 
@@ -104,6 +164,19 @@ bool ProcessLock::IsCompatibleWithWebExposedIsolation(
     return false;
   }
 
+  // Without SiteIsolation or partial SiteIsolation, DocumentIsolationPolicy is
+  // not backed by process isolation. If it is not backed by process isolation,
+  // a process that allows any site can host any context regardless of the
+  // cross-origin isolation status of the context set by
+  // DocumentIsolationPolicy.
+  if (AllowsAnySite() &&
+      !SiteIsolationPolicy::UseDedicatedProcessesForAllSites() &&
+      !SiteIsolationPolicy::AreDynamicIsolatedOriginsEnabled() &&
+      base::FeatureList::IsEnabled(
+          features::kDocumentIsolationPolicyWithoutSiteIsolation)) {
+    return true;
+  }
+
   // Check if the CrossOriginIsolationKeys are compatible.
   //
   // TODO(crbug.com/349755777): Currently, this prevents a RenderProcessHost
@@ -111,29 +184,17 @@ bool ProcessLock::IsCompatibleWithWebExposedIsolation(
   // reused for navigations to documents with DocumentIsolationPolicy, even if
   // the RenderProcessHost has not been used and it would be safe to reuse it.
   //
-  // Unfortunately, ProcessLock::CreateAllowAnySite will result in the
+  // Historically, ProcessLock::CreateAllowAnySite would result in the
   // associated RenderProcessHost to be marked as crossOriginIsolated or not,
-  // depending on the passed WebExposedIsolationInfo. It cannot be set to a
-  // different crossOriginIsolated status again (without removing checks that
-  // the COI status of the process cannot change).
+  // depending on the passed WebExposedIsolationInfo. It could not be set to a
+  // different crossOriginIsolated status again without removing checks that the
+  // COI status of the process could not change.
   //
-  // Therefore, we need this check to avoid reusing a process matching a
-  // ProcessLock created ProcessLock::CreateAllowAnySite, and triggering the COI
-  // state change check in the renderer process.
-  //
-  // We should refactor how COI status is set in the renderer process, so that
-  // unused RenderProcessHosts are not assigned a COI status. This will allow
-  // them to be reused regardless of the COI status of the navigation.
-  std::optional<AgentClusterKey::CrossOriginIsolationKey> this_coi_key =
-      site_info_->agent_cluster_key()
-          ? site_info_->agent_cluster_key()->GetCrossOriginIsolationKey()
-          : std::nullopt;
-  std::optional<AgentClusterKey::CrossOriginIsolationKey> other_coi_key =
-      site_info.agent_cluster_key()
-          ? site_info.agent_cluster_key()->GetCrossOriginIsolationKey()
-          : std::nullopt;
-
-  return this_coi_key == other_coi_key;
+  // However, we're now checking COI status per agent-cluster, so the code could
+  // be refactored to update the process lock of an unused process to whatever
+  // COI state is needed for the navigation, and allow process reuse.
+  return site_info_->agent_cluster_key().GetCrossOriginIsolationKey() ==
+         site_info.agent_cluster_key().GetCrossOriginIsolationKey();
 }
 
 bool ProcessLock::operator==(const ProcessLock& rhs) const {
@@ -147,10 +208,6 @@ bool ProcessLock::operator==(const ProcessLock& rhs) const {
   // Here we proceed with a comparison almost identical to
   // SiteInfo::MakeSecurityPrincipalKey(), except that `site_url_` is excluded.
   return site_info_->ProcessLockCompareTo(rhs.site_info_.value()) == 0;
-}
-
-bool ProcessLock::operator!=(const ProcessLock& rhs) const {
-  return !(*this == rhs);
 }
 
 bool ProcessLock::operator<(const ProcessLock& rhs) const {
@@ -171,10 +228,10 @@ std::string ProcessLock::ToString() const {
   std::string ret = "{ ";
 
   if (site_info_.has_value()) {
-    ret += lock_url().possibly_invalid_spec();
-
-    if (is_origin_keyed_process())
+    ret += GetProcessLockURL().possibly_invalid_spec();
+    if (agent_cluster_key().IsOriginKeyed()) {
       ret += " origin-keyed";
+    }
 
     if (is_sandboxed()) {
       ret += " sandboxed";

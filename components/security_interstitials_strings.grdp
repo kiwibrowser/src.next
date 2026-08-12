@@ -107,7 +107,7 @@
     Your organization has blocked <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN">$1<ex>example.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> because it violates a policy. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link" aria-label="$2"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
   </message>
   <message name="IDS_ENTERPRISE_BLOCK_PRIMARY_PARAGRAPH_CUSTOM_MESSAGE" desc="Main paragraph of an error message with custom message provided by admin. Context: the error page that's shown when the requested URL doesn't pass the filtering rules set by the admin.">
-  Your administrator says: "<ph name="CUSTOM_MESSAGE">$1<ex>This site has been blocked because it violates a policy.</ex></ph>"
+  Your organization says: "<ph name="CUSTOM_MESSAGE">$1<ex>This site has been blocked because it violates a policy.</ex></ph>"
   </message>
   <message name="IDS_ENTERPRISE_BLOCK_GO_BACK" desc="The text for the button that takes the user back to safety.">
     Go back
@@ -124,7 +124,7 @@
     Your organization has identified  <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="DOMAIN">$1<ex>example.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> as a site that might violate a policy. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link" aria-label="$2"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
   </message>
   <message name="IDS_ENTERPRISE_WARN_PRIMARY_PARAGRAPH_CUSTOM_MESSAGE" desc="Main paragraph of an error message with custom message provided by admin. Context: the error page that's shown when the requested URL doesn't pass the filtering rules set by the admin.">
-    Your administrator says: "<ph name="CUSTOM_MESSAGE">$1<ex>This site might violate a policy.</ex></ph>"
+    Your organization says: "<ph name="CUSTOM_MESSAGE">$1<ex>This site might violate a policy.</ex></ph>"
   </message>
   <message name="IDS_ENTERPRISE_WARN_GO_BACK" desc="The text for the button that takes the user back to safety.">
     Go back
@@ -187,9 +187,6 @@
   </message>
   <message name="IDS_SSL_V2_PRIMARY_PARAGRAPH" desc="The primary explanatory paragraph for the SSL interstitial.">
     Attackers might be trying to steal your information from <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="SITE">$1<ex>google.com</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> (for example, passwords, messages, or credit cards). <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
-  </message>
-  <message name="IDS_SSL_V2_RECURRENT_ERROR_PARAGRAPH" desc="A paragraph for an SSL interstitial that the user has seen multiple times in a browsing session.">
-    Warnings may be common while websites update their security. This should improve soon.
   </message>
 
   <!-- SSL error page: overridable -->
@@ -348,8 +345,8 @@
   <message name="IDS_CONNECTION_HELP_SPECIFIC_ERROR_HEADING" desc="Heading for individual errors section in chrome://connection-help. Matches the heading for the specific error section in https://support.google.com/chrome/answer/6098869">
     Get help with a specific error message
   </message>
-  <message name="IDS_CONNECTION_HELP_CONNECTION_NOT_PRIVATE_TITLE" desc="Title for your connection is not private section in chrome://connection-help. Matches the heading for the fourth section in https://support.google.com/chrome/answer/6098869, with the addition of ERR_CERT_SYMANTEC_LEGACY.">
-    "Your connection is not private" or "&lt;span class="error-code"&gt;NET::ERR_CERT_AUTHORITY_INVALID&lt;/span&gt;" or "&lt;span class="error-code"&gt;ERR_CERT_COMMON_NAME_INVALID&lt;/span&gt;" or "&lt;span class="error-code"&gt;NET::ERR_CERT_WEAK_SIGNATURE_ALGORITHM&lt;/span&gt;" or "&lt;span class="error-code"&gt;ERR_CERT_SYMANTEC_LEGACY&lt;/span&gt;" or "SSL certificate error"
+  <message name="IDS_CONNECTION_HELP_CONNECTION_NOT_PRIVATE_TITLE" desc="Title for your connection is not private section in chrome://connection-help. Matches the heading for the fourth section in https://support.google.com/chrome/answer/6098869.">
+    "Your connection is not private" or "&lt;span class="error-code"&gt;NET::ERR_CERT_AUTHORITY_INVALID&lt;/span&gt;" or "&lt;span class="error-code"&gt;ERR_CERT_COMMON_NAME_INVALID&lt;/span&gt;" or "&lt;span class="error-code"&gt;NET::ERR_CERT_WEAK_SIGNATURE_ALGORITHM&lt;/span&gt;" or "SSL certificate error"
   </message>
   <message name="IDS_CONNECTION_HELP_CONNECT_TO_NETWORK_TITLE" desc="Title for connect to network section in chrome://connection-help. Matches the heading for the fifth section in https://support.google.com/chrome/answer/6098869">
     "Connect to network"
@@ -500,7 +497,7 @@
   </message>
 
   <message name="IDS_HTTPS_ONLY_BALANCED_MODE_HEADING" desc="Large heading of the warning shown when an http only site is loaded with https-only balanced mode active">
-    <ph name="SITE">$1<ex>example.com</ex></ph> doesn’t support a secure connection
+    <ph name="SITE">$1<ex>example.com</ex></ph> doesn’t support a secure connection with HTTPS
   </message>
   <message name="IDS_HTTPS_ONLY_BALANCED_MODE_PRIMARY_PARAGRAPH" desc="Main paragraph of the HTTPS-Only Balanced Mode warning. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS.">
     <ph name="BEGIN_LIST">&lt;ul&gt;</ph>
@@ -511,9 +508,17 @@
     You might also contact the site owner and suggest they upgrade to HTTPS. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
   </message>
 
-  <message name="IDS_HTTPS_ONLY_MODE_WITH_ADVANCED_PROTECTION_PRIMARY_PARAGRAPH" desc="Main paragraph of the HTTPS-Only Mode warning. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user also has Advanced Protection enabled.">
-    You are seeing this warning because this site does not support HTTPS and you are under Google's Advanced Protection Program. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
-  </message>
+  <if expr="not is_android">
+    <message name="IDS_HTTPS_ONLY_MODE_WITH_ADVANCED_PROTECTION_PRIMARY_PARAGRAPH" desc="Main paragraph of the HTTPS-Only Mode warning. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user also has Advanced Protection enabled.">
+      This site will remain blocked because you are under Google's Advanced Protection Program. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
+    </message>
+  </if>
+  <if expr="is_android">
+    <message name="IDS_HTTPS_ONLY_MODE_WITH_ADVANCED_PROTECTION_PRIMARY_PARAGRAPH_ANDROID" desc="Main paragraph of the HTTPS-Only Mode warning. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user also has Advanced Protection enabled.">
+        This site will remain blocked because you have Advanced Protection turned on in <ph name="BEGIN_ANDROID_SETTINGS_LINK">&lt;a href="#" id="android-advanced-protection-settings-link"&gt;</ph>Android settings<ph name="END_ANDROID_SETTINGS_LINK">&lt;/a&gt;</ph>. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
+    </message>
+  </if>
+
   <message name="IDS_HTTPS_ONLY_MODE_WITH_SITE_ENGAGEMENT_PRIMARY_PARAGRAPH" desc="Main paragraph of the HTTPS-Only Mode warning. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user is seeing this warning because they typically visit HTTPS URLs.">
     You usually connect to this site securely, but Chrome couldn't use a secure connection this time. An attacker might be trying to eavesdrop or modify your network connection. <ph name="BEGIN_LEARN_MORE_LINK">&lt;a href="#" id="learn-more-link"&gt;</ph>Learn more about this warning<ph name="END_LEARN_MORE_LINK">&lt;/a&gt;</ph>
   </message>
@@ -531,4 +536,50 @@
     Continue to site
   </message>
 
+  <!-- Ask-before-HTTP Prompt -->
+  <message name="IDS_ABH_PROMPT_TITLE" desc="Title shown in the Ask-before-HTTP warning dialog. This is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS.">
+    This site doesn’t support a secure connection
+  </message>
+  <message name="IDS_ABH_PROMPT_BALANCED_MODE_FIRST_ITEM_TEXT" desc="First bullet point shown in the Ask-before-HTTP warning dialog. This is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS.">
+    Attackers can see and change information you send or receive from the site.
+  </message>
+  <message name="IDS_ABH_PROMPT_BALANCED_MODE_SECOND_ITEM_TEXT" desc="Second bullet point shown in the Ask-before-HTTP warning dialog. This is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS.">
+    It’s safest to visit this site later if you're using a public network. There is less risk from a trusted network, like your home or work Wi-Fi.
+  </message>
+  <message name="IDS_ABH_PROMPT_SECONDARY_TEXT" desc="Additional text shown in the Ask-before-HTTP warning dialog (after the two bullet points). This is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS/">
+    You might also contact the site owner and suggest they upgrade to HTTPS. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+  </message>
+  <message name="IDS_ABH_PROMPT_LEARN_MORE_LINK" desc="Clickable link in the Ask-before-HTTP warning dialog to guide the user to learn why the warning was shown.">
+    Learn more about this warning
+  </message>
+  <message name="IDS_ABH_PROMPT_SITE_ENGAGEMENT_PRIMARY_PARAGRAPH" desc="Main paragraph shown in the Ask-before-HTTP warning dialog. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user is seeing this warning because they typically visit HTTPS URLs.">
+    You usually connect to this site securely, but Chrome couldn’t use a secure connection this time. An attacker might be trying to eavesdrop or modify your network connection. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+  </message>
+  <message name="IDS_ABH_PROMPT_TYPICALLY_SECURE_BROWSING_PRIMARY_PARAGRAPH" desc="Main paragraph of the Ask-before-HTTP warning dialog. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user has previously engaged with the HTTPS version of the site.">
+    You usually connect to sites securely, but Chrome couldn’t use a secure connection this time. An attacker might be trying to eavesdrop or modify your network connection. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+  </message>
+  <message name="IDS_ABH_PROMPT_INCOGNITO_PRIMARY_PARAGRAPH" desc="Main paragrpah of the Ask-before-HTTP warning dialog. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user is seeing this warning because they are browsing in Incognito mode.">
+    You are seeing this warning because this site does not support HTTPS and you are in Incognito mode. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+  </message>
+  <if expr="not is_android">
+    <message name="IDS_ABH_PROMPT_ADVANCED_PROTECTION_PRIMARY_PARAGRAPH" desc="Main paragraph of the Ask-before-HTTP warning dialog. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user also has Advanced Protection enabled.">
+      You are seeing this warning because this site does not support HTTPS and you are under Google’s Advanced Protection Program. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+    </message>
+  </if>
+  <if expr="is_android">
+    <message name="IDS_ABH_PROMPT_ADVANCED_PROTECTION_PRIMARY_PARAGRAPH_ANDROID" desc="Main paragraph of the Ask-before-HTTP warning dialog. This warning is shown when the browser tries to upgrade a navigation to a site to HTTPS but the site does not support HTTPS. The user also has Advanced Protection enabled.">
+      You are seeing this warning because this site does not support HTTPS and you have Advanced Protection turned on in Android settings. <ph name="LEARN_MORE">$1<ex>Learn more about this warning</ex></ph>
+    </message>
+  </if>
+
+  <!-- WebView Content Restriction Interstitial -->
+  <message name="IDS_WEBVIEW_CONTENT_RESTRICTION_BLOCKED_MESSAGE" desc="Message to inform the user that the content is blocked by admin policy">
+    Blocked by admin policy
+  </message>
+  <message name="IDS_WEBVIEW_CONTENT_RESTRICTION_LEARN_MORE" desc="Clickable link in the error page to guide the user to learn why the content was blocked">
+    Learn more
+  </message>
+  <message name="IDS_WEBVIEW_CONTENT_RESTRICTION_GO_BACK" desc="The text for the button that takes the user back to previous page.">
+    Back
+  </message>
 </grit-part>

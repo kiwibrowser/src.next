@@ -4,10 +4,8 @@
 
 import("//build/config/chrome_build.gni")
 import("//build/config/chromeos/args.gni")
-import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/compiler/pgo/pgo.gni")
-import("//build/config/features.gni")
 import("//build/config/locales.gni")
 import("//build/config/ozone.gni")
 import("//build/config/python.gni")
@@ -21,11 +19,12 @@ import("//chrome/browser/buildflags.gni")
 import("//chrome/chrome_paks.gni")
 import("//chrome/common/features.gni")
 import("//chrome/process_version_rc_template.gni")
-import("//components/nacl/features.gni")
 import("//components/optimization_guide/features.gni")
 import("//extensions/buildflags/buildflags.gni")
 import("//media/media_options.gni")
-import("//ppapi/buildflags/buildflags.gni")
+import("//services/on_device_model/on_device_model.gni")
+import("//services/shape_detection/features.gni")
+import("//third_party/angle/gni/angle.gni")
 import("//third_party/blink/public/public_features.gni")
 import("//third_party/widevine/cdm/widevine.gni")
 import("//tools/resources/generate_resource_allowlist.gni")
@@ -84,9 +83,12 @@ if (is_win) {
   action("reorder_imports") {
     script = "//build/win/reorder-imports.py"
 
-    # See comment in chrome_dll.gypi in the hardlink_to_output
-    # target for why this cannot be 'initial' like the DLL.
-    inputs = [ "$root_out_dir/initialexe/chrome.exe" ]
+    # initialexe/ is used so that the we can reorder imports and write back to
+    # the final destination at $root_out_dir/.
+    inputs = [
+      "$root_out_dir/initialexe/chrome.exe",
+      "$root_out_dir/initialexe/chrome.exe.pdb",
+    ]
     outputs = [
       "$root_out_dir/chrome.exe",
       "$root_out_dir/chrome.exe.pdb",
@@ -103,7 +105,7 @@ if (is_win) {
   }
 }
 
-# This does not currently work. See crbug.com/1311822.
+# This does not currently work. See crbug.com/40220356.
 # This target exists above chrome and it's main components in the dependency
 # tree as a central place to put assert_no_deps annotations. Since this depends
 # on Chrome and the main DLLs it uses, it will transitively assert that those
@@ -139,265 +141,260 @@ if (!is_android && !is_mac) {
     # Targets added here can only be built by explicitly using //chrome:chrome.
     # Windows-only deps are OK because chrome_initial uses initialexe/chrome as
     # the output name for that platform.
-    # See crbug.com/1146571.
+    # See crbug.com/40156324.
     if (is_win) {
       public_deps += [ ":reorder_imports" ]
       data_deps += [ ":reorder_imports" ]
     }
   }
 
-  template("_chrome_exe") {
-    if (invoker.collect_inputs_only) {
-      _type = "shared_library"
-    } else {
-      _type = "executable"
+  if (is_win) {
+    _chrome_output_name = "initialexe/chrome"
+  } else {
+    _chrome_output_name = "chrome"
+  }
+
+  executable("chrome_initial") {
+    configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
+    configs += [ "//build/config/compiler:thinlto_optimize_max" ]
+    output_name = _chrome_output_name
+
+    # Because the sources list varies so significantly per-platform, generally
+    # each platform lists its own files rather than relying on filtering or
+    # removing unused files.
+    sources = [ "app/chrome_exe_resource.h" ]
+    defines = []
+    public_deps = []
+    deps = [
+      "//build:chromeos_buildflags",
+      "//printing/buildflags",
+    ]
+    data = [ "$root_out_dir/resources.pak" ]
+    data_deps = []
+
+    if (is_win || is_linux || is_chromeos) {
+      deps += [ "//components/webapps/isolated_web_apps:scheme" ]
     }
-    target(_type, target_name) {
-      configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
-      configs += [ "//build/config/compiler:thinlto_optimize_max" ]
-      if (is_win) {
-        output_name = "initialexe/chrome"
-      } else {
-        output_name = "chrome"
-      }
 
-      # Because the sources list varies so significantly per-platform, generally
-      # each platform lists its own files rather than relying on filtering or
-      # removing unused files.
-      sources = [ "app/chrome_exe_resource.h" ]
-      defines = []
-      public_deps = []
-      deps = [
-        "//build:chromeos_buildflags",
-        "//printing/buildflags",
+    if (is_chromeos) {
+      data_deps += [ "//sandbox/linux:chrome_sandbox" ]
+      if (build_mojo_proxy) {
+        data_deps +=
+            [ "//chromeos/ash/components/mojo_proxy/service:mojo_proxy" ]
+      }
+      deps += [ "//components/exo/wayland:ui_controls_protocol_stub" ]
+    }
+
+    if (is_win) {
+      sources += [
+        "app/chrome_exe.rc",
+        "app/chrome_exe_main_win.cc",
+        "app/delay_load_failure_hook_win.cc",
+        "app/delay_load_failure_hook_win.h",
+        "app/main_dll_loader_win.cc",
+        "app/main_dll_loader_win.h",
       ]
-      data = [ "$root_out_dir/resources.pak" ]
-      data_deps = []
 
-      if (is_chromeos) {
-        data_deps += [
-          "//components/variations/cros_evaluate_seed:evaluate_seed",
-          "//sandbox/linux:chrome_sandbox",
-        ]
-        if (build_mojo_proxy) {
-          data_deps += [ "//mojo/proxy:mojo_proxy" ]
-        }
-        deps += [
-          "//components/exo/wayland:test_controller_stub",
-          "//components/exo/wayland:ui_controls_protocol_stub",
-        ]
-      }
-
-      if (is_win) {
-        sources += [
-          "app/chrome_exe.rc",
-          "app/chrome_exe_main_win.cc",
-          "app/delay_load_failure_hook_win.cc",
-          "app/delay_load_failure_hook_win.h",
-          "app/main_dll_loader_win.cc",
-          "app/main_dll_loader_win.h",
-          "common/crash_keys.cc",
-          "common/crash_keys.h",
-        ]
-
-        deps += [
-          ":chrome_dll",
-          ":chrome_exe_version",
-          ":copy_first_run",
-          ":packed_resources_integrity_header",
-          ":visual_elements_resources",
-          "//base",
-          "//build:branding_buildflags",
-          "//chrome/app:chrome_exe_main_exports",
-          "//chrome/app:exit_code_watcher",
-          "//chrome/app/version_assembly:chrome_exe_manifest",
-          "//chrome/browser:active_use_util",
-          "//chrome/browser:chrome_process_finder",
-          "//chrome/browser/policy:path_parser",
-          "//chrome/chrome_elf",
-          "//chrome/common:constants",
-          "//chrome/common/win:delay_load_failure_support",
-          "//chrome/install_static:install_static_util",
-          "//chrome/install_static:secondary_module",
-          "//chrome/installer/util:constants",
-          "//chrome/installer/util:did_run_support",
-          "//components/crash/core/app",
-          "//components/crash/core/app:run_as_crashpad_handler",
-          "//components/crash/core/common",
-          "//components/crash/win:chrome_wer",
-          "//components/flags_ui:switches",
-          "//content:sandbox_helper_win",
-          "//content/public/common:static_switches",
-          "//crypto",
-          "//gpu/command_buffer/service",
-          "//sandbox",
-          "//sandbox/policy",
-          "//sandbox/policy/mojom",
-          "//third_party/breakpad:breakpad_handler",
-          "//third_party/breakpad:breakpad_sender",
-          "//third_party/crashpad/crashpad/util",
-          "//ui/gl",
-        ]
-
-        data_deps = [
-          "//chrome/app/version_assembly:version_assembly_manifest",
-          "//chrome/browser/web_applications/chrome_pwa_launcher",
-          "//chrome/chrome_proxy",
-          "//chrome/elevation_service",
-          "//chrome/notification_helper",
-        ]
-
-        if (enable_platform_experience) {
-          data_deps +=
-              [ "//chrome/browser/platform_experience/win:os_update_handler" ]
-        }
-
-        defines += [ "CHROME_EXE_MAIN" ]
-
-        if (win_console_app) {
-          defines += [ "WIN_CONSOLE_APP" ]
-        } else {
-          # Set /SUBSYSTEM:WINDOWS for chrome.exe itself, unless a console build
-          # has been requested.
-          configs -= [ "//build/config/win:console" ]
-          configs += [ "//build/config/win:windowed" ]
-        }
-
-        configs += [
-          "//build/config/win:delayloads",
-          "//build/config/win:delayloads_not_for_child_dll",
-        ]
-
-        if (current_cpu == "x86") {
-          # Set the initial stack size to 0.5MiB, instead of the 1.5MiB needed by
-          # Chrome's main thread. This saves significant memory on threads (like
-          # those in the Windows thread pool, and others) whose stack size we can
-          # only control through this setting. Because Chrome's main thread needs
-          # a minimum 1.5 MiB stack, the main thread (in 32-bit builds only) uses
-          # fibers to switch to a 1.5 MiB stack before running any other code.
-          ldflags = [ "/STACK:0x80000" ]
-        } else {
-          # Increase the initial stack size. The default is 1MB, this is 8MB.
-          ldflags = [ "/STACK:0x800000" ]
-        }
-      } else if (use_aura) {
-        # Non-Windows aura entrypoint.
-        sources += [ "app/chrome_exe_main_aura.cc" ]
-      }
-
-      if (is_linux || is_chromeos) {
-        sources += [
-          "app/chrome_dll_resource.h",
-          "app/chrome_main.cc",
-          "app/chrome_main_delegate.cc",
-          "app/chrome_main_delegate.h",
-          "app/startup_timestamps.h",
-        ]
-
-        deps += [
-          # On Linux, link the dependencies (libraries) that make up actual
-          # Chromium functionality directly into the executable.
-          ":dependencies",
-          "//chrome/common:version_header",
-
-          # For the sampling profiler.
-          "//chrome/common/profiler",
-
-          # Needed to use the master_preferences functions
-          "//chrome/installer/util:with_no_strings",
-          "//content/public/app",
-        ]
-
-        public_deps = [
-          ":xdg_mime",  # Needs to be public for installer to consume files.
-          "//chrome/common:buildflags",
-        ]
-
-        data_deps += [ "//components/crash/core/app:chrome_crashpad_handler" ]
-
-        ldflags = []
-
-        # On Chrome OS builds put priority to the library in the installed
-        # directory. This will avoid conflicting of exposed symbols.
-        if (is_chromeos_device) {
-          ldflags += [ "-L" + rebase_path(root_out_dir) ]
-        }
-
-        # On Chrome OS builds (for both ash-chrome and lacros-chrome), put
-        # a metadata.json file in root directory containing Chrome version.
-        if (is_chromeos) {
-          data_deps += [ "//build:version_metadata" ]
-        }
-
-        # Chrome OS debug builds for arm need to pass --long-plt to the linker.
-        # See https://bugs.chromium.org/p/chromium/issues/detail?id=583532
-        if (is_chromeos && is_debug && target_cpu == "arm") {
-          ldflags += [ "-Wl,--long-plt" ]
-        }
-
-        if (is_linux && !is_component_build && !using_sanitizer) {
-          version_script = "//build/linux/chrome.map"
-          inputs = [ version_script ]
-          ldflags += [ "-Wl,--version-script=" +
-                       rebase_path(version_script, root_build_dir) ]
-        }
-
-        if (is_chromeos) {
-          public_deps += [ "//ui/lottie" ]
-          deps += [
-            "//chrome/browser/ash/locale",
-            "//chrome/browser/ash/schedqos",
-          ]
-        }
-
-        if (use_ozone) {
-          deps += [ "//ui/ozone" ]
-          if (is_linux) {
-            deps += [ "//ui/linux:display_server_utils" ]
-          }
-        }
-      }
-
-      # These files are used by the installer so we need a public dep.
-      public_deps += [ ":packed_resources" ]
-
-      # The step's output are needed at runtime, so we also need a data_dep.
-      data_deps += [ ":packed_resources" ]
-
-      # ChromeOS by design is safe to have rpath=$ORIGIN. This simplifies shared
-      # library usage.
-      if (is_chromeos && !is_component_build) {
-        configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
-      }
+      deps += [
+        ":chrome_dll",
+        ":chrome_exe_version",
+        ":copy_first_run",
+        ":visual_elements_resources",
+        "//base",
+        "//build:branding_buildflags",
+        "//chrome/app:chrome_exe_main_exports",
+        "//chrome/app:exit_code_watcher",
+        "//chrome/app/version_assembly:chrome_exe_manifest",
+        "//chrome/browser:active_use_util",
+        "//chrome/browser/policy:path_parser",
+        "//chrome/browser/win:chrome_process_finder",
+        "//chrome/chrome_elf",
+        "//chrome/common:constants",
+        "//chrome/common/win:delay_load_failure_support",
+        "//chrome/install_static:install_static_util",
+        "//chrome/install_static:secondary_module",
+        "//chrome/installer/util:constants",
+        "//chrome/installer/util:did_run_support",
+        "//components/activity_reporter:buildflags",
+        "//components/crash/core/app",
+        "//components/crash/core/app:run_as_crashpad_handler",
+        "//components/version_info:channel",
+        "//content:sandbox_helper_win",
+        "//content/public/common:static_switches",
+        "//sandbox",
+        "//sandbox/policy",
+        "//sandbox/policy/mojom",
+        "//third_party/crashpad/crashpad/util",
+      ]
 
       data_deps += [
-        "//chrome/browser/resources/media/mei_preload:component",
-        "//components/privacy_sandbox/privacy_sandbox_attestations/preload:component",
-        "//third_party/widevine/cdm",
+        "//chrome/app/version_assembly:version_assembly_manifest",
+        "//chrome/browser/web_applications/chrome_pwa_launcher",
+        "//chrome/chrome_proxy",
+        "//chrome/elevation_service",
+        "//chrome/notification_helper",
+        "//chrome/windows_services/elevated_tracing_service",
+        "//components/crash/win:chrome_wer",
       ]
-      if (invoker.collect_inputs_only) {
-        output_name = target_name
-        data_deps = []
-        ldflags += [ "--collect-inputs-only" ]
+
+      if (enable_platform_experience) {
+        data_deps +=
+            [ "//chrome/browser/platform_experience/win:os_update_handler" ]
       }
 
-      if (is_linux) {
-        sources += [
-          "app/chrome_main_linux.cc",
-          "app/chrome_main_linux.h",
+      defines += [ "CHROME_EXE_MAIN" ]
+
+      if (win_console_app) {
+        defines += [ "WIN_CONSOLE_APP" ]
+      } else {
+        # Set /SUBSYSTEM:WINDOWS for chrome.exe itself, unless a console build
+        # has been requested.
+        configs -= [ "//build/config/win:console" ]
+        configs += [ "//build/config/win:windowed" ]
+      }
+
+      configs += [
+        "//build/config/win:delayloads",
+        "//build/config/win:delayloads_not_for_child_dll",
+      ]
+
+      if (current_cpu == "x86") {
+        # Set the initial stack size to 0.5MiB, instead of the 1.5MiB needed by
+        # Chrome's main thread. This saves significant memory on threads (like
+        # those in the Windows thread pool, and others) whose stack size we can
+        # only control through this setting. Because Chrome's main thread needs
+        # a minimum 1.5 MiB stack, the main thread (in 32-bit builds only) uses
+        # fibers to switch to a 1.5 MiB stack before running any other code.
+        ldflags = [ "/STACK:0x80000" ]
+      } else {
+        # Increase the initial stack size. The default is 1MB, this is 8MB.
+        ldflags = [ "/STACK:0x800000" ]
+      }
+    } else if (use_aura) {
+      # Non-Windows aura entrypoint.
+      sources += [ "app/chrome_exe_main_aura.cc" ]
+    }
+
+    if (is_linux || is_chromeos) {
+      sources += [
+        "app/chrome_dll_resource.h",
+        "app/chrome_main.cc",
+        "app/chrome_main.h",
+        "app/chrome_main_delegate.cc",
+        "app/chrome_main_delegate.h",
+        "app/startup_timestamps.h",
+      ]
+
+      deps += [
+        # On Linux, link the dependencies (libraries) that make up actual
+        # Chromium functionality directly into the executable.
+        ":dependencies",
+        "//chrome/app:chrome_crash_reporter_client",
+        "//chrome/browser:chrome_content_browser_client",
+        "//chrome/browser:chrome_process_singleton",
+        "//chrome/browser:process_singleton",
+        "//chrome/browser:startup_data",
+        "//chrome/browser/lifetime",
+        "//chrome/common:version_header",
+
+        # For the sampling profiler.
+        "//chrome/common/profiler",
+
+        # Needed to use the master_preferences functions
+        "//chrome/installer/util:with_no_strings",
+        "//content/public/app",
+      ]
+
+      public_deps = [
+        # Needs to be public for installer to consume files from
+        # linux_cros_extra_data.
+        ":linux_cros_extra_data",
+        "//chrome/common:buildflags",
+      ]
+
+      data_deps += [ "//components/crash/core/app:chrome_crashpad_handler" ]
+
+      ldflags = []
+
+      # On Chrome OS builds put priority to the library in the installed
+      # directory. This will avoid conflicting of exposed symbols.
+      if (is_chromeos_device) {
+        ldflags += [ "-L" + rebase_path(root_out_dir) ]
+      }
+
+      # On Chrome OS builds, put a metadata.json file in root directory
+      # containing Chrome version.
+      if (is_chromeos) {
+        data_deps += [ "//build:version_metadata" ]
+      }
+
+      # Chrome OS debug builds for arm need to pass --long-plt to the linker.
+      # See https://crbug.com/41237849
+      if (is_chromeos && is_debug && target_cpu == "arm") {
+        ldflags += [ "-Wl,--long-plt" ]
+      }
+
+      if (is_linux && !is_component_build && !using_sanitizer) {
+        version_script = "//build/linux/chrome.map"
+        inputs = [ version_script ]
+        ldflags += [ "-Wl,--version-script=" +
+                     rebase_path(version_script, root_build_dir) ]
+      }
+
+      if (is_chromeos) {
+        public_deps += [ "//ui/lottie" ]
+        deps += [
+          "//chrome/browser/ash/locale",
+          "//chrome/browser/ash/schedqos",
+          "//chromeos/ash/experiences/arc:arc_base_utils",
         ]
       }
+
+      if (use_ozone) {
+        deps += [ "//ui/ozone" ]
+        if (is_linux) {
+          deps += [ "//ui/linux:display_server_utils" ]
+        }
+      }
+    }
+
+    # These files are used by the installer so we need a public dep.
+    public_deps += [ ":packed_resources" ]
+
+    # The step's output are needed at runtime, so we also need a data_dep.
+    data_deps += [ ":packed_resources" ]
+
+    # ChromeOS by design is safe to have rpath=$ORIGIN. This simplifies shared
+    # library usage.
+    if (is_chromeos && !is_component_build) {
+      configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
+    }
+
+    data_deps += [
+      "//chrome/browser/resources/media/mei_preload:component",
+      "//chrome/browser/web_applications/isolated_web_apps/key_distribution/preload:component",
+      "//components/privacy_sandbox/privacy_sandbox_attestations/preload:component",
+      "//third_party/widevine/cdm",
+    ]
+
+    if (is_linux) {
+      sources += [
+        "app/chrome_main_linux.cc",
+        "app/chrome_main_linux.h",
+      ]
+    }
+
+    if (is_chrome_for_testing) {
+      deps += [ "//chrome/browser/chrome_for_testing:browser" ]
     }
   }
-  _chrome_exe("chrome_initial") {
-    collect_inputs_only = false
-  }
-  if (current_toolchain == default_toolchain && is_linux) {
-    _chrome_exe("chrome_inputs") {
-      collect_inputs_only = true
-    }
+
+  # TODO(crbug.com/40204298): Make this work on other platforms.
+  if (is_linux && current_toolchain == default_toolchain &&
+      !is_component_build) {
     private_code_test("chrome_private_code_test") {
-      linker_inputs_dep = ":chrome_inputs"
+      linker_inputs_dep = ":chrome_initial"
+      executable_name = _chrome_output_name
     }
   }
 }  # !is_android && !is_mac
@@ -413,6 +410,7 @@ if (is_win) {
     sources = [
       "//base/win/dllmain.cc",
       "app/chrome_main.cc",
+      "app/chrome_main.h",
       "app/chrome_main_delegate.cc",
       "app/chrome_main_delegate.h",
       "app/startup_timestamps.h",
@@ -427,6 +425,12 @@ if (is_win) {
       "//chrome/app:chrome_dll_resources",
       "//chrome/app:command_ids",
       "//chrome/app/theme:chrome_unscaled_resources",
+      "//chrome/browser:chrome_content_browser_client",
+      "//chrome/browser:chrome_process_singleton",
+      "//chrome/browser:process_singleton",
+      "//chrome/browser:startup_data",
+      "//chrome/browser/lifetime",
+      "//chrome/browser/win:isolated_browser_support",
       "//chrome/chrome_elf",
       "//chrome/common:buildflags",
       "//chrome/common:version_header",
@@ -436,12 +440,10 @@ if (is_win) {
       "//components/crash/core/app",
       "//components/memory_system",
       "//components/policy:generated",
+      "//components/webapps/isolated_web_apps:scheme",
       "//content/public/app",
       "//crypto",
-      "//headless:headless_non_renderer",
-      "//headless:headless_shell_browser_lib",
       "//net:net_resources",
-      "//ppapi/buildflags",
       "//sandbox/win:sandbox",
       "//third_party/cld_3/src/src:cld_3",
       "//third_party/wtl",
@@ -454,8 +456,8 @@ if (is_win) {
       deps += [ "//ui/compositor" ]
     }
 
-    if (is_chromeos) {
-      deps += [ "//chrome/browser/ash/schedqos" ]
+    if (is_chrome_for_testing) {
+      deps += [ "//chrome/browser/chrome_for_testing:browser" ]
     }
   }
 
@@ -554,7 +556,7 @@ if (is_win) {
     if (is_component_build) {
       # In a component build, the framework is directly linked to the
       # executable because dlopen() and loading all the dependent dylibs
-      # is time-consuming, see https://crbug.com/1197495.
+      # is time-consuming, see https://crbug.com/40176946.
       deps += [ ":chrome_framework+link" ]
       ldflags = [ "-Wl,-rpath,@executable_path/../Frameworks" ]
 
@@ -563,7 +565,7 @@ if (is_win) {
       # not packaged within the framework. This data_deps line makes all of
       # those dependent libraries runtime dependencies of the .app bundle.
       # This is a bit of a hack, since GN deliberately terminates its search
-      # for runtime_deps at create_bundle nodes (https://crbug.com/1010347).
+      # for runtime_deps at create_bundle nodes (https://crbug.com/40101435).
       data_deps = [ ":chrome_framework" ]
     }
   }
@@ -595,9 +597,7 @@ if (is_win) {
     outputs = []
 
     foreach(locale, platform_pak_locales) {
-      _strings_file = "${branding_path_product}_strings"
-
-      inputs += [ "$root_gen_dir/chrome/${_strings_file}_${locale}.pak" ]
+      inputs += [ "$root_gen_dir/chrome/branded_strings_${locale}.pak" ]
     }
 
     foreach(locale, locales_as_apple_outputs) {
@@ -609,7 +609,7 @@ if (is_win) {
     args =
         [
           "-b",
-          "${branding_path_product}_strings",
+          "branded_strings",
           "-v",
           chrome_version_full,
           "-g",
@@ -645,16 +645,21 @@ if (is_win) {
     outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
   }
 
+  bundle_data("chrome_asset_catalog") {
+    sources = [ "app/theme/$branding_path_component/mac/Assets.car" ]
+    outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
+  }
+
   bundle_data("chrome_resources") {
     sources = [
       "$root_out_dir/$chrome_mac_bundle_id.manifest",
-      "app/theme/$branding_path_component/mac/document.icns",
       "browser/ui/cocoa/applescript/scripting.sdef",
     ]
     outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
     public_deps = [
       ":chrome_app_icon",
       ":chrome_app_strings",
+      ":chrome_asset_catalog",
       "//components/policy:chrome_manifest_bundle",
     ]
   }
@@ -708,7 +713,7 @@ if (is_win) {
       "--stamp",
       rebase_path(_stamp_file, root_build_dir),
       "--keep",
-      chrome_version_full,
+      chrome_framework_version,
       "--keep",
       "Current",
     ]
@@ -780,16 +785,22 @@ if (is_win) {
       if (is_component_build) {
         # In a component build, the framework is directly linked to the
         # executable because dlopen() and loading all the dependent dylibs
-        # is time-consuming, see https://crbug.com/1197495.
+        # is time-consuming, see https://crbug.com/40176946.
         deps += [ ":chrome_framework+link_nested" ]
 
         ldflags += [
-          # The helper is in Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/X/Helpers/Chromium Helper.app/Contents/MacOS
-          # so set rpath up to the base.
-          "-Wl,-rpath,@loader_path/../../../../../../../../../..",
+          # The helper is in Chromium.app/Contents/Frameworks/Chromium
+          # Framework.framework/Versions/X/Helpers/Chromium
+          # Helper.app/Contents/MacOS
 
-          # ... and up to Contents/Frameworks.
+          # Set up an rpath to the Contents/Frameworks directory so that
+          # Chromium.framework will be found there. This matches the path that
+          # chrome_exe_main_mac.cc uses with `dlopen` and avoids loading the
+          # framework into memory twice.
           "-Wl,-rpath,@executable_path/../../../../../../..",
+
+          # Add an rpath up to the base for all other libraries.
+          "-Wl,-rpath,@loader_path/../../../../../../../../../..",
         ]
       }
 
@@ -865,6 +876,7 @@ if (is_win) {
     info_plist_target = ":chrome_helper_app_alerts_plist"
     deps = [
       ":chrome_app_icon",
+      ":chrome_asset_catalog",
       ":chrome_helper_app_alerts_resources",
     ]
   }
@@ -979,35 +991,16 @@ if (is_win) {
     }
   }
 
-  if (enable_nacl) {
-    bundle_data("chrome_framework_plugins") {
-      sources = []
-      outputs =
-          [ "{{bundle_contents_dir}}/Internet Plug-Ins/{{source_file_part}}" ]
-      public_deps = []
-
-      if (enable_nacl) {
-        if (current_cpu == "x86") {
-          sources += [ "$root_out_dir/nacl_irt_x86_32.nexe" ]
-        } else if (current_cpu == "x64") {
-          sources += [ "$root_out_dir/nacl_irt_x86_64.nexe" ]
-        }
-        public_deps += [ "//ppapi/native_client:irt" ]
-      }
-    }
-  } else {
-    group("chrome_framework_plugins") {
-    }
-  }
-
   # Add the ANGLE .dylibs in the MODULE_DIR of Chromium.app
-  bundle_data("angle_binaries") {
-    sources = [
-      "$root_out_dir/egl_intermediates/libEGL.dylib",
-      "$root_out_dir/egl_intermediates/libGLESv2.dylib",
-    ]
-    outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
-    public_deps = [ "//ui/gl:angle_library_copy" ]
+  if (!use_static_angle) {
+    bundle_data("angle_binaries") {
+      sources = [
+        "$root_out_dir/egl_intermediates/libEGL.dylib",
+        "$root_out_dir/egl_intermediates/libGLESv2.dylib",
+      ]
+      outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
+      public_deps = [ "//ui/gl:angle_library_copy" ]
+    }
   }
 
   # Add the SwiftShader .dylibs in the MODULE_DIR of Chromium.app
@@ -1018,6 +1011,12 @@ if (is_win) {
     ]
     outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
     public_deps = [ "//ui/gl:swiftshader_vk_library_copy" ]
+  }
+
+  bundle_data("vulkan_loader_binaries") {
+    sources = [ "$root_out_dir/vulkan_intermediates/libvulkan.dylib" ]
+    outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
+    public_deps = [ "//ui/gl:vulkan_loader_library_copy" ]
   }
 
   if (bundle_widevine_cdm) {
@@ -1134,6 +1133,7 @@ if (is_win) {
       "app/chrome_crash_reporter_client_mac.mm",
       "app/chrome_dll_resource.h",
       "app/chrome_main.cc",
+      "app/chrome_main.h",
       "app/chrome_main_delegate.cc",
       "app/chrome_main_delegate.h",
       "app/chrome_main_mac.h",
@@ -1145,19 +1145,30 @@ if (is_win) {
       ":dependencies",
       "//build:chromeos_buildflags",
       "//chrome/app:command_ids",
+      "//chrome/browser:chrome_browser_application_mac",
+      "//chrome/browser:chrome_content_browser_client",
+      "//chrome/browser:chrome_process_singleton",
+      "//chrome/browser:process_singleton",
+      "//chrome/browser:startup_data",
+      "//chrome/browser/lifetime",
+      "//chrome/browser/mac",
       "//chrome/common:buildflags",
       "//chrome/common:version_header",
       "//chrome/common/profiler",
       "//components/crash/core/app",
       "//components/memory_system",
       "//components/policy:generated",
+      "//components/webapps/isolated_web_apps:scheme",
       "//content/public/app",
-      "//headless:headless_shell_lib",
       "//third_party/cld_3/src/src:cld_3",
     ]
 
     if (is_chromeos) {
       deps += [ "//chrome/browser/ash/schedqos" ]
+    }
+
+    if (is_chrome_for_testing) {
+      deps += [ "//chrome/browser/chrome_for_testing:browser" ]
     }
 
     if (is_component_build) {
@@ -1185,14 +1196,6 @@ if (is_win) {
       "Resources",
     ]
 
-    if (is_chrome_branded) {
-      framework_contents += [ "Default Apps" ]
-    }
-
-    if (enable_nacl) {
-      framework_contents += [ "Internet Plug-Ins" ]
-    }
-
     configs += [ "//build/config/compiler:wexit_time_destructors" ]
     configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
     configs += [ "//build/config/compiler:thinlto_optimize_max" ]
@@ -1206,20 +1209,21 @@ if (is_win) {
     public_deps = [ ":chrome_dll" ]
 
     bundle_deps = [
-      ":angle_binaries",
       ":chrome_framework_helpers",
-      ":chrome_framework_plugins",
       ":chrome_framework_resources",
       ":optimization_guide_library",
       ":swiftshader_binaries",
       ":widevine_cdm_library",
       "//chrome/browser/resources/media/mei_preload:component_bundle",
+      "//chrome/browser/web_applications/isolated_web_apps/key_distribution/preload:component_bundle",
       "//components/privacy_sandbox/privacy_sandbox_attestations/preload:component_bundle",
     ]
 
-    if (is_chrome_branded) {
-      bundle_deps += [ ":preinstalled_apps" ]
+    if (!use_static_angle) {
+      bundle_deps += [ ":angle_binaries" ]
     }
+
+    bundle_deps += [ ":vulkan_loader_binaries" ]
 
     configs += [ ":chrome_dll_symbol_order" ]
     if (!is_component_build && !using_sanitizer) {
@@ -1236,7 +1240,7 @@ if (is_win) {
     if (!is_component_build) {
       # Specify a sensible install_name for static builds. The library is
       # dlopen()ed so this is not used to resolve the module.
-      ldflags += [ "-Wl,-install_name,@executable_path/../Frameworks/$chrome_framework_name.framework/Versions/$chrome_version_full/$chrome_framework_name" ]
+      ldflags += [ "-Wl,-install_name,@executable_path/../Frameworks/$chrome_framework_name.framework/Versions/$chrome_framework_version/$chrome_framework_name" ]
     } else {
       # In the component build, both the :chrome_app and various
       # :chrome_helper* targets directly link to the Framework target. Use
@@ -1256,8 +1260,8 @@ if (is_win) {
   assert(_framework_binary_path != "",
          "Ignore configuration-dependent unused variable warning")
 
-  # TOOD(crbug/1163903#c8) - thakis@ look into why profile and coverage
-  # instrumentation adds these symbols in different orders
+  # TOOD(crbug.com/40740432#comment9) - thakis@ look into why profile and
+  # coverage instrumentation adds these symbols in different orders
   if (!is_component_build && chrome_pgo_phase != 1 && !using_sanitizer) {
     action("verify_chrome_framework_order") {
       script = "//chrome/tools/build/mac/verify_order.py"
@@ -1282,7 +1286,7 @@ if (is_win) {
       if (is_component_build) {
         # In a component build, the framework is directly linked to the
         # executable because dlopen() and loading all the dependent dylibs
-        # is time-consuming, see https://crbug.com/1197495.
+        # is time-consuming, see https://crbug.com/40176946.
         public_deps = [ ":chrome_framework+link" ]
       } else {
         public_deps = [ ":chrome_framework" ]
@@ -1302,15 +1306,18 @@ if (is_win) {
     _chrome_symbols_sources = [
       "$root_out_dir/$chrome_product_full_name.app/Contents/MacOS/$chrome_product_full_name",
       "$root_out_dir/chrome_crashpad_handler",
-      "$root_out_dir/libEGL.dylib",
-      "$root_out_dir/libGLESv2.dylib",
       "$root_out_dir/libvk_swiftshader.dylib",
       _framework_binary_path,
     ]
+    _chrome_symbols_sources += [ "$root_out_dir/libvulkan.dylib" ]
     if (build_with_internal_optimization_guide) {
       _chrome_symbols_sources +=
           [ "$root_out_dir/liboptimization_guide_internal.dylib" ]
     }
+    _chrome_symbols_sources += [
+      "$root_out_dir/libEGL.dylib",
+      "$root_out_dir/libGLESv2.dylib",
+    ]
 
     foreach(helper_params, chrome_mac_helpers) {
       _chrome_symbols_sources += [ "$root_out_dir/${chrome_helper_name}${helper_params[2]}.app/Contents/MacOS/${chrome_helper_name}${helper_params[2]}" ]
@@ -1343,13 +1350,27 @@ if (is_win) {
         ":chrome_app",
         ":chrome_framework",
         "//components/crash/core/app:chrome_crashpad_handler",
-        "//third_party/angle:libEGL",
-        "//third_party/angle:libGLESv2",
         "//third_party/swiftshader/src/Vulkan:swiftshader_libvulkan",
         dump_syms,
       ]
+      deps += [ "//third_party/vulkan-loader/src:libvulkan" ]
       if (build_with_internal_optimization_guide) {
         deps += [ "//components/optimization_guide/internal:optimization_guide_internal" ]
+      }
+
+      # Because chrome_dump_syms explicitly lists the ANGLE .dylibs in sources,
+      # it must depend directly on the targets generating them to satisfy
+      # GN/analyze (since ui/gl:gl only includes them as data_deps).
+      if (use_static_angle) {
+        deps += [
+          "//ui/gl:dummy_libEGL",
+          "//ui/gl:dummy_libGLESv2",
+        ]
+      } else {
+        deps += [
+          "//third_party/angle:libEGL",
+          "//third_party/angle:libGLESv2",
+        ]
       }
 
       foreach(helper_params, chrome_mac_helpers) {
@@ -1368,24 +1389,37 @@ if (is_win) {
         "$root_out_dir/$chrome_framework_name.dSYM",
         "$root_out_dir/$chrome_product_full_name.dSYM",
         "$root_out_dir/chrome_crashpad_handler.dSYM",
-        "$root_out_dir/libEGL.dylib.dSYM",
-        "$root_out_dir/libGLESv2.dylib.dSYM",
         "$root_out_dir/libvk_swiftshader.dylib.dSYM",
       ]
+      _dsyms += [ "$root_out_dir/libvulkan.dylib.dSYM" ]
       if (build_with_internal_optimization_guide) {
         _dsyms += [ "$root_out_dir/liboptimization_guide_internal.dylib.dSYM" ]
       }
+      _dsyms += [
+        "$root_out_dir/libEGL.dylib.dSYM",
+        "$root_out_dir/libGLESv2.dylib.dSYM",
+      ]
 
       deps = [
         ":chrome_app",
         ":chrome_framework",
         "//components/crash/core/app:chrome_crashpad_handler",
-        "//third_party/angle:libEGL",
-        "//third_party/angle:libGLESv2",
         "//third_party/swiftshader/src/Vulkan:swiftshader_libvulkan",
       ]
+      deps += [ "//third_party/vulkan-loader/src:libvulkan" ]
       if (build_with_internal_optimization_guide) {
         deps += [ "//components/optimization_guide/internal:optimization_guide_internal" ]
+      }
+      if (use_static_angle) {
+        deps += [
+          "//ui/gl:dummy_libEGL",
+          "//ui/gl:dummy_libGLESv2",
+        ]
+      } else {
+        deps += [
+          "//third_party/angle:libEGL",
+          "//third_party/angle:libGLESv2",
+        ]
       }
 
       foreach(helper_params, chrome_mac_helpers) {
@@ -1417,19 +1451,22 @@ group("dependencies") {
     "//build:chromeos_buildflags",
     "//chrome/browser",
     "//chrome/browser:buildflags",
+    "//chrome/browser:shell_integration",
+    "//chrome/browser/diagnostics",
     "//chrome/browser/policy:path_parser",
     "//chrome/child",
     "//chrome/common",
     "//chrome/gpu",
     "//chrome/renderer",
     "//chrome/utility",
-    "//components/about_ui",
     "//components/crash/core/app",
     "//components/devtools/devtools_pipe",
     "//components/memory_system",
     "//components/startup_metric_utils",
     "//components/sync",
-    "//components/upload_list:upload_list",
+    "//components/upload_list",
+    "//components/variations/service",
+    "//components/webui/about",
     "//content/public/child",
     "//pdf",
     "//services/tracing/public/cpp",
@@ -1438,19 +1475,8 @@ group("dependencies") {
     "//v8:v8_headers",
   ]
 
-  if (enable_ppapi) {
-    public_deps += [ "//ppapi/host" ]
-  }
-
   if (enable_printing) {
     public_deps += [ "//printing" ]
-  }
-
-  if (enable_nacl) {
-    public_deps += [
-      "//components/nacl/browser",
-      "//components/nacl/renderer/plugin:nacl_trusted_plugin",
-    ]
   }
 
   if (is_chromeos) {
@@ -1459,7 +1485,6 @@ group("dependencies") {
       "//chrome/browser/ash/boot_times_recorder",
       "//chrome/browser/ash/dbus",
       "//chrome/browser/ash/schedqos",
-      "//chromeos",
       "//chromeos/ash/components/memory",
       "//chromeos/dbus/constants",
     ]
@@ -1523,38 +1548,10 @@ group("resources") {
 group("extra_resources") {
   # Deps should be same as those in chrome_extra_paks() within chrome_paks.gni.
   public_deps = [
-    "//chrome/browser/resources:resources",
+    "//chrome/browser/resources",
     "//components/autofill/core/browser:autofill_address_rewriter_resources",
+    "//components/autofill/core/browser:autofill_alternative_state_name_map_resources",
   ]
-}
-
-if (is_chrome_branded && !is_android) {
-  if (!is_mac) {
-    _preinstalled_apps_target_type = "copy"
-  } else {
-    _preinstalled_apps_target_type = "bundle_data"
-  }
-
-  target(_preinstalled_apps_target_type, "preinstalled_apps") {
-    visibility = [ ":packed_resources" ]
-    if (is_mac) {
-      visibility += [
-        ":chrome_framework",
-        ":chrome_framework_shared_library",
-      ]
-    }
-
-    sources = [ "browser/resources/default_apps/external_extensions.json" ]
-
-    if (!is_mac) {
-      outputs = [ "$root_out_dir/default_apps/{{source_file_part}}" ]
-    } else {
-      outputs = [ "{{bundle_contents_dir}}/Default Apps/{{source_file_part}}" ]
-    }
-
-    # Force anybody that depends on this to get the default apps as data files.
-    data = process_file_template(sources, outputs)
-  }
 }
 
 if (!is_android) {
@@ -1571,38 +1568,14 @@ if (!is_android) {
       repack_allowlist = _chrome_resource_allowlist
       deps = [ ":resource_allowlist" ]
     }
-
-    if (is_chrome_branded && !is_mac) {
-      public_deps = [ ":preinstalled_apps" ]
-    }
-
-    # This needs to be in-sync with //chrome/app/packed_resources_integrity.h.
-    files_to_hash = [
-      "resources.pak",
-      "chrome_100_percent.pak",
-    ]
-    if (enable_hidpi) {
-      files_to_hash += [ "chrome_200_percent.pak" ]
-    }
-  }
-
-  # This is extracted to deserialize build dependency around
-  # :packed_resources_integrity_hash and improve build parallelism.
-  source_set("packed_resources_integrity_header") {
-    sources = [ "app/packed_resources_integrity.h" ]
-
-    # chrome/app/packed_resources_integrity.cc file is generated in dependency.
-    deps = [ ":packed_resources_integrity" ]
   }
 }
 
-if (!is_android) {
-  repack("browser_tests_pak") {
-    testonly = true
-    sources = [ "$root_gen_dir/chrome/webui_test_resources.pak" ]
-    output = "$root_out_dir/browser_tests.pak"
-    deps = [ "//chrome/test/data/webui:resources" ]
-  }
+repack("browser_tests_pak") {
+  testonly = true
+  sources = [ "$root_gen_dir/chrome/webui_test_resources.pak" ]
+  output = "$root_out_dir/browser_tests.pak"
+  deps = [ "//chrome/test/data/webui:resources" ]
 }
 
 group("strings") {
@@ -1614,10 +1587,6 @@ group("strings") {
 }
 
 if (is_android) {
-  java_cpp_enum("partner_bookmarks_javagen") {
-    sources = [ "browser/android/bookmarks/partner_bookmarks_reader.h" ]
-  }
-
   java_cpp_enum("offline_pages_enum_javagen") {
     sources = [ "browser/offline_pages/offline_page_utils.h" ]
   }
@@ -1653,6 +1622,15 @@ if (is_android) {
 
     deps = [
       ":dependencies",
+      "//chrome/app:chrome_crash_reporter_client",
+      "//chrome/browser:chrome_content_browser_client",
+      "//chrome/browser:defaults",
+      "//chrome/browser:process_singleton",
+      "//chrome/browser:startup_data",
+      "//chrome/browser/android",
+      "//chrome/browser/flags:flags_android",
+      "//chrome/browser/lifetime",
+      "//chrome/browser/payments:impl",
       "//chrome/browser/ui",
       "//chrome/child",
       "//chrome/common",
@@ -1660,28 +1638,23 @@ if (is_android) {
       "//chrome/common/profiler",
       "//chrome/gpu",
       "//chrome/renderer",
+      "//components/crash/android:crash_android",
       "//components/minidump_uploader",
       "//components/safe_browsing:buildflags",
       "//components/safe_browsing/android:safe_browsing_api_handler",
       "//components/safe_browsing/android:safe_browsing_mobile",
       "//components/stylus_handwriting/android",
+      "//components/variations:variations_associated_data",
       "//content/public/app",
     ]
 
     # Explicit dependency required for JNI registration to be able to
     # find the native side functions.
-    if (is_android && is_component_build) {
+    if (is_component_build) {
       deps += [
         "//components/viz/service",
         "//device/gamepad",
         "//ui/events/devices",
-      ]
-    }
-
-    if (is_android) {
-      deps += [
-        "//chrome/browser/flags:flags_android",
-        "//components/crash/android:crash_android",
       ]
     }
 
@@ -1706,20 +1679,28 @@ if (is_linux || is_chromeos) {
   if (!(is_debug && use_debug_fission)) {
     group("linux_symbols") {
       deps = [
-        ":angle_egl_symbols",
-        ":angle_gles_symbols",
         ":chrome_crashpad_symbols",
         ":chrome_symbols",
       ]
       if (is_linux) {
         deps += [ ":swiftshader_vk_symbols" ]
       }
-      if (!is_chromeos) {
+      if (!is_chromeos && angle_shared_libvulkan) {
         deps += [ ":angle_libvulkan_symbols" ]
       }
       if (build_with_internal_optimization_guide) {
         deps += [ ":optimization_guide_symbols" ]
+        if (enable_ml_internal) {
+          deps += [ ":lite_rt_web_gpu_accelerator_symbols" ]
+        }
       }
+      if (build_with_internal_shape_detection) {
+        deps += [ ":shape_detection_symbols" ]
+      }
+      deps += [
+        ":angle_egl_symbols",
+        ":angle_gles_symbols",
+      ]
     }
     extract_symbols("chrome_symbols") {
       binary = "$root_out_dir/chrome"
@@ -1767,7 +1748,11 @@ if (is_linux || is_chromeos) {
         symbol_file = "$root_out_dir/angle_libegl.breakpad.$current_cpu"
       }
 
-      deps = [ "//third_party/angle:libEGL" ]
+      if (use_static_angle) {
+        deps = [ "//ui/gl:dummy_libEGL" ]
+      } else {
+        deps = [ "//third_party/angle:libEGL" ]
+      }
     }
     extract_symbols("angle_gles_symbols") {
       binary = "$root_out_dir/libGLESv2.so"
@@ -1779,9 +1764,13 @@ if (is_linux || is_chromeos) {
         symbol_file = "$root_out_dir/angle_libgles.breakpad.$current_cpu"
       }
 
-      deps = [ "//third_party/angle:libGLESv2" ]
+      if (use_static_angle) {
+        deps = [ "//ui/gl:dummy_libGLESv2" ]
+      } else {
+        deps = [ "//third_party/angle:libGLESv2" ]
+      }
     }
-    if (!is_chromeos) {
+    if (!is_chromeos && angle_shared_libvulkan) {
       extract_symbols("angle_libvulkan_symbols") {
         binary = "$root_out_dir/libvulkan.so.1"
 
@@ -1809,16 +1798,40 @@ if (is_linux || is_chromeos) {
 
         deps = [ "//components/optimization_guide/internal:optimization_guide_internal" ]
       }
+      if (enable_ml_internal) {
+        extract_symbols("lite_rt_web_gpu_accelerator_symbols") {
+          binary = "$root_out_dir/libLiteRtWebGpuAccelerator.so"
+          if (current_cpu == "x86") {
+            symbol_file =
+                "$root_out_dir/lite_rt_web_gpu_accelerator.breakpad.ia32"
+          } else {
+            symbol_file = "$root_out_dir/lite_rt_web_gpu_accelerator.breakpad.$current_cpu"
+          }
+
+          deps = [ "//components/optimization_guide/internal/third_party/odml:ml_drift_webgpu_accelerator_so" ]
+        }
+      }
+    }
+    if (build_with_internal_shape_detection) {
+      extract_symbols("shape_detection_symbols") {
+        binary = "$root_out_dir/libshape_detection_internal.so"
+        if (current_cpu == "x86") {
+          # GYP used "ia32" so keep that naming for back-compat.
+          symbol_file = "$root_out_dir/shape_detection_internal.breakpad.ia32"
+        } else {
+          symbol_file =
+              "$root_out_dir/shape_detection_internal.breakpad.$current_cpu"
+        }
+
+        deps =
+            [ "//services/shape_detection/internal:shape_detection_internal" ]
+      }
     }
   }
 
   # Copies some scripts and resources that are used for desktop integration.
-  copy("xdg_mime") {
-    sources = [
-      "//chrome/tools/build/linux/chrome-wrapper",
-      "//third_party/xdg-utils/scripts/xdg-mime",
-      "//third_party/xdg-utils/scripts/xdg-settings",
-    ]
+  copy("linux_cros_extra_data") {
+    sources = [ "//chrome/tools/build/linux/chrome-wrapper" ]
     if (is_linux) {
       sources += [
         "//chrome/app/theme/$branding_path_component/linux/product_logo_48.png",

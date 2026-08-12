@@ -241,7 +241,7 @@ void WebAssociatedURLLoaderImpl::ClientAdapter::DidReceiveResponse(
   // If there are blocked headers, copy the response so we can remove them.
   WebURLResponse validated_response = WrappedResourceResponse(response);
   for (const auto& header : blocked_headers)
-    validated_response.ClearHttpHeaderField(WebString::FromASCII(header));
+    validated_response.ClearHttpHeaderField(WebString::FromAscii(header));
   client_->DidReceiveResponse(validated_response);
 }
 
@@ -289,7 +289,7 @@ void WebAssociatedURLLoaderImpl::ClientAdapter::DidFail(
 
 void WebAssociatedURLLoaderImpl::ClientAdapter::DidFailRedirectCheck(
     uint64_t identifier) {
-  DidFail(identifier, ResourceError::Failure(NullURL()));
+  DidFail(identifier, ResourceError::Failure(NullUrl()));
 }
 
 void WebAssociatedURLLoaderImpl::ClientAdapter::EnableErrorNotifications() {
@@ -364,7 +364,7 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
 
   if (!observer_) {
     ReleaseClient()->DidFail(
-        WebURLError(ResourceError::CancelledError(KURL())));
+        WebURLError(ResourceError::CancelledError(NullUrl())));
     return;
   }
 
@@ -496,7 +496,8 @@ void WebAssociatedURLLoaderImpl::ContextDestroyed() {
   if (!client_)
     return;
 
-  ReleaseClient()->DidFail(WebURLError(ResourceError::CancelledError(KURL())));
+  ReleaseClient()->DidFail(
+      WebURLError(ResourceError::CancelledError(NullUrl())));
   // |this| may be dead here.
 }
 

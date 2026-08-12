@@ -58,8 +58,8 @@ namespace {
 // 'webkit' or 'Webkit' prefix - both valid as idl names for -webkit- prefixed
 // properties.
 bool HasWebkitPrefix(const AtomicString& property_name) {
-  return property_name.StartsWith("webkit") ||
-         property_name.StartsWith("Webkit");
+  return property_name.starts_with("webkit") ||
+         property_name.starts_with("Webkit");
 }
 
 CSSPropertyID ParseCSSPropertyID(const ExecutionContext* execution_context,
@@ -77,17 +77,17 @@ CSSPropertyID ParseCSSPropertyID(const ExecutionContext* execution_context,
 
   if (HasWebkitPrefix(property_name)) {
     builder.Append('-');
-  } else if (IsASCIIUpper(property_name[0])) {
+  } else if (IsAsciiUpper(property_name[0])) {
     return CSSPropertyID::kInvalid;
   }
 
-  bool has_seen_upper = IsASCIIUpper(property_name[i]);
+  bool has_seen_upper = IsAsciiUpper(property_name[i]);
 
-  builder.Append(ToASCIILower(property_name[i++]));
+  builder.Append(ToAsciiLower(property_name[i++]));
 
   for (; i < length; ++i) {
     UChar c = property_name[i];
-    if (!IsASCIIUpper(c)) {
+    if (!IsAsciiUpper(c)) {
       if (c == '-') {
         has_seen_dash = true;
       }
@@ -95,7 +95,7 @@ CSSPropertyID ParseCSSPropertyID(const ExecutionContext* execution_context,
     } else {
       has_seen_upper = true;
       builder.Append('-');
-      builder.Append(ToASCIILower(c));
+      builder.Append(ToAsciiLower(c));
     }
   }
 
@@ -192,30 +192,23 @@ NamedPropertySetterResult CSSStyleDeclaration::AnonymousNamedSetter(
   if (!IsValidCSSPropertyID(unresolved_property)) {
     return NamedPropertySetterResult::kDidNotIntercept;
   }
-  // We create the ExceptionState manually due to performance issues: adding
-  // [RaisesException] to the IDL causes the bindings layer to expensively
-  // create a std::string to set the ExceptionState's |property_name| argument,
-  // while we can use CSSProperty::GetPropertyName() here (see bug 829408).
-  ExceptionState exception_state(
-      script_state->GetIsolate(), v8::ExceptionContext::kAttributeSet,
-      "CSSStyleDeclaration",
-      CSSProperty::Get(ResolveCSSPropertyID(unresolved_property))
-          .GetPropertyName());
   // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
   // impact is understood.
   SyncScrollAttemptHeuristic::DidSetStyle();
   if (value->IsNumber()) {
-    double double_value = NativeValueTraits<IDLUnrestrictedDouble>::NativeValue(
-        script_state->GetIsolate(), value, exception_state);
-    if (exception_state.HadException()) [[unlikely]] {
-      return NamedPropertySetterResult::kIntercepted;
-    }
+    double double_value = value.As<v8::Number>()->Value();
     if (FastPathSetProperty(unresolved_property, double_value)) {
       return NamedPropertySetterResult::kIntercepted;
     }
     // The fast path failed, e.g. because the property was a longhand,
     // so let the normal string handling deal with it.
   }
+  // We create the ExceptionState manually due to performance issues: adding
+  // [RaisesException] to the IDL causes the bindings layer to expensively
+  // create a std::string to set the ExceptionState's |property_name|
+  // argument, while we can use CSSProperty::GetPropertyName() here (see bug
+  // 829408).
+  ExceptionState exception_state(script_state->GetIsolate());
   if (value->IsString()) {
     // NativeValueTraits::ToBlinkStringView() (called implicitly on conversion)
     // tries fairly hard to make an AtomicString out of the string,
@@ -224,14 +217,14 @@ NamedPropertySetterResult CSSStyleDeclaration::AnonymousNamedSetter(
     // it or parse it in some other way. So if it's short enough, we try to
     // construct a simple StringView on our own.
     const v8::Local<v8::String> string = value.As<v8::String>();
-    if (string->Length() <= 128 && string->IsOneByte()) {
+    uint32_t length = string->Length();
+    if (length <= 128 && string->IsOneByte()) {
       LChar buffer[128];
-      int len =
-          string->WriteOneByte(script_state->GetIsolate(), buffer, /*start=*/0,
-                               /*length=*/-1, v8::String::NO_NULL_TERMINATION);
-      SetPropertyInternal(
-          unresolved_property, String(), StringView(buffer, len), false,
-          execution_context->GetSecureContextMode(), exception_state);
+      string->WriteOneByteV2(script_state->GetIsolate(), 0, length, buffer);
+      SetPropertyInternal(unresolved_property, String(),
+                          StringView(base::span(buffer).first(length)), false,
+                          execution_context->GetSecureContextMode(),
+                          exception_state);
       if (exception_state.HadException()) {
         return NamedPropertySetterResult::kIntercepted;
       }
@@ -287,7 +280,7 @@ void CSSStyleDeclaration::NamedPropertyEnumerator(Vector<String>& names,
       }
     }
     std::sort(property_names.begin(), property_names.end(),
-              WTF::CodeUnitCompareLessThan);
+              CodeUnitCompareLessThan);
   }
   names = property_names;
 }

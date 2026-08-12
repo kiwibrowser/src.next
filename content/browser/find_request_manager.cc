@@ -4,13 +4,13 @@
 
 #include "content/browser/find_request_manager.h"
 
+#include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/containers/queue.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
-#include "base/ranges/algorithm.h"
+#include "base/notimplemented.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/browser/find_in_page_client.h"
@@ -92,7 +92,7 @@ RenderFrameHostImpl* GetPreviousSibling(RenderFrameHostImpl* rfh) {
   // The previous sibling may be in another WebContents.
   if (RenderFrameHostImpl* parent = GetAncestor(rfh)) {
     auto children = GetChildren(parent);
-    auto it = base::ranges::find(children, rfh);
+    auto it = std::ranges::find(children, rfh);
     // It is odd that this rfh may not be a child of its parent, but this is
     // actually possible during teardown, hence the need for the check for
     // "it != children.end()".
@@ -112,7 +112,7 @@ RenderFrameHostImpl* GetNextSibling(RenderFrameHostImpl* rfh) {
   // The next sibling may be in another WebContents.
   if (RenderFrameHostImpl* parent = GetAncestor(rfh)) {
     auto children = GetChildren(parent);
-    auto it = base::ranges::find(children, rfh);
+    auto it = std::ranges::find(children, rfh);
     // It is odd that this RenderFrameHost may not be a child of its parent, but
     // this is actually possible during teardown, hence the need for the check
     // for "it != children.end()".
@@ -294,6 +294,11 @@ FindRequestManager::ActivateNearestFindResultState::
 FindRequestManager::ActivateNearestFindResultState::
     ~ActivateNearestFindResultState() = default;
 
+int FindRequestManager::ActivateNearestFindResultState::GetNextID() {
+  static int next_id = 0;
+  return next_id++;
+}
+
 FindRequestManager::FrameRects::FrameRects() = default;
 FindRequestManager::FrameRects::FrameRects(const std::vector<gfx::RectF>& rects,
                                            int version)
@@ -370,7 +375,7 @@ void FindRequestManager::EmitFindRequest(int request_id,
 
 void FindRequestManager::ForEachAddedFindInPageRenderFrameHost(
     base::FunctionRef<void(RenderFrameHostImpl*)> func_ref) {
-  contents_->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+  contents_->GetPrimaryMainFrame()->ForEachRenderFrameHostImpl(
       [this, func_ref](RenderFrameHostImpl* rfh) {
         if (!CheckFrame(rfh))
           return;
@@ -547,7 +552,7 @@ void FindRequestManager::RemoveFrame(RenderFrameHost* rfh) {
 
   // If no pending find replies are expected for the removed frame, then just
   // report the updated results.
-  if (!base::Contains(pending_initial_replies_, rfh) &&
+  if (!pending_initial_replies_.contains(rfh) &&
       pending_find_next_reply_ != rfh) {
     bool final_update =
         pending_initial_replies_.empty() && !pending_find_next_reply_;
@@ -598,7 +603,7 @@ void FindRequestManager::OnGetNearestFindResultReply(RenderFrameHostImpl* rfh,
                                                      int request_id,
                                                      float distance) {
   if (request_id != activate_.current_request_id ||
-      !base::Contains(activate_.pending_replies, rfh)) {
+      !activate_.pending_replies.contains(rfh)) {
     return;
   }
 
@@ -681,10 +686,19 @@ void FindRequestManager::FindInternal(const FindRequest& request) {
 
     // The find next request will be directed at the focused frame if there is
     // one, or the first frame with matches otherwise.
-    RenderFrameHost* target_rfh =
-        contents_->GetFocusedWebContents()->GetFocusedFrame();
+    auto* focused_web_contents = contents_->GetFocusedWebContents();
+    RenderFrameHost* target_rfh = focused_web_contents
+                                      ? focused_web_contents->GetFocusedFrame()
+                                      : nullptr;
     if (!target_rfh || !CheckFrame(target_rfh))
       target_rfh = GetInitialFrame(request.options->forward);
+
+    // Verify that we have a valid frame before sending the request.
+    if (!target_rfh || !CheckFrame(target_rfh)) {
+      // No valid frame to send the find request to. Advance the queue.
+      AdvanceQueue(request.id);
+      return;
+    }
 
     SendFindRequest(request, target_rfh);
     current_request_ = request;
@@ -696,10 +710,10 @@ void FindRequestManager::FindInternal(const FindRequest& request) {
   Reset(request);
 
   // Add and observe eligible RFHs in the WebContents. And, use
-  // ForEachRenderFrameHost instead of ForEachAddedFindInPageRenderFrameHost
+  // ForEachRenderFrameHostImpl instead of ForEachAddedFindInPageRenderFrameHost
   // because that calls CheckFrame() which will only be true if we've called
   // AddFrame() for the frame.
-  contents_->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+  contents_->GetPrimaryMainFrame()->ForEachRenderFrameHostImpl(
       [this](RenderFrameHostImpl* rfh) {
         auto* wc = WebContents::FromRenderFrameHost(rfh);
         // Make sure each WebContents is only added once.
@@ -795,7 +809,7 @@ RenderFrameHost* FindRequestManager::Traverse(RenderFrameHost* from_rfh,
     RenderFrameHost* current_rfh = rfh;
     if (!matches_only ||
         find_in_page_clients_.find(current_rfh)->second->number_of_matches() ||
-        base::Contains(pending_initial_replies_, current_rfh)) {
+        pending_initial_replies_.contains(current_rfh)) {
       // Note that if there is still a pending reply expected for this frame,
       // then it may have unaccounted matches and will not be skipped via
       // |matches_only|.
@@ -832,7 +846,7 @@ void FindRequestManager::AddFrame(RenderFrameHost* rfh, bool force) {
 bool FindRequestManager::CheckFrame(RenderFrameHost* rfh) const {
   // TODO(crbug.com/40196212): Convert IsFindInPageDisabled to a DCHECK when we
   // replace DidFinishLoad with DidFinishNavigation in FrameObserver.
-  if (!rfh || !base::Contains(find_in_page_clients_, rfh) ||
+  if (!rfh || !find_in_page_clients_.contains(rfh) ||
       IsFindInPageDisabled(rfh)) {
     return false;
   }
@@ -887,9 +901,10 @@ void FindRequestManager::FinalUpdateReceived(int request_id,
     // next frame with matches after this one.
     target_rfh = Traverse(rfh, current_request_.options->forward,
                           true /* matches_only */, true /* wrap */);
-  } else if ((target_rfh =
+  } else if (contents_->GetFocusedWebContents() &&
+             (target_rfh =
                   contents_->GetFocusedWebContents()->GetFocusedFrame()) !=
-             nullptr) {
+                 nullptr) {
     // Otherwise, if there is a focused frame, then the active match will be in
     // the next frame with matches after that one.
     target_rfh = Traverse(target_rfh, current_request_.options->forward,

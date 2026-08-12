@@ -25,8 +25,11 @@
 
 #include "third_party/blink/renderer/core/css/font_face_set_document.h"
 
+#include <optional>
+
 #include "base/metrics/histogram_functions.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/core/css/css_font_face.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
@@ -141,46 +144,53 @@ FontFaceSetDocument::CSSConnectedFontFaceList() const {
 }
 
 void FontFaceSetDocument::FireDoneEventIfPossible() {
-  if (should_fire_loading_event_) {
-    return;
-  }
-  if (!ShouldSignalReady()) {
-    return;
-  }
-  Document* d = GetDocument();
-  if (!d) {
+  Document* document = GetDocument();
+  if (!document || !document->View()) {
     return;
   }
 
-  // If the layout was invalidated in between when we thought layout
-  // was updated and when we're ready to fire the event, just wait
-  // until after the next layout before firing events.
-  if (!d->View() || d->View()->NeedsLayout()) {
+  if (!ShouldSignalReady()) {
+    return;
+  }
+
+  // FireDoneEventIfPossible gets scheduled via PostTask at the end of a
+  // successful style+layout update. An invalidation may have occurred in
+  // the interim, so update style and layout synchronously here.
+  document->UpdateStyleAndLayout(DocumentUpdateReason::kUnknown);
+
+  // These values can change during style+layout update, so check them
+  // *after* the call to UpdateStyleAndLayout.
+  if (should_fire_loading_event_) {
+    return;
+  }
+
+  if (!ShouldSignalReady()) {
     return;
   }
 
   FireDoneEvent();
 }
 
-bool FontFaceSetDocument::ResolveFontStyle(const String& font_string,
-                                           Font& font) {
+const Font* FontFaceSetDocument::ResolveFontStyle(const String& font_string) {
   if (font_string.empty()) {
-    return false;
+    return nullptr;
   }
 
   // Interpret fontString in the same way as the 'font' attribute of
   // CanvasRenderingContext2D.
   auto* parsed_style = CSSParser::ParseFont(font_string, GetExecutionContext());
   if (!parsed_style) {
-    return false;
+    return nullptr;
   }
 
   if (!GetDocument()->documentElement()) {
     auto* font_selector = GetDocument()->GetStyleEngine().GetFontSelector();
-    FontDescription description =
+    std::optional<FontDescription> maybe_description =
         FontStyleResolver::ComputeFont(*parsed_style, font_selector);
-    font = Font(description, font_selector);
-    return true;
+    if (!maybe_description.has_value()) {
+      return nullptr;
+    }
+    return MakeGarbageCollected<Font>(maybe_description.value(), font_selector);
   }
 
   ComputedStyleBuilder builder =
@@ -196,14 +206,14 @@ bool FontFaceSetDocument::ResolveFontStyle(const String& font_string,
   builder.SetFontDescription(default_font_description);
   const ComputedStyle* style = builder.TakeStyle();
 
-  font = GetDocument()->GetStyleEngine().ComputeFont(
+  const Font* font = GetDocument()->GetStyleEngine().ComputeFont(
       *GetDocument()->documentElement(), *style, *parsed_style);
 
   // StyleResolver::ComputeFont() should have set the document's FontSelector
   // to |style|.
-  DCHECK_EQ(font.GetFontSelector(), GetFontSelector());
+  DCHECK_EQ(font->GetFontSelector(), GetFontSelector());
 
-  return true;
+  return font;
 }
 
 Document* FontFaceSetDocument::GetDocument() const {

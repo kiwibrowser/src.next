@@ -17,8 +17,8 @@
 
 static void JNI_DownloadStartupUtils_EnsureDownloadSystemInitialized(
     JNIEnv* env,
-    jboolean is_full_browser_started,
-    jboolean is_off_the_record) {
+    bool is_full_browser_started,
+    bool is_off_the_record) {
   DCHECK(is_full_browser_started || !is_off_the_record)
       << "OffTheRecord mode must load full browser.";
   if (!is_full_browser_started) {
@@ -46,3 +46,5 @@ ProfileKey* DownloadStartupUtils::EnsureDownloadSystemInitialized(
   DownloadManagerUtils::GetInProgressDownloadManager(profile_key);
   return profile_key;
 }
+
+DEFINE_JNI(DownloadStartupUtils)

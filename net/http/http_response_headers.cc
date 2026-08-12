@@ -16,11 +16,11 @@
 #include <string_view>
 #include <utility>
 
+#include "base/byte_count.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/escape.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,10 +28,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "net/base/features.h"
 #include "net/base/parse_number.h"
-#include "net/base/tracing.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_status_code.h"
@@ -39,6 +39,8 @@
 #include "net/http/structured_headers.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_values.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
+#include "third_party/abseil-cpp/absl/strings/ascii.h"
 
 using base::Time;
 
@@ -166,7 +168,7 @@ int ParseStatus(std::string_view status, std::string& append_to) {
   int response_code = -1;
   // For backwards compatibility, overlarge response codes are permitted.
   // base::StringToInt will clamp the value to INT_MAX.
-  base::StringToInt(base::MakeStringPiece(status.begin(), first_non_digit),
+  base::StringToInt(std::string_view(status.begin(), first_non_digit),
                     &response_code);
   CHECK_GE(response_code, 0);
 
@@ -194,26 +196,19 @@ int ParseStatus(std::string_view status, std::string& append_to) {
 
 }  // namespace
 
-const char HttpResponseHeaders::kContentRange[] = "Content-Range";
-const char HttpResponseHeaders::kLastModified[] = "Last-Modified";
-const char HttpResponseHeaders::kVary[] = "Vary";
-
 struct HttpResponseHeaders::ParsedHeader {
   // A header "continuation" contains only a subsequent value for the
   // preceding header.  (Header values are comma separated.)
   bool is_continuation() const { return name_begin == name_end; }
 
-  std::string::const_iterator name_begin;
-  std::string::const_iterator name_end;
-  std::string::const_iterator value_begin;
-  std::string::const_iterator value_end;
+  // Provided for use in HttpResponseHeaders::StrictlyEquals(), which is only
+  // used in testing.
+  bool operator==(const ParsedHeader&) const = default;
 
-  // Write a representation of this object into a tracing proto.
-  void WriteIntoTrace(perfetto::TracedValue context) const {
-    auto dict = std::move(context).WriteDictionary();
-    dict.Add("name", base::MakeStringPiece(name_begin, name_end));
-    dict.Add("value", base::MakeStringPiece(value_begin, value_end));
-  }
+  size_t name_begin;
+  size_t name_end;
+  size_t value_begin;
+  size_t value_end;
 };
 
 //-----------------------------------------------------------------------------
@@ -232,7 +227,10 @@ scoped_refptr<HttpResponseHeaders> HttpResponseHeaders::Builder::Build() {
                                                    status_, headers_);
 }
 
-HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
+class HttpResponseHeaders::HeaderSet : public absl::flat_hash_set<std::string> {
+};
+
+HttpResponseHeaders::HttpResponseHeaders(std::string_view raw_input)
     : response_code_(-1) {
   Parse(raw_input);
 
@@ -244,21 +242,11 @@ HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
   // that would actually create a double call between the original
   // HttpResponseHeader that was serialized, and initialization of the
   // new object from that pickle.
-  if (base::FeatureList::IsEnabled(features::kOptimizeParsingDataUrls)) {
-    std::optional<HttpStatusCode> status_code =
-        TryToGetHttpStatusCode(response_code_);
-    if (status_code.has_value()) {
-      UMA_HISTOGRAM_ENUMERATION("Net.HttpResponseCode2", status_code.value(),
-                                net::HttpStatusCode::HTTP_STATUS_CODE_MAX);
-    }
-  } else {
-    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-        "Net.HttpResponseCode",
-        HttpUtil::MapStatusCodeForHistogram(response_code_),
-        // Note the third argument is only
-        // evaluated once, see macro
-        // definition for details.
-        HttpUtil::GetStatusCodesForHistogram());
+  std::optional<HttpStatusCode> status_code =
+      TryToGetHttpStatusCode(response_code_);
+  if (status_code.has_value()) {
+    UMA_HISTOGRAM_ENUMERATION("Net.HttpResponseCode2", status_code.value(),
+                              net::HttpStatusCode::HTTP_STATUS_CODE_MAX);
   }
 }
 
@@ -301,7 +289,7 @@ HttpResponseHeaders::HttpResponseHeaders(
     // It's okay if we over-estimate the size of `parsed_`, so treat all ','
     // characters as if they might split the value to avoid parsing the value
     // carefully here.
-    const size_t comma_count = base::ranges::count(value, ',') + 1;
+    const size_t comma_count = std::ranges::count(value, ',') + 1;
     expected_parsed_size += comma_count;
     header_contains_comma.push_back(comma_count);
   }
@@ -329,19 +317,19 @@ HttpResponseHeaders::HttpResponseHeaders(
     CheckDoesNotHaveEmbeddedNulls(value);
     // Because std::string iterators are random-access, end() has to point to
     // the position where the next character will be appended.
-    const auto name_begin = raw_headers_.cend();
+    const auto name_begin = raw_headers_.size();
     raw_headers_.append(key);
-    const auto name_end = raw_headers_.cend();
+    const auto name_end = raw_headers_.size();
     raw_headers_.push_back(':');
-    auto values_begin = raw_headers_.cend();
+    auto values_begin = raw_headers_.size();
     raw_headers_.append(value);
-    auto values_end = raw_headers_.cend();
+    auto values_end = raw_headers_.size();
     raw_headers_.push_back('\0');
     // The HTTP/2 standard disallows header values starting or ending with
     // whitespace (RFC 9113 8.2.1). Hopefully the same is also true of HTTP/3.
     // TODO(crbug.com/40282642): Validate that our implementations
     // actually enforce this constraint and change this TrimLWS() to a DCHECK.
-    HttpUtil::TrimLWS(&values_begin, &values_end);
+    HttpUtil::TrimLWS(raw_headers_, values_begin, values_end);
     AddHeader(name_begin, name_end, values_begin, values_end,
               header_contains_comma[index] ? ContainsCommas::kYes
                                            : ContainsCommas::kNo);
@@ -389,59 +377,14 @@ void HttpResponseHeaders::Persist(base::Pickle* pickle,
                                   PersistOptions options) {
   if (options == PERSIST_RAW) {
     pickle->WriteString(raw_headers_);
-    return;  // Done.
+    return;
   }
+  std::vector<uint8_t> serialized = Serialize(options);
+  pickle->WriteData(serialized);
+}
 
-  HeaderSet filter_headers;
-
-  // Construct set of headers to filter out based on options.
-  if ((options & PERSIST_SANS_NON_CACHEABLE) == PERSIST_SANS_NON_CACHEABLE)
-    AddNonCacheableHeaders(&filter_headers);
-
-  if ((options & PERSIST_SANS_COOKIES) == PERSIST_SANS_COOKIES)
-    AddCookieHeaders(&filter_headers);
-
-  if ((options & PERSIST_SANS_CHALLENGES) == PERSIST_SANS_CHALLENGES)
-    AddChallengeHeaders(&filter_headers);
-
-  if ((options & PERSIST_SANS_HOP_BY_HOP) == PERSIST_SANS_HOP_BY_HOP)
-    AddHopByHopHeaders(&filter_headers);
-
-  if ((options & PERSIST_SANS_RANGES) == PERSIST_SANS_RANGES)
-    AddHopContentRangeHeaders(&filter_headers);
-
-  if ((options & PERSIST_SANS_SECURITY_STATE) == PERSIST_SANS_SECURITY_STATE)
-    AddSecurityStateHeaders(&filter_headers);
-
-  std::string blob;
-  blob.reserve(raw_headers_.size());
-
-  // This copies the status line w/ terminator null.
-  // Note raw_headers_ has embedded nulls instead of \n,
-  // so this just copies the first header line.
-  blob.assign(raw_headers_.c_str(), strlen(raw_headers_.c_str()) + 1);
-
-  for (size_t i = 0; i < parsed_.size(); ++i) {
-    DCHECK(!parsed_[i].is_continuation());
-
-    // Locate the start of the next header.
-    size_t k = i;
-    while (++k < parsed_.size() && parsed_[k].is_continuation()) {}
-    --k;
-
-    std::string header_name = base::ToLowerASCII(
-        base::MakeStringPiece(parsed_[i].name_begin, parsed_[i].name_end));
-    if (filter_headers.find(header_name) == filter_headers.end()) {
-      // Make sure there is a null after the value.
-      blob.append(parsed_[i].name_begin, parsed_[k].value_end);
-      blob.push_back('\0');
-    }
-
-    i = k;
-  }
-  blob.push_back('\0');
-
-  pickle->WriteString(blob);
+std::vector<uint8_t> HttpResponseHeaders::SerializeForMojoIpc() const {
+  return Serialize(PERSIST_SANS_COOKIES);
 }
 
 void HttpResponseHeaders::Update(const HttpResponseHeaders& new_headers) {
@@ -468,15 +411,15 @@ void HttpResponseHeaders::Update(const HttpResponseHeaders& new_headers) {
     while (++k < new_parsed.size() && new_parsed[k].is_continuation()) {}
     --k;
 
-    auto name =
-        base::MakeStringPiece(new_parsed[i].name_begin, new_parsed[i].name_end);
+    auto name = new_headers.header_name(new_parsed[i]);
     if (ShouldUpdateHeader(name)) {
       std::string name_lower = base::ToLowerASCII(name);
       updated_headers.insert(name_lower);
 
       // Preserve this header line in the merged result, making sure there is
       // a null after the value.
-      new_raw_headers.append(new_parsed[i].name_begin, new_parsed[k].value_end);
+      new_raw_headers.append(new_headers.subrange(new_parsed[i].name_begin,
+                                                  new_parsed[k].value_end));
       new_raw_headers.push_back('\0');
     }
 
@@ -497,11 +440,10 @@ void HttpResponseHeaders::MergeWithHeaders(std::string raw_headers,
     while (++k < parsed_.size() && parsed_[k].is_continuation()) {}
     --k;
 
-    std::string name = base::ToLowerASCII(
-        base::MakeStringPiece(parsed_[i].name_begin, parsed_[i].name_end));
+    std::string name = base::ToLowerASCII(header_name(parsed_[i]));
     if (headers_to_remove.find(name) == headers_to_remove.end()) {
       // It's ok to preserve this header in the final result.
-      raw_headers.append(parsed_[i].name_begin, parsed_[k].value_end);
+      raw_headers.append(subrange(parsed_[i].name_begin, parsed_[k].value_end));
       raw_headers.push_back('\0');
     }
 
@@ -526,7 +468,7 @@ void HttpResponseHeaders::RemoveHeader(std::string_view name) {
 }
 
 void HttpResponseHeaders::RemoveHeaders(
-    const std::unordered_set<std::string>& header_names) {
+    const std::vector<std::string>& header_names) {
   // Copy up to the null byte.  This just copies the status line.
   std::string new_raw_headers(raw_headers_.c_str());
   new_raw_headers.push_back('\0');
@@ -595,7 +537,7 @@ void HttpResponseHeaders::SetHeader(std::string_view name,
   AddHeader(name, value);
 }
 
-void HttpResponseHeaders::AddCookie(const std::string& cookie_string) {
+void HttpResponseHeaders::AddCookie(std::string_view cookie_string) {
   AddHeader("Set-Cookie", cookie_string);
 }
 
@@ -635,23 +577,22 @@ void HttpResponseHeaders::UpdateWithNewRange(const HttpByteRange& byte_range,
   AddHeader(kLengthHeader, base::StringPrintf("%" PRId64, range_len));
 }
 
-void HttpResponseHeaders::Parse(const std::string& raw_input) {
+void HttpResponseHeaders::Parse(std::string_view raw_input) {
   raw_headers_.reserve(raw_input.size());
   // TODO(crbug.com/40277776): Call reserve() on `parsed_` with an
   // appropriate value.
 
   // ParseStatusLine adds a normalized status line to raw_headers_
-  std::string::const_iterator line_begin = raw_input.begin();
-  std::string::const_iterator line_end = base::ranges::find(raw_input, '\0');
+  size_t line_end = raw_input.find('\0');
   // has_headers = true, if there is any data following the status line.
   // Used by ParseStatusLine() to decide if a HTTP/0.9 is really a HTTP/1.0.
   bool has_headers =
-      (line_end != raw_input.end() && (line_end + 1) != raw_input.end() &&
-       *(line_end + 1) != '\0');
-  ParseStatusLine(line_begin, line_end, has_headers);
+      (line_end != std::string::npos && (line_end + 1) != raw_input.size() &&
+       raw_input[line_end + 1] != '\0');
+  ParseStatusLine(raw_input.substr(0, line_end), has_headers);
   raw_headers_.push_back('\0');  // Terminate status line with a null.
 
-  if (line_end == raw_input.end()) {
+  if (line_end == std::string::npos) {
     raw_headers_.push_back('\0');  // Ensure the headers end with a double null.
 
     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
@@ -659,12 +600,12 @@ void HttpResponseHeaders::Parse(const std::string& raw_input) {
     return;
   }
 
-  // Including a terminating null byte.
+  // Length of the written status line, including the terminating null byte.
   size_t status_line_len = raw_headers_.size();
 
-  // Now, we add the rest of the raw headers to raw_headers_, and begin parsing
-  // it (to populate our parsed_ vector).
-  raw_headers_.append(line_end + 1, raw_input.end());
+  // Now, we add the rest of the raw headers to `raw_headers_`, and begin
+  // parsing it (to populate our `parsed_` vector).
+  raw_headers_.append(raw_input.substr(line_end + 1));
 
   // Ensure the headers end with a double null.
   while (raw_headers_.size() < 2 ||
@@ -673,14 +614,14 @@ void HttpResponseHeaders::Parse(const std::string& raw_input) {
     raw_headers_.push_back('\0');
   }
 
-  // Adjust to point at the null byte following the status line
-  line_end = raw_headers_.begin() + status_line_len - 1;
-
-  HttpUtil::HeadersIterator headers(line_end + 1, raw_headers_.end(),
-                                    std::string(1, '\0'));
+  HttpUtil::HeadersIterator headers(
+      std::string_view(raw_headers_).substr(status_line_len),
+      std::string(1, '\0'));
   while (headers.GetNext()) {
-    AddHeader(headers.name_begin(), headers.name_end(), headers.values_begin(),
-              headers.values_end(), ContainsCommas::kMaybe);
+    AddHeader(status_line_len + headers.name_begin(),
+              status_line_len + headers.name_end(),
+              status_line_len + headers.values_begin(),
+              status_line_len + headers.values_end(), ContainsCommas::kMaybe);
   }
 
   DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
@@ -704,11 +645,11 @@ std::optional<std::string> HttpResponseHeaders::GetNormalizedHeader(
       value.emplace();
     }
 
-    std::string::const_iterator value_begin = parsed_[i].value_begin;
-    std::string::const_iterator value_end = parsed_[i].value_end;
+    size_t value_begin = parsed_[i].value_begin;
+    size_t value_end = parsed_[i].value_end;
     while (++i < parsed_.size() && parsed_[i].is_continuation())
       value_end = parsed_[i].value_end;
-    value->append(value_begin, value_end);
+    value->append(subrange(value_begin, value_end));
   }
 
   return value;
@@ -725,7 +666,7 @@ std::string HttpResponseHeaders::GetStatusText() const {
   // '<http_version> SP <response_code> SP <status_text>'.
   std::string status_text = GetStatusLine();
   // Seek to beginning of <response_code>.
-  std::string::const_iterator begin = base::ranges::find(status_text, ' ');
+  std::string::const_iterator begin = std::ranges::find(status_text, ' ');
   std::string::const_iterator end = status_text.end();
   CHECK(begin != end);
   ++begin;
@@ -748,14 +689,14 @@ bool HttpResponseHeaders::EnumerateHeaderLines(size_t* iter,
 
   DCHECK(!parsed_[i].is_continuation());
 
-  name->assign(parsed_[i].name_begin, parsed_[i].name_end);
+  name->assign(header_name(parsed_[i]));
 
-  std::string::const_iterator value_begin = parsed_[i].value_begin;
-  std::string::const_iterator value_end = parsed_[i].value_end;
+  size_t value_begin = parsed_[i].value_begin;
+  size_t value_end = parsed_[i].value_end;
   while (++i < parsed_.size() && parsed_[i].is_continuation())
     value_end = parsed_[i].value_end;
 
-  value->assign(value_begin, value_end);
+  value->assign(subrange(value_begin, value_end));
 
   *iter = i;
   return true;
@@ -782,7 +723,7 @@ std::optional<std::string_view> HttpResponseHeaders::EnumerateHeader(
 
   if (iter)
     *iter = i + 1;
-  return std::string_view(parsed_[i].value_begin, parsed_[i].value_end);
+  return header_value(parsed_[i]);
 }
 
 bool HttpResponseHeaders::EnumerateHeader(size_t* iter,
@@ -820,30 +761,27 @@ HttpResponseHeaders::~HttpResponseHeaders() = default;
 // Note: this implementation implicitly assumes that line_end points at a valid
 // sentinel character (such as '\0').
 // static
-HttpVersion HttpResponseHeaders::ParseVersion(
-    std::string::const_iterator line_begin,
-    std::string::const_iterator line_end) {
-  std::string::const_iterator p = line_begin;
+HttpVersion HttpResponseHeaders::ParseVersion(std::string_view line) {
+  size_t p = 0;
 
   // RFC9112 Section 2.3:
   // HTTP-version  = HTTP-name "/" DIGIT "." DIGIT
   // HTTP-name     = %s"HTTP"
 
-  if (!base::StartsWith(base::MakeStringPiece(line_begin, line_end), "http",
-                        base::CompareCase::INSENSITIVE_ASCII)) {
+  if (!base::StartsWith(line, "http", base::CompareCase::INSENSITIVE_ASCII)) {
     DVLOG(1) << "missing status line";
     return HttpVersion();
   }
 
   p += 4;
 
-  if (p >= line_end || *p != '/') {
+  if (p >= line.size() || line[p] != '/') {
     DVLOG(1) << "missing version";
     return HttpVersion();
   }
 
-  std::string::const_iterator dot = std::find(p, line_end, '.');
-  if (dot == line_end) {
+  size_t dot = line.find('.', p);
+  if (dot == std::string_view::npos || dot + 1 == line.size()) {
     DVLOG(1) << "malformed version";
     return HttpVersion();
   }
@@ -851,25 +789,23 @@ HttpVersion HttpResponseHeaders::ParseVersion(
   ++p;  // from / to first digit.
   ++dot;  // from . to second digit.
 
-  if (!(base::IsAsciiDigit(*p) && base::IsAsciiDigit(*dot))) {
+  if (!(base::IsAsciiDigit(line[p]) && base::IsAsciiDigit(line[dot]))) {
     DVLOG(1) << "malformed version number";
     return HttpVersion();
   }
 
-  uint16_t major = *p - '0';
-  uint16_t minor = *dot - '0';
+  uint16_t major = line[p] - '0';
+  uint16_t minor = line[dot] - '0';
 
   return HttpVersion(major, minor);
 }
 
 // Note: this implementation implicitly assumes that line_end points at a valid
 // sentinel character (such as '\0').
-void HttpResponseHeaders::ParseStatusLine(
-    std::string::const_iterator line_begin,
-    std::string::const_iterator line_end,
-    bool has_headers) {
+void HttpResponseHeaders::ParseStatusLine(std::string_view line,
+                                          bool has_headers) {
   // Extract the version number
-  HttpVersion parsed_http_version = ParseVersion(line_begin, line_end);
+  HttpVersion parsed_http_version = ParseVersion(line);
 
   // Clamp the version number to one of: {0.9, 1.0, 1.1, 2.0}
   if (parsed_http_version == HttpVersion(0, 9) && !has_headers) {
@@ -892,17 +828,16 @@ void HttpResponseHeaders::ParseStatusLine(
   }
 
   // TODO(eroman): this doesn't make sense if ParseVersion failed.
-  std::string::const_iterator p = std::find(line_begin, line_end, ' ');
+  size_t space = line.find(' ');
 
-  if (p == line_end) {
+  if (space == std::string_view::npos) {
     DVLOG(1) << "missing response status; assuming 200 OK";
     raw_headers_.append(" 200 OK");
     response_code_ = HTTP_OK;
     return;
   }
 
-  response_code_ =
-      ParseStatus(base::MakeStringPiece(p + 1, line_end), raw_headers_);
+  response_code_ = ParseStatus(line.substr(space + 1), raw_headers_);
 }
 
 size_t HttpResponseHeaders::FindHeader(size_t from,
@@ -910,8 +845,7 @@ size_t HttpResponseHeaders::FindHeader(size_t from,
   for (size_t i = from; i < parsed_.size(); ++i) {
     if (parsed_[i].is_continuation())
       continue;
-    auto name =
-        base::MakeStringPiece(parsed_[i].name_begin, parsed_[i].name_end);
+    auto name = header_name(parsed_[i]);
     if (base::EqualsCaseInsensitiveASCII(search, name))
       return i;
   }
@@ -919,100 +853,152 @@ size_t HttpResponseHeaders::FindHeader(size_t from,
   return std::string::npos;
 }
 
-std::optional<base::TimeDelta> HttpResponseHeaders::GetCacheControlDirective(
-    std::string_view directive) const {
-  static constexpr std::string_view name("cache-control");
-  std::optional<std::string_view> value;
+std::optional<base::TimeDelta> HttpResponseHeaders::ParseSeconds(
+    std::string_view value) const {
+  // 1*DIGIT with leading and trailing spaces, as described at
+  // https://datatracker.ietf.org/doc/html/rfc7234#section-1.2.1.
+  value = base::TrimString(value, " ", base::TRIM_ALL);
+  if (value.empty() || !std::ranges::all_of(value, absl::ascii_isdigit)) {
+    return std::nullopt;
+  }
+  int64_t seconds = 0;
+  base::StringToInt64(value, &seconds);
+  // We ignore the return value because we've already checked the input
+  // string. For the overflow case we use
+  // base::TimeDelta::FiniteMax().InSeconds().
+  seconds = std::min(seconds, base::TimeDelta::FiniteMax().InSeconds());
+  return base::Seconds(seconds);
+}
 
-  size_t directive_size = directive.size();
+std::string_view HttpResponseHeaders::subrange(size_t begin, size_t end) const {
+  return std::string_view(raw_headers_).substr(begin, end - begin);
+}
 
-  size_t iter = 0;
-  while ((value = EnumerateHeader(&iter, name))) {
-    if (!base::StartsWith(*value, directive,
-                          base::CompareCase::INSENSITIVE_ASCII)) {
-      continue;
-    }
-    if (value->size() == directive_size || (*value)[directive_size] != '=') {
-      continue;
-    }
-    // 1*DIGIT with leading and trailing spaces, as described at
-    // https://datatracker.ietf.org/doc/html/rfc7234#section-1.2.1.
-    auto start = value->cbegin() + directive_size + 1;
-    auto end = value->cend();
-    while (start < end && *start == ' ') {
-      // leading spaces
-      ++start;
-    }
-    while (start < end - 1 && *(end - 1) == ' ') {
-      // trailing spaces
-      --end;
-    }
-    if (start == end ||
-        !std::all_of(start, end, [](char c) { return '0' <= c && c <= '9'; })) {
-      continue;
-    }
-    int64_t seconds = 0;
-    base::StringToInt64(base::MakeStringPiece(start, end), &seconds);
-    // We ignore the return value because we've already checked the input
-    // string. For the overflow case we use
-    // base::TimeDelta::FiniteMax().InSeconds().
-    seconds = std::min(seconds, base::TimeDelta::FiniteMax().InSeconds());
-    return base::Seconds(seconds);
+std::vector<uint8_t> HttpResponseHeaders::Serialize(
+    PersistOptions options) const {
+  CHECK(options != PERSIST_RAW);
+
+  HeaderSet filter_headers;
+
+  // Construct set of headers to filter out based on options.
+  if ((options & PERSIST_SANS_NON_CACHEABLE) == PERSIST_SANS_NON_CACHEABLE) {
+    AddNonCacheableHeaders(&filter_headers);
   }
 
+  if ((options & PERSIST_SANS_COOKIES) == PERSIST_SANS_COOKIES) {
+    AddCookieHeaders(&filter_headers);
+  }
+
+  if ((options & PERSIST_SANS_CHALLENGES) == PERSIST_SANS_CHALLENGES) {
+    AddChallengeHeaders(&filter_headers);
+  }
+
+  if ((options & PERSIST_SANS_HOP_BY_HOP) == PERSIST_SANS_HOP_BY_HOP) {
+    AddHopByHopHeaders(&filter_headers);
+  }
+
+  if ((options & PERSIST_SANS_RANGES) == PERSIST_SANS_RANGES) {
+    AddHopContentRangeHeaders(&filter_headers);
+  }
+
+  if ((options & PERSIST_SANS_SECURITY_STATE) == PERSIST_SANS_SECURITY_STATE) {
+    AddSecurityStateHeaders(&filter_headers);
+  }
+
+  std::string blob;
+  blob.reserve(raw_headers_.size());
+
+  // This copies the status line w/ terminator null.
+  // Note raw_headers_ has embedded nulls instead of \n,
+  // so this just copies the first header line.
+  blob.assign(raw_headers_.c_str(), strlen(raw_headers_.c_str()) + 1);
+
+  for (size_t i = 0; i < parsed_.size(); ++i) {
+    DCHECK(!parsed_[i].is_continuation());
+
+    // Locate the start of the next header.
+    size_t k = i;
+    while (++k < parsed_.size() && parsed_[k].is_continuation()) {
+    }
+    --k;
+
+    std::string header = base::ToLowerASCII(header_name(parsed_[i]));
+    if (filter_headers.find(header) == filter_headers.end()) {
+      // Make sure there is a null after the value.
+      blob.append(subrange(parsed_[i].name_begin, parsed_[k].value_end));
+      blob.push_back('\0');
+    }
+
+    i = k;
+  }
+  blob.push_back('\0');
+
+  return std::vector<uint8_t>(blob.begin(), blob.end());
+}
+
+std::string_view HttpResponseHeaders::header_name(
+    const ParsedHeader& parsed) const {
+  return subrange(parsed.name_begin, parsed.name_end);
+}
+
+std::string_view HttpResponseHeaders::header_value(
+    const ParsedHeader& parsed) const {
+  return subrange(parsed.value_begin, parsed.value_end);
+}
+
+std::optional<base::TimeDelta>
+HttpResponseHeaders::GetCacheControlHeaderValueForTesting(
+    const std::string_view directive) const {
+  for (size_t iter = 0; auto value = EnumerateHeader(&iter, kCacheControl);) {
+    const std::optional<std::string_view> directive_value = base::RemovePrefix(
+        *value, directive, base::CompareCase::INSENSITIVE_ASCII);
+    if (directive_value.has_value()) {
+      const auto delta = ParseSeconds(*directive_value);
+      if (delta.has_value()) {
+        return delta;
+      }
+    }
+  }
   return std::nullopt;
 }
 
-void HttpResponseHeaders::AddHeader(std::string::const_iterator name_begin,
-                                    std::string::const_iterator name_end,
-                                    std::string::const_iterator values_begin,
-                                    std::string::const_iterator values_end,
+void HttpResponseHeaders::AddHeader(size_t name_begin,
+                                    size_t name_end,
+                                    size_t values_begin,
+                                    size_t values_end,
                                     ContainsCommas contains_commas) {
   // If the header can be coalesced, then we should split it up.
   if (values_begin == values_end ||
-      HttpUtil::IsNonCoalescingHeader(
-          base::MakeStringPiece(name_begin, name_end)) ||
+      HttpUtil::IsNonCoalescingHeader(subrange(name_begin, name_end)) ||
       contains_commas == ContainsCommas::kNo) {
     AddToParsed(name_begin, name_end, values_begin, values_end);
   } else {
-    std::string_view values = base::MakeStringPiece(values_begin, values_end);
+    std::string_view values = subrange(values_begin, values_end);
     HttpUtil::ValuesIterator it(values, ',', /*ignore_empty_values=*/false);
     while (it.GetNext()) {
-      // Convert from a string_view back to a string iterator. To do this,
-      // find the offset of the start of `it.value()` relative to to the start
-      // of `values`, and add it to to the start of values.
-      //
-      // TODO(crbug.com/369533090): Converting from a string_view back to a
-      // string iterator is awkward. Switch this class to using string_views.
-      std::string::const_iterator sub_value_begin =
-          values_begin + (it.value().data() - values.data());
-      std::string::const_iterator sub_value_end =
-          sub_value_begin + it.value().length();
+      // Calculate offsets of each value in [values_begin, values_end], relative
+      // to the start of `raw_headers_`.
+      size_t value_begin = values_begin + it.value_begin();
+      size_t value_end = values_begin + it.value_end();
 
-      AddToParsed(name_begin, name_end, sub_value_begin, sub_value_end);
+      AddToParsed(name_begin, name_end, value_begin, value_end);
       // clobber these so that subsequent values are treated as continuations
       name_begin = name_end = values_end;
     }
   }
 }
 
-void HttpResponseHeaders::AddToParsed(std::string::const_iterator name_begin,
-                                      std::string::const_iterator name_end,
-                                      std::string::const_iterator value_begin,
-                                      std::string::const_iterator value_end) {
-  ParsedHeader header;
-  header.name_begin = name_begin;
-  header.name_end = name_end;
-  header.value_begin = value_begin;
-  header.value_end = value_end;
-  parsed_.push_back(header);
+void HttpResponseHeaders::AddToParsed(size_t name_begin,
+                                      size_t name_end,
+                                      size_t value_begin,
+                                      size_t value_end) {
+  parsed_.emplace_back(name_begin, name_end, value_begin, value_end);
 }
 
 void HttpResponseHeaders::AddNonCacheableHeaders(HeaderSet* result) const {
   // Add server specified transients.  Any 'cache-control: no-cache="foo,bar"'
   // headers present in the response specify additional headers that we should
   // not store in the cache.
-  const char kCacheControl[] = "cache-control";
   const char kPrefix[] = "no-cache=\"";
   const size_t kPrefixLen = sizeof(kPrefix) - 1;
 
@@ -1082,11 +1068,17 @@ void HttpResponseHeaders::GetMimeTypeAndCharset(std::string* mime_type,
   mime_type->clear();
   charset->clear();
 
-  std::optional<std::string_view> value;
+  std::optional<std::string> combined_value =
+      GetNormalizedHeader("content-type");
+  if (!combined_value) {
+    return;
+  }
+
   bool had_charset = false;
-  size_t iter = 0;
-  while ((value = EnumerateHeader(&iter, "content-type"))) {
-    HttpUtil::ParseContentType(*value, mime_type, charset, &had_charset,
+  HttpUtil::ValuesIterator it(*combined_value, ',',
+                              /*ignore_empty_values=*/true);
+  while (it.GetNext()) {
+    HttpUtil::ParseContentType(it.value(), mime_type, charset, &had_charset,
                                /*boundary=*/nullptr);
   }
 }
@@ -1119,8 +1111,7 @@ bool HttpResponseHeaders::IsRedirect(std::string* location) const {
   } while (parsed_[i].value_begin == parsed_[i].value_end);
 
   if (location) {
-    auto location_strpiece =
-        base::MakeStringPiece(parsed_[i].value_begin, parsed_[i].value_end);
+    auto location_strpiece = header_value(parsed_[i]);
     // Escape any non-ASCII characters to preserve them.  The server should
     // only be returning ASCII here, but for compat we need to do this.
     //
@@ -1146,7 +1137,7 @@ bool HttpResponseHeaders::HasStorageAccessRetryHeader(
   if (!item || !item->item.is_token() || item->item.GetString() != "retry") {
     return false;
   }
-  return base::ranges::any_of(
+  return std::ranges::any_of(
       item->params, [&](const auto& key_and_value) -> bool {
         const auto [key, value] = key_and_value;
         if (key != "allowed-origin") {
@@ -1185,9 +1176,9 @@ bool HttpResponseHeaders::IsRedirectResponseCode(int response_code) {
 //   freshness_lifetime + stale_while_revalidate > current_age
 //
 ValidationType HttpResponseHeaders::RequiresValidation(
-    const Time& request_time,
-    const Time& response_time,
-    const Time& current_time) const {
+    Time request_time,
+    Time response_time,
+    Time current_time) const {
   FreshnessLifetimes lifetimes = GetFreshnessLifetimes(response_time);
   if (lifetimes.freshness.is_zero() && lifetimes.staleness.is_zero())
     return VALIDATION_SYNCHRONOUS;
@@ -1204,12 +1195,45 @@ ValidationType HttpResponseHeaders::RequiresValidation(
   return VALIDATION_SYNCHRONOUS;
 }
 
+bool HttpResponseHeaders::HasCacheRestriction() const {
+  for (size_t iter = 0; auto value = EnumerateHeader(&iter, kCacheControl);) {
+    if (base::EqualsCaseInsensitiveASCII(*value, kNoCache) ||
+        base::EqualsCaseInsensitiveASCII(*value, kNoStore)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+HttpResponseHeaders::CacheControlFreshnessDirectives
+HttpResponseHeaders::ParseCacheControlDirectivesForFreshness() const {
+  CacheControlFreshnessDirectives directives;
+  for (size_t iter = 0; auto value = EnumerateHeader(&iter, kCacheControl);) {
+    // Result of calling base::RemovePrefix() for values that have prefixes.
+    // nullopt if the prefix that is searched for is not present.
+    std::optional<std::string_view> with_prefix_removed;
+    if (base::EqualsCaseInsensitiveASCII(*value, kMustRevalidate)) {
+      directives.must_revalidate = true;
+    } else if (!directives.max_age &&
+               (with_prefix_removed = base::RemovePrefix(
+                    *value, kMaxAge, base::CompareCase::INSENSITIVE_ASCII))) {
+      directives.max_age = ParseSeconds(*with_prefix_removed);
+    } else if (!directives.stale_while_revalidate &&
+               (with_prefix_removed =
+                    base::RemovePrefix(*value, kStaleWhileRevalidate,
+                                       base::CompareCase::INSENSITIVE_ASCII))) {
+      directives.stale_while_revalidate = ParseSeconds(*with_prefix_removed);
+    }
+  }
+  return directives;
+}
+
 // From RFC 2616 section 13.2.4:
 //
 // The max-age directive takes priority over Expires, so if max-age is present
 // in a response, the calculation is simply:
 //
-//   freshness_lifetime = max_age_value
+//   freshness_lifetime = max_age
 //
 // Otherwise, if Expires is present in the response, the calculation is:
 //
@@ -1228,32 +1252,29 @@ ValidationType HttpResponseHeaders::RequiresValidation(
 // the |staleness| time, unless it overridden by another directive.
 //
 HttpResponseHeaders::FreshnessLifetimes
-HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
+HttpResponseHeaders::GetFreshnessLifetimes(Time response_time) const {
   FreshnessLifetimes lifetimes;
   // Check for headers that force a response to never be fresh.  For backwards
   // compat, we treat "Pragma: no-cache" as a synonym for "Cache-Control:
   // no-cache" even though RFC 2616 does not specify it.
-  if (HasHeaderValue("cache-control", "no-cache") ||
-      HasHeaderValue("cache-control", "no-store") ||
-      HasHeaderValue("pragma", "no-cache")) {
+
+  if (HasCacheRestriction() || HasHeaderValue("pragma", "no-cache")) {
     return lifetimes;
   }
 
+  auto [must_revalidate, max_age, stale_while_revalidate] =
+      ParseCacheControlDirectivesForFreshness();
   // Cache-Control directive must_revalidate overrides stale-while-revalidate.
-  bool must_revalidate = HasHeaderValue("cache-control", "must-revalidate");
-
   lifetimes.staleness =
-      must_revalidate
-          ? base::TimeDelta()
-          : GetStaleWhileRevalidateValue().value_or(base::TimeDelta());
+      must_revalidate ? base::TimeDelta()
+                      : stale_while_revalidate.value_or(base::TimeDelta());
 
   // NOTE: "Cache-Control: max-age" overrides Expires, so we only check the
   // Expires header after checking for max-age in GetFreshnessLifetimes.  This
   // is important since "Expires: <date in the past>" means not fresh, but
   // it should not trump a max-age value.
-  std::optional<base::TimeDelta> max_age_value = GetMaxAgeValue();
-  if (max_age_value) {
-    lifetimes.freshness = max_age_value.value();
+  if (max_age) {
+    lifetimes.freshness = max_age.value();
     return lifetimes;
   }
 
@@ -1372,10 +1393,9 @@ HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
 //     resident_time = now - response_time;
 //     current_age = corrected_initial_age + resident_time;
 //
-base::TimeDelta HttpResponseHeaders::GetCurrentAge(
-    const Time& request_time,
-    const Time& response_time,
-    const Time& current_time) const {
+base::TimeDelta HttpResponseHeaders::GetCurrentAge(Time request_time,
+                                                   Time response_time,
+                                                   Time current_time) const {
   // If there is no Date header, then assume that the server response was
   // generated at the time when we received the response.
   Time date_value = GetDateValue().value_or(response_time);
@@ -1396,7 +1416,7 @@ base::TimeDelta HttpResponseHeaders::GetCurrentAge(
 }
 
 std::optional<base::TimeDelta> HttpResponseHeaders::GetMaxAgeValue() const {
-  return GetCacheControlDirective("max-age");
+  return GetCacheControlHeaderValueForTesting(kMaxAge);
 }
 
 std::optional<base::TimeDelta> HttpResponseHeaders::GetAgeValue() const {
@@ -1436,7 +1456,7 @@ std::optional<Time> HttpResponseHeaders::GetExpiresValue() const {
 
 std::optional<base::TimeDelta>
 HttpResponseHeaders::GetStaleWhileRevalidateValue() const {
-  return GetCacheControlDirective("stale-while-revalidate");
+  return GetCacheControlHeaderValueForTesting(kStaleWhileRevalidate);
 }
 
 std::optional<Time> HttpResponseHeaders::GetTimeValuedHeader(
@@ -1451,9 +1471,7 @@ std::optional<Time> HttpResponseHeaders::GetTimeValuedHeader(
   //
   // > A cache recipient MUST interpret invalid date formats, especially the
   // > value "0", as representing a time in the past (i.e., "already expired").
-  if (base::FeatureList::IsEnabled(
-          features::kTreatHTTPExpiresHeaderValueZeroAsExpired) &&
-      name == "Expires" && *value == "0") {
+  if (name == "Expires" && *value == "0") {
     return Time::Min();
   }
 
@@ -1527,27 +1545,31 @@ bool HttpResponseHeaders::HasValidators() const {
 
 // From RFC 2616:
 // Content-Length = "Content-Length" ":" 1*DIGIT
-int64_t HttpResponseHeaders::GetContentLength() const {
-  return GetInt64HeaderValue("content-length");
+std::optional<base::ByteCount> HttpResponseHeaders::GetContentLength() const {
+  std::optional<int64_t> result = GetInt64HeaderValue("content-length");
+  if (result.has_value()) {
+    return base::ByteCount(result.value());
+  }
+  return std::nullopt;
 }
 
-int64_t HttpResponseHeaders::GetInt64HeaderValue(
-    const std::string& header) const {
+std::optional<int64_t> HttpResponseHeaders::GetInt64HeaderValue(
+    std::string_view header) const {
   size_t iter = 0;
   std::optional<std::string_view> content_length =
       EnumerateHeader(&iter, header);
   if (!content_length || content_length->empty()) {
-    return -1;
+    return std::nullopt;
   }
 
   if ((*content_length)[0] == '+') {
-    return -1;
+    return std::nullopt;
   }
 
   int64_t result;
   bool ok = base::StringToInt64(*content_length, &result);
   if (!ok || result < 0) {
-    return -1;
+    return std::nullopt;
   }
 
   return result;
@@ -1569,10 +1591,10 @@ bool HttpResponseHeaders::GetContentRangeFor206(
       *content_range, first_byte_position, last_byte_position, instance_length);
 }
 
-base::Value::Dict HttpResponseHeaders::NetLogParams(
+base::DictValue HttpResponseHeaders::NetLogParams(
     NetLogCaptureMode capture_mode) const {
-  base::Value::Dict dict;
-  base::Value::List headers;
+  base::DictValue dict;
+  base::ListValue headers;
   headers.Append(NetLogStringValue(GetStatusLine()));
   size_t iterator = 0;
   std::string name;
@@ -1603,31 +1625,23 @@ bool HttpResponseHeaders::IsCookieResponseHeader(std::string_view name) {
 void HttpResponseHeaders::WriteIntoTrace(perfetto::TracedValue context) const {
   perfetto::TracedDictionary dict = std::move(context).WriteDictionary();
   dict.Add("response_code", response_code_);
-  dict.Add("headers", parsed_);
+
+  auto headers = dict.AddArray("headers");
+  for (const auto& parsed : parsed_) {
+    auto header = headers.AppendDictionary();
+    header.Add("name", header_name(parsed));
+    header.Add("value", header_value(parsed));
+  }
 }
 
 bool HttpResponseHeaders::StrictlyEquals(
     const HttpResponseHeaders& other) const {
-  if (http_version_ != other.http_version_ ||
-      response_code_ != other.response_code_ ||
-      raw_headers_ != other.raw_headers_ ||
-      parsed_.size() != other.parsed_.size()) {
-    return false;
-  }
-
-  auto offsets_match = [&](std::string::const_iterator this_offset,
-                           std::string::const_iterator other_offset) {
-    return this_offset - raw_headers_.begin() ==
-           other_offset - other.raw_headers_.begin();
-  };
-  return std::mismatch(parsed_.begin(), parsed_.end(), other.parsed_.begin(),
-                       [&](const ParsedHeader& lhs, const ParsedHeader& rhs) {
-                         return offsets_match(lhs.name_begin, rhs.name_begin) &&
-                                offsets_match(lhs.name_end, rhs.name_end) &&
-                                offsets_match(lhs.value_begin,
-                                              rhs.value_begin) &&
-                                offsets_match(lhs.value_end, rhs.value_end);
-                       }) == std::pair(parsed_.end(), other.parsed_.end());
+  // This is used only for unit testing this class, so while the `raw_headers_`
+  // values being equal should imply that `parsed_` are equal as well, assuming
+  // there are no bugs, this method exists in part to detect for such bugs.
+  return http_version_ == other.http_version_ &&
+         response_code_ == other.response_code_ &&
+         raw_headers_ == other.raw_headers_ && parsed_ == other.parsed_;
 }
 
 }  // namespace net

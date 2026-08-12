@@ -86,6 +86,11 @@ void GpuDataManagerImpl::SetSkiaGraphiteEnabledForTesting(bool enabled) {
   private_->SetSkiaGraphiteEnabledForTesting(enabled);  // IN-TEST
 }
 
+void GpuDataManagerImpl::SetInitializedForTesting(bool initialized) {
+  base::AutoLock auto_lock(lock_);
+  private_->SetInitializedForTesting(initialized);  // IN-TEST
+}
+
 gpu::GPUInfo GpuDataManagerImpl::GetGPUInfo() {
   base::AutoLock auto_lock(lock_);
   return private_->GetGPUInfo();
@@ -102,11 +107,10 @@ bool GpuDataManagerImpl::GpuAccessAllowed(std::string* reason) {
   return private_->GpuAccessAllowed(reason);
 }
 
-void GpuDataManagerImpl::RequestDx12VulkanVideoGpuInfoIfNeeded(
-    GpuInfoRequest request,
-    bool delayed) {
+void GpuDataManagerImpl::RequestGpuInfoIfNeeded(GpuInfoRequest request,
+                                                bool delayed) {
   base::AutoLock auto_lock(lock_);
-  private_->RequestDx12VulkanVideoGpuInfoIfNeeded(request, delayed);
+  private_->RequestGpuInfoIfNeeded(request, delayed);
 }
 
 bool GpuDataManagerImpl::IsEssentialGpuInfoAvailable() {
@@ -150,6 +154,11 @@ bool GpuDataManagerImpl::HardwareAccelerationEnabled() {
   return private_->HardwareAccelerationEnabled();
 }
 
+bool GpuDataManagerImpl::IsGpuRasterizationForUIEnabled() {
+  base::AutoLock auto_lock(lock_);
+  return private_->IsGpuRasterizationForUIEnabled();
+}
+
 void GpuDataManagerImpl::AppendGpuCommandLine(base::CommandLine* command_line,
                                               GpuProcessKind kind) {
   base::AutoLock auto_lock(lock_);
@@ -176,11 +185,6 @@ void GpuDataManagerImpl::UpdateDirectXInfo(uint32_t d3d12_feature_level,
   private_->UpdateDirectXInfo(d3d12_feature_level, directml_feature_level);
 }
 
-void GpuDataManagerImpl::UpdateVulkanInfo(uint32_t vulkan_version) {
-  base::AutoLock auto_lock(lock_);
-  private_->UpdateVulkanInfo(vulkan_version);
-}
-
 void GpuDataManagerImpl::UpdateDevicePerfInfo(
     const gpu::DevicePerfInfo& device_perf_info) {
   base::AutoLock auto_lock(lock_);
@@ -202,24 +206,29 @@ void GpuDataManagerImpl::UpdateDirectXRequestStatus(bool request_continues) {
   private_->UpdateDirectXRequestStatus(request_continues);
 }
 
-void GpuDataManagerImpl::UpdateVulkanRequestStatus(bool request_continues) {
-  base::AutoLock auto_lock(lock_);
-  private_->UpdateVulkanRequestStatus(request_continues);
-}
-
 bool GpuDataManagerImpl::DirectXRequested() const {
   base::AutoLock auto_lock(lock_);
   return private_->DirectXRequested();
 }
 
-bool GpuDataManagerImpl::VulkanRequested() const {
-  base::AutoLock auto_lock(lock_);
-  return private_->VulkanRequested();
-}
-
 void GpuDataManagerImpl::TerminateInfoCollectionGpuProcess() {
   base::AutoLock auto_lock(lock_);
   private_->TerminateInfoCollectionGpuProcess();
+}
+
+void GpuDataManagerImpl::SetUseAdapterLuid(const CHROME_LUID& luid) {
+  base::AutoLock auto_lock(lock_);
+  private_->SetUseAdapterLuid(luid);
+}
+
+void GpuDataManagerImpl::ClearUseAdapterLuid() {
+  base::AutoLock auto_lock(lock_);
+  private_->ClearUseAdapterLuid();
+}
+
+std::optional<CHROME_LUID> GpuDataManagerImpl::GetUseAdapterLuid() const {
+  base::AutoLock auto_lock(lock_);
+  return private_->GetUseAdapterLuid();
 }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -327,7 +336,7 @@ void GpuDataManagerImpl::ProcessCrashed() {
   private_->ProcessCrashed();
 }
 
-base::Value::List GpuDataManagerImpl::GetLogMessages() const {
+base::ListValue GpuDataManagerImpl::GetLogMessages() const {
   base::AutoLock auto_lock(lock_);
   return private_->GetLogMessages();
 }
@@ -369,6 +378,11 @@ void GpuDataManagerImpl::FallBackToNextGpuMode() {
   private_->FallBackToNextGpuMode();
 }
 
+void GpuDataManagerImpl::FallBackToNextGpuModeDueToCrash() {
+  base::AutoLock auto_lock(lock_);
+  private_->FallBackToNextGpuModeDueToCrash();
+}
+
 bool GpuDataManagerImpl::CanFallback() const {
   base::AutoLock auto_lock(lock_);
   return private_->CanFallback();
@@ -406,10 +420,6 @@ void GpuDataManagerImpl::OnDisplayMetricsChanged(
 bool GpuDataManagerImpl::IsGpuMemoryBufferNV12Supported() {
   base::AutoLock auto_lock(lock_);
   return private_->IsGpuMemoryBufferNV12Supported();
-}
-void GpuDataManagerImpl::SetGpuMemoryBufferNV12Supported(bool supported) {
-  base::AutoLock auto_lock(lock_);
-  private_->SetGpuMemoryBufferNV12Supported(supported);
 }
 #endif  // BUILDFLAG(IS_LINUX)
 

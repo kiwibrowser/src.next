@@ -11,9 +11,13 @@
 #include "base/unguessable_token.h"
 #include "base/values.h"
 #include "net/base/features.h"
+#include "net/base/isolation_info.h"
+#include "net/base/network_isolation_key.h"
+#include "net/base/network_isolation_partition.h"
 #include "net/base/schemeful_site.h"
 #include "network_anonymization_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/hash/hash_testing.h"
 #include "url/gurl.h"
 #include "url/url_util.h"
 
@@ -27,6 +31,18 @@ class NetworkAnonymizationKeyTest : public testing::Test {
   const base::UnguessableToken kNonce = base::UnguessableToken::Create();
 };
 
+TEST_F(NetworkAnonymizationKeyTest, EmptyKeyProperties) {
+  NetworkAnonymizationKey empty_key;
+  EXPECT_TRUE(empty_key.IsEmpty());
+  EXPECT_FALSE(empty_key.GetTopFrameSite().has_value());
+  EXPECT_FALSE(empty_key.IsCrossSite());
+  EXPECT_FALSE(empty_key.GetNonce().has_value());
+  EXPECT_EQ(empty_key.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(empty_key, NetworkAnonymizationKey::CreateEmptyWithPartition(
+                           NetworkIsolationPartition::kGeneral));
+}
+
 TEST_F(NetworkAnonymizationKeyTest, CreateFromNetworkIsolationKey) {
   SchemefulSite site_a = SchemefulSite(GURL("http://a.test/"));
   SchemefulSite site_b = SchemefulSite(GURL("http://b.test/"));
@@ -36,6 +52,13 @@ TEST_F(NetworkAnonymizationKeyTest, CreateFromNetworkIsolationKey) {
   NetworkIsolationKey populated_cross_site_nik(site_a, site_b, nik_nonce);
   NetworkIsolationKey populated_same_site_nik(site_a, site_a, nik_nonce);
   NetworkIsolationKey populated_same_site_opaque_nik(opaque, opaque, nik_nonce);
+  NetworkIsolationKey populated_same_site_nik_network_partition(
+      site_a, site_a, /*nonce=*/std::nullopt,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  NetworkIsolationKey empty_nik_with_partition =
+      IsolationInfo::CreateEmptyWithPartition(
+          NetworkIsolationPartition::kDnsOverHttps)
+          .network_isolation_key();
   NetworkIsolationKey empty_nik;
 
   NetworkAnonymizationKey nak_from_same_site_nik =
@@ -47,27 +70,52 @@ TEST_F(NetworkAnonymizationKeyTest, CreateFromNetworkIsolationKey) {
   NetworkAnonymizationKey nak_from_same_site_opaque_nik =
       NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
           populated_same_site_opaque_nik);
+  NetworkAnonymizationKey nak_from_same_site_nik_network_partition =
+      NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
+          populated_same_site_nik_network_partition);
+  NetworkAnonymizationKey nak_from_empty_nik_with_partition =
+      NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
+          empty_nik_with_partition);
   NetworkAnonymizationKey nak_from_empty_nik =
       NetworkAnonymizationKey::CreateFromNetworkIsolationKey(empty_nik);
 
   // NAKs created when there is no top frame site on the NIK should create an
   // empty NAK.
   EXPECT_TRUE(nak_from_empty_nik.IsEmpty());
+  EXPECT_FALSE(nak_from_empty_nik.IsCrossSite());
+  EXPECT_TRUE(nak_from_empty_nik_with_partition.IsEmpty());
+  EXPECT_FALSE(nak_from_empty_nik_with_partition.IsCrossSite());
+  EXPECT_EQ(nak_from_empty_nik_with_partition.network_isolation_partition(),
+            NetworkIsolationPartition::kDnsOverHttps);
 
   // Top site should be populated correctly.
   EXPECT_EQ(nak_from_same_site_nik.GetTopFrameSite(), site_a);
   EXPECT_EQ(nak_from_cross_site_nik.GetTopFrameSite(), site_a);
   EXPECT_EQ(nak_from_same_site_opaque_nik.GetTopFrameSite(), opaque);
+  EXPECT_EQ(nak_from_same_site_nik_network_partition.GetTopFrameSite(), site_a);
 
   // Nonce should be populated correctly.
   EXPECT_EQ(nak_from_same_site_nik.GetNonce(), nik_nonce);
   EXPECT_EQ(nak_from_cross_site_nik.GetNonce(), nik_nonce);
   EXPECT_EQ(nak_from_same_site_opaque_nik.GetNonce(), nik_nonce);
+  EXPECT_EQ(nak_from_same_site_nik_network_partition.GetNonce(), std::nullopt);
 
   // Is cross site boolean should be populated correctly.
   EXPECT_TRUE(nak_from_same_site_nik.IsSameSite());
   EXPECT_TRUE(nak_from_cross_site_nik.IsCrossSite());
   EXPECT_TRUE(nak_from_same_site_opaque_nik.IsSameSite());
+  EXPECT_TRUE(nak_from_same_site_nik_network_partition.IsSameSite());
+
+  // NetworkIsolationPartition should be populated correctly.
+  EXPECT_EQ(nak_from_same_site_nik.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(nak_from_cross_site_nik.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(nak_from_same_site_opaque_nik.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(
+      nak_from_same_site_nik_network_partition.network_isolation_partition(),
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
 
   // Double-keyed + cross site bit NAKs created from different third party
   // cross site contexts should be the different.
@@ -114,9 +162,13 @@ TEST_F(NetworkAnonymizationKeyTest, CreateFromFrameSite) {
   base::UnguessableToken nonce = base::UnguessableToken::Create();
 
   NetworkAnonymizationKey nak_from_same_site =
-      NetworkAnonymizationKey::CreateFromFrameSite(site_a, site_a, nonce);
+      NetworkAnonymizationKey::CreateFromFrameSite(
+          site_a, site_a, nonce,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
   NetworkAnonymizationKey nak_from_cross_site =
-      NetworkAnonymizationKey::CreateFromFrameSite(site_a, site_b, nonce);
+      NetworkAnonymizationKey::CreateFromFrameSite(
+          site_a, site_b, nonce,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
   NetworkAnonymizationKey nak_from_same_site_opaque =
       NetworkAnonymizationKey::CreateFromFrameSite(opaque_1, opaque_1, nonce);
   NetworkAnonymizationKey nak_from_cross_site_opaque =
@@ -140,6 +192,16 @@ TEST_F(NetworkAnonymizationKeyTest, CreateFromFrameSite) {
   EXPECT_TRUE(nak_from_same_site_opaque.IsSameSite());
   EXPECT_TRUE(nak_from_cross_site_opaque.IsCrossSite());
 
+  // NetworkIsolationPartition should be populated correctly.
+  EXPECT_EQ(nak_from_same_site.network_isolation_partition(),
+            NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_EQ(nak_from_cross_site.network_isolation_partition(),
+            NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_EQ(nak_from_same_site_opaque.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(nak_from_cross_site_opaque.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+
   // NAKs created from different third party cross site contexts should be
   // different.
   EXPECT_NE(nak_from_same_site, nak_from_cross_site);
@@ -155,6 +217,10 @@ TEST_F(NetworkAnonymizationKeyTest, IsEmpty) {
 
   EXPECT_TRUE(empty_key.IsEmpty());
   EXPECT_FALSE(populated_key.IsEmpty());
+
+  NetworkAnonymizationKey transient_key =
+      NetworkAnonymizationKey::CreateTransient();
+  EXPECT_FALSE(transient_key.IsEmpty());
 }
 
 TEST_F(NetworkAnonymizationKeyTest, CreateTransient) {
@@ -171,26 +237,33 @@ TEST_F(NetworkAnonymizationKeyTest, CreateTransient) {
 TEST_F(NetworkAnonymizationKeyTest, IsTransient) {
   NetworkAnonymizationKey empty_key;
   NetworkAnonymizationKey populated_key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/false,
-                                               /*nonce=*/std::nullopt);
+      NetworkAnonymizationKey::CreateFromParts(
+          /*top_frame_site=*/kTestSiteA,
+          /*is_cross_site=*/false,
+          /*nonce=*/std::nullopt);
   NetworkAnonymizationKey data_top_frame_key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kDataSite,
-                                               /*is_cross_site=*/false,
-                                               /*nonce=*/std::nullopt);
+      NetworkAnonymizationKey::CreateFromParts(
+          /*top_frame_site=*/kDataSite,
+          /*is_cross_site=*/false,
+          /*nonce=*/std::nullopt);
   NetworkAnonymizationKey populated_key_with_nonce =
       NetworkAnonymizationKey::CreateFromParts(
           /*top_frame_site=*/kTestSiteA,
-          /*is_cross_site*/ false, base::UnguessableToken::Create());
+          /*is_cross_site=*/false, base::UnguessableToken::Create());
   NetworkAnonymizationKey data_frame_key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/false,
-                                               /*nonce=*/std::nullopt);
+      NetworkAnonymizationKey::CreateFromParts(
+          /*top_frame_site=*/kTestSiteA,
+          /*is_cross_site=*/false,
+          /*nonce=*/std::nullopt);
 
   NetworkAnonymizationKey from_create_transient =
       NetworkAnonymizationKey::CreateTransient();
 
   EXPECT_TRUE(empty_key.IsTransient());
+  EXPECT_TRUE(IsolationInfo::CreateEmptyWithPartition(
+                  NetworkIsolationPartition::kDnsOverHttps)
+                  .network_anonymization_key()
+                  .IsTransient());
   EXPECT_FALSE(populated_key.IsTransient());
   EXPECT_TRUE(data_top_frame_key.IsTransient());
   EXPECT_TRUE(populated_key_with_nonce.IsTransient());
@@ -204,45 +277,90 @@ TEST_F(NetworkAnonymizationKeyTest, IsTransient) {
   EXPECT_FALSE(populated_double_key.IsTransient());
 }
 
-TEST_F(NetworkAnonymizationKeyTest, IsFullyPopulated) {
-  NetworkAnonymizationKey empty_key;
-  NetworkAnonymizationKey populated_key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/false,
-                                               /*nonce=*/std::nullopt);
-  EXPECT_TRUE(populated_key.IsFullyPopulated());
-  EXPECT_FALSE(empty_key.IsFullyPopulated());
-  NetworkAnonymizationKey empty_frame_site_key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/false,
-                                               /*nonce=*/std::nullopt);
-  EXPECT_TRUE(empty_frame_site_key.IsFullyPopulated());
-}
-
 TEST_F(NetworkAnonymizationKeyTest, Getters) {
-  NetworkAnonymizationKey key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/true, kNonce);
+  NetworkAnonymizationKey key = NetworkAnonymizationKey::CreateFromParts(
+      /*top_frame_site=*/kTestSiteA,
+      /*is_cross_site=*/true, kNonce, NetworkIsolationPartition::kGeneral);
 
   EXPECT_EQ(key.GetTopFrameSite(), kTestSiteA);
   EXPECT_EQ(key.GetNonce(), kNonce);
+  EXPECT_EQ(key.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
 
   EXPECT_TRUE(key.IsCrossSite());
 }
 
-TEST_F(NetworkAnonymizationKeyTest, ToDebugString) {
+TEST_F(NetworkAnonymizationKeyTest, CreateEmptyWithPartition) {
   NetworkAnonymizationKey key =
-      NetworkAnonymizationKey::CreateFromParts(/*top_frame_site=*/kTestSiteA,
-                                               /*is_cross_site=*/true, kNonce);
+      NetworkAnonymizationKey::CreateEmptyWithPartition(
+          NetworkIsolationPartition::kDnsOverHttps);
+  base::Value key_value;
+  ASSERT_TRUE(key.ToValue(&key_value));
+
+  EXPECT_TRUE(key.IsEmpty());
+  EXPECT_TRUE(key.IsTransient());
+  EXPECT_EQ(NetworkIsolationPartition::kDnsOverHttps,
+            key.network_isolation_partition());
+
+  // Create another NetworkAnonymizationKey with the same partition, and check
+  // that they're equal.
+  NetworkAnonymizationKey same_key =
+      NetworkAnonymizationKey::CreateEmptyWithPartition(
+          NetworkIsolationPartition::kDnsOverHttps);
+  base::Value same_key_value;
+  ASSERT_TRUE(same_key.ToValue(&same_key_value));
+
+  EXPECT_EQ(key, same_key);
+  EXPECT_EQ(key_value, same_key_value);
+
+  // Create another NetworkAnonymizationKey with a different partition, and
+  // check that they're different.
+  NetworkAnonymizationKey other_key =
+      NetworkAnonymizationKey::CreateEmptyWithPartition(
+          NetworkIsolationPartition::kFedCmUncredentialedRequests);
+  base::Value other_key_value;
+  ASSERT_TRUE(other_key.ToValue(&other_key_value));
+
+  EXPECT_NE(key, other_key);
+  EXPECT_NE(key_value, other_key_value);
+
+  // Check that it's also different from the general case empty
+  // NetworkAnonymizationKey.
+  NetworkAnonymizationKey empty_key;
+  base::Value empty_key_value;
+  ASSERT_TRUE(empty_key.ToValue(&empty_key_value));
+
+  EXPECT_NE(key, empty_key);
+  EXPECT_NE(key_value, empty_key_value);
+}
+
+TEST_F(NetworkAnonymizationKeyTest, ToDebugString) {
+  NetworkAnonymizationKey key = NetworkAnonymizationKey::CreateFromParts(
+      /*top_frame_site=*/kTestSiteA,
+      /*is_cross_site=*/true);
   NetworkAnonymizationKey empty_key;
 
   // `is_cross_site` holds the value the key is created with.
   std::string double_key_with_cross_site_flag_expected_string_value =
-      kTestSiteA.GetDebugString() + " cross_site (with nonce " +
-      kNonce.ToString() + ")";
+      kTestSiteA.GetDebugString() + " cross_site";
   EXPECT_EQ(key.ToDebugString(),
             double_key_with_cross_site_flag_expected_string_value);
   EXPECT_EQ(empty_key.ToDebugString(), "null");
+}
+
+TEST_F(NetworkAnonymizationKeyTest,
+       ToDebugStringWithNonceAndNonGeneralPartition) {
+  NetworkAnonymizationKey key = NetworkAnonymizationKey::CreateFromParts(
+      /*top_frame_site=*/kTestSiteA,
+      /*is_cross_site=*/true, kNonce,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+
+  // `is_cross_site` holds the value the key is created with.
+  std::string double_key_with_cross_site_flag_expected_string_value =
+      kTestSiteA.GetDebugString() + " cross_site (with nonce " +
+      kNonce.ToString() + ") (protected audience seller worklet partition)";
+  EXPECT_EQ(key.ToDebugString(),
+            double_key_with_cross_site_flag_expected_string_value);
 }
 
 TEST_F(NetworkAnonymizationKeyTest, Equality) {
@@ -357,9 +475,116 @@ TEST_F(NetworkAnonymizationKeyTest, EmptyValueRoundTrip) {
   EXPECT_EQ(original_key, from_value_key);
 }
 
+TEST_F(NetworkAnonymizationKeyTest,
+       ValueRoundTripWithNonGeneralNetworkPartition) {
+  NetworkAnonymizationKey original_key =
+      NetworkAnonymizationKey::CreateFromParts(
+          /*top_frame_site=*/kTestSiteA,
+          /*is_cross_site=*/true,
+          /*nonce=*/std::nullopt,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  base::Value value;
+  ASSERT_TRUE(original_key.ToValue(&value));
+
+  // Fill initial value with opaque data, to make sure it's overwritten.
+  NetworkAnonymizationKey from_value_key;
+  EXPECT_TRUE(NetworkAnonymizationKey::FromValue(value, &from_value_key));
+  EXPECT_EQ(original_key, from_value_key);
+}
+
+TEST_F(NetworkAnonymizationKeyTest,
+       TransientValueRoundTripWithNonGeneralNetworkPartition) {
+  NetworkAnonymizationKey key = NetworkAnonymizationKey::CreateFromParts(
+      /*top_frame_site=*/kTestSiteA,
+      /*is_cross_site=*/true,
+      /*nonce=*/base::UnguessableToken::Create(),
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  base::Value value;
+  ASSERT_FALSE(key.ToValue(&value));
+}
+
+TEST_F(NetworkAnonymizationKeyTest,
+       EmptyValueSerializationWithNonGeneralNetworkPartition) {
+  NetworkAnonymizationKey original_key =
+      NetworkAnonymizationKey::CreateEmptyWithPartition(
+          NetworkIsolationPartition::kDnsOverHttps);
+  base::Value value;
+  ASSERT_TRUE(original_key.ToValue(&value));
+
+  // Verify it's a one-valued list.
+  ASSERT_TRUE(value.is_list());
+  EXPECT_EQ(value.GetList().size(), 1u);
+  EXPECT_TRUE(value.GetList()[0].is_int());
+  EXPECT_EQ(value.GetList()[0].GetInt(),
+            static_cast<int>(NetworkIsolationPartition::kDnsOverHttps));
+
+  // Verify it round-trips.
+  NetworkAnonymizationKey from_value_key;
+  EXPECT_TRUE(NetworkAnonymizationKey::FromValue(value, &from_value_key));
+  EXPECT_EQ(original_key, from_value_key);
+}
+
+TEST_F(NetworkAnonymizationKeyTest,
+       FromValueOnlyAcceptsValidNetworkIsolationPartitionValues) {
+  base::Value value;
+  ASSERT_TRUE(NetworkAnonymizationKey::CreateFromParts(
+                  /*top_frame_site=*/kTestSiteA,
+                  /*is_cross_site=*/true)
+                  .ToValue(&value));
+
+  NetworkAnonymizationKey new_nak = NetworkAnonymizationKey();
+
+  // The NetworkIsolationPartition value should be an int.
+  base::ListValue& list = value.GetList();
+  list[2] = base::Value("not_an_int_value");
+  EXPECT_FALSE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+
+  // Don't accept a negative value.
+  list[2] = base::Value(-1);
+  EXPECT_FALSE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+
+  // Don't accept a value too high.
+  list[2] = base::Value(
+      base::strict_cast<int32_t>(NetworkIsolationPartition::kMaxValue) + 1);
+  EXPECT_FALSE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+
+  // Accept the max value of NetworkIsolationPartition.
+  list[2] = base::Value(
+      base::strict_cast<int32_t>(NetworkIsolationPartition::kMaxValue));
+  ASSERT_TRUE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+  EXPECT_EQ(new_nak.network_isolation_partition(),
+            NetworkIsolationPartition::kMaxValue);
+
+  // Accept the min value of NetworkIsolationPartition.
+  list[2] = base::Value(0);
+  ASSERT_TRUE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+  EXPECT_EQ(new_nak.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+
+  // Accept a missing 3rd value.
+  list.resize(list.size() - 1);
+  EXPECT_TRUE(NetworkAnonymizationKey::FromValue(value, &new_nak));
+  EXPECT_EQ(new_nak.network_isolation_partition(),
+            NetworkIsolationPartition::kGeneral);
+}
+
+TEST_F(NetworkAnonymizationKeyTest, SupportsAbslHash) {
+  EXPECT_TRUE(absl::VerifyTypeImplementsAbslHashCorrectly({
+      NetworkAnonymizationKey(),
+      NetworkAnonymizationKey::CreateSameSite(kTestSiteA),
+      NetworkAnonymizationKey::CreateCrossSite(kTestSiteA),
+      NetworkAnonymizationKey::CreateSameSite(kTestSiteB),
+      NetworkAnonymizationKey::CreateSameSite(kDataSite),
+      NetworkAnonymizationKey::CreateFromParts(kTestSiteA, false, kNonce),
+      NetworkAnonymizationKey::CreateFromParts(kTestSiteA, true, kNonce),
+      NetworkAnonymizationKey::CreateFromParts(
+          kTestSiteA, false, std::nullopt,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet),
+  }));
+}
+
 TEST(NetworkAnonymizationKeyFeatureShiftTest,
      ValueRoundTripKeySchemeMissmatch) {
-  base::test::ScopedFeatureList scoped_feature_list_;
   const SchemefulSite kOpaqueSite = SchemefulSite(GURL("data:text/html,junk"));
   const SchemefulSite kTestSiteA = SchemefulSite(GURL("http://a.test/"));
   const SchemefulSite kTestSiteB = SchemefulSite(GURL("http://b.test/"));
@@ -377,15 +602,15 @@ TEST(NetworkAnonymizationKeyFeatureShiftTest,
   // `cross_site_double_key_value` to build it.
   base::Value serialized_site =
       cross_site_double_key_value.GetList()[0].Clone();
-  base::Value::List double_key_list;
+  base::ListValue double_key_list;
   double_key_list.Append(serialized_site.Clone());
   base::Value double_key_value = base::Value(std::move(double_key_list));
   EXPECT_FALSE(NetworkAnonymizationKey::FromValue(double_key_value,
                                                   &expected_failure_nak));
 
-  // Check that deserializing a triple keyed value (a 2-element list containing
-  // two sites) fails.
-  base::Value::List triple_key_list;
+  // Check that deserializing a triple keyed value (a 2-element list
+  // containing two sites) fails.
+  base::ListValue triple_key_list;
   triple_key_list.Append(serialized_site.Clone());
   triple_key_list.Append(std::move(serialized_site));
   base::Value triple_key_value = base::Value(std::move(triple_key_list));

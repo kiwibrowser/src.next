@@ -43,7 +43,6 @@ class Color;
 class PaintLayer;
 class Element;
 class LocalFrame;
-class LayoutBlockFlow;
 class LayoutObject;
 struct PhysicalRect;
 

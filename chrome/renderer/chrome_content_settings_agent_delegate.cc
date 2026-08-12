@@ -4,20 +4,19 @@
 
 #include "chrome/renderer/chrome_content_settings_agent_delegate.h"
 
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
 #include "pdf/buildflags.h"
 
 // TODO(b/197163596): Remove File Manager constants
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "ash/webui/file_manager/url_constants.h"
 #endif
-#include "base/containers/contains.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/mojom/context_type.mojom.h"
@@ -42,7 +41,7 @@ ChromeContentSettingsAgentDelegate::ChromeContentSettingsAgentDelegate(
   content::RenderFrame* main_frame = render_frame->GetMainRenderFrame();
   // TODO(nasko): The main frame is not guaranteed to be in the same process
   // with this frame with --site-per-process. This code needs to be updated
-  // to handle this case. See https://crbug.com/496670.
+  // to handle this case. See https://crbug.com/40421201.
   if (main_frame && main_frame != render_frame) {
     auto* parent = ChromeContentSettingsAgentDelegate::Get(main_frame);
     temporarily_allowed_plugins_ = parent->temporarily_allowed_plugins_;
@@ -52,7 +51,7 @@ ChromeContentSettingsAgentDelegate::ChromeContentSettingsAgentDelegate(
 ChromeContentSettingsAgentDelegate::~ChromeContentSettingsAgentDelegate() =
     default;
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 void ChromeContentSettingsAgentDelegate::SetExtensionDispatcher(
     extensions::Dispatcher* extension_dispatcher) {
   DCHECK(!extension_dispatcher_)
@@ -65,8 +64,8 @@ bool ChromeContentSettingsAgentDelegate::IsPluginTemporarilyAllowed(
     const std::string& identifier) {
   // If the empty string is in here, it means all plugins are allowed.
   // TODO(bauerb): Remove this once we only pass in explicit identifiers.
-  return base::Contains(temporarily_allowed_plugins_, identifier) ||
-         base::Contains(temporarily_allowed_plugins_, std::string());
+  return temporarily_allowed_plugins_.contains(identifier) ||
+         temporarily_allowed_plugins_.contains(std::string());
 }
 
 void ChromeContentSettingsAgentDelegate::AllowPluginTemporarily(
@@ -94,7 +93,7 @@ bool ChromeContentSettingsAgentDelegate::IsFrameAllowlistedForStorageAccess(
 
 bool ChromeContentSettingsAgentDelegate::IsSchemeAllowlisted(
     const std::string& scheme) {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   return scheme == extensions::kExtensionScheme;
 #else
   return false;
@@ -102,7 +101,7 @@ bool ChromeContentSettingsAgentDelegate::IsSchemeAllowlisted(
 }
 
 bool ChromeContentSettingsAgentDelegate::AllowReadFromClipboard() {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   extensions::ScriptContext* current_context =
       extension_dispatcher_->script_context_set().GetCurrent();
   if (current_context &&
@@ -119,7 +118,7 @@ bool ChromeContentSettingsAgentDelegate::AllowReadFromClipboard() {
 }
 
 bool ChromeContentSettingsAgentDelegate::AllowWriteToClipboard() {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   // All blessed extension pages could historically write to the clipboard, so
   // preserve that for compatibility.
   extensions::ScriptContext* current_context =
@@ -139,12 +138,6 @@ bool ChromeContentSettingsAgentDelegate::AllowWriteToClipboard() {
   return false;
 }
 
-std::optional<bool> ChromeContentSettingsAgentDelegate::AllowMutationEvents() {
-  if (IsPlatformApp())
-    return false;
-  return std::nullopt;
-}
-
 void ChromeContentSettingsAgentDelegate::DidCommitProvisionalLoad(
     ui::PageTransition transition) {
   if (render_frame()->GetWebFrame()->Parent())
@@ -156,7 +149,7 @@ void ChromeContentSettingsAgentDelegate::DidCommitProvisionalLoad(
 void ChromeContentSettingsAgentDelegate::OnDestruct() {}
 
 bool ChromeContentSettingsAgentDelegate::IsPlatformApp() {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
   blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
   blink::WebSecurityOrigin origin = frame->GetDocument().GetSecurityOrigin();
   const extensions::Extension* extension = GetExtension(origin);
@@ -167,7 +160,7 @@ bool ChromeContentSettingsAgentDelegate::IsPlatformApp() {
 }
 
 bool ChromeContentSettingsAgentDelegate::IsAllowListedSystemWebApp() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
   blink::WebSecurityOrigin origin = frame->GetDocument().GetSecurityOrigin();
   // TODO(crbug.com/1233395): Migrate Files SWA to Clipboard API and remove this
@@ -180,7 +173,7 @@ bool ChromeContentSettingsAgentDelegate::IsAllowListedSystemWebApp() {
   return false;
 }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 const extensions::Extension* ChromeContentSettingsAgentDelegate::GetExtension(
     const blink::WebSecurityOrigin& origin) const {
   if (origin.Protocol().Ascii() != extensions::kExtensionScheme)

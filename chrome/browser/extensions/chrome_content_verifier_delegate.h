@@ -13,7 +13,10 @@
 
 #include "base/memory/raw_ptr.h"
 #include "extensions/browser/content_verifier/content_verifier_delegate.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_id.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace content {
 class BrowserContext;
@@ -104,11 +107,11 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
   };
 
  private:
-  // Returns true iff |extension| is considered extension from Chrome Web Store
+  // Returns true iff `extension` is considered extension from Chrome Web Store
   // (and therefore signed hashes may be used for its content verification).
   bool IsFromWebstore(const Extension& extension) const;
 
-  // Returns information needed for content verification of |extension|.
+  // Returns information needed for content verification of `extension`.
   VerifyInfo GetVerifyInfo(const Extension& extension) const;
 
   raw_ptr<content::BrowserContext, AcrossTasksDanglingUntriaged> context_;
@@ -116,7 +119,7 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
 
   // This maps an extension id to a backoff entry for slowing down
   // redownload/reinstall of corrupt policy extensions if it keeps happening
-  // in a loop (eg crbug.com/661738).
+  // in a loop (eg crbug.com/41284312).
   std::map<ExtensionId, std::unique_ptr<net::BackoffEntry>>
       policy_reinstall_backoff_;
 
@@ -125,7 +128,8 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
   std::set<ExtensionId> would_be_disabled_ids_;
 
   // For reporting metrics about extensions without hashes, which we want to
-  // reinstall in the future. See https://crbug.com/958794#c22 for details.
+  // reinstall in the future. See https://crbug.com/40625642#comment23 for
+  // details.
   std::set<ExtensionId> would_be_reinstalled_ids_;
 };
 

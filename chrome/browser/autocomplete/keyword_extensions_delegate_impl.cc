@@ -54,18 +54,19 @@ void KeywordExtensionsDelegateImpl::DeleteSuggestion(
       base::UTF16ToUTF8(suggestion_text));
 }
 
-void  KeywordExtensionsDelegateImpl::IncrementInputId() {
+void KeywordExtensionsDelegateImpl::IncrementInputId() {
   current_input_id_ = ++global_input_uid_;
 }
 
 bool KeywordExtensionsDelegateImpl::IsEnabledExtension(
     const std::string& extension_id) {
   const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(
-          profile_)->enabled_extensions().GetByID(extension_id);
+      extensions::ExtensionRegistry::Get(profile_)
+          ->enabled_extensions()
+          .GetByID(extension_id);
   return extension &&
-      (!profile_->IsOffTheRecord() ||
-       extensions::util::IsIncognitoEnabled(extension_id, profile_));
+         (!profile_->IsOffTheRecord() ||
+          extensions::util::IsIncognitoEnabled(extension_id, profile_));
 }
 
 bool KeywordExtensionsDelegateImpl::Start(
@@ -138,51 +139,60 @@ void KeywordExtensionsDelegateImpl::OnOmniboxInputEntered() {
 }
 
 void KeywordExtensionsDelegateImpl::OnOmniboxSuggestionsReady(
-    omnibox_api::SendSuggestions::Params* suggestions) {
-  DCHECK(suggestions);
-
-  if (suggestions->request_id != current_input_id_)
-    return;  // This is an old result. Just ignore.
+    const std::vector<ExtensionSuggestion>& suggestions,
+    const int request_id,
+    const std::string& extension_id) {
+  // Ignore result if it's old or if the provider is done. Checking if the
+  // provider is done prevents the extension from sending multiple sets of
+  // suggestions for the same request.
+  if (request_id != current_input_id_ || provider_->done()) {
+    return;
+  }
 
   TemplateURLService* model = provider_->GetTemplateURLService();
   DCHECK(model);
 
   const AutocompleteInput& input = extension_suggest_last_input_;
 
-  // ExtractKeywordFromInput() can fail if e.g. this code is triggered by
-  // direct calls from the development console, outside the normal flow of
-  // user input.
+  // AutocompleteInput::ExtractKeywordFromInput() can fail if e.g. this code is
+  // triggered by direct calls from the development console, outside the normal
+  // flow of user input.
   std::u16string keyword, remaining_input;
-  if (!KeywordProvider::ExtractKeywordFromInput(input, model, &keyword,
-                                                &remaining_input))
+  if (!AutocompleteInput::ExtractKeywordFromInput(input, model, &keyword,
+                                                  &remaining_input)) {
     return;
+  }
 
   const TemplateURL* template_url = model->GetTemplateURLForKeyword(keyword);
+  DCHECK_EQ(extension_id, template_url->GetExtensionId());
 
-  for (size_t i = 0; i < suggestions->suggest_results.size(); ++i) {
-    const omnibox_api::SuggestResult& suggestion =
-        suggestions->suggest_results[i];
-    // We want to order these suggestions in descending order, so start with
-    // the relevance of the first result (added synchronously in Start()),
-    // and subtract 1 for each subsequent suggestion from the extension.
-    // We recompute the first match's relevance; we know that |complete|
-    // is true, because we wouldn't get results from the extension unless
-    // the full keyword had been typed.
-    int first_relevance = KeywordProvider::CalculateRelevance(
-        input.type(), true, true, input.prefer_keyword(),
-        input.allow_exact_keyword_match());
+  // We want to order these suggestions in descending order, so start with
+  // the relevance of the first result, added synchronously in
+  // KeywordProvider::Start(), and subtract 1 for each subsequent suggestion
+  // from the extension. We recompute the first match's relevance; we know that
+  // |complete| is true, because we wouldn't get results from the extension
+  // unless the full keyword had been typed.
+  int first_relevance = KeywordProvider::CalculateRelevance(
+      input.type(), /*complete=*/true, /*support_replacement=*/true,
+      input.in_keyword_mode(), input.allow_exact_keyword_match());
+
+  for (const ExtensionSuggestion& suggestion : suggestions) {
     // Because these matches are async, we should never let them become the
     // default match, lest we introduce race conditions in the omnibox user
     // interaction.
     extension_suggest_matches_.push_back(provider_->CreateAutocompleteMatch(
         template_url, input, keyword.length(),
-        base::UTF8ToUTF16(suggestion.content), false, first_relevance - (i + 1),
-        suggestion.deletable && *suggestion.deletable));
+        AutocompleteMatch::SanitizeString(
+            base::UTF8ToUTF16(suggestion.content)),
+        false, --first_relevance, suggestion.deletable));
 
     AutocompleteMatch* match = &extension_suggest_matches_.back();
-    match->contents.assign(base::UTF8ToUTF16(suggestion.description));
-    match->contents_class =
-        extensions::StyleTypesToACMatchClassifications(suggestion);
+    match->contents.assign(AutocompleteMatch::SanitizeString(
+        base::UTF8ToUTF16(suggestion.description)));
+
+    // No match should have empty classifications.
+    CHECK(!suggestion.match_classifications.empty());
+    match->contents_class = suggestion.match_classifications;
   }
 
   set_done(true);
@@ -192,6 +202,10 @@ void KeywordExtensionsDelegateImpl::OnOmniboxSuggestionsReady(
 }
 
 void KeywordExtensionsDelegateImpl::OnOmniboxDefaultSuggestionChanged() {
+  if (provider_->done()) {
+    return;
+  }
+
   TemplateURLService* model = provider_->GetTemplateURLService();
   DCHECK(model);
 
@@ -201,9 +215,10 @@ void KeywordExtensionsDelegateImpl::OnOmniboxDefaultSuggestionChanged() {
   // session.
   std::u16string keyword, remaining_input;
   if (matches()->empty() || current_keyword_extension_id_.empty() ||
-      !KeywordProvider::ExtractKeywordFromInput(input, model, &keyword,
-                                                &remaining_input))
+      !AutocompleteInput::ExtractKeywordFromInput(input, model, &keyword,
+                                                  &remaining_input)) {
     return;
+  }
 
   const TemplateURL* template_url(model->GetTemplateURLForKeyword(keyword));
   extensions::ApplyDefaultSuggestionForExtensionKeyword(

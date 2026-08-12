@@ -6,11 +6,16 @@
 #define CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 
 #include <optional>
+#include <string>
 
+#include "base/callback_list.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/history/core/browser/history_service_observer.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/translate/core/browser/translate_driver.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -24,12 +29,22 @@ class HistoryService;
 class HistoryTabHelper
     : public content::WebContentsObserver,
       public translate::TranslateDriver::LanguageDetectionObserver,
+      public history::HistoryServiceObserver,
       public content::WebContentsUserData<HistoryTabHelper> {
  public:
+  using OnUpdatedHistoryForNavigationCallbackList =
+      base::RepeatingCallbackList<void(int64_t navigation_id,
+                                       bool is_in_primary_main_frame,
+                                       base::Time timestamp,
+                                       const GURL& url)>;
+
   HistoryTabHelper(const HistoryTabHelper&) = delete;
   HistoryTabHelper& operator=(const HistoryTabHelper&) = delete;
 
   ~HistoryTabHelper() override;
+
+  base::CallbackListSubscription RegisterOnUpdatedHistoryForNavigationCallback(
+      OnUpdatedHistoryForNavigationCallbackList::CallbackType callback);
 
   // Returns the history::HistoryAddPageArgs to use for adding a page to
   // history.
@@ -51,7 +66,9 @@ class HistoryTabHelper
 
 #if BUILDFLAG(IS_ANDROID)
   // Sets App ID that that goes into visit database.
-  void SetAppId(const std::string& app_id) { app_id_ = app_id; }
+  void SetAppId(std::optional<std::string> app_id) { app_id_ = app_id; }
+  void SetClearAppIdAfterFirstCommit();
+  std::optional<std::string> GetAppId() { return app_id_; }
 #endif
 
  private:
@@ -60,7 +77,9 @@ class HistoryTabHelper
   FRIEND_TEST_ALL_PREFIXES(HistoryTabHelperTest,
                            CreateAddPageArgsHasOpenerWebContentsFirstPage);
   FRIEND_TEST_ALL_PREFIXES(HistoryTabHelperTest,
-                           CreateAddPageArgsHasOpenerWebContentseNotFirstPage);
+                           CreateAddPageArgsHasLiveOriginalOpenerChain);
+  FRIEND_TEST_ALL_PREFIXES(HistoryTabHelperTest,
+                           CreateAddPageArgsHasOpenerWebContentsNotFirstPage);
   FRIEND_TEST_ALL_PREFIXES(HistoryFencedFrameBrowserTest,
                            FencedFrameDoesNotAffectLoadingState);
 
@@ -84,6 +103,10 @@ class HistoryTabHelper
                            ui::PageTransition transition,
                            bool started_from_context_menu,
                            bool renderer_initiated) override;
+
+  // history::HistoryServiceObserver.
+  void OnURLVisited(history::HistoryService* history_service,
+                    const history::VisitedURLInfo& visited_url_info) override;
 
   // TranslateDriver::LanguageDetectionObserver implementation.
   void OnLanguageDetermined(
@@ -122,7 +145,7 @@ class HistoryTabHelper
   std::optional<NavigationState> cached_navigation_state_;
 
   // The package name of an app that opens a Custom Tab and visits a URL.
-  std::optional<std::string> app_id_ = std::nullopt;
+  std::optional<std::string> app_id_;
 
   // Set to true in unit tests to avoid need for a Browser instance.
   bool force_eligible_tab_for_testing_ = false;
@@ -130,6 +153,16 @@ class HistoryTabHelper
   // The `WebContents` that opened the `WebContents` associated with `this` via
   // "Open in New Tab", "Open in New Window", window.open(), etc.
   base::WeakPtr<content::WebContents> opener_web_contents_;
+
+  bool clear_app_id_after_first_commit_;
+
+  // Set only when the history service observer event was invoked. Used to
+  // remove HistoryTabHelper object from the observer list in the destructor
+  // where |GetHistoryService()| doesn't work any longer.
+  raw_ptr<history::HistoryService> history_service_;
+
+  OnUpdatedHistoryForNavigationCallbackList
+      on_updated_history_for_navigation_callbacks_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

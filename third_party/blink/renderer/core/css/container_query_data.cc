@@ -10,7 +10,7 @@ namespace blink {
 
 void ContainerQueryData::Trace(Visitor* visitor) const {
   visitor->Trace(container_query_evaluator_);
-  ElementRareDataField::Trace(visitor);
+  NodeRareDataField::Trace(visitor);
 }
 
 }  // namespace blink

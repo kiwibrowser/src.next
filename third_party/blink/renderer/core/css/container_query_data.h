@@ -8,7 +8,7 @@
 #include <optional>
 
 #include "third_party/blink/renderer/core/css/style_recalc_change.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
@@ -16,9 +16,9 @@ namespace blink {
 
 class ContainerQueryEvaluator;
 
-// Class for storing Container Query data on ElementRareData.
+// Class for storing Container Query data on NodeRareData.
 class ContainerQueryData final : public GarbageCollected<ContainerQueryData>,
-                                 public ElementRareDataField {
+                                 public NodeRareDataField {
  public:
   StyleRecalcChange ClearAndReturnRecalcChangeForChildren() {
     DCHECK(child_change_.has_value());

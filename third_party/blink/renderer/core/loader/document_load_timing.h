@@ -29,18 +29,15 @@
 #include <optional>
 
 #include "base/time/time.h"
+#include "services/network/public/mojom/timing_allow_origin.mojom-blink.h"
 #include "third_party/blink/public/mojom/confidence_level.mojom-blink.h"
-#include "third_party/blink/public/mojom/navigation/system_entropy.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
-#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
-
-namespace base {
-class Clock;
-class TickClock;
-}  // namespace base
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_value.h"
 
 namespace blink {
 
@@ -50,6 +47,38 @@ class LocalFrame;
 
 using RandomizedConfidenceValue =
     std::pair<double, mojom::blink::ConfidenceLevel>;
+
+// The values need to outlive DocumentLoadTiming for metrics reporting.
+struct DocumentLoadTimingValues final
+    : public GarbageCollected<DocumentLoadTimingValues> {
+  base::TimeTicks unload_event_start;
+  base::TimeTicks unload_event_end;
+  base::TimeTicks redirect_start;
+  base::TimeTicks redirect_end;
+  base::TimeTicks fetch_start;
+  base::TimeTicks response_end;
+  base::TimeTicks load_event_start;
+  base::TimeTicks load_event_end;
+  base::TimeTicks activation_start;
+  base::TimeTicks critical_ch_restart;
+
+  uint16_t redirect_count = 0;
+  bool has_cross_origin_redirect = false;
+  bool can_request_from_previous_document = false;
+
+  // https://fetch.spec.whatwg.org/#request-navigation-timing-allow-check-list
+  // Holds the parsed `Timing-Allow-Origin` value of each redirect response in a
+  // navigation's redirect chain (one entry per redirect response; null for a
+  // response with no `Timing-Allow-Origin` header). Used, once the destination
+  // origin is known, to decide whether redirect timing is exposed for a
+  // cross-origin redirect chain.
+  Vector<network::mojom::blink::TimingAllowOriginPtr>
+      navigation_timing_allow_check_list;
+
+  std::optional<RandomizedConfidenceValue> randomized_confidence;
+
+  void Trace(Visitor*) const {}
+};
 
 class CORE_EXPORT DocumentLoadTiming final {
   DISALLOW_NEW();
@@ -79,11 +108,18 @@ class CORE_EXPORT DocumentLoadTiming final {
                                        const base::TimeDelta& start_time);
 
   void AddRedirect(const KURL& redirecting_url, const KURL& redirected_url);
+
+  // https://fetch.spec.whatwg.org/#append-to-a-requests-navigation-timing-allow-check-list
+  void AppendToNavigationTimingAllowCheckList(
+      network::mojom::blink::TimingAllowOriginPtr tao);
+
   void SetRedirectStart(base::TimeTicks);
   void SetRedirectEnd(base::TimeTicks);
-  void SetRedirectCount(uint16_t value) { redirect_count_ = value; }
+  void SetRedirectCount(uint16_t value) {
+    document_load_timing_values_->redirect_count = value;
+  }
   void SetHasCrossOriginRedirect(bool value) {
-    has_cross_origin_redirect_ = value;
+    document_load_timing_values_->has_cross_origin_redirect = value;
   }
 
   void SetUnloadEventStart(base::TimeTicks);
@@ -100,17 +136,17 @@ class CORE_EXPORT DocumentLoadTiming final {
   void SetActivationStart(base::TimeTicks);
 
   void SetCanRequestFromPreviousDocument(bool value) {
-    can_request_from_previous_document_ = value;
-  }
-
-  void SetSystemEntropyAtNavigationStart(mojom::blink::SystemEntropy value) {
-    system_entropy_at_navigation_start_ = value;
+    document_load_timing_values_->can_request_from_previous_document = value;
   }
 
   void SetRandomizedConfidence(
       const std::optional<RandomizedConfidenceValue>& value);
 
   void SetCriticalCHRestart(base::TimeTicks critical_ch_restart);
+
+  DocumentLoadTimingValues* GetDocumentLoadTimingValues() const {
+    return document_load_timing_values_.Get();
+  }
 
   base::TimeTicks InputStart() const { return input_start_; }
   std::optional<base::TimeDelta> UserTimingMarkFullyLoaded() const {
@@ -127,43 +163,63 @@ class CORE_EXPORT DocumentLoadTiming final {
     return custom_user_timing_mark_;
   }
   base::TimeTicks NavigationStart() const { return navigation_start_; }
-  const WTF::Vector<base::TimeTicks>& BackForwardCacheRestoreNavigationStarts()
+  const Vector<base::TimeTicks>& BackForwardCacheRestoreNavigationStarts()
       const {
     return bfcache_restore_navigation_starts_;
   }
   base::TimeTicks CommitNavigationEnd() const { return commit_navigation_end_; }
-  base::TimeTicks UnloadEventStart() const { return unload_event_start_; }
-  base::TimeTicks UnloadEventEnd() const { return unload_event_end_; }
-  base::TimeTicks RedirectStart() const { return redirect_start_; }
-  base::TimeTicks RedirectEnd() const { return redirect_end_; }
-  uint16_t RedirectCount() const { return redirect_count_; }
-  base::TimeTicks FetchStart() const { return fetch_start_; }
-  base::TimeTicks ResponseEnd() const { return response_end_; }
-  base::TimeTicks LoadEventStart() const { return load_event_start_; }
-  base::TimeTicks LoadEventEnd() const { return load_event_end_; }
-  base::TimeTicks ActivationStart() const { return activation_start_; }
-  bool HasCrossOriginRedirect() const { return has_cross_origin_redirect_; }
-  bool CanRequestFromPreviousDocument() const {
-    return can_request_from_previous_document_;
-  }
-  base::TimeTicks CriticalCHRestart() const { return critical_ch_restart_; }
-
   base::TimeTicks ReferenceMonotonicTime() const {
     return reference_monotonic_time_;
   }
 
-  void Trace(Visitor*) const;
-
-  void SetTickClockForTesting(const base::TickClock* tick_clock);
-  void SetClockForTesting(const base::Clock* clock);
-
-  mojom::blink::SystemEntropy SystemEntropyAtNavigationStart() const {
-    return system_entropy_at_navigation_start_;
+  base::TimeTicks UnloadEventStart() const {
+    return document_load_timing_values_->unload_event_start;
   }
-
+  base::TimeTicks UnloadEventEnd() const {
+    return document_load_timing_values_->unload_event_end;
+  }
+  base::TimeTicks RedirectStart() const {
+    return document_load_timing_values_->redirect_start;
+  }
+  base::TimeTicks RedirectEnd() const {
+    return document_load_timing_values_->redirect_end;
+  }
+  base::TimeTicks FetchStart() const {
+    return document_load_timing_values_->fetch_start;
+  }
+  base::TimeTicks ResponseEnd() const {
+    return document_load_timing_values_->response_end;
+  }
+  base::TimeTicks LoadEventStart() const {
+    return document_load_timing_values_->load_event_start;
+  }
+  base::TimeTicks LoadEventEnd() const {
+    return document_load_timing_values_->load_event_end;
+  }
+  base::TimeTicks ActivationStart() const {
+    return document_load_timing_values_->activation_start;
+  }
+  uint16_t RedirectCount() const {
+    return document_load_timing_values_->redirect_count;
+  }
+  bool HasCrossOriginRedirect() const {
+    return document_load_timing_values_->has_cross_origin_redirect;
+  }
+  const Vector<network::mojom::blink::TimingAllowOriginPtr>&
+  NavigationTimingAllowCheckList() const {
+    return document_load_timing_values_->navigation_timing_allow_check_list;
+  }
+  bool CanRequestFromPreviousDocument() const {
+    return document_load_timing_values_->can_request_from_previous_document;
+  }
+  base::TimeTicks CriticalCHRestart() const {
+    return document_load_timing_values_->critical_ch_restart;
+  }
   std::optional<RandomizedConfidenceValue> RandomizedConfidence() const {
-    return randomized_confidence_;
+    return document_load_timing_values_->randomized_confidence;
   }
+
+  void Trace(Visitor*) const;
 
  private:
   void MarkRedirectEnd();
@@ -183,29 +239,10 @@ class CORE_EXPORT DocumentLoadTiming final {
       custom_user_timing_mark_;
   base::TimeTicks navigation_start_;
   base::TimeTicks commit_navigation_end_;
-  WTF::Vector<base::TimeTicks> bfcache_restore_navigation_starts_;
-  base::TimeTicks unload_event_start_;
-  base::TimeTicks unload_event_end_;
-  base::TimeTicks redirect_start_;
-  base::TimeTicks redirect_end_;
-  base::TimeTicks fetch_start_;
-  base::TimeTicks response_end_;
-  base::TimeTicks load_event_start_;
-  base::TimeTicks load_event_end_;
-  base::TimeTicks activation_start_;
-  base::TimeTicks critical_ch_restart_;
-
-  const base::Clock* clock_;
-  const base::TickClock* tick_clock_;
+  Vector<base::TimeTicks> bfcache_restore_navigation_starts_;
 
   Member<DocumentLoader> document_loader_;
-
-  uint16_t redirect_count_ = 0;
-  bool has_cross_origin_redirect_ = false;
-  bool can_request_from_previous_document_ = false;
-  mojom::blink::SystemEntropy system_entropy_at_navigation_start_ =
-      mojom::blink::SystemEntropy::kNormal;
-  std::optional<RandomizedConfidenceValue> randomized_confidence_;
+  Member<DocumentLoadTimingValues> document_load_timing_values_;
 };
 
 }  // namespace blink

@@ -7,6 +7,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/strcat.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -22,15 +23,21 @@
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/web_contents_tester.h"
+#include "extensions/browser/disable_reason.h"
+#include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/browser/ui_util.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/test/test_extension_dir.h"
 #include "url/gurl.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -46,7 +53,10 @@ constexpr char kExtensionUpdateUrl[] =
 
 class ExtensionUtilUnittest : public ExtensionServiceTestBase {
  public:
-  void SetUp() override { InitializeEmptyExtensionService(); }
+  void SetUp() override {
+    ExtensionServiceTestBase::SetUp();
+    InitializeEmptyExtensionService();
+  }
 };
 
 TEST_F(ExtensionUtilUnittest, SetAllowFileAccess) {
@@ -54,8 +64,8 @@ TEST_F(ExtensionUtilUnittest, SetAllowFileAccess) {
       R"({
            "name": "foo",
            "version": "1.0",
-           "manifest_version": 2,
-           "permissions": ["<all_urls>"]
+           "manifest_version": 3,
+           "host_permissions": ["<all_urls>"]
          })";
 
   TestExtensionDir dir;
@@ -110,8 +120,8 @@ TEST_F(ExtensionUtilUnittest, SetAllowFileAccessWhileDisabled) {
       R"({
            "name": "foo",
            "version": "1.0",
-           "manifest_version": 2,
-           "permissions": ["<all_urls>"]
+           "manifest_version": 3,
+           "host_permissions": ["<all_urls>"]
          })";
 
   TestExtensionDir dir;
@@ -139,35 +149,35 @@ TEST_F(ExtensionUtilUnittest, SetAllowFileAccessWhileDisabled) {
 
   // Disabling the extension then calling SetAllowFileAccess should reload the
   // extension with file access.
-  service()->DisableExtension(extension_id,
-                              disable_reason::DISABLE_USER_ACTION);
+  registrar()->DisableExtension(extension_id,
+                                {disable_reason::DISABLE_USER_ACTION});
   {
     TestExtensionRegistryObserver observer(registry(), extension_id);
     util::SetAllowFileAccess(extension_id, browser_context(), true);
     extension = observer.WaitForExtensionInstalled();
   }
   // The extension should still be disabled.
-  EXPECT_FALSE(service()->IsExtensionEnabled(extension_id));
+  EXPECT_FALSE(registrar()->IsExtensionEnabled(extension_id));
 
-  service()->EnableExtension(extension_id);
+  registrar()->EnableExtension(extension_id);
   EXPECT_TRUE(util::AllowFileAccess(extension_id, profile()));
   EXPECT_TRUE(extension->permissions_data()->CanCaptureVisiblePage(
       file_url, tab_id, nullptr, CaptureRequirement::kActiveTabOrAllUrls));
 
   // Disabling the extension and then removing the file access should reload it
   // again back to not having file access. Regression test for
-  // crbug.com/1385343.
-  service()->DisableExtension(extension_id,
-                              disable_reason::DISABLE_USER_ACTION);
+  // crbug.com/40061772.
+  registrar()->DisableExtension(extension_id,
+                                {disable_reason::DISABLE_USER_ACTION});
   {
     TestExtensionRegistryObserver observer(registry(), extension_id);
     util::SetAllowFileAccess(extension_id, browser_context(), false);
     extension = observer.WaitForExtensionInstalled();
   }
   // The extension should still be disabled.
-  EXPECT_FALSE(service()->IsExtensionEnabled(extension_id));
+  EXPECT_FALSE(registrar()->IsExtensionEnabled(extension_id));
 
-  service()->EnableExtension(extension_id);
+  registrar()->EnableExtension(extension_id);
   EXPECT_FALSE(util::AllowFileAccess(extension_id, profile()));
   EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
       file_url, tab_id, nullptr, CaptureRequirement::kActiveTabOrAllUrls));
@@ -196,7 +206,7 @@ TEST_F(ExtensionUtilUnittest, FixupLongExtensionName) {
       u"long\u2026";
 
   std::u16string fixup_extension_name =
-      util::GetFixupExtensionNameForUIDisplay(long_extension_name);
+      ui_util::GetFixupExtensionNameForUIDisplay(long_extension_name);
   EXPECT_EQ(fixup_extension_name, expected_fixup_extension_name);
 }
 
@@ -207,7 +217,7 @@ class ExtensionUtilWithSigninProfileUnittest : public ExtensionUtilUnittest {
     ExtensionUtilUnittest::SetUp();
 
     testing_profile_manager_ = std::make_unique<TestingProfileManager>(
-        TestingBrowserProcess::GetGlobal(), &testing_local_state_);
+        TestingBrowserProcess::GetGlobal());
     ASSERT_TRUE(testing_profile_manager_->SetUp());
     auto policy_service = std::make_unique<policy::PolicyServiceImpl>(
         std::vector<
@@ -236,11 +246,11 @@ class ExtensionUtilWithSigninProfileUnittest : public ExtensionUtilUnittest {
   }
 
   void SetupForceList(const ExtensionIdList& extension_ids) {
-    base::Value::Dict dict = base::Value::Dict();
+    base::DictValue dict = base::DictValue();
     for (const auto& extension_id : extension_ids) {
       dict.Set(extension_id,
-               base::Value::Dict().Set(ExternalProviderImpl::kExternalUpdateUrl,
-                                       kExtensionUpdateUrl));
+               base::DictValue().Set(ExternalProviderImpl::kExternalUpdateUrl,
+                                     kExtensionUpdateUrl));
     }
     signin_profile_prefs_->SetManagedPref(pref_names::kInstallForceList,
                                           std::move(dict));
@@ -301,7 +311,7 @@ TEST_F(ExtensionUtilWithSigninProfileUnittest,
   extension_registry->AddTerminated(policy_extension);
   EXPECT_TRUE(util::HasIsolatedStorage(policy_extension_id, signin_profile_));
 
-  // Extension blockedlisted.
+  // Extension blocklisted.
   extension_registry->RemoveTerminated(policy_extension_id);
   extension_registry->AddBlocklisted(policy_extension);
   EXPECT_TRUE(util::HasIsolatedStorage(policy_extension_id, signin_profile_));

@@ -5,15 +5,22 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_MOCK_CRX_INSTALLER_H_
 #define CHROME_BROWSER_EXTENSIONS_MOCK_CRX_INSTALLER_H_
 
-#include "chrome/browser/extensions/crx_installer.h"
+#include "extensions/browser/crx_installer.h"
+#include "extensions/buildflags/buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 
 // A mock around CrxInstaller to track extension installations.
 class MockCrxInstaller : public CrxInstaller {
  public:
-  explicit MockCrxInstaller(ExtensionService* frontend);
+  explicit MockCrxInstaller(content::BrowserContext* context);
 
   MOCK_METHOD(void, InstallCrxFile, (const CRXFileInfo& info), (override));
 

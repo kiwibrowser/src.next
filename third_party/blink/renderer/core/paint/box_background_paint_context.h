@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BOX_BACKGROUND_PAINT_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BOX_BACKGROUND_PAINT_CONTEXT_H_
 
+#include "third_party/blink/renderer/core/layout/geometry/box_strut.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/paint/paint_phase.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
@@ -13,6 +14,7 @@
 
 namespace blink {
 
+struct BorderShapeReferenceRects;
 class ComputedStyle;
 class FillLayer;
 class ImageResourceObserver;
@@ -21,6 +23,7 @@ class LayoutBoxModelObject;
 class LayoutTableCell;
 class LayoutView;
 class PhysicalBoxFragment;
+class StyleBorderShape;
 struct PaintInfo;
 
 struct SnappedAndUnsnappedOutsets {
@@ -74,6 +77,9 @@ class BoxBackgroundPaintContext {
   PhysicalBoxStrut BorderOutsets() const;
   PhysicalBoxStrut PaddingOutsets() const;
   PhysicalBoxStrut VisualOverflowOutsets() const;
+  BorderShapeReferenceRects ComputeBorderShapeReferenceRects(
+      const PhysicalRect& rect,
+      const StyleBorderShape& border_shape) const;
 
   PhysicalBoxStrut InnerBorderOutsets(
       const PhysicalRect& dest_rect,

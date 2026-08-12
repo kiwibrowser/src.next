@@ -14,12 +14,14 @@
 #include <vector>
 
 #include "base/containers/unique_ptr_adapters.h"
+#include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
 #include "net/base/network_anonymization_key.h"
+#include "net/base/network_handle.h"
 #include "net/base/privacy_mode.h"
 #include "net/base/proxy_server.h"
 #include "net/base/request_priority.h"
@@ -38,7 +40,6 @@
 
 namespace net {
 
-class HostMappingRules;
 class HttpNetworkSession;
 class HttpResponseHeaders;
 
@@ -64,6 +65,10 @@ class NET_EXPORT HttpStreamFactory {
     // Job that will preconnect via HTTP/3 iff an "h3" value was found in the
     // ALPN list of an HTTPS DNS record.
     PRECONNECT_DNS_ALPN_H3,
+    // Job that reuses an existing HTTP/3 session for WebSocket via Extended
+    // CONNECT. Never creates a new connection -- yields to `main_job_` if no
+    // suitable session exists.
+    WS_OVER_H3,
   };
 
   // This is the subset of HttpRequestInfo needed by the HttpStreamFactory
@@ -83,8 +88,15 @@ class NET_EXPORT HttpStreamFactory {
 
     ~StreamRequestInfo();
 
+    // At this layer and below, only PAC scripts need the full URL. Everything
+    // else wants, at most, the SchemeHostPort. The URL has its
+    // username/password fields removed, to protect against leaking user
+    // information when logging.
+    GURL url;
+
     std::string method;
     NetworkAnonymizationKey network_anonymization_key;
+    MutableNetworkTrafficAnnotationTag traffic_annotation;
 
     // Whether HTTP/1.x can be used. Extracted from
     // UploadDataStream::AllowHTTP1().
@@ -94,12 +106,12 @@ class NET_EXPORT HttpStreamFactory {
     PrivacyMode privacy_mode = PRIVACY_MODE_DISABLED;
     SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow;
     SocketTag socket_tag;
+    handles::NetworkHandle target_network = handles::kInvalidNetworkHandle;
   };
 
   // Calculates an appropriate SPDY session key for the given parameters.
   static SpdySessionKey GetSpdySessionKey(
       const ProxyChain& proxy_chain,
-      const GURL& origin_url,
       const StreamRequestInfo& request_info);
 
   // Returns whether an appropriate SPDY session would correspond to either a
@@ -130,7 +142,7 @@ class NET_EXPORT HttpStreamFactory {
       RequestPriority priority,
       const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
       HttpStreamRequest::Delegate* delegate,
-      bool enable_ip_based_pooling,
+      bool enable_ip_based_pooling_for_h2,
       bool enable_alternative_services,
       const NetLogWithSource& net_log);
 
@@ -143,7 +155,7 @@ class NET_EXPORT HttpStreamFactory {
       const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
       HttpStreamRequest::Delegate* delegate,
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
-      bool enable_ip_based_pooling,
+      bool enable_ip_based_pooling_for_h2,
       bool enable_alternative_services,
       const NetLogWithSource& net_log);
 
@@ -157,16 +169,19 @@ class NET_EXPORT HttpStreamFactory {
       RequestPriority priority,
       const std::vector<SSLConfig::CertAndStatus>& allowed_bad_certs,
       HttpStreamRequest::Delegate* delegate,
-      bool enable_ip_based_pooling,
+      bool enable_ip_based_pooling_for_h2,
       bool enable_alternative_services,
       const NetLogWithSource& net_log);
 
   // Requests that enough connections for |num_streams| be opened.
   //
   // TODO: Make this take StreamRequestInfo instead.
-  void PreconnectStreams(int num_streams, HttpRequestInfo& info);
-
-  const HostMappingRules* GetHostMappingRules() const;
+  // TODO(crbug.com/crbug.com/40843081): Change `callback` to
+  // CompletionOnceCallback so that the caller can check the result. Currently
+  // TransportClientSocketPool doesn't plumb errors correctly.
+  void PreconnectStreams(int num_streams,
+                         HttpRequestInfo& info,
+                         base::OnceClosure callback);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(HttpStreamRequestTest, SetPriority);
@@ -175,8 +190,6 @@ class NET_EXPORT HttpStreamFactory {
 
   using JobControllerSet =
       std::set<std::unique_ptr<JobController>, base::UniquePtrComparator>;
-
-  url::SchemeHostPort RewriteHost(const url::SchemeHostPort& server);
 
   // Values must not be changed or reused.  Keep in sync with identically named
   // enum in histograms.xml.
@@ -197,12 +210,9 @@ class NET_EXPORT HttpStreamFactory {
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       HttpStreamRequest::StreamType stream_type,
       bool is_websocket,
-      bool enable_ip_based_pooling,
+      bool enable_ip_based_pooling_for_h2,
       bool enable_alternative_services,
       const NetLogWithSource& net_log);
-
-  // Called when the Preconnect completes. Used for testing.
-  virtual void OnPreconnectsCompleteInternal() {}
 
   // Called when the JobController finishes service. Delete the JobController
   // from |job_controller_set_|.

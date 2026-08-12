@@ -7,6 +7,7 @@ import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
 import 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
 import 'chrome://resources/cr_elements/icons.html.js';
+import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
 import 'chrome://resources/js/action_link.js';
 import './icons.html.js';
 import '/strings.m.js';
@@ -14,24 +15,27 @@ import 'chrome://resources/cr_elements/cr_icon/cr_icon.js';
 
 import type {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
 import type {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import {TooltipPosition} from 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
 import {I18nMixinLit} from 'chrome://resources/cr_elements/i18n_mixin_lit.js';
 import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
+import {isRTL} from 'chrome://resources/js/util.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {getCss} from './item.css.js';
 import {getHtml} from './item.html.js';
 import {ItemMixin} from './item_mixin.js';
-import {computeInspectableViewLabel, createDummyExtensionInfo, EnableControl, getEnableControl, getEnableToggleAriaLabel, getEnableToggleTooltipText, getItemSource, getItemSourceString, isEnabled, sortViews, SourceType, userCanChangeEnablement} from './item_util.js';
-import {Mv2ExperimentStage} from './mv2_deprecation_util.js';
+import {computeInspectableViewLabel, createDummyExtensionInfo, EnableControl, getEnableControl, getEnableToggleAriaLabel, getItemSource, getItemSourceString, isEnabled, sortViews, SourceType, userCanChangeEnablement} from './item_util.js';
+import {UPLOAD_EXTENSION_TO_ACCOUNT_ITEMS_LIST_PAGE_HISTOGRAM_NAME} from './metrics_util.js';
 import {navigation, Page} from './navigation_helper.js';
 
 export interface ItemDelegate {
   deleteItem(id: string): void;
   deleteItems(ids: string[]): Promise<void>;
   uninstallItem(id: string): Promise<void>;
-  setItemEnabled(id: string, isEnabled: boolean): void;
+  setItemEnabled(id: string, isEnabled: boolean): Promise<void>;
   setItemAllowedIncognito(id: string, isAllowedIncognito: boolean): void;
+  setItemAllowedUserScripts(id: string, isAllowedUserScripts: boolean): void;
   setItemAllowedOnFileUrls(id: string, isAllowedOnFileUrls: boolean): void;
   setItemHostAccess(id: string, hostAccess: chrome.developerPrivate.HostAccess):
       void;
@@ -51,12 +55,14 @@ export interface ItemDelegate {
       reason: chrome.developerPrivate.SafetyCheckWarningReason): void;
   setShowAccessRequestsInToolbar(id: string, showRequests: boolean): void;
   setItemPinnedToToolbar(id: string, pinnedToToolbar: boolean): void;
+  uploadItemToAccount(id: string): Promise<boolean>;
 
   // TODO(tjudkins): This function is not specific to items, so should be pulled
   // out to a more generic place when we need to access it from elsewhere.
   recordUserAction(metricName: string): void;
   getItemStateChangedTarget():
       ChromeEvent<(data: chrome.developerPrivate.EventData) => void>;
+  showSiteSettings(id: string): void;
 }
 
 export class FakeChromeEvent {
@@ -73,8 +79,11 @@ export class DummyItemDelegate {
   uninstallItem(_id: string) {
     return Promise.resolve();
   }
-  setItemEnabled(_id: string, _isEnabled: boolean) {}
+  setItemEnabled(_id: string, _isEnabled: boolean) {
+    return Promise.resolve();
+  }
   setItemAllowedIncognito(_id: string, _isAllowedIncognito: boolean) {}
+  setItemAllowedUserScripts(_id: string, _isAllowedUserScripts: boolean) {}
   setItemAllowedOnFileUrls(_id: string, _isAllowedOnFileUrls: boolean) {}
   setItemHostAccess(
       _id: string, _hostAccess: chrome.developerPrivate.HostAccess) {}
@@ -100,10 +109,14 @@ export class DummyItemDelegate {
       _id: string, _reason: chrome.developerPrivate.SafetyCheckWarningReason) {}
   setShowAccessRequestsInToolbar(_id: string, _showRequests: boolean) {}
   setItemPinnedToToolbar(_id: string, _pinnedToToolbar: boolean) {}
+  uploadItemToAccount(_id: string) {
+    return Promise.resolve(false);
+  }
   recordUserAction(_metricName: string) {}
   getItemStateChangedTarget() {
     return new FakeChromeEvent();
   }
+  showSiteSettings(_id: string) {}
 }
 
 export interface ExtensionsItemElement {
@@ -144,19 +157,21 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
       // bindings.
       data: {type: Object},
 
-      mv2ExperimentStage: {type: Number},
 
       // First inspectable view after sorting.
       firstInspectView_: {type: Object},
+      enableToggleTooltipPosition_: {type: String},
     };
   }
 
-  delegate: ItemDelegate|null = null;
-  inDevMode: boolean = false;
-  mv2ExperimentStage: Mv2ExperimentStage = Mv2ExperimentStage.NONE;
-  safetyCheckShowing: boolean = false;
-  data: chrome.developerPrivate.ExtensionInfo = createDummyExtensionInfo();
-  private firstInspectView_?: chrome.developerPrivate.ExtensionView;
+  accessor delegate: ItemDelegate|null = null;
+  accessor inDevMode: boolean = false;
+  accessor safetyCheckShowing: boolean = false;
+  accessor data: chrome.developerPrivate.ExtensionInfo =
+      createDummyExtensionInfo();
+  private accessor firstInspectView_: chrome.developerPrivate.ExtensionView|
+      undefined;
+  protected accessor enableToggleTooltipPosition_ = TooltipPosition.LEFT;
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     super.willUpdate(changedProperties);
@@ -164,6 +179,11 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     if (changedProperties.has('data')) {
       this.firstInspectView_ = this.computeFirstInspectView_();
     }
+  }
+
+  override firstUpdated() {
+    this.enableToggleTooltipPosition_ =
+        isRTL() ? TooltipPosition.RIGHT : TooltipPosition.LEFT;
   }
 
   /** @return The "Details" button. */
@@ -178,17 +198,13 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
 
   /** @return The "Errors" button, if it exists. */
   getErrorsButton(): HTMLElement|null {
-    return this.shadowRoot!.querySelector('#errors-button');
+    return this.shadowRoot.querySelector('#errors-button');
   }
 
   protected getEnableToggleAriaLabel_(): string {
     return getEnableToggleAriaLabel(
         this.isEnabled_(), this.data.type, this.i18n('appEnabled'),
         this.i18n('extensionEnabled'), this.i18n('itemOff'));
-  }
-
-  protected getEnableToggleTooltipText_(): string {
-    return getEnableToggleTooltipText(this.data);
   }
 
   protected getIdElementText_() {
@@ -258,6 +274,13 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     this.reloadItem().catch((loadError) => this.fire('load-error', loadError));
   }
 
+  protected async onUploadClick_() {
+    assert(this.delegate);
+    const uploaded = await this.delegate.uploadItemToAccount(this.data.id);
+    chrome.metricsPrivate.recordBoolean(
+        UPLOAD_EXTENSION_TO_ACCOUNT_ITEMS_LIST_PAGE_HISTOGRAM_NAME, uploaded);
+  }
+
   protected onRepairClick_() {
     assert(this.delegate);
     this.delegate.repairItem(this.data.id);
@@ -268,7 +291,7 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
   }
 
   protected isEnableToggleEnabled_(): boolean {
-    return userCanChangeEnablement(this.data, this.mv2ExperimentStage);
+    return userCanChangeEnablement(this.data);
   }
 
   /** @return Whether the reload button should be shown. */
@@ -348,8 +371,12 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     return this.data.views.length <= 1;
   }
 
-  protected computeDevReloadButtonHidden_(): boolean {
-    return !this.canReloadItem();
+  protected showAccountUploadButton_(): boolean {
+    return this.data.canUploadAsAccountExtension;
+  }
+
+  protected showDevReloadButton_(): boolean {
+    return this.canReloadItem();
   }
 
   protected computeExtraInspectLabel_(): string {
@@ -364,6 +391,7 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
   private hasSevereWarnings_(): boolean {
     return this.data.disableReasons.corruptInstall ||
         this.data.disableReasons.suspiciousInstall ||
+        this.data.disableReasons.unsupportedDeveloperExtension ||
         this.data.runtimeWarnings.length > 0 || !!this.data.blocklistText;
   }
 
@@ -410,6 +438,17 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     // the allowlist warning will still be shown in the item detail view.
     return this.hasAllowlistWarning_() && !this.hasSevereWarnings_() &&
         !this.hasMv2DeprecationWarning_();
+  }
+
+  protected showErrorsAsWarningsButtonLabel_(): boolean {
+    // If there are runtime errors or install warnings, show as errors.
+    if (this.data.runtimeErrors?.length || this.data.installWarnings?.length) {
+      return false;
+    }
+
+    // All manifest errors are considered warnings, so if there are no
+    // runtime/install issues, label is 'Warnings'.
+    return true;
   }
 }
 

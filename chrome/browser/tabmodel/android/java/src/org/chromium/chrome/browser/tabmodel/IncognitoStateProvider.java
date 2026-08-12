@@ -6,8 +6,11 @@ package org.chromium.chrome.browser.tabmodel;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 /** A provider that notifies its observers when incognito mode is entered or exited. */
+@NullMarked
 public class IncognitoStateProvider {
     /** An interface to be notified about changes to the incognito state. */
     public interface IncognitoStateObserver {
@@ -22,10 +25,10 @@ public class IncognitoStateProvider {
     private final Callback<TabModel> mCurrentTabModelObserver;
 
     /** A {@link TabModelSelector} used to know when incognito mode is entered or exited. */
-    private TabModelSelector mTabModelSelector;
+    private @Nullable TabModelSelector mTabModelSelector;
 
     public IncognitoStateProvider() {
-        mIncognitoStateObservers = new ObserverList<IncognitoStateObserver>();
+        mIncognitoStateObservers = new ObserverList<>();
 
         mCurrentTabModelObserver =
                 (tabModel) -> {
@@ -62,7 +65,9 @@ public class IncognitoStateProvider {
      */
     public void setTabModelSelector(TabModelSelector tabModelSelector) {
         mTabModelSelector = tabModelSelector;
-        mTabModelSelector.getCurrentTabModelSupplier().addObserver(mCurrentTabModelObserver);
+        mTabModelSelector
+                .getCurrentTabModelSupplier()
+                .addSyncObserverAndPostIfNonNull(mCurrentTabModelObserver);
         emitIncognitoStateChanged(mTabModelSelector.isIncognitoSelected());
     }
 
@@ -83,5 +88,13 @@ public class IncognitoStateProvider {
         for (IncognitoStateObserver observer : mIncognitoStateObservers) {
             observer.onIncognitoStateChanged(isIncognito);
         }
+    }
+
+    public void setIncognitoStateForTesting(boolean isIncognito) {
+        emitIncognitoStateChanged(isIncognito);
+    }
+
+    public int getObserverCountForTesting() {
+        return mIncognitoStateObservers.size();
     }
 }

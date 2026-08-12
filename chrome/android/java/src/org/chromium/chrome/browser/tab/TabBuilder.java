@@ -4,38 +4,50 @@
 
 package org.chromium.chrome.browser.tab;
 
-import androidx.annotation.Nullable;
+import static org.chromium.build.NullUtil.assumeNonNull;
+
+import android.content.Context;
+import android.graphics.Rect;
 
 import org.chromium.base.Callback;
+import org.chromium.base.ResettersForTesting;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
- * Builds {@link Tab} using builder pattern. All Tab classes should be instantiated
- * through this builder.
+ * Builds {@link Tab} using builder pattern. All Tab classes should be instantiated through this
+ * builder.
  */
+@NullMarked
 public class TabBuilder {
+    private static @Nullable Tab sTabForTesting;
+
     private final Profile mProfile;
 
     private int mId = Tab.INVALID_TAB_ID;
-    private Tab mParent;
-    private TabResolver mTabResolver;
-    private WindowAndroid mWindow;
+    private @Nullable Tab mParent;
+    private @Nullable TabResolver mTabResolver;
+    private @Nullable WindowAndroid mWindow;
     // Should not be null when build() is called.
     private @Nullable @TabLaunchType Integer mLaunchType;
-    private @TabCreationState Integer mCreationType;
+    private @Nullable @TabCreationState Integer mCreationType;
     private boolean mFromFrozenState;
-    private LoadUrlParams mLoadUrlParams;
-    private String mTitle;
+    private @Nullable LoadUrlParams mLoadUrlParams;
+    private @Nullable String mTitle;
 
-    private WebContents mWebContents;
-    private TabDelegateFactory mDelegateFactory;
+    private @Nullable WebContents mWebContents;
+    private @Nullable TabDelegateFactory mDelegateFactory;
     private boolean mInitiallyHidden;
     private boolean mInitializeRenderer;
-    private TabState mTabState;
-    private Callback<Tab> mPreInitializeAction;
+    private @Nullable TabState mTabState;
+    private @Nullable Callback<Tab> mPreInitializeAction;
+    private boolean mIsPinned;
+    private boolean mIsArchived;
+    private boolean mIsContentViewDeferred;
 
     public TabBuilder(Profile profile) {
         mProfile = profile;
@@ -53,16 +65,29 @@ public class TabBuilder {
 
     /**
      * Sets the tab from which the new one is opened.
+     *
      * @param parent The parent Tab.
      * @return {@link TabBuilder} creating the Tab.
      */
-    public TabBuilder setParent(Tab parent) {
+    public TabBuilder setParent(@Nullable Tab parent) {
         mParent = parent;
         return this;
     }
 
     /**
+     * Sets the archived state of the tab.
+     *
+     * @param isArchived Whether the tab is archived.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setArchived(boolean isArchived) {
+        mIsArchived = isArchived;
+        return this;
+    }
+
+    /**
      * Sets the tab resolver (tab id -> {@link Tab} mapping)
+     *
      * @param tabResolver the {@link TabResolver}
      * @return {@link TabBuilder} creating the Tab.
      */
@@ -102,22 +127,24 @@ public class TabBuilder {
     }
 
     /**
-     * Sets a {@link WebContents} object to be used on the Tab. If not set, a new one
-     * will be created.
+     * Sets a {@link WebContents} object to be used on the Tab. If not set, a new one will be
+     * created.
+     *
      * @param webContents {@link WebContents} object.
      * @return {@link TabBuilder} creating the Tab.
      */
-    public TabBuilder setWebContents(WebContents webContents) {
+    public TabBuilder setWebContents(@Nullable WebContents webContents) {
         mWebContents = webContents;
         return this;
     }
 
     /**
      * Sets a {@link TabDelegateFactory} object.
+     *
      * @param delegateFactory The factory delegated to create various Tab-related objects.
      * @return {@link TabBuilder} creating the Tab.
      */
-    public TabBuilder setDelegateFactory(TabDelegateFactory delegateFactory) {
+    public TabBuilder setDelegateFactory(@Nullable TabDelegateFactory delegateFactory) {
         mDelegateFactory = delegateFactory;
         return this;
     }
@@ -153,7 +180,19 @@ public class TabBuilder {
         return this;
     }
 
+    public TabBuilder setInitialPinState(boolean isPinned) {
+        mIsPinned = isPinned;
+        return this;
+    }
+
+    public TabBuilder setContentViewDeferred(boolean deferred) {
+        mIsContentViewDeferred = deferred;
+        return this;
+    }
+
     public Tab build() {
+        if (sTabForTesting != null) return sTabForTesting;
+
         assert mLaunchType != null : "TabBuilder#setLaunchType() must be called.";
 
         // Pre-condition check
@@ -168,7 +207,7 @@ public class TabBuilder {
             if (mFromFrozenState) assert mLaunchType == TabLaunchType.FROM_RESTORE;
         }
 
-        TabImpl tab = new TabImpl(mId, mProfile, mLaunchType);
+        TabImpl tab = new TabImpl(mId, mProfile, mLaunchType, mIsArchived);
         Tab parent = null;
         if (mParent != null) {
             parent = mParent;
@@ -185,8 +224,11 @@ public class TabBuilder {
 
         if (mPreInitializeAction != null) mPreInitializeAction.onResult(tab);
 
+        tab.setContentViewDeferred(mIsContentViewDeferred && !mIsArchived);
+
         // Initializes Tab. Its user data objects are also initialized through the event
         // |onInitialized| of TabObserver they register.
+        assert mDelegateFactory != null;
         tab.initialize(
                 parent,
                 mCreationType,
@@ -196,7 +238,8 @@ public class TabBuilder {
                 mDelegateFactory,
                 mInitiallyHidden,
                 mTabState,
-                mInitializeRenderer);
+                mInitializeRenderer,
+                mIsPinned);
         return tab;
     }
 
@@ -215,7 +258,7 @@ public class TabBuilder {
         return this;
     }
 
-    private TabBuilder setTitle(String title) {
+    private TabBuilder setTitle(@Nullable String title) {
         mTitle = title;
         return this;
     }
@@ -274,5 +317,57 @@ public class TabBuilder {
                         initiallyHidden
                                 ? TabCreationState.LIVE_IN_BACKGROUND
                                 : TabCreationState.LIVE_IN_FOREGROUND);
+    }
+
+    /**
+     * Creates an instance of a {@link Tab} that is fully detached from any activity.
+     *
+     * <p>Also performs general tab initialization as well as detached specifics.
+     *
+     * @param context The context to use.
+     * @param delegateFactory The {@link TabDelegateFactory} to use in the tab.
+     * @param profile The {@link Profile} to use in the tab.
+     * @param webContents The {@link WebContents} to use in the tab. If null the default is used.
+     * @return The newly created and initialized spare tab. Callers are responsible for managing the
+     *     lifecycle of this Tab (e.g. reparenting it), otherwise it will leak memory.
+     */
+    public static Tab createDetachedSpareTab(
+            Context context,
+            TabDelegateFactory delegateFactory,
+            Profile profile,
+            @Nullable WebContents webContents) {
+        if (sTabForTesting != null) return sTabForTesting;
+
+        WindowAndroid window = new WindowAndroid(context, /* occlusionTrackingAllowed= */ false);
+
+        // Creates a tab with renderer initialized for spareTab. See https://crbug.com/40255340.
+        Tab tab =
+                TabBuilder.createLiveTab(profile, true)
+                        .setWindow(window)
+                        .setLaunchType(TabLaunchType.UNSET)
+                        .setDelegateFactory(delegateFactory)
+                        .setInitiallyHidden(true)
+                        .setInitializeRenderer(true)
+                        .setWebContents(webContents)
+                        .build();
+
+        // Resize the webContents to avoid expensive post load resize when attaching the tab.
+        Rect bounds = TabUtils.estimateContentSize(context);
+        int width = bounds.right - bounds.left;
+        int height = bounds.bottom - bounds.top;
+        webContents = tab.getWebContents();
+        assumeNonNull(webContents);
+        webContents.setSize(width, height);
+
+        // Detach the tab from the current activity.
+        webContents.setTopLevelNativeWindow(null);
+        tab.updateAttachment(null, null);
+
+        return tab;
+    }
+
+    public static void setTabForTesting(Tab tab) {
+        sTabForTesting = tab;
+        ResettersForTesting.register(() -> sTabForTesting = null);
     }
 }

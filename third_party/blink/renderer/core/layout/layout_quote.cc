@@ -24,7 +24,6 @@
 #include <algorithm>
 
 #include "third_party/blink/renderer/core/css/style_containment_scope.h"
-#include "third_party/blink/renderer/core/css/style_containment_scope_tree.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
@@ -60,8 +59,8 @@ void LayoutQuote::WillBeDestroyed() {
     GetDocument()
         .GetStyleEngine()
         .EnsureStyleContainmentScopeTree()
-        .UpdateOutermostQuotesDirtyScope(scope_);
-    scope_->DetachQuote(*this);
+        .UpdateOutermostDirtyScope(scope_);
+    scope_->DetachItem(*this);
   }
   LayoutInline::WillBeDestroyed();
 }
@@ -73,15 +72,17 @@ void LayoutQuote::WillBeRemovedFromTree() {
     GetDocument()
         .GetStyleEngine()
         .EnsureStyleContainmentScopeTree()
-        .UpdateOutermostQuotesDirtyScope(scope_);
-    scope_->DetachQuote(*this);
+        .UpdateOutermostDirtyScope(scope_);
+    scope_->DetachItem(*this);
   }
 }
 
-void LayoutQuote::StyleDidChange(StyleDifference diff,
-                                 const ComputedStyle* old_style) {
+void LayoutQuote::StyleDidChange(
+    StyleDifference diff,
+    const ComputedStyle* old_style,
+    const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
-  LayoutInline::StyleDidChange(diff, old_style);
+  LayoutInline::StyleDidChange(diff, old_style, style_change_context);
   UpdateText();
 }
 

@@ -75,16 +75,16 @@ class ViewportTest : public testing::Test {
     // TODO(crbug.com/751425): We should use the mock functionality
     // via the WebViewHelper instance in each test case.
     url_test_helpers::RegisterMockedURLLoadFromBase(
-        WebString::FromUTF8(base_url_), test::CoreTestDataPath(),
-        WebString::FromUTF8(file_name));
+        WebString::FromUtf8(base_url_), test::CoreTestDataPath(),
+        WebString::FromUtf8(file_name));
   }
 
   void RegisterMockedChromeURLLoad(const std::string& file_name) {
     // TODO(crbug.com/751425): We should use the mock functionality
     // via the WebViewHelper instance in each test case.
     url_test_helpers::RegisterMockedURLLoadFromBase(
-        WebString::FromUTF8(chrome_url_), test::CoreTestDataPath(),
-        WebString::FromUTF8(file_name));
+        WebString::FromUtf8(chrome_url_), test::CoreTestDataPath(),
+        WebString::FromUtf8(file_name));
   }
 
   void ExecuteScript(WebLocalFrame* frame, const WebString& code) {
@@ -115,7 +115,7 @@ static PageScaleConstraints RunViewportTest(Page* page,
       ->SetFrameRect(gfx::Rect(gfx::Point(), initial_viewport_size));
   ViewportDescription description = page->GetViewportDescription();
   PageScaleConstraints constraints = description.Resolve(
-      gfx::SizeF(initial_viewport_size), Length::Fixed(980));
+      gfx::SizeF(initial_viewport_size), ViewportLength::Fixed(980));
 
   constraints.FitToContentsWidth(constraints.layout_size.width(),
                                  initial_width);

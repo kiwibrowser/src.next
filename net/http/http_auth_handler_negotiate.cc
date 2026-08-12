@@ -15,7 +15,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "net/base/address_family.h"
 #include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
@@ -25,6 +24,7 @@
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_preferences.h"
+#include "net/http/http_request_info.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
@@ -37,10 +37,10 @@ using DelegationType = HttpAuth::DelegationType;
 
 namespace {
 
-base::Value::Dict NetLogParameterChannelBindings(
+base::DictValue NetLogParameterChannelBindings(
     const std::string& channel_binding_token,
     NetLogCaptureMode capture_mode) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   if (!NetLogCaptureIncludesSocketBytes(capture_mode))
     return dict;
 
@@ -228,6 +228,7 @@ int HttpAuthHandlerNegotiate::GenerateAuthTokenImpl(
   DCHECK(callback_.is_null());
   DCHECK(auth_token_ == nullptr);
   auth_token_ = auth_token;
+  target_network_ = request->target_network;
   if (already_called_) {
     DCHECK((!has_credentials_ && credentials == nullptr) ||
            (has_credentials_ && credentials->Equals(credentials_)));
@@ -352,8 +353,9 @@ int HttpAuthHandlerNegotiate::DoResolveCanonicalName() {
   // TODO(cbentzel): Add reverse DNS lookup for numeric addresses.
   HostResolver::ResolveHostParameters parameters;
   parameters.include_canonical_name = true;
-  resolve_host_request_ = resolver_->CreateRequest(
-      scheme_host_port_, network_anonymization_key_, net_log(), parameters);
+  resolve_host_request_ =
+      resolver_->CreateRequest(scheme_host_port_, network_anonymization_key_,
+                               target_network_, net_log(), parameters);
   return resolve_host_request_->Start(base::BindOnce(
       &HttpAuthHandlerNegotiate::OnIOComplete, base::Unretained(this)));
 }
@@ -366,10 +368,9 @@ int HttpAuthHandlerNegotiate::DoResolveCanonicalNameComplete(int rv) {
       // Expect at most a single DNS alias representing the canonical name
       // because the `HostResolver` request was made with
       // `include_canonical_name`.
-      DCHECK(resolve_host_request_->GetDnsAliasResults());
-      DCHECK_LE(resolve_host_request_->GetDnsAliasResults()->size(), 1u);
-      if (!resolve_host_request_->GetDnsAliasResults()->empty()) {
-        server = *resolve_host_request_->GetDnsAliasResults()->begin();
+      DCHECK_LE(resolve_host_request_->GetDnsAliasResults().size(), 1u);
+      if (!resolve_host_request_->GetDnsAliasResults().empty()) {
+        server = *resolve_host_request_->GetDnsAliasResults().begin();
         DCHECK(!server.empty());
       }
     } else {

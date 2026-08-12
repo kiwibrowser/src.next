@@ -34,13 +34,15 @@
 namespace blink {
 
 static bool IsValidAttributeName(const String& name) {
-  if (!name.StartsWith("data-"))
+  if (!name.starts_with("data-")) {
     return false;
+  }
 
   unsigned length = name.length();
   for (unsigned i = 5; i < length; ++i) {
-    if (IsASCIIUpper(name[i]))
+    if (IsAsciiUpper(name[i])) {
       return false;
+    }
   }
 
   return true;
@@ -55,8 +57,8 @@ static String ConvertAttributeNameToPropertyName(const String& name) {
     if (character != '-') {
       string_builder.Append(character);
     } else {
-      if ((i + 1 < length) && IsASCIILower(name[i + 1])) {
-        string_builder.Append(ToASCIIUpper(name[i + 1]));
+      if ((i + 1 < length) && IsAsciiLower(name[i + 1])) {
+        string_builder.Append(ToAsciiUpper(name[i + 1]));
         ++i;
       } else {
         string_builder.Append(character);
@@ -77,11 +79,11 @@ static bool PropertyNameMatchesAttributeName(
   while (a < attribute_name.size() && p < property_name.size()) {
     const CharType2 current_attribute_char = attribute_name[a];
     if (current_attribute_char == '-' && a + 1 < attribute_name.size() &&
-        IsASCIILower(attribute_name[a + 1])) {
+        IsAsciiLower(attribute_name[a + 1])) {
       word_boundary = true;
     } else {
       const CharType2 current_attribute_char_to_compare =
-          word_boundary ? ToASCIIUpper(current_attribute_char)
+          word_boundary ? ToAsciiUpper(current_attribute_char)
                         : current_attribute_char;
       if (current_attribute_char_to_compare != property_name[p]) {
         return false;
@@ -97,8 +99,9 @@ static bool PropertyNameMatchesAttributeName(
 
 static bool PropertyNameMatchesAttributeName(const String& property_name,
                                              const String& attribute_name) {
-  if (!attribute_name.StartsWith("data-"))
+  if (!attribute_name.starts_with("data-")) {
     return false;
+  }
 
   if (property_name.Is8Bit()) {
     if (attribute_name.Is8Bit()) {
@@ -120,8 +123,9 @@ static bool PropertyNameMatchesAttributeName(const String& property_name,
 static bool IsValidPropertyName(const String& name) {
   unsigned length = name.length();
   for (unsigned i = 0; i < length; ++i) {
-    if (name[i] == '-' && (i + 1 < length) && IsASCIILower(name[i + 1]))
+    if (name[i] == '-' && (i + 1 < length) && IsAsciiLower(name[i + 1])) {
       return false;
+    }
   }
   return true;
 }
@@ -135,9 +139,9 @@ static AtomicString ConvertPropertyNameToAttributeName(const String& name) {
   unsigned length = name.length();
   for (unsigned i = 0; i < length; ++i) {
     UChar character = name[i];
-    if (IsASCIIUpper(character)) {
+    if (IsAsciiUpper(character)) {
       builder.Append('-');
-      builder.Append(ToASCIILower(character));
+      builder.Append(ToAsciiLower(character));
     } else {
       builder.Append(character);
     }
@@ -179,7 +183,7 @@ void DatasetDOMStringMap::SetItem(const String& name,
   if (!IsValidPropertyName(name)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
-        "'" + name + "' is not a valid property name.");
+        StrCat({"'", name, "' is not a valid property name."}));
     return;
   }
 
@@ -200,7 +204,7 @@ bool DatasetDOMStringMap::DeleteItem(const String& name) {
 
 void DatasetDOMStringMap::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
-  ElementRareDataField::Trace(visitor);
+  NodeRareDataField::Trace(visitor);
   DOMStringMap::Trace(visitor);
 }
 

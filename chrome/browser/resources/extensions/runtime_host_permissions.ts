@@ -16,7 +16,7 @@ import '/strings.m.js';
 
 import type {CrActionMenuElement} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
-import {assert} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
@@ -108,32 +108,32 @@ export class ExtensionsRuntimeHostPermissionsElement extends CrLitElement {
     };
   }
 
-  permissions: chrome.developerPrivate.RuntimeHostPermissions = {
+  accessor permissions: chrome.developerPrivate.RuntimeHostPermissions = {
     hasAllHosts: true,
     hostAccess: chrome.developerPrivate.HostAccess.ON_CLICK,
     hosts: [],
   };
-  itemId: string = '';
-  delegate: ItemDelegate = new DummyItemDelegate();
-  enableEnhancedSiteControls: boolean = false;
-  protected showHostDialog_: boolean = false;
-  protected showRemoveSiteDialog_: boolean = false;
-  protected hostDialogModel_: string|null = null;
-  private hostDialogAnchorElement_: HTMLElement|null = null;
-  private actionMenuModel_: string|null = null;
-  private actionMenuAnchorElement_: HTMLElement|null = null;
-  private oldHostAccess_: string|null = null;
-  private revertingHostAccess_: boolean = false;
+  accessor itemId: string = '';
+  accessor delegate: ItemDelegate = new DummyItemDelegate();
+  accessor enableEnhancedSiteControls: boolean = false;
+  protected accessor showHostDialog_: boolean = false;
+  protected accessor showRemoveSiteDialog_: boolean = false;
+  protected accessor hostDialogModel_: string|null = null;
+  private accessor hostDialogAnchorElement_: HTMLElement|null = null;
+  private accessor actionMenuModel_: string|null = null;
+  private accessor actionMenuAnchorElement_: HTMLElement|null = null;
+  private accessor oldHostAccess_: string|null = null;
+  private accessor revertingHostAccess_: boolean = false;
 
   getSelectMenu(): HTMLSelectElement {
     const selectMenuId =
         this.enableEnhancedSiteControls ? '#newHostAccess' : '#hostAccess';
-    return this.shadowRoot!.querySelector<HTMLSelectElement>(selectMenuId)!;
+    return this.shadowRoot.querySelector<HTMLSelectElement>(selectMenuId)!;
   }
 
   getRemoveSiteDialog(): CrDialogElement {
-    return this.shadowRoot!.querySelector<CrDialogElement>(
-        '#removeSitesDialog')!;
+    return this.shadowRoot.querySelector<CrDialogElement>('#removeSitesDialog')!
+        ;
   }
 
   protected onHostAccessChange_() {
@@ -156,6 +156,8 @@ export class ExtensionsRuntimeHostPermissionsElement extends CrLitElement {
           chrome.metricsPrivate.recordUserAction(
               'Extensions.Settings.Hosts.OnAllSitesSelected');
           break;
+        default:
+          assertNotReachedCase(access);
       }
     }
 
@@ -202,7 +204,7 @@ export class ExtensionsRuntimeHostPermissionsElement extends CrLitElement {
 
     // Only show granted hosts in the list.
     // TODO(devlin): For extensions that request a finite set of hosts,
-    // display them in a toggle list. https://crbug.com/891803.
+    // display them in a toggle list. https://crbug.com/41418731.
     return this.permissions.hosts.filter(control => control.granted)
         .map(control => control.host)
         .sort();
@@ -319,12 +321,16 @@ export class ExtensionsRuntimeHostPermissionsElement extends CrLitElement {
     return getFaviconUrl(url);
   }
 
-  protected onRemoveSitesWarningConfirm_() {
+  protected onRemoveSitesWarningConfirmClick_() {
     this.delegate.setItemHostAccess(
         this.itemId,
         this.getSelectMenu().value as chrome.developerPrivate.HostAccess);
     this.getRemoveSiteDialog().close();
     this.showRemoveSiteDialog_ = false;
+  }
+
+  protected onRemoveSitesWarningCancelClick_() {
+    this.onRemoveSitesWarningCancel_();
   }
 
   protected onRemoveSitesWarningCancel_() {

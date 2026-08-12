@@ -72,6 +72,11 @@ enum BadMessageReason {
   LEGACY_IPC_MISMATCH = 32,
   ER_SW_INVALID_LAZY_BACKGROUND_PARAM = 33,
   SWH_BAD_WORKER_THREAD_ID = 34,
+  ER_INVALID_EXTENSION_ID_FOR_PROCESS = 35,
+  CEFH_INVALID_EXTENSION_ID_FOR_SCRIPT_INJECT_REQUEST = 36,
+  SWH_INVALID_SERVICE_WORKER_SCOPE = 37,
+  EMF_INVALID_MESSAGE_FROM_SANDBOXED_PROCESS = 38,
+  WRA_INVALID_EXTENSION_ID_FOR_PROCESS = 39,
   // Please add new elements here. The naming convention is abbreviated class
   // name (e.g. ExtensionHost becomes EH) plus a unique description of the
   // reason. After making changes, you MUST update histograms.xml by running:
@@ -81,7 +86,7 @@ enum BadMessageReason {
 
 // Called when the browser receives a bad IPC message from a normal or an
 // extension renderer. Logs the event, records a histogram metric for the
-// |reason|, and terminates the process for |host|/|render_process_id|.
+// `reason`, and terminates the process for `host`/`render_process_id`.
 void ReceivedBadMessage(content::RenderProcessHost* host,
                         BadMessageReason reason);
 

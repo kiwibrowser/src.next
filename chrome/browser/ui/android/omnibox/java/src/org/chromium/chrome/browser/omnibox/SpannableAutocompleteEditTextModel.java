@@ -10,14 +10,15 @@ import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.inputmethod.InputConnection;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.components.omnibox.OmniboxFeatures;
+import org.chromium.components.omnibox.TextSelection;
 import org.chromium.ui.accessibility.AccessibilityState;
 
-import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -25,10 +26,11 @@ import java.util.regex.Pattern;
  * SpannableString. By wrapping all the keyboard related operations in a batch edit, we can
  * effectively hide the existence of autocomplete text from keyboard.
  */
+@NullMarked
 public class SpannableAutocompleteEditTextModel
         implements AutocompleteEditTextModelBase, AutocompleteInputConnection.InputDelegate {
     private static final String TAG = "SpanAutocomplete";
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = OmniboxFeatures.sDiagInputConnection.getValue();
 
     // A pattern that matches strings consisting of English and European character sets, numbers,
     // punctuations, and a white space.
@@ -55,7 +57,7 @@ public class SpannableAutocompleteEditTextModel
 
     private final SpanCursorController mSpanCursorController;
 
-    private AutocompleteInputConnection mInputConnection;
+    private @Nullable AutocompleteInputConnection mInputConnection;
     private boolean mLastEditWasTyping = true;
     private boolean mIgnoreTextChangeFromAutocomplete = true;
     private int mBatchEditNestCount;
@@ -80,8 +82,8 @@ public class SpannableAutocompleteEditTextModel
                         delegate.getText().toString(),
                         null,
                         null,
-                        delegate.getSelectionStart(),
-                        delegate.getSelectionEnd());
+                        new TextSelection(delegate.getSelectionStart(), delegate.getSelectionEnd()),
+                        null);
         mPreviouslyNotifiedState = new AutocompleteState(mCurrentState);
         mPreviouslySetState = new AutocompleteState(mCurrentState);
 
@@ -89,7 +91,8 @@ public class SpannableAutocompleteEditTextModel
     }
 
     @Override
-    public InputConnection onCreateInputConnection(InputConnection inputConnection) {
+    public @Nullable InputConnection onCreateInputConnection(
+            @Nullable InputConnection inputConnection) {
         mLastUpdateSelStart = mDelegate.getSelectionStart();
         mLastUpdateSelEnd = mDelegate.getSelectionEnd();
         mBatchEditNestCount = 0;
@@ -110,61 +113,67 @@ public class SpannableAutocompleteEditTextModel
 
     private void sendAccessibilityEventForUserTextChange(
             AutocompleteState oldState, AutocompleteState newState) {
-        int addedCount = -1;
-        int removedCount = -1;
-        int fromIndex = -1;
+        String oldAutocompleteText = oldState.getAutocompleteText();
+        String oldText = oldState.getText();
+        String newText = newState.getText();
+        String oldUserText = oldState.getUserText();
+        String newUserText = newState.getUserText();
+        int oldAutocompleteTextLen = oldAutocompleteText != null ? oldAutocompleteText.length() : 0;
+        int newUserTextLen = newUserText.length();
+        int oldUserTextLen = oldUserText.length();
 
+        int addedCount;
+        int removedCount;
+        int fromIndex;
         if (newState.isBackwardDeletedFrom(oldState)) {
             addedCount = 0;
-            removedCount = oldState.getText().length() - newState.getUserText().length();
-            fromIndex = newState.getUserText().length();
+            removedCount = oldText.length() - newUserTextLen;
+            fromIndex = newUserTextLen;
         } else if (newState.isForwardTypedFrom(oldState)) {
-            addedCount = newState.getUserText().length() - oldState.getUserText().length();
-            removedCount = oldState.getAutocompleteText().map(t -> t.length()).orElse(0);
-            fromIndex = oldState.getUserText().length();
-        } else if (newState.getUserText().equals(oldState.getUserText())) {
+            addedCount = newUserTextLen - oldUserTextLen;
+            removedCount = oldAutocompleteTextLen;
+            fromIndex = oldUserTextLen;
+        } else if (newUserText.equals(oldUserText)) {
             addedCount = 0;
-            removedCount = oldState.getAutocompleteText().map(t -> t.length()).orElse(0);
-            fromIndex = oldState.getUserText().length();
+            removedCount = oldAutocompleteTextLen;
+            fromIndex = oldUserTextLen;
         } else {
             // Assume that the whole text has been replaced.
-            addedCount = newState.getText().length();
-            removedCount = oldState.getUserText().length();
+            addedCount = newText.length();
+            removedCount = oldUserTextLen;
             fromIndex = 0;
         }
 
         mDelegateShouldIgnoreAccessibilityEvents = false;
-        if (!oldState.getText().equals(newState.getText())
-                && (addedCount != 0 || removedCount != 0)) {
+        if (!oldText.equals(newText) && (addedCount != 0 || removedCount != 0)) {
             AccessibilityEvent event =
                     AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
-            event.setBeforeText(oldState.getText());
+            event.setBeforeText(oldText);
             event.setFromIndex(fromIndex);
             event.setRemovedCount(removedCount);
             event.setAddedCount(addedCount);
-            mDelegate.sendAccessibilityEventUnchecked(event);
+            mDelegate.sendAccessibilityEvent(event);
         }
 
-        if (oldState.getSelStart() != newState.getSelStart()
-                || oldState.getSelEnd() != newState.getSelEnd()) {
-            mDelegate.sendAccessibilityEventUnchecked(
+        if (!oldState.getSelection().equals(newState.getSelection())) {
+            mDelegate.sendAccessibilityEvent(
                     AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED));
         }
         mDelegateShouldIgnoreAccessibilityEvents = true;
     }
 
     private void sendAccessibilityEventForAppendingAutocomplete(AutocompleteState newState) {
-        if (!newState.getAutocompleteText().isPresent()) return;
+        String autocompleteText = newState.getAutocompleteText();
+        if (autocompleteText == null) return;
         // Note that only text changes and selection does not change.
         AccessibilityEvent eventTextChanged =
                 AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
         eventTextChanged.setBeforeText(newState.getUserText());
         eventTextChanged.setFromIndex(newState.getUserText().length());
         eventTextChanged.setRemovedCount(0);
-        eventTextChanged.setAddedCount(
-                newState.getAutocompleteText().map(t -> t.length()).orElse(0));
+        eventTextChanged.setAddedCount(autocompleteText.length());
         mDelegateShouldIgnoreAccessibilityEvents = false;
-        mDelegate.sendAccessibilityEventUnchecked(eventTextChanged);
+        mDelegate.sendAccessibilityEvent(eventTextChanged);
         mDelegateShouldIgnoreAccessibilityEvents = true;
     }
 
@@ -196,8 +205,8 @@ public class SpannableAutocompleteEditTextModel
         }
         notifyAccessibilityService();
         if (mCurrentState.getUserText().equals(mPreviouslyNotifiedState.getUserText())
-                && (mCurrentState.getAutocompleteText().isPresent()
-                        || !mPreviouslyNotifiedState.getAutocompleteText().isPresent())) {
+                && (mCurrentState.getAutocompleteText() != null
+                        || mPreviouslyNotifiedState.getAutocompleteText() == null)) {
             // Nothing has changed except that autocomplete text has been set or modified. Or
             // selection change did not affect autocomplete text. Autocomplete text is set by the
             // controller, so only text change or deletion of autocomplete text should be notified.
@@ -253,8 +262,11 @@ public class SpannableAutocompleteEditTextModel
         boolean retVal;
         mInputConnection.onBeginImeCommand();
         if (hasAutocomplete() && event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (event.getKeyCode() == KeyEvent.KEYCODE_FORWARD_DEL) {
-                // The editor doesn't see the selected text so won't handle forward delete.
+            if (event.getKeyCode() == KeyEvent.KEYCODE_FORWARD_DEL
+                    || event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+                // The editor doesn't see the selected text so won't handle forward delete. Normal
+                // delete doesn't always work on the last character on hard keyboards, so handle it
+                // similarly.
                 clearAutocompleteText();
                 mLastEditWasTyping = false;
 
@@ -262,10 +274,11 @@ public class SpannableAutocompleteEditTextModel
             } else if (cursorMovementCommitsAutocomplete(event)) {
                 // These commands treat the autocomplete suggestion as a selection and then apply
                 // the cursor movement.
-                int currentPos = mCurrentState.getSelStart();
+                int currentPos = mCurrentState.getSelection().from;
                 int totalLength = mCurrentState.getUserText().length();
-                if (mCurrentState.getAutocompleteText().isPresent()) {
-                    totalLength += mCurrentState.getAutocompleteText().get().length();
+                String autocompleteText = mCurrentState.getAutocompleteText();
+                if (autocompleteText != null) {
+                    totalLength += autocompleteText.length();
                 }
 
                 mInputConnection.commitAutocomplete();
@@ -301,9 +314,15 @@ public class SpannableAutocompleteEditTextModel
         // setText() does not necessarily trigger onTextChanged(). We need to accept the new text
         // and reset the states.
         mCurrentState.set(
-                text.toString(), Optional.empty(), Optional.empty(), text.length(), text.length());
+                text.toString(),
+                null,
+                null,
+                new TextSelection(text.length(), text.length()),
+                null);
         mSpanCursorController.reset();
-        mPreviouslyNotifiedState.copyFrom(mCurrentState);
+        if (mIgnoreTextChangeFromAutocomplete) {
+            mPreviouslyNotifiedState.copyFrom(mCurrentState);
+        }
         mPreviouslySetState.copyFrom(mCurrentState);
         if (mBatchEditNestCount == 0) updateSelectionForTesting();
     }
@@ -311,12 +330,14 @@ public class SpannableAutocompleteEditTextModel
     @Override
     public void onSelectionChanged(int selStart, int selEnd) {
         if (DEBUG) Log.i(TAG, "onSelectionChanged [%d,%d]", selStart, selEnd);
-        if (mCurrentState.getSelStart() == selStart && mCurrentState.getSelEnd() == selEnd) return;
+        TextSelection selection = mCurrentState.getSelection();
+        if (selection.from == selStart && selection.to == selEnd) return;
 
         // Do not allow users to select the space between additional texts.
+        String autocompleteText = mCurrentState.getAutocompleteText();
         int maxLength =
                 mCurrentState.getUserText().length()
-                        + mCurrentState.getAutocompleteText().map(t -> t.length()).orElse(0);
+                        + (autocompleteText != null ? autocompleteText.length() : 0);
         if (selStart > maxLength || selEnd > maxLength) {
             int newStart = selStart > maxLength ? maxLength : selStart;
             int newEnd = selEnd > maxLength ? maxLength : selEnd;
@@ -324,10 +345,10 @@ public class SpannableAutocompleteEditTextModel
             return;
         }
 
-        mCurrentState.setSelection(selStart, selEnd);
+        mCurrentState.setSelection(new TextSelection(selStart, selEnd));
         if (mBatchEditNestCount > 0) return;
         int len = mCurrentState.getUserText().length();
-        if (mCurrentState.getAutocompleteText().isPresent()) {
+        if (autocompleteText != null) {
             if (selStart > len || selEnd > len) {
                 if (DEBUG) Log.i(TAG, "Autocomplete text is being touched. Make it real.");
                 if (mInputConnection != null) mInputConnection.commitAutocomplete();
@@ -348,8 +369,8 @@ public class SpannableAutocompleteEditTextModel
             // Reset selection now. It will be updated immediately after focus is re-gained.
             // We do this to ensure the selection changed announcements are advertised by us
             // since we suppress all TEXT_SELECTION_CHANGED announcements coming from EditText.
-            mPreviouslyNotifiedState.setSelection(-1, -1);
-            mCurrentState.setSelection(-1, -1);
+            mPreviouslyNotifiedState.setSelection(TextSelection.INVALID);
+            mCurrentState.setSelection(TextSelection.INVALID);
         }
     }
 
@@ -384,11 +405,13 @@ public class SpannableAutocompleteEditTextModel
 
     @Override
     public int getAutocompleteTextLength() {
-        return mCurrentState.getAutocompleteText().map(t -> t.length()).orElse(0);
+        return mCurrentState.getAutocompleteText() != null
+                ? mCurrentState.getAutocompleteText().length()
+                : 0;
     }
 
     @Override
-    public Optional<String> getAdditionalText() {
+    public @Nullable String getAdditionalText() {
         return mCurrentState.getAdditionalText();
     }
 
@@ -400,9 +423,10 @@ public class SpannableAutocompleteEditTextModel
 
     @Override
     public void setAutocompleteText(
-            @NonNull CharSequence userText,
+            CharSequence userText,
             @Nullable CharSequence inlineAutocompleteText,
-            Optional<String> additionalText) {
+            @Nullable String additionalText,
+            @Nullable String siteSearchLabel) {
         // Note: this is invoked when the Autocomplete text is supplied by the Autocomplete
         // subsystem. These changes should be ignored for Autocomplete, specifically should not
         // be sent back to the Autocomplete subsystem to trigger suggestions fetch.
@@ -410,23 +434,23 @@ public class SpannableAutocompleteEditTextModel
         setAutocompleteTextInternal(
                 userText.toString(),
                 inlineAutocompleteText != null ? inlineAutocompleteText.toString() : null,
-                additionalText);
+                additionalText,
+                siteSearchLabel);
         setIgnoreTextChangeFromAutocomplete(false);
     }
 
     private void setAutocompleteTextInternal(
-            @NonNull String userText,
+            String userText,
             @Nullable String autocompleteText,
-            Optional<String> additionalText) {
+            @Nullable String additionalText,
+            @Nullable String siteSearchLabel) {
         if (DEBUG) Log.i(TAG, "setAutocompleteText: %s[%s]", userText, autocompleteText);
         mPreviouslySetState.set(
                 userText,
-                TextUtils.isEmpty(autocompleteText)
-                        ? Optional.empty()
-                        : Optional.of(autocompleteText),
+                TextUtils.isEmpty(autocompleteText) ? null : autocompleteText,
                 additionalText,
-                userText.length(),
-                userText.length());
+                new TextSelection(userText.length(), userText.length()),
+                siteSearchLabel);
         // TODO(changwan): avoid any unnecessary removal and addition of autocomplete text when it
         // is not changed or when it is appended to the existing autocomplete text.
         if (mInputConnection != null) {
@@ -440,6 +464,7 @@ public class SpannableAutocompleteEditTextModel
         boolean retVal =
                 mBatchEditNestCount == 0
                         && mLastEditWasTyping
+                        && mCurrentState.getSelection().isCollapsed()
                         && mCurrentState.isCursorAtEndOfUserText()
                         && doesKeyboardSupportAutocomplete()
                         && isNonCompositionalText(getTextWithoutAutocomplete());
@@ -449,14 +474,15 @@ public class SpannableAutocompleteEditTextModel
 
     private boolean doesKeyboardSupportAutocomplete() {
         String pkgName = mDelegate.getKeyboardPackageName();
-        return !pkgName.contains(".iqqi") // crbug.com/767016
+        return !pkgName.contains(".iqqi") // crbug.com/41345660
                 && !pkgName.contains("omronsoft")
-                && !pkgName.contains(".iwnn"); // crbug.com/758443
+                && !pkgName.contains(".iwnn"); // crbug.com/40536735
     }
 
     @Override
     public boolean shouldFinishCompositionOnDeletion() {
-        // crbug.com/758443, crbug.com/766888: Japanese keyboard does not finish composition when we
+        // crbug.com/40536735, crbug.com/41345594: Japanese keyboard does not finish composition
+        // when we
         // restore the deleted text, and later typing will make Japanese keyboard move before the
         // restored character. Most keyboards accept finishComposingText and update their internal
         // states.
@@ -466,7 +492,7 @@ public class SpannableAutocompleteEditTextModel
         // keyboards, instead we call finishComposingText() for all the keyboards except for Samsung
         // keyboard.
         return !pkgName.contains("com.sec.android.inputmethod")
-                // crbug.com/1071011: LG keyboard has the same issue.
+                // crbug.com/40684893: LG keyboard has the same issue.
                 && !pkgName.contains("com.lge.ime");
     }
 
@@ -483,13 +509,13 @@ public class SpannableAutocompleteEditTextModel
 
     @Override
     public boolean hasAutocomplete() {
-        boolean retVal = mCurrentState.getAutocompleteText().isPresent();
+        boolean retVal = mCurrentState.getAutocompleteText() != null;
         if (DEBUG) Log.i(TAG, "hasAutocomplete: " + retVal);
         return retVal;
     }
 
     @Override
-    public InputConnection getInputConnection() {
+    public @Nullable InputConnection getInputConnection() {
         return mInputConnection;
     }
 

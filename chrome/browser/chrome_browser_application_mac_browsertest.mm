@@ -55,6 +55,20 @@ BOOL g_voice_over_enabled = NO;
 
 @end
 
+@interface FakeWindow : NSWindow
+@property(strong, nonatomic) NSEvent* lastEvent;
+@end
+
+@implementation FakeWindow
+
+@synthesize lastEvent;
+
+- (void)sendEvent:(NSEvent*)event {
+  self.lastEvent = event;
+}
+
+@end
+
 class ChromeBrowserAppMacBrowserTest : public InProcessBrowserTest {
  public:
   ChromeBrowserAppMacBrowserTest() {
@@ -66,6 +80,14 @@ class ChromeBrowserAppMacBrowserTest : public InProcessBrowserTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     SetVoiceOverEnabled(VoiceOverEnabledAtStartUp());
+  }
+
+  void SetUpOnMainThread() override {
+    // Enable platform activation since that is what is begin tested here.
+    content::BrowserAccessibilityState::GetInstance()
+        ->SetActivationFromPlatformEnabled(
+            /*enabled=*/true);
+    InProcessBrowserTest::SetUpOnMainThread();
   }
 
   // Whether or not we simulate VoiceOver active before the test runs.
@@ -96,7 +118,8 @@ class ChromeBrowserAppMacBrowserTest : public InProcessBrowserTest {
   }
 
   bool BrowserIsInCompleteAccessibilityMode() {
-    return BrowserIsInAccessibilityMode(ui::kAXModeComplete);
+    return BrowserIsInAccessibilityMode(ui::kAXModeComplete |
+                                        ui::AXMode::kScreenReader);
   }
 
   bool BrowserIsInBasicAccessibilityMode() {
@@ -274,15 +297,16 @@ IN_PROC_BROWSER_TEST_F(ChromeBrowserAppMacBrowserTest,
 
   // The user activates VoiceOver.
   SetVoiceOverEnabled(YES);
-
   // Requests for AccessibilityRole when VoiceOver is active should not
   // downgrade the AX level.
   RequestAppAccessibilityRole();
   EXPECT_TRUE(BrowserIsInCompleteAccessibilityMode());
 
+  // After VoiceOver is deactivated, the AXMode is returned to its
+  // previous value.
   SetVoiceOverEnabled(NO);
   WaitThreeSeconds();
-  EXPECT_TRUE(BrowserAccessibilityDisabled());
+  EXPECT_TRUE(BrowserIsInNativeAPIAccessibilityMode());
 
   EnableEnhancedUserInterface(YES);
   WaitThreeSeconds();
@@ -291,6 +315,27 @@ IN_PROC_BROWSER_TEST_F(ChromeBrowserAppMacBrowserTest,
   // downgrade the AX level.
   RequestAppAccessibilityRole();
   EXPECT_TRUE(BrowserIsInCompleteAccessibilityMode());
+}
+
+// Tests that sending a key up event with the command modifier flag is forwarded
+// to the key window, which AppKit prevents in the default implementation of
+// -[NSApplication sendEvent:].
+IN_PROC_BROWSER_TEST_F(ChromeBrowserAppMacBrowserTest,
+                       CmdKeyUpEventsForwardedToWindow) {
+  FakeWindow* fakeWindow = [[FakeWindow alloc] init];
+  [fakeWindow makeKeyAndOrderFront:nil];
+  NSEvent* cmdAKeyUpEvent = [NSEvent keyEventWithType:NSEventTypeKeyUp
+                                             location:NSZeroPoint
+                                        modifierFlags:NSEventModifierFlagCommand
+                                            timestamp:0
+                                         windowNumber:0
+                                              context:nil
+                                           characters:@"a"
+                          charactersIgnoringModifiers:@"a"
+                                            isARepeat:NO
+                                              keyCode:0];
+  [[BrowserCrApplication sharedApplication] sendEvent:cmdAKeyUpEvent];
+  EXPECT_EQ(cmdAKeyUpEvent, fakeWindow.lastEvent);
 }
 
 // A test class where VoiceOver is "enabled" when its tests start.
@@ -311,5 +356,6 @@ IN_PROC_BROWSER_TEST_F(ChromeBrowserAppMacBrowserMacVoiceOverEnabledTest,
 
   // Enable VoiceOver.
   EXPECT_TRUE(VoiceOverEnabled());
-  EXPECT_EQ(accessibility_state->GetAccessibilityMode(), ui::kAXModeComplete);
+  EXPECT_EQ(accessibility_state->GetAccessibilityMode(),
+            ui::kAXModeComplete | ui::AXMode::kScreenReader);
 }

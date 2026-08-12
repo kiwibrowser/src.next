@@ -22,25 +22,44 @@
 
 #include <memory>
 
+#include "third_party/blink/renderer/core/css/counters_attachment_context.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/increment_load_event_delay_count.h"
+#include "third_party/blink/renderer/core/dom/parser_content_policy.h"
+#include "third_party/blink/renderer/core/editing/serializers/markup_formatter.h"
+#include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/html/parser/html_document_parser.h"
 #include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/xsl_style_sheet_resource.h"
+#include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
+#include "third_party/blink/renderer/core/svg/graphics/svg_image_chrome_client.h"
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"  // for parseAttributes()
+#include "third_party/blink/renderer/core/xml/parser/xml_document_parser_rs.h"  // for parseAttributesRust()
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
+#include "third_party/blink/renderer/core/xml/xslt_processor.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
+
+namespace {
+
+bool IsLocalSheet(const String& href) {
+  return href.length() > 1 && href[0] == '#';
+}
+
+}  // namespace
 
 ProcessingInstruction::ProcessingInstruction(Document& document,
                                              const String& target,
@@ -55,9 +74,15 @@ ProcessingInstruction::ProcessingInstruction(Document& document,
 
 ProcessingInstruction::~ProcessingInstruction() = default;
 
+bool ProcessingInstruction::IsXSL() const {
+  CHECK(!is_xsl_ || RuntimeEnabledFeatures::XSLTEnabled());
+  return is_xsl_;
+}
+
 EventListener* ProcessingInstruction::EventListenerForXSLT() {
-  if (!listener_for_xslt_)
+  if (!listener_for_xslt_) {
     return nullptr;
+  }
 
   return listener_for_xslt_->ToEventListener();
 }
@@ -80,62 +105,269 @@ CharacterData* ProcessingInstruction::CloneWithData(Document& factory,
   return MakeGarbageCollected<ProcessingInstruction>(factory, target_, data);
 }
 
-void ProcessingInstruction::DidAttributeChanged() {
+void ProcessingInstruction::DidChangeData() {
+  attributes_dirty_ = true;
+  bool was_xsl = is_xsl_;
+  String href;
+  String charset;
+  CheckStyleSheet(href, charset);
+  if (isConnected()) {
+    if (was_xsl && !is_xsl_) {
+      DocumentXSLT::ProcessingInstructionRemovedFromDocument(GetDocument(),
+                                                             this);
+      GetDocument().GetStyleEngine().AddStyleSheetCandidateNode(*this);
+    } else if (!was_xsl && is_xsl_) {
+      is_xsl_ = false;
+      GetDocument().GetStyleEngine().RemoveStyleSheetCandidateNode(
+          *this, *parentNode());
+      is_xsl_ = true;
+      DocumentXSLT::ProcessingInstructionInsertedIntoDocument(GetDocument(),
+                                                              this);
+    }
+  }
+  UpdateStylesheetIfNeeded();
+}
+
+void ProcessingInstruction::UpdateStylesheetIfNeeded() {
+  if (!IsXMLStylesheet()) {
+    return;
+  }
+
   if (sheet_) {
-    if (sheet_->IsLoading())
+    if (sheet_->IsLoading()) {
       RemovePendingSheet();
+    }
     ClearSheet();
   }
 
   String href;
   String charset;
-  if (!CheckStyleSheet(href, charset))
+  if (CheckStyleSheet(href, charset)) {
+    ProcessStylesheet(href, charset);
+  }
+}
+
+void ProcessingInstruction::ProcessAttributesIfNeeded() {
+  if (!attributes_dirty_) {
     return;
-  Process(href, charset);
+  }
+
+  attributes_dirty_ = false;
+  attributes_.clear();
+  // see http://www.w3.org/TR/xml-stylesheet/
+  // ### support stylesheet included in a fragment of this (or another)
+  // document
+  // ### make sure this gets called when adding from javascript
+  bool attrs_ok;
+  HashMap<String, String> attrs;
+  if (RuntimeEnabledFeatures::XMLParsingRustEnabled()) {
+    attrs = blink::ParseAttributesRust(data_, attrs_ok);
+  } else {
+    attrs = blink::ParseAttributes(data_, attrs_ok);
+  }
+  if (!attrs_ok) {
+    return;
+  }
+
+  for (const auto& pair : attrs) {
+    attributes_.push_back(
+        KeyValuePair<AtomicString, AtomicString>(pair.key, pair.value));
+  }
+}
+
+bool ProcessingInstruction::ValidateAttributeName(
+    const AtomicString& name,
+    ExceptionState& exception_state) const {
+  if (!Document::IsValidAttributeLocalName(name)) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidCharacterError,
+                                      "Invalid attribute name: " + name);
+    return false;
+  }
+  return true;
+}
+
+const AtomicString& ProcessingInstruction::GetAttributeValue(
+    const AtomicString& name,
+    const AtomicString& default_value) {
+  DCHECK_EQ(name, name.ToAsciiLower());
+  ProcessAttributesIfNeeded();
+  for (const auto& pair : attributes_) {
+    if (pair.key == name) {
+      return pair.value;
+    }
+  }
+  return default_value;
+}
+
+bool ProcessingInstruction::HasAttribute(const AtomicString& name) {
+  DCHECK_EQ(name, name.ToAsciiLower());
+  ProcessAttributesIfNeeded();
+  for (const auto& pair : attributes_) {
+    if (pair.key == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ProcessingInstruction::SetAttribute(const AtomicString& name,
+                                         const AtomicString& value) {
+  DCHECK_EQ(name, name.ToAsciiLower());
+  DCHECK(ValidateAttributeName(name, ASSERT_NO_EXCEPTION));
+
+  ProcessAttributesIfNeeded();
+  for (auto& pair : attributes_) {
+    if (pair.key == name) {
+      pair.value = value;
+      UpdateDataFromAttributes();
+      return;
+    }
+  }
+  attributes_.push_back(KeyValuePair<AtomicString, AtomicString>(name, value));
+  UpdateDataFromAttributes();
+}
+
+void ProcessingInstruction::RemoveAttribute(const AtomicString& name) {
+  DCHECK_EQ(name, name.ToAsciiLower());
+  ProcessAttributesIfNeeded();
+  const wtf_size_t size = attributes_.size();
+  for (wtf_size_t i = 0; i < size; ++i) {
+    if (attributes_[i].key == name) {
+      attributes_.EraseAt(i);
+      UpdateDataFromAttributes();
+      return;
+    }
+  }
+}
+
+void ProcessingInstruction::ToggleAttribute(const AtomicString& name,
+                                            std::optional<bool> force,
+                                            ExceptionState& exception_state) {
+  if (!ValidateAttributeName(name, exception_state)) {
+    return;
+  }
+
+  DCHECK_EQ(name, name.ToAsciiLower());
+  const bool already_there = HasAttribute(name);
+  force = force.value_or(!already_there);
+
+  if (*force) {
+    if (!already_there) {
+      SetAttribute(name, g_empty_atom);
+    }
+  } else {
+    RemoveAttribute(name);
+  }
+}
+
+bool ProcessingInstruction::hasAttributes() {
+  ProcessAttributesIfNeeded();
+  return !attributes_.empty();
+}
+
+Vector<AtomicString> ProcessingInstruction::getAttributeNames() {
+  ProcessAttributesIfNeeded();
+  Vector<AtomicString> names;
+  names.reserve(attributes_.size());
+  for (const auto& pair : attributes_) {
+    names.push_back(pair.key);
+  }
+  return names;
+}
+
+void ProcessingInstruction::UpdateDataFromAttributes() {
+  StringBuilder builder;
+  const wtf_size_t size = attributes_.size();
+  for (wtf_size_t i = 0; i < size; ++i) {
+    if (i) {
+      builder.Append(" ");
+    }
+    builder.Append(attributes_[i].key);
+    builder.Append("=\"");
+    MarkupFormatter::AppendAttributeValue(builder, attributes_[i].value,
+                                          GetDocument().IsHTMLDocument());
+    builder.Append("\"");
+  }
+  SetDataFromAttributeChange(builder.ReleaseString());
+  UpdateStylesheetIfNeeded();
+}
+
+bool ProcessingInstruction::IsXMLStylesheet() const {
+  return (target_ == "xml-stylesheet") && GetDocument().GetFrame() &&
+         (parentNode() == GetDocument());
 }
 
 bool ProcessingInstruction::CheckStyleSheet(String& href, String& charset) {
-  if (target_ != "xml-stylesheet" || !GetDocument().GetFrame() ||
-      parentNode() != GetDocument())
+  if (!IsXMLStylesheet()) {
     return false;
+  }
 
-  // see http://www.w3.org/TR/xml-stylesheet/
-  // ### support stylesheet included in a fragment of this (or another) document
-  // ### make sure this gets called when adding from javascript
-  bool attrs_ok;
-  const HashMap<String, String> attrs = ParseAttributes(data_, attrs_ok);
-  if (!attrs_ok)
-    return false;
-  HashMap<String, String>::const_iterator i = attrs.find("type");
-  String type;
-  if (i != attrs.end())
-    type = i->value;
+  ProcessAttributesIfNeeded();
+
+  DEFINE_STATIC_LOCAL(AtomicString, kType, ("type"));
+  DEFINE_STATIC_LOCAL(AtomicString, kHref, ("href"));
+  DEFINE_STATIC_LOCAL(AtomicString, kCharset, ("charset"));
+  DEFINE_STATIC_LOCAL(AtomicString, kAlternate, ("alternate"));
+  DEFINE_STATIC_LOCAL(AtomicString, kTitle, ("title"));
+  DEFINE_STATIC_LOCAL(AtomicString, kMedia, ("media"));
+
+  AtomicString type = GetAttributeValue(kType, g_empty_atom);
 
   is_css_ = type.empty() || type == "text/css";
   is_xsl_ = (type == "text/xml" || type == "text/xsl" ||
              type == "application/xml" || type == "application/xhtml+xml" ||
              type == "application/rss+xml" || type == "application/atom+xml");
-  if (!is_css_ && !is_xsl_)
+  if (!is_css_ && !is_xsl_) {
     return false;
+  }
 
-  auto it_href = attrs.find("href");
-  href = it_href != attrs.end() ? it_href->value : "";
-  auto it_charset = attrs.find("charset");
-  charset = it_charset != attrs.end() ? it_charset->value : "";
-  auto it_alternate = attrs.find("alternate");
-  String alternate = it_alternate != attrs.end() ? it_alternate->value : "";
-  alternate_ = alternate == "yes";
-  auto it_title = attrs.find("title");
-  title_ = it_title != attrs.end() ? it_title->value : "";
-  auto it_media = attrs.find("media");
-  media_ = it_media != attrs.end() ? it_media->value : "";
+  if (is_xsl_ && !RuntimeEnabledFeatures::XSLTEnabled()) {
+    XSLTProcessor::ReportXSLTDisabled(GetDocument(),
+                                      /*exception_state*/ nullptr);
+    is_xsl_ = false;
+    return false;
+  }
+
+  href = GetAttributeValue(kHref, g_empty_atom);
+
+  // Disallow "external" XSLT stylesheets in SVG documents in image contexts.
+  if (is_xsl_ && SVGImage::IsInSVGImage(this) && !IsLocalSheet(href)) {
+    is_xsl_ = false;
+    return false;
+  }
+
+  if (is_xsl_ && GetDocument().IsSVGDocument()) {
+    if (SVGImage::IsInSVGImage(this)) {
+      // Encountering XSL inside an external SVG image can't be counted through
+      // the document we retrieve through GetDocument() here, as that is the SVG
+      // document of the image. Instead, we set the flag on the SVG image, and
+      // in SVGImage::UpdateUseCountersAfterLoad() send the use counter as part
+      // of the metrics of the embedding document, not the SVG document of the
+      // image.
+      if (Page* page = GetDocument().GetPage()) {
+        if (auto* client =
+                DynamicTo<IsolatedSVGChromeClient>(&page->GetChromeClient())) {
+          client->SetDidEncounterXSL();
+        }
+      }
+    } else {
+      UseCounter::Count(GetDocument(), WebFeature::kXSLPIInSVGStandaloneDoc);
+    }
+  }
+
+  charset = GetAttributeValue(kCharset, g_empty_atom);
+  alternate_ = GetAttributeValue(kAlternate, g_empty_atom) == "yes";
+  title_ = GetAttributeValue(kTitle, g_empty_atom);
+  media_ = GetAttributeValue(kMedia, g_empty_atom);
 
   return !alternate_ || !title_.empty();
 }
 
-void ProcessingInstruction::Process(const String& href, const String& charset) {
-  if (href.length() > 1 && href[0] == '#') {
-    local_href_ = href.Substring(1);
+void ProcessingInstruction::ProcessStylesheet(const String& href,
+                                              const String& charset) {
+  CHECK(IsXMLStylesheet());
+  if (IsLocalSheet(href)) {
+    local_href_ = href.substr(1);
     // We need to make a synthetic XSLStyleSheet that is embedded.
     // It needs to be able to kick off import/include loads that
     // can hang off some parent sheet.
@@ -145,6 +377,11 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
                                                    final_url, true);
       loading_ = false;
     }
+
+    // crbug.com/496271580: Clear the resource to prevent late-arriving
+    // network responses from being processed if the stylesheet has
+    // switched to a local source.
+    ClearResource();
     return;
   }
 
@@ -162,7 +399,7 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
     XSLStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
   } else {
     params.SetCharset(charset.empty() ? GetDocument().Encoding()
-                                      : WTF::TextEncoding(charset));
+                                      : TextEncoding(charset));
     GetDocument().GetStyleEngine().AddPendingBlockingSheet(
         *this, PendingSheetType::kBlocking);
     CSSStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
@@ -170,17 +407,20 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
 }
 
 bool ProcessingInstruction::IsLoading() const {
-  if (loading_)
+  if (loading_) {
     return true;
-  if (!sheet_)
+  }
+  if (!sheet_) {
     return false;
+  }
   return sheet_->IsLoading();
 }
 
 bool ProcessingInstruction::SheetLoaded() {
   if (!IsLoading()) {
-    if (!DocumentXSLT::SheetLoaded(GetDocument(), this))
+    if (!DocumentXSLT::SheetLoaded(GetDocument(), this)) {
       RemovePendingSheet();
+    }
     return true;
   }
   return false;
@@ -209,8 +449,9 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
         Referrer(style_resource->GetResponse().ResponseUrl(),
                  style_resource->GetReferrerPolicy()),
         style_resource->Encoding());
-    if (style_resource->GetResourceRequest().IsAdResource())
+    if (style_resource->GetResourceRequest().IsAdResource()) {
       parser_context->SetIsAdRelated();
+    }
 
     auto* new_sheet = MakeGarbageCollected<StyleSheetContents>(
         parser_context, style_resource->Url());
@@ -235,33 +476,42 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
   ClearResource();
   loading_ = false;
 
-  if (is_css_)
+  if (is_css_) {
     To<CSSStyleSheet>(sheet_.Get())->Contents()->CheckLoaded();
-  else if (is_xsl_)
+  } else if (is_xsl_) {
     To<XSLStyleSheet>(sheet_.Get())->CheckLoaded();
+  }
 }
 
 Node::InsertionNotificationRequest ProcessingInstruction::InsertedInto(
     ContainerNode& insertion_point) {
   CharacterData::InsertedInto(insertion_point);
-  if (!insertion_point.isConnected())
+  if (!insertion_point.isConnected()) {
     return kInsertionDone;
+  }
+  return Node::kInsertionShouldCallDidNotifySubtreeInsertions;
+}
+
+void ProcessingInstruction::DidNotifySubtreeInsertionsToDocument() {
+  CharacterData::DidNotifySubtreeInsertionsToDocument();
 
   String href;
   String charset;
   bool is_valid = CheckStyleSheet(href, charset);
   if (!DocumentXSLT::ProcessingInstructionInsertedIntoDocument(GetDocument(),
-                                                               this))
+                                                               this)) {
     GetDocument().GetStyleEngine().AddStyleSheetCandidateNode(*this);
-  if (is_valid)
-    Process(href, charset);
-  return kInsertionDone;
+  }
+  if (is_valid) {
+    ProcessStylesheet(href, charset);
+  }
 }
 
 void ProcessingInstruction::RemovedFrom(ContainerNode& insertion_point) {
   CharacterData::RemovedFrom(insertion_point);
-  if (!insertion_point.isConnected())
+  if (!insertion_point.isConnected()) {
     return;
+  }
 
   // No need to remove XSLStyleSheet from StyleEngine.
   if (!DocumentXSLT::ProcessingInstructionRemovedFromDocument(GetDocument(),
@@ -270,8 +520,9 @@ void ProcessingInstruction::RemovedFrom(ContainerNode& insertion_point) {
         *this, insertion_point);
   }
 
-  if (IsLoading())
+  if (IsLoading()) {
     RemovePendingSheet();
+  }
 
   if (sheet_) {
     DCHECK_EQ(sheet_->ownerNode(), this);
@@ -288,8 +539,9 @@ void ProcessingInstruction::ClearSheet() {
 }
 
 void ProcessingInstruction::RemovePendingSheet() {
-  if (is_xsl_)
+  if (is_xsl_) {
     return;
+  }
   GetDocument().GetStyleEngine().RemovePendingBlockingSheet(
       *this, PendingSheetType::kBlocking);
 }

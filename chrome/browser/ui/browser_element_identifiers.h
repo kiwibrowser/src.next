@@ -2,95 +2,209 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// A subset of the browser element identifiers are being used in Desktop UI
-// benchmark. The name of the identifiers and the string names used by the
-// benchmark are expected to be equal.
-//
-// Please keep the names in this file in sync with
-// `tools/perf/page_sets/desktop_ui/browser_element_identifiers.py`
-
 #ifndef CHROME_BROWSER_UI_BROWSER_ELEMENT_IDENTIFIERS_H_
 #define CHROME_BROWSER_UI_BROWSER_ELEMENT_IDENTIFIERS_H_
 
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_tracker.h"
 
-// These should gradually replace values in view_ids.h.
-// Please keep this list alphabetized.
+// These are the top-level UI ElementIdentifiers that can be used to retrieve
+// parts of the UI in both production code and in tests.
+//
+// These IDs can be used with:
+//  - BrowserElements
+//  - BrowserElementsViews
+//  - ElementTracker
+//  - ElementTrackerViews
+//  - Kombucha (InteractiveBrowserTest) tests
+//
+// Guidelines:
+//  1. Keep the list alphabetized.
+//     - Name identifiers in such a way that related identifiers are together
+//       alphabetically.
+//     - E.g. kToolbarAppMenuElementId, kToolbarBackButtonElementId, etc.
+//  2. This is not intended to be a master directory.
+//     - Only add things here if they are in the top-level conceptual space of
+//       the browser window.
+//     - For dialog elements, prefer to declare them in the dialog controller
+//       class using DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE() instead.
+//     - Similarly, declare menu item identifiers in the menu controller, WebUI
+//       page elements in the page handler or controller, etc.
+//     - You will notice some items here that should probably not be here. When
+//       convenient, take the time to move them out to the appropriate location.
+//  3. These should gradually replace values in view_ids.h.
+//     - When possible take the time to remove view_ids and references to them.
+//
+// Example uses:
+// ```
+//   // A view whose ID is listed in this file:
+//   auto* my_view =
+//       BrowserElementsViews::From(browser)->GetViewAs<MyView>(kMyViewId);
+//
+//   // A view whose ID is declared in a dialog controller:
+//   auto* my_dialog_view =
+//       BrowserElementsViews::From(browser)->GetViewAs<MyDialogView>(
+//           MyDialogController::kMyDialogViewId);
+// ```
+
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kActionItemZoomElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAddCurrentTabToReadingListElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAiModePageActionIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillAddressPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kAutofillFilledCardInformationPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillMandatoryReauthPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillPaymentIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillSavePaymentsPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillVirtualCardEnrollPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kIndigoPageActionIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kMultistepFilterPageActionIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(
     kAnonymizedUrlCollectionPersonalizationSettingId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAppUninstallDialogOkButtonId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillCreditCardBenefitElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillCreditCardSuggestionEntryElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillManualFallbackElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillPredictionImprovementsErrorElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillPredictionImprovementsFillElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(
-    kAutofillPredictionImprovementsTriggerElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillPredictionImprovementsIphElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillStandaloneCvcSuggestionElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillSuggestionElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkBarElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkEditorId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkEditorOkButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkReplaceOldGroupCheckboxId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkSidePanelWebViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkStarViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kBrowserDialogAnchorElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kBrowserFrameElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kBrowserViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kConstrainedDialogWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsCaptureBorder);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsContainerViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsSeparatorLeadingEdgeElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsSeparatorTopCornerElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsSeparatorTopEdgeElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContentsSeparatorTrailingEdgeElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kContextualTasksEphemeralToolbarButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContextualTasksPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContextualTasksSidePanelWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContextualTasksWebUIPinButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContextualTasksWebUIToolbarElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kContextualTasksWebUIOverflowMenuElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kContextualTasksWebUIOverflowMenuPinButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kCookieControlsIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kCustomizeChromeSidePanelWebViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kDataSharingBubbleElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kNotificationContentSettingImageView);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kDataSharingSigninPromptDialogCancelButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDataSharingErrorDialogOkButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDeletionDialogCancelButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDeletionDialogDontAskCheckboxId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDeletionDialogOkButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kDeviceSignalsConsentCancelButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kDeviceSignalsConsentOkButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kDiscountsChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kEnhancedProtectionSettingElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kExclusiveAccessBubbleViewElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(
-    kExtensionsMv2DisabledDialogManageButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuMainPageElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuSiteSettingsToggleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuReloadPageButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuReloadSectionElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsMenuManageExtensionsElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(
-    kExtensionsMv2DisabledDialogParagraphElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kExtensionsRequestAccessButtonElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(
-    kExtensionsMv2DisabledDialogRemoveButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFeatureFirstRunDialogContentViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFedCmAccountChooserDialogAccountElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFederationElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFindPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFileSystemPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kFooterWebViewSeparatorElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kMemorySaverChipElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kMultiContentsViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kNotificationContentSettingImageView);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kHatsNextWebDialogId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicOsWidgetKeyboardShortcutElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicOsToggleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicNudgeButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicActorTaskIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kGlicSelectionOverlayViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kHistorySearchInputElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kInactiveTabSettingElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kInfoBarContainerElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kInstallPwaElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kIntentChipElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kIntentPickerPageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kIOSLensPromoAnchorElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kJsOptimizationsIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLeftAlignedSidePanelSeparatorViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensOverlayHomeworkPageActionIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensOverlayPageActionIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensOverlayTranslateButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensOverlayViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensPermissionDialogCancelButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensPermissionDialogOkButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensPreselectionBubbleElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensPreselectionBubbleExitButtonElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensSearchBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLensSidePanelSearchBoxElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLocalWebParentApprovalDialogId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLocalWebParentApprovalDialogErrorId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kLocationBarElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLocationIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kNewTabButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kNtpFooterViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kOfferNotificationChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kOmniboxElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kAiOverlayDialogWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kOptimizationGuideChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPasswordsOmniboxKeyIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kPaymentsChurnedUsersBubbleId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPerformanceSidePanelWebViewElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kPinnedActionToolbarButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(
     kPinnedToolbarActionsContainerDividerElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPinnedToolbarActionsContainerElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kPinnedToolbarActionSendTabToSelfElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kPinnedToolbarActionShowSidePanelBookmarksElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kPinnedToolbarActionShowSidePanelContextualTasksElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kPinnedToolbarActionShowSidePanelLensOverlayResultsElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPlusAddressCreateSuggestionElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPriceInsightsChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPriceTrackingBookmarkViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kPriceTrackingChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kProductSpecificationsChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kProductSpecificationsButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelControlsViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelNewTabGroupButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelRecentThreadsViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelTabGroupsItemViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelTabGroupsListTitleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kProjectsPanelTabGroupsItemViewMoreButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kProjectsPanelTabGroupsItemViewSharedIconElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelTabGroupsViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelThreadListItemViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kProjectsPanelThreadsActivityAiModeItemElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelThreadsActivityButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kProjectsPanelThreadsActivityGeminiItemElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kProjectsPanelViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadAnythingSettingsButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadAnythingViewModeElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadAnythingPageActionElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadLaterSidePanelWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kRecordButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kReloadButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kRightAlignedSidePanelSeparatorViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSavePasswordComboboxElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSavedTabGroupBarElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSavedTabGroupButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSavedTabGroupOverflowButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSavedTabGroupOverflowMenuId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSharedTabGroupCommentsActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSharedTabGroupFeedbackElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kCollaborationMessagingPageActionIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSearchEngineChoiceDialogId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelCloseButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelComboboxElementId);
@@ -100,25 +214,45 @@ DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelMoreInfoButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelOpenInNewTabButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelPinButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelReadingListUnreadElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelResizeAreaElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelResizeHandleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelRoundedCornerViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSideSearchButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSideSearchWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSystemMenuNewTabElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSystemMenuRestoreItemElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kSystemMenuRestoreTabElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabAlertIndicatorButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleCloseGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kTabGroupEditorBubbleConvertToBookmarkButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleDeleteGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleFocusGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleUnfocusGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleLeaveGroupButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(
     kTabGroupEditorBubbleManageSharedGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(
+    kTabGroupEditorBubbleMoveGroupToNewWindowButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleNewTabInGroupButtonId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleRecentActivityButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleShareGroupButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupEditorBubbleSaveToggleId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupHeaderAttentionIndicatorElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabGroupHeaderElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutoTabGroupButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabDeclutterButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabSearchBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabSearchButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripActionContainerElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripComboButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripRegionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripFrameGrabHandleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripFrameDialogAnchorId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToastElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarActionViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarAppMenuButtonElementId);
@@ -126,34 +260,49 @@ DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarAvatarBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarAvatarButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarBackButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarBackButtonMenuElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarBatterySaverBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarBatterySaverButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarChromeLabsBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarChromeLabsButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarDownloadBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarDownloadButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDownloadBubbleRowElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kDownloadBubbleOpenButtonId);
+DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kDownloadEndedCustomEventId);
+DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kDownloadedFileOpenedCustomEventId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarExtensionsContainerElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarForwardButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarForwardButtonMenuElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarHomeButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarMediaBubbleElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarMediaButtonElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarNewTabButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarOverflowButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(
     kToolbarPerformanceInterventionButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarSplitTabsToolbarButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarSplitTabsMenuElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarSidePanelButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarSidePanelContainerElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarTabCounterButtonElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kToolbarManagementButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTopContainerElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kUserNotesSidePanelWebViewElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kTranslatePageActionElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kUnfocusTabGroupButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kVerticalTabStripCollapseButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kVerticalTabStripBottomContainerElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kVerticalTabStripProjectsButtonElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kVerticalTabStripTopContainerElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kVerticalTabTitleElementId);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kWebAuthnAmbientSigninIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kWebUIIPHDemoElementIdentifier);
-
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kWebUIToolbarElementIdentifier);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kBrowserThemeChangedEventId);
+DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kExtensionsMenuPinExtensionsEventId);
+DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kExtensionsSidePanelPinExtensionsEventId);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kLensSidePanelSearchBoxFocusedEventId);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kSidePanelComboboxChangedCustomEventId);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kSidePanelReadingMarkedAsReadEventId);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kTabGroupedCustomEventId);
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kTabGroupSavedCustomEventId);
+DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kVerticalTabStripCollapsedCustomEventId);
 
 #endif  // CHROME_BROWSER_UI_BROWSER_ELEMENT_IDENTIFIERS_H_

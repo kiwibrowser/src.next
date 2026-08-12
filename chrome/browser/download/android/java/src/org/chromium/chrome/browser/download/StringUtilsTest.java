@@ -39,18 +39,18 @@ public class StringUtilsTest {
         Assert.assertEquals(
                 "Downloading…", StringUtils.getProgressTextForUi(ProgressBuilder.bytes(0, null)));
         Assert.assertEquals(
-                "1.00 KB / ?", StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1024, null)));
+                "1.00 KB / ?", StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1000, null)));
         Assert.assertEquals(
-                "0.50 KB / ?", StringUtils.getProgressTextForUi(ProgressBuilder.bytes(512, null)));
+                "0.51 KB / ?", StringUtils.getProgressTextForUi(ProgressBuilder.bytes(512, null)));
         Assert.assertEquals(
                 "1.00 MB / ?",
-                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1024 * 1024, null)));
+                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1_000_000, null)));
         Assert.assertEquals(
                 "1.00 GB / ?",
-                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1024 * 1024 * 1024, null)));
+                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1_000_000_000L, null)));
         Assert.assertEquals(
                 "1.00 KB / 2.00 KB",
-                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1024, 2048L)));
+                StringUtils.getProgressTextForUi(ProgressBuilder.bytes(1000, 2000L)));
         Assert.assertEquals(
                 "Downloading…", StringUtils.getProgressTextForUi(ProgressBuilder.files(0, null)));
         Assert.assertEquals(
@@ -105,13 +105,12 @@ public class StringUtilsTest {
     public void testGetAvailableBytesForUi() {
         final Context context = ApplicationProvider.getApplicationContext();
         Assert.assertEquals("0.00 KB available", StringUtils.getAvailableBytesForUi(context, 0));
-        Assert.assertEquals("0.50 KB available", StringUtils.getAvailableBytesForUi(context, 512));
-        Assert.assertEquals("1.00 KB available", StringUtils.getAvailableBytesForUi(context, 1024));
+        Assert.assertEquals("0.51 KB available", StringUtils.getAvailableBytesForUi(context, 512));
+        Assert.assertEquals("1.00 KB available", StringUtils.getAvailableBytesForUi(context, 1000));
         Assert.assertEquals(
-                "1.00 MB available", StringUtils.getAvailableBytesForUi(context, 1024 * 1024));
+                "1.00 MB available", StringUtils.getAvailableBytesForUi(context, 1_000_000));
         Assert.assertEquals(
-                "1.00 GB available",
-                StringUtils.getAvailableBytesForUi(context, 1024 * 1024 * 1024));
+                "1.00 GB available", StringUtils.getAvailableBytesForUi(context, 1_000_000_000L));
     }
 
     @Test
@@ -120,11 +119,11 @@ public class StringUtilsTest {
     public void testDownloadUtilsGetStringForBytes() {
         final Context context = ApplicationProvider.getApplicationContext();
         Assert.assertEquals("0.00 KB", DownloadUtils.getStringForBytes(context, 0));
-        Assert.assertEquals("0.50 KB", DownloadUtils.getStringForBytes(context, 512));
-        Assert.assertEquals("1.00 KB", DownloadUtils.getStringForBytes(context, 1024));
-        Assert.assertEquals("1.00 MB", DownloadUtils.getStringForBytes(context, 1024 * 1024));
-        Assert.assertEquals(
-                "1.00 GB", DownloadUtils.getStringForBytes(context, 1024 * 1024 * 1024));
+        Assert.assertEquals("0.51 KB", DownloadUtils.getStringForBytes(context, 512));
+        Assert.assertEquals("1.00 KB", DownloadUtils.getStringForBytes(context, 1000));
+        Assert.assertEquals("1.00 MB", DownloadUtils.getStringForBytes(context, 1_000_000));
+        Assert.assertEquals("10.00 MB", DownloadUtils.getStringForBytes(context, 10_000_000));
+        Assert.assertEquals("1.00 GB", DownloadUtils.getStringForBytes(context, 1_000_000_000L));
     }
 
     @Test
@@ -139,6 +138,77 @@ public class StringUtilsTest {
         Assert.assertEquals(
                 "123" + StringUtils.ELLIPSIS + ".pdf",
                 StringUtils.getAbbreviatedFileName("1234567.pdf", 7));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Download"})
+    public void testGetAbbreviatedFileNameEarlyReturn() {
+        // Pure ASCII with length <= limit should early return
+        Assert.assertEquals("123.pdf", StringUtils.getAbbreviatedFileName("123.pdf", 7));
+        // Unicode characters with length <= limit might exceed the budget and be abbreviated
+        Assert.assertNotEquals("中中中中.apk", StringUtils.getAbbreviatedFileName("中中中中.apk", 8));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Download"})
+    public void testGetAbbreviatedFileNameOptimization() {
+        // Verify that extremely long ASCII filenames with length > limit are abbreviated correctly
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 2000; i++) {
+            sb.append("a");
+        }
+        sb.append(".txt");
+        String veryLongName = sb.toString();
+        String abbreviated = StringUtils.getAbbreviatedFileName(veryLongName, 10);
+        Assert.assertEquals("aaaaaa" + StringUtils.ELLIPSIS + ".txt", abbreviated);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Download"})
+    public void testGetAbbreviatedFileNameUnicodeOptimization() {
+        // Verify that extremely long Unicode filenames do not cause timeout and loop limit works
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 2000; i++) {
+            sb.append("中");
+        }
+        sb.append(".txt");
+        String veryLongUnicodeName = sb.toString();
+        String abbreviated = StringUtils.getAbbreviatedFileName(veryLongUnicodeName, 10);
+        Assert.assertTrue(abbreviated.endsWith(".txt"));
+        Assert.assertTrue(abbreviated.contains(StringUtils.ELLIPSIS));
+        // The base name part should be truncated and its character length should not exceed 6
+        // (limit - 4)
+        int ellipsisIndex = abbreviated.indexOf(StringUtils.ELLIPSIS);
+        String basePart = abbreviated.substring(0, ellipsisIndex);
+        Assert.assertTrue(basePart.length() <= 6);
+        Assert.assertTrue(basePart.length() > 0);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Download"})
+    public void testGetAbbreviatedFileNameUnicode() {
+        // Verify that it handles very wide Unicode and decorative characters, and places ellipsis
+        // correctly
+        String longUnicode = "𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋𠀋.apk";
+        String abbreviated = StringUtils.getAbbreviatedFileName(longUnicode, 15);
+        Assert.assertTrue(abbreviated.endsWith(".apk"));
+        Assert.assertTrue(abbreviated.contains(StringUtils.ELLIPSIS));
+
+        // Verify surrogate-pair integrity (no broken/halved characters)
+        for (int i = 0; i < abbreviated.length(); i++) {
+            char c = abbreviated.charAt(i);
+            if (Character.isHighSurrogate(c)) {
+                Assert.assertTrue(i + 1 < abbreviated.length());
+                Assert.assertTrue(Character.isLowSurrogate(abbreviated.charAt(i + 1)));
+            } else if (Character.isLowSurrogate(c)) {
+                Assert.assertTrue(i - 1 >= 0);
+                Assert.assertTrue(Character.isHighSurrogate(abbreviated.charAt(i - 1)));
+            }
+        }
     }
 
     private static class ProgressBuilder {

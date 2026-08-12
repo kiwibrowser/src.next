@@ -8,7 +8,9 @@ import android.content.res.ColorStateList;
 import android.view.View.OnClickListener;
 
 import org.chromium.base.Callback;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.theme.ThemeColorProvider.TintObserver;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
@@ -19,24 +21,26 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
  * The controller for the tab switcher button. This class handles all interactions that the tab
  * switcher button has with the outside world.
  */
+@NullMarked
 public class TabSwitcherButtonCoordinator {
     /**
-     *  The model that handles events from outside the tab switcher button. Normally the coordinator
-     *  should acces the mediator which then updates the model. Since this component is very simple
-     *  the mediator is omitted.
+     * The model that handles events from outside the tab switcher button. Normally the coordinator
+     * should acces the mediator which then updates the model. Since this component is very simple
+     * the mediator is omitted.
      */
     private final PropertyModel mTabSwitcherButtonModel =
             new PropertyModel(TabSwitcherButtonProperties.ALL_KEYS);
 
     private final Callback<Integer> mTabCountObserver;
 
-    private ThemeColorProvider mThemeColorProvider;
-    private TintObserver mTintObserver;
+    private @Nullable ThemeColorProvider mThemeColorProvider;
+    private @Nullable TintObserver mTintObserver;
 
-    private ObservableSupplier<Integer> mTabCountSupplier;
+    private @Nullable MonotonicObservableSupplier<Integer> mTabCountSupplier;
 
     /**
      * Build the controller that manages the tab switcher button.
+     *
      * @param view The {@link TabSwitcherButtonView} the controller manages.
      */
     public TabSwitcherButtonCoordinator(TabSwitcherButtonView view) {
@@ -63,8 +67,8 @@ public class TabSwitcherButtonCoordinator {
                 new TintObserver() {
                     @Override
                     public void onTintChanged(
-                            ColorStateList tint,
-                            ColorStateList activityFocusTint,
+                            @Nullable ColorStateList tint,
+                            @Nullable ColorStateList activityFocusTint,
                             @BrandedColorScheme int brandedColorScheme) {
                         mTabSwitcherButtonModel.set(TabSwitcherButtonProperties.TINT, tint);
                     }
@@ -74,12 +78,13 @@ public class TabSwitcherButtonCoordinator {
                 TabSwitcherButtonProperties.TINT, mThemeColorProvider.getTint());
     }
 
-    public void setTabCountSupplier(ObservableSupplier<Integer> tabCountSupplier) {
+    public void setTabCountSupplier(MonotonicObservableSupplier<Integer> tabCountSupplier) {
         mTabCountSupplier = tabCountSupplier;
         mTabSwitcherButtonModel.set(TabSwitcherButtonProperties.IS_ENABLED, true);
-        mTabCountSupplier.addObserver(mTabCountObserver);
+        mTabCountSupplier.addSyncObserverAndPostIfNonNull(mTabCountObserver);
     }
 
+    @SuppressWarnings("NullAway")
     public void destroy() {
         if (mThemeColorProvider != null) {
             mThemeColorProvider.removeTintObserver(mTintObserver);

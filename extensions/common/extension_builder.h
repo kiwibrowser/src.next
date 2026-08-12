@@ -28,7 +28,7 @@ class Extension;
 // This class can be used in two ways:
 // Aided Manifest Construction
 //   The easy way. Use the constructor that takes a name and use helper methods
-//   like AddPermission() to customize the extension without needing to
+//   like AddAPIPermission() to customize the extension without needing to
 //   construct the manifest dictionary by hand. For more customization, you can
 //   use MergeManifest() to add additional keys (which will take precedence over
 //   others).
@@ -38,9 +38,9 @@ class Extension;
 //   TODO(devlin): My suspicion is that this is almost always less readable and
 //   useful, but it came first and is used in many places. It'd be nice to maybe
 //   get rid of it.
-// These are not interchangable - calling SetManifest() with aided manifest
-// construction or e.g. AddPermissions() with custom manifest construction will
-// crash.
+// These are not interchangeable - calling SetManifest() with aided manifest
+// construction or e.g. AddAPIPermissions() with custom manifest construction
+// will crash.
 class ExtensionBuilder {
  public:
   enum class Type {
@@ -61,7 +61,7 @@ class ExtensionBuilder {
   ExtensionBuilder();
 
   // Initializes an ExtensionBuilder that can be used with various utility
-  // methods to automatically construct a manifest. |name| will be the name of
+  // methods to automatically construct a manifest. `name` will be the name of
   // the extension and used to generate a stable ID.
   explicit ExtensionBuilder(const std::string& name,
                             Type type = Type::EXTENSION);
@@ -115,7 +115,7 @@ class ExtensionBuilder {
   ExtensionBuilder& SetBackgroundContext(BackgroundContext background_context);
 
   // Adds a content script to the extension, with a script with the specified
-  // |script_name| that matches the given |match_patterns|.
+  // `script_name` that matches the given `match_patterns`.
   ExtensionBuilder& AddContentScript(
       const std::string& script_name,
       const std::vector<std::string>& match_patterns);
@@ -129,8 +129,8 @@ class ExtensionBuilder {
   // Shortcuts to setting values on the manifest dictionary without needing to
   // go all the way through MergeManifest(). Sample usage:
   // ExtensionBuilder("name").SetManifestKey("version", "0.2").Build();
-  // Can be used in conjuction with chained base::Value::List and
-  // base::Value::Dict to create complex values.
+  // Can be used in conjunction with chained base::ListValue and
+  // base::DictValue to create complex values.
   template <typename T>
   ExtensionBuilder& SetManifestKey(std::string_view key, T&& value) {
     SetManifestKeyImpl(key, base::Value(std::forward<T>(value)));
@@ -154,8 +154,8 @@ class ExtensionBuilder {
   //////////////////////////////////////////////////////////////////////////////
   // Utility methods for use with custom manifest construction.
 
-  // Assigns the extension's manifest to |manifest|.
-  ExtensionBuilder& SetManifest(base::Value::Dict manifest);
+  // Assigns the extension's manifest to `manifest`.
+  ExtensionBuilder& SetManifest(base::DictValue manifest);
 
   //////////////////////////////////////////////////////////////////////////////
   // Common utility methods (usable with both aided and custom manifest
@@ -169,7 +169,7 @@ class ExtensionBuilder {
 
   // Merge another manifest into the current manifest, with new keys taking
   // precedence.
-  ExtensionBuilder& MergeManifest(base::Value::Dict manifest);
+  ExtensionBuilder& MergeManifest(base::DictValue manifest);
 
   // Add flags to the extension. Default is no flags.
   ExtensionBuilder& AddFlags(int init_from_value_flags);
@@ -189,7 +189,7 @@ class ExtensionBuilder {
   // manifest which will be used to construct it, or the dictionary itself. Only
   // one will be present.
   std::unique_ptr<ManifestData> manifest_data_;
-  std::optional<base::Value::Dict> manifest_value_;
+  std::optional<base::DictValue> manifest_value_;
 
   base::FilePath path_;
   mojom::ManifestLocation location_;

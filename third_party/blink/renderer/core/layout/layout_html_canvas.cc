@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -37,7 +38,7 @@
 namespace blink {
 
 LayoutHTMLCanvas::LayoutHTMLCanvas(HTMLCanvasElement* element)
-    : LayoutReplaced(element, PhysicalSize(element->Size())) {
+    : LayoutReplaced(element), natural_size_(PhysicalSize(element->Size())) {
   View()->GetFrameView()->SetIsVisuallyNonEmpty();
 }
 
@@ -56,10 +57,11 @@ void LayoutHTMLCanvas::CanvasSizeChanged() {
   PhysicalSize zoomed_size = PhysicalSize(canvas_size);
   zoomed_size.Scale(StyleRef().EffectiveZoom());
 
-  if (zoomed_size == IntrinsicSize())
+  if (zoomed_size == natural_size_) {
     return;
+  }
 
-  SetIntrinsicSize(zoomed_size);
+  natural_size_ = zoomed_size;
 
   if (!Parent())
     return;
@@ -68,7 +70,13 @@ void LayoutHTMLCanvas::CanvasSizeChanged() {
   SetNeedsLayout(layout_invalidation_reason::kSizeChanged);
 }
 
+PhysicalNaturalSizingInfo LayoutHTMLCanvas::GetNaturalDimensions() const {
+  NOT_DESTROYED();
+  return PhysicalNaturalSizingInfo::MakeFixed(natural_size_);
+}
+
 bool LayoutHTMLCanvas::DrawsBackgroundOntoContentLayer() const {
+  NOT_DESTROYED();
   auto* canvas = To<HTMLCanvasElement>(GetNode());
   if (canvas->SurfaceLayerBridge())
     return false;
@@ -89,16 +97,23 @@ void LayoutHTMLCanvas::InvalidatePaint(
     const PaintInvalidatorContext& context) const {
   NOT_DESTROYED();
   auto* element = To<HTMLCanvasElement>(GetNode());
-  if (element->IsDirty())
-    element->DoDeferredPaintInvalidation();
+  if (element->IsDirty()) {
+    if (element->DoDeferredPaintInvalidation() &&
+        !element->ShouldSkipPaintInvalidation()) {
+      GetMutableForPainting().SetShouldDoFullPaintInvalidation(
+          PaintInvalidationReason::kLayout);
+    }
+  }
 
   LayoutReplaced::InvalidatePaint(context);
 }
 
-void LayoutHTMLCanvas::StyleDidChange(StyleDifference diff,
-                                      const ComputedStyle* old_style) {
+void LayoutHTMLCanvas::StyleDidChange(
+    StyleDifference diff,
+    const ComputedStyle* old_style,
+    const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
-  LayoutReplaced::StyleDidChange(diff, old_style);
+  LayoutReplaced::StyleDidChange(diff, old_style, style_change_context);
   To<HTMLCanvasElement>(GetNode())->StyleDidChange(old_style, StyleRef());
 }
 
@@ -116,9 +131,12 @@ void LayoutHTMLCanvas::Trace(Visitor* visitor) const {
 bool LayoutHTMLCanvas::IsChildAllowed(LayoutObject* child,
                                       const ComputedStyle& style) const {
   NOT_DESTROYED();
-  return IsA<Element>(GetNode()) && !child->IsText() &&
-         To<HTMLCanvasElement>(GetNode())->HasPlacedElements() &&
-         RuntimeEnabledFeatures::CanvasPlaceElementEnabled();
+  if (!IsA<Element>(GetNode()) || child->IsText()) {
+    return false;
+  }
+
+  const auto* canvas = To<HTMLCanvasElement>(GetNode());
+  return canvas->layoutSubtree();
 }
 
 }  // namespace blink

@@ -17,18 +17,16 @@ namespace blink {
 
 namespace {
 
-bool CounterStyleShouldOverride(Document& document,
-                                const TreeScope* tree_scope,
-                                const StyleRuleCounterStyle& new_rule,
-                                const StyleRuleCounterStyle& existing_rule) {
+bool CounterStyleShouldOverride(
+    Document& document,
+    const TreeScope* tree_scope,
+    const CascadeLayered<const StyleRuleCounterStyle>& new_rule,
+    const CascadeLayered<const StyleRuleCounterStyle>& existing_rule) {
   const CascadeLayerMap* cascade_layer_map =
       tree_scope ? tree_scope->GetScopedStyleResolver()->GetCascadeLayerMap()
                  : document.GetStyleEngine().GetUserCascadeLayerMap();
-  if (!cascade_layer_map) {
-    return true;
-  }
-  return cascade_layer_map->CompareLayerOrder(existing_rule.GetCascadeLayer(),
-                                              new_rule.GetCascadeLayer()) <= 0;
+  return CascadeLayerMap::CompareLayerOrder(cascade_layer_map, existing_rule,
+                                            new_rule) <= 0;
 }
 
 }  // namespace
@@ -76,23 +74,25 @@ void CounterStyleMap::AddCounterStyles(const RuleSet& rule_set) {
     return;
   }
 
-  for (StyleRuleCounterStyle* rule : rule_set.CounterStyleRules()) {
-    AtomicString name = rule->GetName();
+  for (const CascadeLayered<StyleRuleCounterStyle>& rule :
+       rule_set.CounterStyleRules()) {
+    AtomicString name = rule.value->GetName();
     auto replaced_iter = counter_styles_.find(name);
     if (replaced_iter != counter_styles_.end()) {
-      if (!CounterStyleShouldOverride(*owner_document_, tree_scope_, *rule,
-                                      replaced_iter->value->GetStyleRule())) {
+      if (!CounterStyleShouldOverride(
+              *owner_document_, tree_scope_, rule,
+              replaced_iter->value->GetLayeredStyleRule())) {
         continue;
       }
     }
-    CounterStyle* counter_style = CounterStyle::Create(*rule);
+    CounterStyle* counter_style = CounterStyle::Create(rule);
     if (!counter_style) {
       continue;
     }
     if (replaced_iter != counter_styles_.end()) {
       replaced_iter->value->SetIsDirty();
     }
-    counter_styles_.Set(rule->GetName(), counter_style);
+    counter_styles_.Set(rule.value->GetName(), counter_style);
   }
 
   owner_document_->GetStyleEngine().MarkCounterStylesNeedUpdate();
@@ -248,10 +248,9 @@ void CounterStyleMap::ResolveSpeakAsReferenceFor(CounterStyle& counter_style) {
 
 void CounterStyleMap::ResolveReferences(
     HeapHashSet<Member<CounterStyleMap>>& visited_maps) {
-  if (visited_maps.Contains(this)) {
+  if (!visited_maps.insert(this).is_new_entry) {
     return;
   }
-  visited_maps.insert(this);
 
   // References in ancestor scopes must be resolved first.
   if (CounterStyleMap* ancestor_map = GetAncestorMap()) {
@@ -283,8 +282,8 @@ void CounterStyleMap::MarkDirtyCounterStyles(
   // Replace dirty CounterStyles by clean ones with unresolved references.
   for (Member<CounterStyle>& counter_style_ref : counter_styles_.Values()) {
     if (counter_style_ref->IsDirty()) {
-      CounterStyle* clean_style =
-          MakeGarbageCollected<CounterStyle>(counter_style_ref->GetStyleRule());
+      CounterStyle* clean_style = MakeGarbageCollected<CounterStyle>(
+          counter_style_ref->GetLayeredStyleRule());
       counter_style_ref = clean_style;
     }
   }

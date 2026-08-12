@@ -5,24 +5,25 @@
 #include "components/javascript_dialogs/app_modal_dialog_manager.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/functional/bind.h"
-#include "base/i18n/rtl.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/javascript_dialogs/app_modal_dialog_manager_delegate.h"
 #include "components/javascript_dialogs/app_modal_dialog_queue.h"
 #include "components/javascript_dialogs/app_modal_dialog_view.h"
+#include "components/javascript_dialogs/core/dialog_util.h"
 #include "components/javascript_dialogs/extensions_client.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/javascript_dialog_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/font_list.h"
-#include "url/origin.h"
+
+class GURL;
 
 namespace javascript_dialogs {
 
@@ -52,7 +53,8 @@ bool ShouldDisplaySuppressCheckbox(
 
 // static
 AppModalDialogManager* AppModalDialogManager::GetInstance() {
-  return base::Singleton<AppModalDialogManager>::get();
+  static base::NoDestructor<AppModalDialogManager> instance;
+  return instance.get();
 }
 
 void AppModalDialogManager::SetNativeDialogFactory(
@@ -84,62 +86,18 @@ std::u16string AppModalDialogManager::GetTitle(
 
   // Otherwise, return the formatted URL.
   return GetSiteFrameTitle(
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedURL(),
       web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(),
       alerting_frame_origin);
 }
 
-namespace {
-
-// If an origin is opaque but has a precursor, then returns the precursor
-// origin. If the origin is not opaque, returns it unchanged. Unwrapping origins
-// allows the dialog code to provide the user with a clearer picture of which
-// page is actually showing the dialog.
-url::Origin UnwrapOriginIfOpaque(const url::Origin& origin) {
-  if (!origin.opaque())
-    return origin;
-
-  const url::SchemeHostPort& precursor =
-      origin.GetTupleOrPrecursorTupleIfOpaque();
-  if (!precursor.IsValid())
-    return origin;
-
-  return url::Origin::CreateFromNormalizedTuple(
-      precursor.scheme(), precursor.host(), precursor.port());
-}
-
-}  // namespace
-
 // static
 std::u16string AppModalDialogManager::GetSiteFrameTitle(
+    const GURL& main_frame_url,
     const url::Origin& main_frame_origin,
     const url::Origin& alerting_frame_origin) {
-  // Note that `Origin::Create()` handles unwrapping of `blob:` and
-  // `filesystem:` schemed URLs, so no special handling is needed for that.
-  // However, origins can be opaque but have precursors that are origins that a
-  // user would be able to make sense of, so do unwrapping for that.
-  const url::Origin unwrapped_main_frame_origin =
-      UnwrapOriginIfOpaque(main_frame_origin);
-  const url::Origin unwrapped_alerting_frame_origin =
-      UnwrapOriginIfOpaque(alerting_frame_origin);
-
-  bool is_same_origin_as_main_frame =
-      unwrapped_alerting_frame_origin.IsSameOriginWith(
-          unwrapped_main_frame_origin);
-  if (unwrapped_alerting_frame_origin.GetURL().IsStandard() &&
-      !unwrapped_alerting_frame_origin.GetURL().SchemeIsFile()) {
-    std::u16string origin_string =
-        url_formatter::FormatOriginForSecurityDisplay(
-            unwrapped_alerting_frame_origin,
-            url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
-    return l10n_util::GetStringFUTF16(
-        is_same_origin_as_main_frame ? IDS_JAVASCRIPT_MESSAGEBOX_TITLE
-                                     : IDS_JAVASCRIPT_MESSAGEBOX_TITLE_IFRAME,
-        base::i18n::GetDisplayStringInLTRDirectionality(origin_string));
-  }
-  return l10n_util::GetStringUTF16(
-      is_same_origin_as_main_frame
-          ? IDS_JAVASCRIPT_MESSAGEBOX_TITLE_NONSTANDARD_URL
-          : IDS_JAVASCRIPT_MESSAGEBOX_TITLE_NONSTANDARD_URL_IFRAME);
+  return util::DialogTitle(main_frame_url, main_frame_origin,
+                           alerting_frame_origin);
 }
 
 void AppModalDialogManager::RunJavaScriptDialog(
@@ -165,15 +123,16 @@ void AppModalDialogManager::RunJavaScriptDialog(
 
   extensions_client_->OnDialogOpened(web_contents);
 
-  AppModalDialogQueue::GetInstance()->AddDialog(new AppModalDialogController(
-      web_contents, &javascript_dialog_extra_data_, dialog_title, dialog_type,
-      message_text, default_prompt_text,
-      ShouldDisplaySuppressCheckbox(extra_data),
-      false,  // is_before_unload_dialog
-      false,  // is_reload
-      base::BindOnce(&AppModalDialogManager::OnDialogClosed,
-                     base::Unretained(this), web_contents,
-                     std::move(callback))));
+  AppModalDialogQueue::GetInstance()->AddDialog(
+      std::make_unique<AppModalDialogController>(
+          web_contents, &javascript_dialog_extra_data_, dialog_title,
+          dialog_type, message_text, default_prompt_text,
+          ShouldDisplaySuppressCheckbox(extra_data),
+          /*is_before_unload_dialog=*/false,
+          /*is_reload=*/false,
+          base::BindOnce(&AppModalDialogManager::OnDialogClosed,
+                         base::Unretained(this), web_contents,
+                         std::move(callback))));
 }
 
 void AppModalDialogManager::RunBeforeUnloadDialog(
@@ -228,16 +187,16 @@ void AppModalDialogManager::RunBeforeUnloadDialogWithOptions(
 
   extensions_client_->OnDialogOpened(web_contents);
 
-  AppModalDialogQueue::GetInstance()->AddDialog(new AppModalDialogController(
-      web_contents, &javascript_dialog_extra_data_, title,
-      content::JAVASCRIPT_DIALOG_TYPE_CONFIRM, message,
-      std::u16string(),  // default_prompt_text
-      ShouldDisplaySuppressCheckbox(extra_data),
-      true,  // is_before_unload_dialog
-      is_reload,
-      base::BindOnce(&AppModalDialogManager::OnDialogClosed,
-                     base::Unretained(this), web_contents,
-                     std::move(callback))));
+  AppModalDialogQueue::GetInstance()->AddDialog(
+      std::make_unique<AppModalDialogController>(
+          web_contents, &javascript_dialog_extra_data_, title,
+          content::JAVASCRIPT_DIALOG_TYPE_CONFIRM, message,
+          /*default_prompt_text=*/std::u16string(),
+          ShouldDisplaySuppressCheckbox(extra_data),
+          /*is_before_unload_dialog=*/true, is_reload,
+          base::BindOnce(&AppModalDialogManager::OnDialogClosed,
+                         base::Unretained(this), web_contents,
+                         std::move(callback))));
 }
 
 bool AppModalDialogManager::HandleJavaScriptDialog(
@@ -261,8 +220,9 @@ bool AppModalDialogManager::HandleJavaScriptDialog(
   }
 
   if (accept) {
-    if (prompt_override)
+    if (prompt_override) {
       dialog->SetOverridePromptText(*prompt_override);
+    }
     dialog->view()->AcceptAppModalDialog();
   } else {
     dialog->view()->CancelAppModalDialog();
@@ -273,16 +233,19 @@ bool AppModalDialogManager::HandleJavaScriptDialog(
 void AppModalDialogManager::CancelDialogs(content::WebContents* web_contents,
                                           bool reset_state) {
   AppModalDialogQueue* queue = AppModalDialogQueue::GetInstance();
-  for (auto* dialog : *queue) {
-    if (dialog->web_contents() == web_contents)
+  for (auto& dialog : *queue) {
+    if (dialog->web_contents() == web_contents) {
       dialog->Invalidate();
+    }
   }
   AppModalDialogController* active_dialog = queue->active_dialog();
-  if (active_dialog && active_dialog->web_contents() == web_contents)
+  if (active_dialog && active_dialog->web_contents() == web_contents) {
     active_dialog->Invalidate();
+  }
 
-  if (reset_state)
+  if (reset_state) {
     javascript_dialog_extra_data_.erase(web_contents);
+  }
 }
 
 void AppModalDialogManager::OnDialogClosed(content::WebContents* web_contents,

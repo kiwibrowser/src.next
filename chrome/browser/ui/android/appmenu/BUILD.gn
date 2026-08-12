@@ -8,21 +8,28 @@ import("//chrome/android/features/android_library_factory_tmpl.gni")
 android_library("java") {
   sources = [
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuBlocker.java",
+    "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuBookmarkItemProperties.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuButtonHelper.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuClickHandler.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuCoordinator.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuDelegate.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuHandler.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuItemProperties.java",
+    "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuItemWithSubmenuProperties.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuObserver.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuPropertiesDelegate.java",
+    "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuRecentEntryItemProperties.java",
+    "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuSubmenuHeaderItemProperties.java",
+    "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuTabItemProperties.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/AppMenuUtil.java",
-    "java/src/org/chromium/chrome/browser/ui/appmenu/CustomViewBinder.java",
     "java/src/org/chromium/chrome/browser/ui/appmenu/MenuButtonDelegate.java",
   ]
   deps = [
     ":java_resources",
+    "//base:supplier_java",
     "//chrome/browser/android/lifecycle:java",
+    "//components/bookmarks/common/android:bookmarks_java",
+    "//components/browser_ui/util/android:java",
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_interpolator_interpolator_java",
     "//ui/android:ui_java",
@@ -47,8 +54,11 @@ android_library_factory("factory_java") {
 
 android_resources("java_resources") {
   sources = [
+    "java/res/color-night/menu_action_bar_bg_color.xml",
+    "java/res/color/menu_action_bar_bg_color.xml",
+    "java/res/drawable/menu_action_bar_bg.xml",
+    "java/res/values/attrs.xml",
     "java/res/values/ids.xml",
-    "java/res/values/styles.xml",
   ]
   deps = [
     "//components/browser_ui/styles/android:java_resources",

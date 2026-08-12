@@ -23,29 +23,40 @@
 #include <utility>
 #include <vector>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/task_traits.h"
-#include "base/types/optional_ref.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
+#include "components/unexportable_keys/unexportable_key_service.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/base/network_handle.h"
 #include "net/base/proxy_delegate.h"
+#include "net/disk_cache/buildflags.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/dns/dns_platform_attempt_factory.h"
 #include "net/dns/host_resolver.h"
+#include "net/dns/stale_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/net_buildflags.h"
 #include "net/network_error_logging/network_error_logging_service.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
+#include "net/reporting/reporting_uploader.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/url_request/url_request_job_factory.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "net/dns/dns_platform_attempt_factory_android.h"
+#else
+#include "net/dns/dns_platform_attempt_factory_not_implemented.h"
+#endif  // BUILDFLAG(IS_ANDROID)
 
 namespace net {
 
@@ -53,6 +64,7 @@ class CertVerifier;
 class ClientSocketFactory;
 class CookieStore;
 class HttpAuthHandlerFactory;
+class HttpNetworkLayer;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
 class HttpServerProperties;
@@ -60,6 +72,7 @@ class HostResolverManager;
 class NetworkQualityEstimator;
 class ProxyConfigService;
 class URLRequestContext;
+class CacheEncryptionDelegate;
 
 #if BUILDFLAG(ENABLE_REPORTING)
 struct ReportingPolicy;
@@ -90,11 +103,11 @@ class SessionService;
 // Builder may be used to create only a single URLRequestContext.
 class NET_EXPORT URLRequestContextBuilder {
  public:
-  // Creates an HttpNetworkTransactionFactory given an HttpNetworkSession. Does
-  // not take ownership of the session.
-  using CreateHttpTransactionFactoryCallback =
+  // Callback that takes ownership of the default HttpNetworkLayer and returns
+  // an HttpTransactionFactory, potentially wrapping the provided layer.
+  using WrapHttpNetworkLayerCallback =
       base::OnceCallback<std::unique_ptr<HttpTransactionFactory>(
-          HttpNetworkSession* session)>;
+          std::unique_ptr<HttpNetworkLayer> network_layer)>;
 
   struct NET_EXPORT HttpCacheParams {
     enum Type {
@@ -106,6 +119,11 @@ class NET_EXPORT URLRequestContextBuilder {
       DISK_BLOCKFILE,
       // Disk cache using "simple" backend (SimpleBackendImpl).
       DISK_SIMPLE,
+#if BUILDFLAG(ENABLE_DISK_CACHE_SQL_BACKEND)
+      // Disk cache using "sql" backend (SqlBackendImpl).
+      // This is still under experiment.
+      DISK_EXPERIMENTAL_SQL,
+#endif  // ENABLE_DISK_CACHE_SQL_BACKEND
     };
 
     HttpCacheParams();
@@ -123,6 +141,12 @@ class NET_EXPORT URLRequestContextBuilder {
 
     // The cache path (when type is DISK).
     base::FilePath path;
+
+    // The path for persisting the NoVarySearchCache.
+    base::FilePath no_vary_search_path;
+
+    // The path for persisting the logical invalidation filters.
+    base::FilePath logical_invalidation_path;
 
     // A factory to broker file operations. This is needed for network process
     // sandboxing in some platforms.
@@ -148,6 +172,13 @@ class NET_EXPORT URLRequestContextBuilder {
 
   // Sets whether Zstd compression is enabled. Disabled by default.
   void set_enable_zstd(bool enable_zstd) { enable_zstd_ = enable_zstd; }
+
+#if BUILDFLAG(IS_ANDROID)
+  // Sets whether StaleHostResolver is enabled. Disabled by default.
+  void enable_stale_dns_resolver(bool stale_dns_enabled) {
+    stale_dns_enabled_ = stale_dns_enabled;
+  }
+#endif
 
   // Sets whether Compression Dictionary is enabled. Disabled by default.
   void set_enable_shared_dictionary(bool enable_shared_dictionary) {
@@ -305,6 +336,11 @@ class NET_EXPORT URLRequestContextBuilder {
       std::unique_ptr<ReportingService> reporting_service);
   void set_reporting_policy(std::unique_ptr<ReportingPolicy> reporting_policy);
 
+  void set_prepare_upload_request_callback(
+      ReportingUploader::PrepareUploadRequestCallback callback) {
+    prepare_upload_request_callback_ = std::move(callback);
+  }
+
   void set_network_error_logging_enabled(bool network_error_logging_enabled) {
     network_error_logging_enabled_ = network_error_logging_enabled;
   }
@@ -318,9 +354,6 @@ class NET_EXPORT URLRequestContextBuilder {
   void set_persistent_reporting_and_nel_store(
       std::unique_ptr<PersistentReportingAndNelStore>
           persistent_reporting_and_nel_store);
-
-  void set_enterprise_reporting_endpoints(
-      const base::flat_map<std::string, GURL>& enterprise_reporting_endpoints);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
   // Override the default in-memory cookie store. If |cookie_store| is NULL,
@@ -332,19 +365,30 @@ class NET_EXPORT URLRequestContextBuilder {
   void SetHttpServerProperties(
       std::unique_ptr<HttpServerProperties> http_server_properties);
 
-  // Sets a callback that will be used to create the
-  // HttpNetworkTransactionFactory. If a cache is enabled, the cache's
-  // HttpTransactionFactory will wrap the one this creates.
-  // TODO(mmenke): Get rid of this. See https://crbug.com/721408
-  void SetCreateHttpTransactionFactoryCallback(
-      CreateHttpTransactionFactoryCallback
-          create_http_network_transaction_factory);
+  // Sets a callback that will be invoked with the default HttpNetworkLayer
+  // during context creation. The callback takes ownership of the layer and
+  // returns the HttpTransactionFactory to be used (which may be the layer
+  // itself, or a wrapper).
+  //
+  // If HTTP caching is enabled, the cache's HttpTransactionFactory will wrap
+  // the factory returned by this callback (or the default HttpNetworkLayer if
+  // no callback is set).
+  //
+  // This cannot be called if SetHttpTransactionFactoryForTesting() has been
+  // called.
+  void SetWrapHttpNetworkLayerCallback(
+      WrapHttpNetworkLayerCallback wrap_http_network_layer_callback);
 
+  // Sets a specific HttpTransactionFactory for testing purposes. This bypasses
+  // the default HttpNetworkLayer creation and the WrapHttpNetworkLayerCallback.
+  //
+  // This cannot be called if  SetWrapHttpNetworkLayerCallback() has been
+  // called.
   template <typename T>
   T* SetHttpTransactionFactoryForTesting(std::unique_ptr<T> factory) {
-    create_http_network_transaction_factory_.Reset();
-    http_transaction_factory_ = std::move(factory);
-    return static_cast<T*>(http_transaction_factory_.get());
+    CHECK(!wrap_http_network_layer_callback_);
+    http_transaction_factory_for_testing_ = std::move(factory);
+    return static_cast<T*>(http_transaction_factory_for_testing_.get());
   }
 
   // Sets a ClientSocketFactory so a test can mock out sockets. This must
@@ -362,24 +406,51 @@ class NET_EXPORT URLRequestContextBuilder {
     client_socket_factory_ = std::move(client_socket_factory);
   }
 
-  void set_cookie_deprecation_label(const std::string& label) {
-    cookie_deprecation_label_ = label;
-  }
-
 #if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
   void set_device_bound_session_service(
       std::unique_ptr<device_bound_sessions::SessionService>
           device_bound_session_service);
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
 
   void set_has_device_bound_session_service(bool enable) {
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
     has_device_bound_session_service_ = enable;
+#else
+    NOTREACHED();
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  }
+
+  void set_device_bound_sessions_restricted_sites(
+      const std::vector<SchemefulSite>& restricted_sites) {
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+    device_bound_sessions_restricted_sites_ = restricted_sites;
+#else
+    NOTREACHED();
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  }
+
+  // Must be called in conjunction with
+  // `set_has_device_bound_session_service(true)`.
+  void set_unexportable_key_service(
+      std::unique_ptr<unexportable_keys::UnexportableKeyService> uks) {
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+    unexportable_key_service_ = std::move(uks);
+#else
+    NOTREACHED();
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
   }
 
   void set_device_bound_sessions_file_path(
       const base::FilePath& device_bound_sessions_file_path) {
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
     device_bound_sessions_file_path_ = device_bound_sessions_file_path;
-  }
+#else
+    NOTREACHED();
 #endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  }
+
+  void set_cache_encryption_delegate(
+      std::unique_ptr<net::CacheEncryptionDelegate> cache_encryption_delegate);
 
   // Binds the context to `network`. All requests scheduled through the context
   // built by this builder will be sent using `network`. Requests will fail if
@@ -399,6 +470,11 @@ class NET_EXPORT URLRequestContextBuilder {
 
   void SuppressSettingSocketPerformanceWatcherFactoryForTesting() {
     suppress_setting_socket_performance_watcher_factory_for_testing_ = true;
+  }
+
+  void set_dns_platform_attempt_factory(
+      std::unique_ptr<DnsPlatformAttemptFactory> dns_platform_attempt_factory) {
+    dns_platform_attempt_factory_ = std::move(dns_platform_attempt_factory);
   }
 
  protected:
@@ -444,11 +520,10 @@ class NET_EXPORT URLRequestContextBuilder {
   std::string user_agent_;
   std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings_;
 
-  std::optional<std::string> cookie_deprecation_label_;
-
   bool http_cache_enabled_ = true;
   bool cookie_store_set_by_client_ = false;
   bool suppress_setting_socket_performance_watcher_factory_for_testing_ = false;
+  bool stale_dns_enabled_ = false;
 
   handles::NetworkHandle bound_network_ = handles::kInvalidNetworkHandle;
   // Used only if the context is bound to a network to customize the
@@ -457,8 +532,8 @@ class NET_EXPORT URLRequestContextBuilder {
 
   HttpCacheParams http_cache_params_;
   HttpNetworkSessionParams http_network_session_params_;
-  CreateHttpTransactionFactoryCallback create_http_network_transaction_factory_;
-  std::unique_ptr<HttpTransactionFactory> http_transaction_factory_;
+  WrapHttpNetworkLayerCallback wrap_http_network_layer_callback_;
+  std::unique_ptr<HttpTransactionFactory> http_transaction_factory_for_testing_;
   base::FilePath transport_security_persister_file_path_;
   std::vector<std::string> hsts_policy_bypass_list_;
   raw_ptr<NetLog> net_log_ = nullptr;
@@ -481,21 +556,40 @@ class NET_EXPORT URLRequestContextBuilder {
 #if BUILDFLAG(ENABLE_REPORTING)
   std::unique_ptr<ReportingService> reporting_service_;
   std::unique_ptr<ReportingPolicy> reporting_policy_;
+  ReportingUploader::PrepareUploadRequestCallback
+      prepare_upload_request_callback_;
   bool network_error_logging_enabled_ = false;
   std::unique_ptr<NetworkErrorLoggingService> network_error_logging_service_;
   std::unique_ptr<PersistentReportingAndNelStore>
       persistent_reporting_and_nel_store_;
-  base::flat_map<std::string, GURL> enterprise_reporting_endpoints_ = {};
 #endif  // BUILDFLAG(ENABLE_REPORTING)
   std::unique_ptr<HttpServerProperties> http_server_properties_;
   std::map<std::string, std::unique_ptr<URLRequestJobFactory::ProtocolHandler>>
       protocol_handlers_;
+  std::unique_ptr<net::CacheEncryptionDelegate> cache_encryption_delegate_;
 #if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
   bool has_device_bound_session_service_ = false;
+  std::vector<SchemefulSite> device_bound_sessions_restricted_sites_;
+  std::unique_ptr<unexportable_keys::UnexportableKeyService>
+      unexportable_key_service_;
   std::unique_ptr<device_bound_sessions::SessionService>
       device_bound_session_service_;
   base::FilePath device_bound_sessions_file_path_;
 #endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  // When DnsTransaction receives AttemptMode == kPlatform, it uses
+  // URLRequestContext::dns_platform_attempt_factory() to build the DnsAttempt
+  // backed by platform-specific APIs. Having said that, currently only Android
+  // supports kPlatform. With that in mind:
+  // * When building for Android, we inject a working Android-specific factory
+  // * When building for other platforms, we inject a factory that does crashes
+  //   if interacted with. The expectation is for other platforms to never
+  //   specify AttemptMode::kPlatform until they support it.
+  std::unique_ptr<DnsPlatformAttemptFactory> dns_platform_attempt_factory_ =
+#if BUILDFLAG(IS_ANDROID)
+      DnsPlatformAttemptFactoryAndroid::Create();
+#else
+      std::make_unique<DnsPlatformAttemptFactoryNotImplemented>();
+#endif  // BUILDFLAG(IS_ANDROID)
 
   raw_ptr<ClientSocketFactory> client_socket_factory_raw_ = nullptr;
 };

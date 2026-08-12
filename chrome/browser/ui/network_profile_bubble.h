@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_NETWORK_PROFILE_BUBBLE_H_
 #define CHROME_BROWSER_UI_NETWORK_PROFILE_BUBBLE_H_
 
-class Browser;
+class BrowserWindowInterface;
 class Profile;
 
 namespace base {
@@ -25,7 +25,7 @@ class NetworkProfileBubble {
     METRIC_CHECK_SUPPRESSED,
     // WTSQuerySessionInformation call failed.
     METRIC_CHECK_FAILED,
-    // File access in profile dir failed.
+    // Checking if profile dir is on a network share failed.
     METRIC_CHECK_IO_FAILED,
 
     // Profile on a network share detected.
@@ -58,7 +58,7 @@ class NetworkProfileBubble {
   static void CheckNetworkProfile(const base::FilePath& profile_folder);
 
   // Shows the notification bubble using the provided |browser|.
-  static void ShowNotification(Browser* browser);
+  static void ShowNotification(BrowserWindowInterface* browser);
 
   static void SetNotificationShown(bool shown);
 

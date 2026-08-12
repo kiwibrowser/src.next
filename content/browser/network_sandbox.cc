@@ -6,18 +6,23 @@
 
 #include "base/dcheck_is_on.h"
 #include "base/files/file_util.h"
+#include "base/immediate_crash.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
+#include "base/strings/strcat.h"
 #include "base/task/thread_pool.h"
-#include "base/trace_event/base_tracing.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "content/browser/network_sandbox_grant_result.h"
+#include "content/browser/network_sandbox_grant_result_helper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/network_service_util.h"
 #include "content/public/common/content_client.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/network/public/cpp/transferable_directory.h"
 #include "sql/database.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -25,6 +30,8 @@
 
 #include "base/win/security_util.h"
 #include "base/win/sid.h"
+#include "content/browser/network_service_instance_impl.h"
+#include "content/common/features.h"
 #include "sandbox/policy/features.h"
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -48,6 +55,19 @@ struct SandboxParameters {
 #endif  // DCHECK_IS_ON()
 #endif  // BUILDFLAG(IS_WIN)
 };
+
+SandboxParameters GetSandboxParameters() {
+  SandboxParameters sandbox_params = {};
+#if BUILDFLAG(IS_WIN)
+  sandbox_params.lpac_capability_name =
+      GetContentClient()->browser()->GetLPACCapabilityNameForNetworkService();
+#if DCHECK_IS_ON()
+  sandbox_params.sandbox_enabled =
+      GetContentClient()->browser()->ShouldSandboxNetworkService();
+#endif  // DCHECK_IS_ON()
+#endif  // BUILDFLAG(IS_WIN)
+  return sandbox_params;
+}
 
 // Deletes the old data for a data file called `filename` from `old_path`. If
 // `file_path` refers to an SQL database then `is_sql` should be set to true,
@@ -228,12 +248,28 @@ bool MaybeGrantAccessToDataPath(const SandboxParameters& sandbox_params,
   auto ac_sids = base::win::Sid::FromNamedCapabilityVector(
       {sandbox_params.lpac_capability_name});
 
+  static constexpr DWORD kAccessMask =
+      GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | DELETE;
+  static constexpr DWORD kInheritance =
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE;
+
+  // For cache dir only, ACL the parent above the "Cache_Data" directory to
+  // ensure that rename/delete operations can take place correctly.
+  base::FilePath directory_to_acl = directory->path();
+
+  if (directory_to_acl.BaseName() == base::FilePath(kCacheDataDirectoryName)) {
+    directory_to_acl = directory_to_acl.DirName();
+  }
+  // If LPAC capability already has access to the directory then avoid
+  // granting access again. This is a performance optimization.
+  if (HasAccessToPath(directory_to_acl, ac_sids, kAccessMask, kInheritance)) {
+    return true;
+  }
+
   // Grant recursive access to directory. This also means new files in the
   // directory will inherit the ACE.
-  return base::win::GrantAccessToPath(
-      directory->path(), ac_sids,
-      GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | DELETE,
-      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE, /*recursive=*/true);
+  return base::win::GrantAccessToPath(directory_to_acl, ac_sids, kAccessMask,
+                                      kInheritance, /*recursive=*/true);
 #else
   if (directory->IsOpenForTransferRequired()) {
     directory->OpenForTransfer();
@@ -242,6 +278,68 @@ bool MaybeGrantAccessToDataPath(const SandboxParameters& sandbox_params,
 
   return true;
 #endif  // BUILDFLAG(IS_WIN)
+}
+
+// Logs the system error code to UMA. The name of the histogram will be
+// `histogram_base_name` suffixed with either ".Windows" or ".Posix" depending
+// on the platform (Fuchsia counts as "Posix" here because it uses `errno`).
+// Both variants must be added to "histograms.xml":
+//
+// ```
+// <histogram name="NetworkService.****Error.Posix"
+//     enum="PopularOSErrno" expires_after="">
+//   <owner></owner>
+//   <owner></owner>
+//   <summary>
+//     The system error code ...
+//
+//     Logged when ...
+//
+//     Only logged for non-Windows platforms.
+//   </summary>
+// </histogram>
+//
+// <histogram name="NetworkService.****Error.Windows"
+//     enum="WinGetLastError" expires_after="">
+//   <owner></owner>
+//   <owner></owner>
+//   <summary>
+//     The system error code ...
+//
+//     Logged when ...
+//
+//     Only logged on Windows.
+//   </summary>
+// </histogram>
+// ```
+void LogSystemErrorCode(std::string_view histogram_base_name) {
+  std::string_view suffix = ".Posix";
+  if constexpr (BUILDFLAG(IS_WIN)) {
+    suffix = ".Windows";
+  }
+  base::UmaHistogramSparse(base::StrCat({histogram_base_name, suffix}),
+                           logging::GetLastSystemErrorCode());
+}
+
+// Creates the directory `path`, which must not be std::nullopt, and then grants
+// sandbox access in line with `sandbox_params`. If an error occurs it is logged
+// using `directory_name_for_logging` as the name to use to describe the
+// directory.
+void CreateAndGrantAccessLoggingError(
+    const SandboxParameters& sandbox_params,
+    network::TransferableDirectory& path,
+    std::string_view directory_name_for_histogram) {
+  // The path must exist for the cache ACL to be set. Create if needed.
+  if (base::CreateDirectory(path.path())) {
+    if (!MaybeGrantAccessToDataPath(sandbox_params, &path)) {
+      PLOG(ERROR) << "Failed to grant sandbox access to "
+                  << directory_name_for_histogram << " directory "
+                  << path.path();
+      LogSystemErrorCode(
+          base::StrCat({"NetworkService.GrantAccessToDataPathError.",
+                        directory_name_for_histogram}));
+    }
+  }
 }
 
 // See the description in the header file.
@@ -289,6 +387,12 @@ SandboxGrantResult MaybeGrantSandboxAccessToNetworkContextData(
   // be granted access. Continue attempting to grant access to the other files
   // if this part fails.
   if (params->file_paths->http_cache_directory && params->http_cache_enabled) {
+    // Cache directory structure looks like this:
+    //
+    // Cache/
+    // |-- Cache_Data/ <- `http_cache_directory`
+    // \-- No_Vary_Search/ <- `no_vary_search_directory`
+    //
     // The path must exist for the cache ACL to be set. Create if needed.
     if (base::CreateDirectory(
             params->file_paths->http_cache_directory->path())) {
@@ -299,28 +403,34 @@ SandboxGrantResult MaybeGrantSandboxAccessToNetworkContextData(
       // get the inherited ACE rather than having to set them manually later.
       SCOPED_UMA_HISTOGRAM_TIMER("NetworkService.TimeToGrantCacheAccess");
       TRACE_EVENT("startup", "NetworkSandbox.MaybeGrantAccessToDataPath");
+      // Note: This function will ACL the parent directory to `Cache_Data` i.e.
+      // `Cache`.
       if (!MaybeGrantAccessToDataPath(
               sandbox_params, &*params->file_paths->http_cache_directory)) {
         PLOG(ERROR) << "Failed to grant sandbox access to cache directory "
                     << params->file_paths->http_cache_directory->path();
       }
     }
+
+    // This is only used if disk caching is enabled.
+    if (params->file_paths->no_vary_search_directory) {
+      CHECK_EQ(params->file_paths->no_vary_search_directory->path().DirName(),
+               params->file_paths->http_cache_directory->path().DirName())
+          << "No Vary Search and Cache must be siblings.";
+      // No vary search directory is always a sibling of `http_cache_directory`
+      // and `MaybeGrantAccessToDataPath` ACLs the parent dir, so the right ACLs
+      // have already been emplaced above.
+      base::CreateDirectory(
+          params->file_paths->no_vary_search_directory.value().path());
+    }
   }
   if (params->file_paths->shared_dictionary_directory &&
       params->shared_dictionary_enabled) {
     SCOPED_UMA_HISTOGRAM_TIMER(
         "NetworkService.TimeToGrantSharedDictionaryAccess");
-    // The path must exist for the cache ACL to be set. Create if needed.
-    if (base::CreateDirectory(
-            params->file_paths->shared_dictionary_directory->path())) {
-      if (!MaybeGrantAccessToDataPath(
-              sandbox_params,
-              &*params->file_paths->shared_dictionary_directory)) {
-        PLOG(ERROR) << "Failed to grant sandbox access to shared dictionary "
-                       "directory "
-                    << params->file_paths->shared_dictionary_directory->path();
-      }
-    }
+    CreateAndGrantAccessLoggingError(
+        sandbox_params, params->file_paths->shared_dictionary_directory.value(),
+        "SharedDictionary");
   }
 
   // No data directory, so rest of the files and databases are in memory.
@@ -519,15 +629,7 @@ void GrantSandboxAccessOnThreadPool(
     network::mojom::NetworkContextParamsPtr params,
     base::OnceCallback<void(network::mojom::NetworkContextParamsPtr,
                             SandboxGrantResult)> result_callback) {
-  SandboxParameters sandbox_params = {};
-#if BUILDFLAG(IS_WIN)
-  sandbox_params.lpac_capability_name =
-      GetContentClient()->browser()->GetLPACCapabilityNameForNetworkService();
-#if DCHECK_IS_ON()
-  sandbox_params.sandbox_enabled =
-      GetContentClient()->browser()->ShouldSandboxNetworkService();
-#endif  // DCHECK_IS_ON()
-#endif  // BUILDFLAG(IS_WIN)
+  SandboxParameters sandbox_params = GetSandboxParameters();
   base::OnceCallback<SandboxGrantResult()> worker_task =
       base::BindOnce(&MaybeGrantSandboxAccessToNetworkContextData,
                      sandbox_params, params.get());
@@ -535,6 +637,36 @@ void GrantSandboxAccessOnThreadPool(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       std::move(worker_task),
       base::BindOnce(std::move(result_callback), std::move(params)));
+}
+
+void GrantSandboxAccessAndCreateNetworkContextOnThreadPool(
+    mojo::PendingRemote<network::mojom::NetworkContextCreator> context_creator,
+    mojo::PendingReceiver<network::mojom::NetworkContext> context,
+    network::mojom::NetworkContextParamsPtr params) {
+  SandboxParameters sandbox_params = GetSandboxParameters();
+
+  base::ThreadPool::CreateSequencedTaskRunner(
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
+      ->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              [](mojo::PendingRemote<network::mojom::NetworkContextCreator>
+                     context_creator,
+                 mojo::PendingReceiver<network::mojom::NetworkContext> context,
+                 const SandboxParameters& sandbox_params,
+                 network::mojom::NetworkContextParamsPtr params) {
+                SandboxGrantResult grant_access_result =
+                    MaybeGrantSandboxAccessToNetworkContextData(sandbox_params,
+                                                                params.get());
+                ProcessSandboxGrantResult(*params.get(), grant_access_result);
+
+                mojo::Remote<network::mojom::NetworkContextCreator> creator(
+                    std::move(context_creator));
+                creator->CreateNetworkContext(std::move(context),
+                                              std::move(params));
+              },
+              std::move(context_creator), std::move(context), sandbox_params,
+              std::move(params)));
 }
 
 }  // namespace content

@@ -11,6 +11,9 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/extension_event_histogram_value.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -33,7 +36,7 @@ class EventRouterForwarder
   // Safe to call on any thread.
   void BroadcastEventToRenderers(events::HistogramValue histogram_value,
                                  const std::string& event_name,
-                                 base::Value::List event_args,
+                                 base::ListValue event_args,
                                  bool dispatch_to_off_the_record_profiles);
 
  protected:
@@ -45,7 +48,7 @@ class EventRouterForwarder
   virtual void CallEventRouter(Profile* profile,
                                events::HistogramValue histogram_value,
                                const std::string& event_name,
-                               base::Value::List event_args);
+                               base::ListValue event_args);
 
  private:
   friend class base::RefCountedThreadSafe<EventRouterForwarder>;

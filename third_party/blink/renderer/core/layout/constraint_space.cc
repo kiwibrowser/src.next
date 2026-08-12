@@ -21,11 +21,10 @@ namespace {
 
 struct SameSizeAsConstraintSpace {
   LogicalSize available_size;
-  union {
-    BfcOffset bfc_offset;
-    void* rare_data;
-  };
+  LogicalSize percentage_size;
+  BfcOffset bfc_offset;
   ExclusionSpace exclusion_space;
+  Member<void*> rare_data;
   unsigned bitfields[1];
 };
 
@@ -43,13 +42,16 @@ const ConstraintSpace& ConstraintSpace::CloneForBlockInInlineIfNeeded(
     // If all following lines are empty, which in turn makes it the last
     // *non-empty* inflow child, `RelayoutForTextBoxTrimEnd()` should run the
     // layout again with `ShouldForceTextBoxTrimEnd()` set.
-    space = *this;
+    space.emplace(*this);
+    DCHECK(space->rare_data_);
+    RareData* rare_data = MakeGarbageCollected<RareData>(*space->rare_data_);
     if (ShouldForceTextBoxTrimEnd()) {
-      space->SetShouldForceTextBoxTrimEnd(false);
+      rare_data->should_force_text_box_trim_end = false;
     } else {
-      space->EnsureRareData()->should_text_box_trim_node_end = false;
-      space->EnsureRareData()->should_text_box_trim_fragmentainer_end = false;
+      rare_data->should_text_box_trim_node_end = false;
+      rare_data->should_text_box_trim_fragmentainer_end = false;
     }
+    space->rare_data_ = rare_data;
     return *space;
   } else {
     DCHECK(!ShouldForceTextBoxTrimEnd());
@@ -59,14 +61,11 @@ const ConstraintSpace& ConstraintSpace::CloneForBlockInInlineIfNeeded(
 }
 
 String ConstraintSpace::ToString() const {
-  return String::Format("Offset: %s,%s Size: %sx%s Clearance: %s",
-                        BfcOffset().line_offset.ToString().Ascii().c_str(),
-                        BfcOffset().block_offset.ToString().Ascii().c_str(),
-                        AvailableSize().inline_size.ToString().Ascii().c_str(),
-                        AvailableSize().block_size.ToString().Ascii().c_str(),
-                        HasClearanceOffset()
-                            ? ClearanceOffset().ToString().Ascii().c_str()
-                            : "none");
+  return StrCat({"Offset: ", BfcOffset().line_offset.ToString(), ",",
+                 BfcOffset().block_offset.ToString(),
+                 " Size: ", AvailableSize().inline_size.ToString(), "x",
+                 AvailableSize().block_size.ToString(), " Clearance: ",
+                 HasClearanceOffset() ? ClearanceOffset().ToString() : "none"});
 }
 
 }  // namespace blink

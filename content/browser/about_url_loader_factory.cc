@@ -11,8 +11,9 @@
 namespace content {
 
 AboutURLLoaderFactory::AboutURLLoaderFactory(
-    mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver)
-    : network::SelfDeletingURLLoaderFactory(std::move(factory_receiver)) {}
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver,
+    base::SelfDeletingPassKey key)
+    : network::SelfDeletingURLLoaderFactory(std::move(factory_receiver), key) {}
 
 AboutURLLoaderFactory::~AboutURLLoaderFactory() = default;
 
@@ -51,7 +52,8 @@ AboutURLLoaderFactory::Create() {
   // The AboutURLLoaderFactory will delete itself when there are no more
   // receivers - see the network::SelfDeletingURLLoaderFactory::OnDisconnect
   // method.
-  new AboutURLLoaderFactory(pending_remote.InitWithNewPipeAndPassReceiver());
+  base::MakeSelfDeleting<AboutURLLoaderFactory>(
+      pending_remote.InitWithNewPipeAndPassReceiver());
 
   return pending_remote;
 }

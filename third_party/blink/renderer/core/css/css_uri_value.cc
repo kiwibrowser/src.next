@@ -12,27 +12,27 @@
 namespace blink {
 namespace cssvalue {
 
-CSSURIValue::CSSURIValue(CSSUrlData url_data)
-    : CSSValue(kURIClass), url_data_(std::move(url_data)) {}
+CSSURIValue::CSSURIValue(const CSSUrlData& url_data)
+    : CSSValue(kURIClass), url_data_(url_data) {}
 
 CSSURIValue::~CSSURIValue() = default;
 
 SVGResource* CSSURIValue::EnsureResourceReference() const {
   if (!resource_) {
-    resource_ =
-        MakeGarbageCollected<ExternalSVGResourceDocumentContent>(AbsoluteUrl());
+    resource_ = MakeGarbageCollected<ExternalSVGResourceDocumentContent>(
+        AbsoluteUrl(), UrlData().GetModifiers());
   }
   return resource_.Get();
 }
 
 void CSSURIValue::ReResolveUrl(const Document& document) const {
-  if (url_data_.ReResolveUrl(document)) {
+  if (UrlData().ReResolveUrl(document)) {
     resource_ = nullptr;
   }
 }
 
 String CSSURIValue::CustomCSSText() const {
-  return url_data_.CssText();
+  return UrlData().CssText();
 }
 
 AtomicString CSSURIValue::FragmentIdentifier() const {
@@ -44,8 +44,8 @@ AtomicString CSSURIValue::FragmentIdentifier() const {
 const AtomicString& CSSURIValue::NormalizedFragmentIdentifier() const {
   if (normalized_fragment_identifier_cache_.IsNull()) {
     normalized_fragment_identifier_cache_ =
-        AtomicString(DecodeURLEscapeSequences(
-            FragmentIdentifier(), DecodeURLMode::kUTF8OrIsomorphic));
+        AtomicString(DecodeUrlEscapeSequences(
+            FragmentIdentifier(), DecodeUrlMode::kUtf8OrIsomorphic));
   }
 
   // NOTE: If is_local_ is true, the normalized URL may be different
@@ -53,32 +53,36 @@ const AtomicString& CSSURIValue::NormalizedFragmentIdentifier() const {
   // but it should not matter for the fragment. We DCHECK that we get
   // the right result, to be sure.
   DCHECK_EQ(normalized_fragment_identifier_cache_,
-            AtomicString(DecodeURLEscapeSequences(
-                FragmentIdentifier(), DecodeURLMode::kUTF8OrIsomorphic)));
+            AtomicString(DecodeUrlEscapeSequences(
+                FragmentIdentifier(), DecodeUrlMode::kUtf8OrIsomorphic)));
 
   return normalized_fragment_identifier_cache_;
 }
 
 KURL CSSURIValue::AbsoluteUrl() const {
-  return KURL(url_data_.ResolvedUrl());
+  KURL url(UrlData().ResolvedUrl());
+  if (UrlData().IsPotentiallyDanglingMarkup()) {
+    url.SetPotentiallyDanglingMarkup();
+  }
+  return url;
 }
 
 bool CSSURIValue::IsLocal(const Document& document) const {
-  return url_data_.IsLocal(document);
+  return UrlData().IsLocal(document);
 }
 
 bool CSSURIValue::Equals(const CSSURIValue& other) const {
-  return url_data_ == other.url_data_;
+  return *url_data_ == *other.url_data_;
 }
 
-CSSURIValue* CSSURIValue::ComputedCSSValue(
-    const KURL& base_url,
-    const WTF::TextEncoding& charset) const {
+CSSURIValue* CSSURIValue::ComputedCSSValue(const KURL& base_url,
+                                           const TextEncoding& charset) const {
   return MakeGarbageCollected<CSSURIValue>(
-      url_data_.MakeResolved(base_url, charset));
+      *UrlData().MakeResolved(base_url, charset));
 }
 
 void CSSURIValue::TraceAfterDispatch(blink::Visitor* visitor) const {
+  visitor->Trace(url_data_);
   visitor->Trace(resource_);
   CSSValue::TraceAfterDispatch(visitor);
 }

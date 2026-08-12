@@ -6,6 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_PROPERTY_TREE_BUILDER_H_
 
 #include "base/dcheck_is_on.h"
+#include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
@@ -14,6 +16,15 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
+
+namespace features {
+
+BASE_DECLARE_FEATURE(kPreventSvgFilterPaint);
+BASE_DECLARE_FEATURE_PARAM(bool, kPreventSvgFilterPaintOnLocalFrameRestricted);
+BASE_DECLARE_FEATURE_PARAM(bool, kPreventSvgFilterPaintOnRemoteFrame);
+BASE_DECLARE_FEATURE_PARAM(bool, kPreventSvgFilterPaintOnWebPlugin);
+
+}  // namespace features
 
 class FragmentData;
 class LayoutObject;
@@ -38,6 +49,88 @@ struct PaintPropertyTreeBuilderFragmentContext {
     STACK_ALLOCATED();
 
    public:
+    // Sets the given node to be the new overscroll parent node for this node.
+    // The ::-internal-overscroll-area-parent is always a direct child of the
+    // containing scrollable area. We apply three changes:
+    // 1. Attach its scroll node as a parent of the container's scroll node.
+    // 2. Attach its paint transform node outside the container's scrolling
+    //    content.
+    // 3. If non-overlay, attach its scroll translation node as a parent of the
+    //    content's scroll translation. This ensures that scrolling the
+    //    ::-internal-overscroll-area scrolls the content.
+    //
+    // E.g. transforms the following by moving the indicated nodes up the tree.
+    //
+    //  PaintOffsetTranslation <div>
+    //    ContentTranslation <div>
+    //      ScrollTranslation <div>
+    //        PaintOffsetTranslation ::-internal-overscroll-area-parent) *
+    //          ContentTranslation ::-internal-overscroll-area-parent)   *
+    //            ScrollTranslation ::-internal-overscroll-area-parent)  *
+    //
+    // Turns into:
+    //  PaintOffsetTranslation <div>
+    //    PaintOffsetTranslation ::-internal-overscroll-area-parent) *
+    //      ContentTranslation ::-internal-overscroll-area-parent)   *
+    //        ScrollTranslation ::-internal-overscroll-area-parent)  *
+    //          ContentTranslation <div>
+    //            ScrollTranslation <div>
+    //
+    // For overlay scrolls, no ContentTranslation nodes are needed
+    // (to offset the scroll origin) and the ::-internal-overscroll-area content
+    // is effectively a sibling to the scrolling content, e.g.:
+    //
+    //  PaintOffsetTranslation <div>
+    //    ScrollTranslation <div>
+    //    PaintOffsetTranslation ::-internal-overscroll-area-parent) *
+    //      ScrollTranslation ::-internal-overscroll-area-parent)    *
+    void SetOverscrollParent(
+        const ScrollPaintPropertyNode& overscroll_parent,
+        const TransformPaintPropertyNode& paint_offset_translation,
+        const TransformPaintPropertyNodeOrAlias& overscroll_transform,
+        bool is_overlay) const {
+      // We should only be creating overscroll nodes for non-root
+      // scroll container elements.
+      CHECK(!scroll->IsRoot());
+      const TransformPaintPropertyNode* scroll_translation =
+          overscroll_transform.Unalias().ParentScrollTranslationNode();
+      // The content transform for a non-overlay parent scroller is the
+      // transform space of the scroll clip node.
+      const TransformPaintPropertyNode* content_translation =
+          is_overlay ? scroll_translation
+                     : &scroll_translation->ScrollNode()
+                            ->OverflowClipNode()
+                            ->LocalTransformSpace()
+                            .Unalias();
+
+      CHECK(!content_translation->IsRoot());
+      const_cast<ScrollPaintPropertyNode&>(overscroll_parent)
+          .SetParent(*scroll->Parent());
+      const_cast<ScrollPaintPropertyNode*>(scroll)->SetParent(
+          overscroll_parent);
+      const_cast<TransformPaintPropertyNode&>(paint_offset_translation)
+          .SetParent(*content_translation->Parent());
+
+      if (!is_overlay) {
+        const_cast<TransformPaintPropertyNode*>(content_translation)
+            ->SetParent(overscroll_transform);
+      }
+    }
+
+    // Sets the given node to be the new overscroll parent node for this node.
+    void SetOverscrollClipParent(const ClipPaintPropertyNode& overscroll_clip,
+                                 bool is_overlay) const {
+      // We should only be creating overscroll nodes for non-root
+      // scroll container elements.
+      CHECK(!clip->IsRoot());
+      if (!is_overlay) {
+        const_cast<ClipPaintPropertyNode&>(overscroll_clip)
+            .SetParent(*clip->UnaliasedParent());
+        const_cast<ClipPaintPropertyNode&>(clip->Unalias())
+            .SetParent(overscroll_clip);
+      }
+    }
+
     // The combination of a transform and paint offset describes a linear space.
     // When a layout object recur to its children, the main context is expected
     // to refer the object's border box, then the callee will derive its own
@@ -107,14 +200,6 @@ struct PaintPropertyTreeBuilderFragmentContext {
     // that are baked in PaintOffsetTranslations since we entered the
     // fragmentainer.
     PhysicalOffset paint_offset_for_oof_in_fragmentainer;
-
-    // The fragmentainer index of the nearest ancestor that participates in
-    // block fragmentation. This is updated as we update properties for an
-    // object that participates in block fragmentation. If we enter monolithic
-    // content, the index will be kept and inherited down the tree, so that we
-    // eventually set the correct "NG" fragment index in the FragmentData
-    // object.
-    wtf_size_t fragmentainer_idx = WTF::kNotFound;
   };
 
   ContainingBlockContext current;
@@ -140,6 +225,10 @@ struct PaintPropertyTreeBuilderFragmentContext {
   // Set to true when we visit a view transition element and is propagated to
   // all non-alias effects.
   bool self_or_ancestor_participates_in_view_transition = false;
+
+  // Set to true when we visit a canvas child and is propagated to all
+  // descendant effects.
+  bool is_in_canvas_subtree = false;
 
   // Whether newly created children should flatten their inherited transform
   // (equivalently, draw into the plane of their parent). Should generally
@@ -167,6 +256,16 @@ struct PaintPropertyTreeBuilderFragmentContext {
   // The delta between the old and new accumulated offsets of 2d translation
   // transforms to the layout shift root.
   gfx::Vector2dF translation_2d_to_layout_shift_root_delta;
+
+  // These node pointers provide the transform/clip space to be used by the
+  // ::view-transition pseudo element. The transform/clip ancestor for ::v-t is
+  // distinct from other descendants of the scope element. This is because some
+  // of the scope element's paint properties, like Transform, should apply to
+  // the ::v-t, but others like ScrollTranslation and OverflowClip should not.
+  const ClipPaintPropertyNodeOrAlias* clip_ancestor_for_transition_pseudo_root =
+      nullptr;
+  const TransformPaintPropertyNodeOrAlias*
+      transform_ancestor_for_transition_pseudo_root = nullptr;
 };
 
 struct PaintPropertyTreeBuilderContext final {
@@ -246,14 +345,12 @@ struct PrePaintInfo {
  public:
   PrePaintInfo(const PhysicalBoxFragment* box_fragment,
                PhysicalOffset paint_offset,
-               wtf_size_t fragmentainer_idx,
                bool is_first_for_node,
                bool is_last_for_node,
                bool is_inside_fragment_child,
                bool fragmentainer_is_oof_containing_block)
       : box_fragment(box_fragment),
         paint_offset(paint_offset),
-        fragmentainer_idx(fragmentainer_idx),
         is_first_for_node(is_first_for_node),
         is_last_for_node(is_last_for_node),
         is_inside_fragment_child(is_inside_fragment_child),
@@ -267,7 +364,6 @@ struct PrePaintInfo {
 
   FragmentData* fragment_data = nullptr;
   PhysicalOffset paint_offset;
-  wtf_size_t fragmentainer_idx;
   bool is_first_for_node;
   bool is_last_for_node;
 
@@ -354,6 +450,12 @@ class PaintPropertyTreeBuilder {
 
   static bool ScheduleDeferredTransformNodeUpdate(LayoutObject& object);
   static bool ScheduleDeferredOpacityNodeUpdate(LayoutObject& object);
+
+  // Returns the parent of the highest effect that has a reference filter
+  // applied.
+  static const blink::EffectPaintPropertyNode*
+  GetFirstParentEffectWithoutReferenceFilter(
+      const blink::EffectPaintPropertyNodeOrAlias* node_or_alias);
 
  private:
   ALWAYS_INLINE void InitPaintProperties();

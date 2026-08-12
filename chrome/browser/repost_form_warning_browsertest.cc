@@ -23,12 +23,12 @@ using web_modal::WebContentsModalDialogManager;
 
 class RepostFormWarningTest : public DialogBrowserTest {
  public:
-  RepostFormWarningTest() {}
+  RepostFormWarningTest() = default;
 
   RepostFormWarningTest(const RepostFormWarningTest&) = delete;
   RepostFormWarningTest& operator=(const RepostFormWarningTest&) = delete;
 
-  ~RepostFormWarningTest() override {}
+  ~RepostFormWarningTest() override = default;
 
   // BrowserTestBase:
   void SetUpOnMainThread() override;
@@ -64,7 +64,7 @@ content::WebContents* RepostFormWarningTest::TryReload() {
   return web_contents;
 }
 
-// If becomes flaky, disable on Windows and use http://crbug.com/47228
+// If becomes flaky, disable on Windows and use http://crbug.com/40411916
 IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestDoubleReload) {
   // Try to reload it twice, checking for repost.
   content::WebContents* web_contents = TryReload();
@@ -83,7 +83,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestDoubleReload) {
   EXPECT_FALSE(web_contents_modal_dialog_manager->IsDialogActive());
 }
 
-// If becomes flaky, disable on Windows and use http://crbug.com/47228
+// If becomes flaky, disable on Windows and use http://crbug.com/40411916
 IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
   // Try to reload it, checking for repost.
   content::WebContents* web_contents = TryReload();
@@ -114,7 +114,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
 }
 
 // Disable on Mac OS until dialogs are using toolkit-views for MacViews project.
-// https://crbug.com/683356
+// https://crbug.com/41296226
 #if !BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, InvokeUi_TestRepostWarning) {
   ShowAndVerifyUi();

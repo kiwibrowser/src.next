@@ -14,26 +14,30 @@ import android.util.IntProperty;
 
 import androidx.appcompat.app.ActionBar;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.toolbar.R;
+
+import java.util.function.Supplier;
 
 /**
  * This class controls the how toolbar animates while the action mode bar is being shown. It also
  * manages a {@link ToolbarActionModeCallback}.
  */
+@NullMarked
 public class ActionModeController {
     private static final int SLIDE_DURATION_MS = 200;
 
-    private ToolbarActionModeCallback mToolbarActionModeCallback;
-    private ObjectAnimator mCurrentAnimation;
+    private final ToolbarActionModeCallback mToolbarActionModeCallback;
+    private @Nullable ObjectAnimator mCurrentAnimation;
     private boolean mShowingActionMode;
-    private ObservableSupplier<Integer> mTabStripHeightSupplier;
+    private final Supplier<Integer> mTabStripHeightSupplier;
     private final Context mContext;
     private final ActionBarDelegate mActionBarDelegate;
 
     /** Property for animating the top margin of ActionBarDelegate. */
     public static final IntProperty<ActionBarDelegate> TOP_MARGIN_ANIM_PROPERTY =
-            new IntProperty<ActionBarDelegate>("controlTopMargin") {
+            new IntProperty<>("controlTopMargin") {
                 @Override
                 public Integer get(ActionBarDelegate delegate) {
                     return delegate.getControlTopMargin();
@@ -46,31 +50,33 @@ public class ActionModeController {
             };
 
     /**
-     * This is an interface for to let the controller animate the position of {@link Toolbar}, while
+     * This is an interface to let the controller animate the position of {@link Toolbar}, while
      * action mode is showing.
      */
     public interface ActionBarDelegate {
         /**
          * Sets the top margin of the control container.
+         *
          * @param margin The new top margin of the control container.
          */
-        public void setControlTopMargin(int margin);
+        void setControlTopMargin(int margin);
 
         /**
          * @return The top margin of the control container.
          */
-        public int getControlTopMargin();
+        int getControlTopMargin();
 
         /**
          * @return The action bar that will be animated in and out.
          */
-        public ActionBar getSupportActionBar();
+        @Nullable ActionBar getSupportActionBar();
 
         /**
          * Change the background visibility for the action bar.
+         *
          * @param visible Whether the background should be visible.
          */
-        public void setActionBarBackgroundVisibility(boolean visible);
+        void setActionBarBackgroundVisibility(boolean visible);
     }
 
     /**
@@ -85,7 +91,7 @@ public class ActionModeController {
             Context context,
             ActionBarDelegate actionBarDelegate,
             ToolbarActionModeCallback toolbarActionModeCallback,
-            ObservableSupplier<Integer> tabStripHeightSupplier) {
+            Supplier<Integer> tabStripHeightSupplier) {
         mActionBarDelegate = actionBarDelegate;
         mContext = context;
         mToolbarActionModeCallback = toolbarActionModeCallback;

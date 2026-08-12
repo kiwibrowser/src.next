@@ -5,17 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_H_
 
-#include "base/memory/weak_ptr.h"
+#include "base/byte_size.h"
 #include "base/notreached.h"
+#include "components/viz/common/resources/shared_image_format_utils.h"
 #include "gpu/command_buffer/client/client_shared_image.h"
-#include "gpu/command_buffer/common/mailbox_holder.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
-#include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "ui/gfx/hdr_metadata.h"
 
 namespace gpu {
 namespace gles2 {
@@ -24,7 +23,6 @@ class GLES2Interface;
 }  // namespace gpu
 
 namespace blink {
-class CanvasResourceProvider;
 
 class PLATFORM_EXPORT StaticBitmapImage : public Image {
  public:
@@ -35,6 +33,7 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   static scoped_refptr<StaticBitmapImage> Create(
       sk_sp<SkData> data,
       const SkImageInfo&,
+      const gfx::HDRMetadata&,
       ImageOrientation = ImageOrientationEnum::kDefault);
 
   StaticBitmapImage(ImageOrientation orientation) : orientation_(orientation) {}
@@ -47,16 +46,13 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   gfx::Size SizeWithConfig(SizeConfig) const final;
 
   // Methods have common implementation for all sub-classes
-  bool CurrentFrameIsComplete() override { return true; }
+  bool FirstFrameIsComplete() override { return true; }
   void DestroyDecodedData() override {}
 
   // Methods that have a default implementation, and overridden by only one
   // sub-class
   virtual bool IsValid() const { return true; }
   virtual void Transfer() {}
-  virtual bool IsOriginTopLeft() const { return true; }
-  virtual bool SupportsDisplayCompositing() const { return true; }
-  virtual bool IsOverlayCandidate() const { return false; }
 
   // Creates a non-gpu copy of the image, or returns this if image is already
   // non-gpu.
@@ -64,22 +60,19 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
 
   // Methods overridden by AcceleratedStaticBitmapImage only
   // Assumes the destination texture has already been allocated.
-  virtual bool CopyToTexture(gpu::gles2::GLES2Interface*,
-                             GLenum,
-                             GLuint,
-                             GLint,
-                             bool,
-                             bool,
-                             const gfx::Point&,
-                             const gfx::Rect&) {
+  // `src_rect` is always in top-left coordinate space.
+  virtual bool CopyToTexture(gpu::gles2::GLES2Interface* dest_gl,
+                             GLenum dest_target,
+                             GLuint dest_texture_id,
+                             GLint dest_level,
+                             SkAlphaType dest_alpha_type,
+                             GrSurfaceOrigin destination_origin,
+                             const gfx::Point& dest_point,
+                             const gfx::Rect& src_rect) {
     NOTREACHED();
   }
 
-  virtual bool CopyToResourceProvider(CanvasResourceProvider* resource_provider,
-                                      const gfx::Rect& copy_rect) = 0;
-
   virtual void EnsureSyncTokenVerified() { NOTREACHED(); }
-  virtual gpu::MailboxHolder GetMailboxHolder() const { NOTREACHED(); }
   virtual scoped_refptr<gpu::ClientSharedImage> GetSharedImage() const {
     NOTREACHED();
   }
@@ -88,14 +81,9 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   }
   virtual void UpdateSyncToken(const gpu::SyncToken&) { NOTREACHED(); }
 
-  // For gpu based images the Usage is a bitmap indicating set of API(s) and
-  // underlying gpu::SharedImage may be used with.
-  // The gpu::SharedImageInterface is using uint32_t directly.
-  virtual gpu::SharedImageUsageSet GetUsage() const { NOTREACHED(); }
   bool IsPremultiplied() const {
-    return GetSkImageInfo().alphaType() == SkAlphaType::kPremul_SkAlphaType;
+    return GetAlphaType() == SkAlphaType::kPremul_SkAlphaType;
   }
-  SkColorInfo GetSkColorInfo() const { return GetSkImageInfo().colorInfo(); }
 
   // Methods have exactly the same implementation for all sub-classes
   bool OriginClean() const { return is_origin_clean_; }
@@ -104,9 +92,7 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   // StaticBitmapImage needs to store the orientation of the image itself,
   // because the underlying representations do not. If the bitmap represents
   // a non-default orientation it must be explicitly given in the constructor.
-  ImageOrientation CurrentFrameOrientation() const override {
-    return orientation_;
-  }
+  ImageOrientation Orientation() const override { return orientation_; }
 
   void SetOrientation(ImageOrientation orientation) {
     orientation_ = orientation;
@@ -120,8 +106,16 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   Vector<uint8_t> CopyImageData(const SkImageInfo& info,
                                 bool apply_orientation);
 
-  // Return the SkImageInfo of the internal representation of this image.
-  virtual SkImageInfo GetSkImageInfo() const = 0;
+  virtual gfx::Size GetSize() const = 0;
+  virtual SkAlphaType GetAlphaType() const = 0;
+  virtual gfx::ColorSpace GetColorSpace() const = 0;
+  virtual viz::SharedImageFormat GetSharedImageFormat() const = 0;
+  virtual const gfx::HDRMetadata& GetHdrMetadata() const = 0;
+
+  base::ByteSize EstimatedSizeInBytes() const {
+    return base::ByteSize(
+        GetSharedImageFormat().EstimatedSizeInBytes(GetSize()));
+  }
 
  protected:
   // Helper for sub-classes

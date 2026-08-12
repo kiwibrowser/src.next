@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/run_loop.h"
@@ -15,16 +14,19 @@
 #include "extensions/browser/external_install_info.h"
 #include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/browser/updater/manifest_fetch_data.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/verifier_formats.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
 namespace content_verifier_test {
 
-DownloaderTestDelegate::DownloaderTestDelegate() {}
-DownloaderTestDelegate::~DownloaderTestDelegate() {}
+DownloaderTestDelegate::DownloaderTestDelegate() = default;
+DownloaderTestDelegate::~DownloaderTestDelegate() = default;
 
 void DownloaderTestDelegate::AddResponse(const ExtensionId& extension_id,
                                          const std::string& version_string,
@@ -50,7 +52,7 @@ void DownloaderTestDelegate::StartUpdateCheck(
   for (ExtensionDownloaderTask& task : tasks)
     requests_.push_back(std::move(task));
   for (const auto& id : extension_ids) {
-    if (base::Contains(responses_, id)) {
+    if (responses_.contains(id)) {
       CRXFileInfo crx_info(responses_[id].second, GetTestVerifierFormat());
       crx_info.extension_id = id;
       crx_info.expected_version = responses_[id].first;
@@ -71,7 +73,7 @@ void DownloaderTestDelegate::StartUpdateCheck(
 }
 
 ForceInstallProvider::ForceInstallProvider(const ExtensionId& id) : id_(id) {}
-ForceInstallProvider::~ForceInstallProvider() {}
+ForceInstallProvider::~ForceInstallProvider() = default;
 
 std::string ForceInstallProvider::GetDebugPolicyProviderName() const {
   return "ForceInstallProvider";

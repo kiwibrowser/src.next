@@ -43,7 +43,7 @@
     // platforms that has not been explicitly specified and should always be
     // present.
     initial: {
-      valid_keys: ["Android", "Win", "ChromeOS_Ash", "ChromeOS_Lacros", "Mac", "Linux"],
+      valid_keys: ["Android", "Win", "ChromeOS", "Mac", "Linux"],
     },
     invalidate: {
       default: [],
@@ -54,15 +54,38 @@
 
   data: [
     {
+      name: "batterySaverEnabled",
+      type: "bool",
+      initial: false,
+    },
+    {
+      name: "preloadingDisabled",
+      type: "bool",
+      initial: false,
+    },
+    {
+      name: "acceptLanguages",
+      type: "String",
+      invalidate: ["AcceptLanguages"],
+    },
+
+    {
       name: "defaultTextEncodingName",
       type: "String",
     },
 
     // Do not hide chars typed in password fields immediately, but let the last char stay
-    // visible for N seconds, configured by the passwordEchoDurationInSeconds setting
-    // FIXME: Enable automatically if passwordEchoDurationInSeconds is set to a positive value.
+    // visible for N seconds, configured by the passwordEchoDurationInSeconds setting.
+
+    // Controls password echoing when input is received from physical devices (like a hardware keyboard).
     {
-      name: "passwordEchoEnabled",
+      name: "passwordEchoEnabledPhysical",
+      initial: false,
+    },
+
+    // Controls password echoing when input is received from touch-based sources (like an on-screen soft keyboard).
+    {
+      name: "passwordEchoEnabledTouch",
       initial: false,
     },
 
@@ -103,7 +126,7 @@
     {
       name: "defaultFontSize",
       initial: 0,
-      invalidate: ["Style"],
+      invalidate: ["Style", "FontScaleFactor"],
       type: "int",
     },
     {
@@ -126,8 +149,7 @@
         "Mac": "mojom::blink::EditingBehavior::kEditingMacBehavior",
         "Win": "mojom::blink::EditingBehavior::kEditingWindowsBehavior",
         "Android": "mojom::blink::EditingBehavior::kEditingAndroidBehavior",
-        "ChromeOS_Ash": "mojom::blink::EditingBehavior::kEditingChromeOSBehavior",
-        "ChromeOS_Lacros": "mojom::blink::EditingBehavior::kEditingChromeOSBehavior",
+        "ChromeOS": "mojom::blink::EditingBehavior::kEditingChromeOSBehavior",
         "default": "mojom::blink::EditingBehavior::kEditingUnixBehavior",
       },
       type: "mojom::EditingBehavior",
@@ -165,6 +187,14 @@
       name: "shouldClearDocumentBackground",
       initial: true,
     },
+    // Toggled via DevTools. Final highlighting is active if either this
+    // or the global `HighlightAds` (toggled via the internals page) is true.
+    // Both share the "HighlightAds" invalidation type for convenience.
+    {
+      name: "InspectorHighlightAds",
+      initial: false,
+      invalidate: ["HighlightAds"],
+    },
     {
       name: "HighlightAds",
       initial: false,
@@ -183,6 +213,15 @@
 
     {
       name: "allowScriptsToCloseWindows",
+      initial: false,
+    },
+
+    // Allows a window to focus itself or other windows programmatically
+    // without requiring a user gesture.
+    // This is primarily intended for Isolated Web Apps (IWAs) with the
+    // to allow them to manage window focus order like native applications.
+    {
+      name: "allowUnrestrictedWindowFocus",
       initial: false,
     },
 
@@ -252,6 +291,11 @@
     },
 
     {
+      name: "isInitialProfile",
+      initial: false,
+    },
+
+    {
       name: "presentationRequiresUserGesture",
       initial: true,
     },
@@ -265,6 +309,12 @@
     // headset).
     {
       name: "immersiveModeEnabled",
+      initial: false,
+    },
+
+    // Whether immersive video playback is enabled (eg, on Android XR).
+    {
+      name: "immersiveVideoPlaybackEnabled",
       initial: false,
     },
 
@@ -314,7 +364,7 @@
       initial: true,
     },
     {
-      name: "allowNonEmptyNavigatorPlugins",
+      name: "ignorePermissionForDeviceChangedEvent",
       initial: false,
     },
     {
@@ -446,6 +496,11 @@
     },
 
     {
+      name: "scaleAllFontsIfNoMetaTextScaleTag",
+      initial: false,
+    },
+
+    {
       name: "mainFrameClipsContent",
       initial: true,
       invalidate: ["ViewportPaintProperties"],
@@ -505,7 +560,7 @@
     {
       name: "accessibilityFontScaleFactor",
       initial: "1.0",
-      invalidate: ["TextAutosizing"],
+      invalidate: ["FontScaleFactor"],
       type: "double",
     },
 
@@ -667,16 +722,6 @@
       initial: false,
     },
 
-    // Compensates for poor text legibility on mobile devices. This value is
-    // multiplied by the font scale factor when performing text autosizing of
-    // websites that do not set an explicit viewport description.
-    {
-      name: "deviceScaleAdjustment",
-      initial: "1.0",
-      invalidate: ["TextAutosizing"],
-      type: "double",
-    },
-
     // This value is set to false if the platform does not support fullscreen.
     // When set to false all the requests to enter fullscreen will return an error
     // (fullscreenerror or webkitfullscreenerror) as specified in the standard:
@@ -835,38 +880,47 @@
     {
       name: "textTrackBackgroundColor",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackFontFamily",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackFontStyle",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackFontVariant",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackTextColor",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackTextShadow",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackTextSize",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackWindowColor",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
     {
       name: "textTrackWindowRadius",
       type: "String",
+      invalidate: ["TextTrackStyle"],
     },
 
     // Margin for title-safe placement of cues with overscan, gives top and bottom margin size as
@@ -1090,6 +1144,15 @@
       type: "bool",
     },
 
+    // Holds the browser's theme color to be used to render root non-overlay
+    // Fluent scrollbars. Stored from an SkColor as ARGB.
+    {
+      name: "rootScrollbarThemeColor",
+      initial: "std::nullopt",
+      invalidate: ["Paint"],
+      type: "std::optional<SkColor>",
+    },
+
     // The preferred color scheme set by the user's browser settings. The
     // variable follows the browser's color mode setting unless a browser theme
     // (custom or not) is defined, in which case the color scheme is set to the
@@ -1194,6 +1257,10 @@
       initial: false,
     },
     {
+      name: "middleClickPasteAllowed",
+      initial: true
+    },
+    {
       name: "accessibilityIncludeSvgGElement",
       initial: false,
     },
@@ -1201,19 +1268,11 @@
       name: "bypassCSP",
       initial: false,
     },
-    // Enables automatic adjustments of text size on mobile. This enables the
-    // text autosizer, and controls whether text-size-adjust can apply.
+    // Enables the text-size-adjust CSS property.
     {
-      name: "textAutosizingEnabled",
+      name: "textSizeAdjustEnabled",
       initial: false,
-      invalidate: ["TextAutosizing"],
-    },
-    // Only set by web tests, and only used if textAutosizingEnabled is true.
-    {
-      name: "textAutosizingWindowSizeOverride",
-      invalidate: ["TextAutosizing"],
-      type: "gfx::Size",
-      include_paths: ["ui/gfx/geometry/size.h"],
+      invalidate: ["Style"],
     },
     {
       name: "WebXRImmersiveArAllowed",
@@ -1239,12 +1298,6 @@
       initial: false,
       invalidate: ["Style"],
       type: "bool",
-    },
-    // SubApps APIs transient activation requirement can be bypassed via
-    // `SubAppsAPIsAllowedWithoutGestureAndAuthorizationForOrigins` policy.
-    {
-      name: "requireTransientActivationAndAuthorizationForSubAppsAPI",
-      initial: true,
     },
     // Enable the features to change the safe-area-inset* CSS environment
     // variables based on the browser controls's shown ration.

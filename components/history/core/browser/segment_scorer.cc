@@ -21,19 +21,10 @@ namespace history {
 
 // static
 std::unique_ptr<SegmentScorer::RecencyFactor>
-SegmentScorer::RecencyFactor::CreateFromFeatureFlags() {
-  std::string recency_factor_name =
-      base::FeatureParam<std::string>(&history::kMostVisitedTilesNewScoring,
-                                      kMvtScoringParamRecencyFactor,
-                                      kMvtScoringParamRecencyFactor_Default)
-          .Get();
-
+SegmentScorer::RecencyFactor::Create(const std::string& recency_factor_name) {
   if (recency_factor_name == kMvtScoringParamRecencyFactor_Decay) {
-    double decay_per_day = std::clamp(
-        base::FeatureParam<double>(&history::kMostVisitedTilesNewScoring,
-                                   kMvtScoringParamDecayPerDay, 1.0)
-            .Get(),
-        1E-10, 1.0);
+    double decay_per_day =
+        std::clamp(kMvtScoringParamDecayPerDay.Get(), 1E-10, 1.0);
     return std::make_unique<RecencyFactorDecay>(decay_per_day);
   }
 
@@ -41,21 +32,21 @@ SegmentScorer::RecencyFactor::CreateFromFeatureFlags() {
     return std::make_unique<RecencyFactorDecayStaircase>();
   }
 
-  if (recency_factor_name != kMvtScoringParamRecencyFactor_Default) {
+  if (recency_factor_name != kMvtScoringParamRecencyFactor_Classic) {
     DVLOG(1) << "Unknown recency factor name " << recency_factor_name;
   }
-  return std::make_unique<RecencyFactorDefault>();
+  return std::make_unique<RecencyFactorClassic>();
 }
 
 SegmentScorer::RecencyFactor::~RecencyFactor() = default;
 
-/******** SegmentScorer::RecencyFactorDefault ********/
+/******** SegmentScorer::RecencyFactorClassic ********/
 
-SegmentScorer::RecencyFactorDefault::~RecencyFactorDefault() = default;
+SegmentScorer::RecencyFactorClassic::~RecencyFactorClassic() = default;
 
 // Computes a smooth function that boosts today's visits by 3x, week-ago visits
 // by 2x, 3-week-ago visits by 1.5x, falling off to 1x asymptotically.
-float SegmentScorer::RecencyFactorDefault::Compute(int days_ago) {
+float SegmentScorer::RecencyFactorClassic::Compute(int days_ago) {
   return 1.0f + (2.0f * (1.0f / (1.0f + days_ago / 7.0f)));
 }
 
@@ -92,20 +83,30 @@ float SegmentScorer::RecencyFactorDecayStaircase::Compute(int days_ago) {
 
 // static
 std::unique_ptr<SegmentScorer> SegmentScorer::CreateFromFeatureFlags() {
-  std::unique_ptr<SegmentScorer::RecencyFactor> recency_factor =
-      SegmentScorer::RecencyFactor::CreateFromFeatureFlags();
+  std::string recency_factor_name = kMvtScoringParamRecencyFactor.Get();
 
-  int daily_visit_count_cap =
-      base::FeatureParam<int>(&history::kMostVisitedTilesNewScoring,
-                              kMvtScoringParamDailyVisitCountCap, INT_MAX)
-          .Get();
+  std::unique_ptr<RecencyFactor> recency_factor =
+      RecencyFactor::Create(recency_factor_name);
+
+  int daily_visit_count_cap = kMvtScoringParamDailyVisitCountCap.Get();
   return base::WrapUnique(
       new SegmentScorer(std::move(recency_factor), daily_visit_count_cap));
 }
 
-SegmentScorer::SegmentScorer(
-    std::unique_ptr<SegmentScorer::RecencyFactor> recency_factor,
-    int daily_visit_count_cap)
+// static
+std::unique_ptr<SegmentScorer> SegmentScorer::Create(
+    const std::string& recency_factor_name) {
+  std::unique_ptr<RecencyFactor> recency_factor =
+      RecencyFactor::Create(recency_factor_name);
+
+  // TODO(crbug.com/405422202): Explicitly define in the omnibox feature config.
+  int daily_visit_count_cap = kMvtScoringParamDailyVisitCountCap.Get();
+  return base::WrapUnique(
+      new SegmentScorer(std::move(recency_factor), daily_visit_count_cap));
+}
+
+SegmentScorer::SegmentScorer(std::unique_ptr<RecencyFactor> recency_factor,
+                             int daily_visit_count_cap)
     : recency_factor_(std::move(recency_factor)),
       daily_visit_count_cap_(daily_visit_count_cap) {}
 
@@ -113,7 +114,8 @@ SegmentScorer::~SegmentScorer() = default;
 
 float SegmentScorer::Compute(const std::vector<base::Time>& time_slots,
                              const std::vector<int>& visit_counts,
-                             base::Time now) const {
+                             base::Time now,
+                             std::optional<size_t> recency_window_days) const {
   size_t n = time_slots.size();
   CHECK_EQ(n, visit_counts.size());
   float score = 0.0f;
@@ -128,6 +130,11 @@ float SegmentScorer::Compute(const std::vector<base::Time>& time_slots,
     // Recent visits count more than historical ones, so multiply a
     // recency factor related to how long ago this day was.
     int days_ago = (now - time_slot).InDays();
+    // Ignore entries older than `recency_window_days`.
+    if (recency_window_days &&
+        days_ago > static_cast<int>(recency_window_days.value())) {
+      continue;
+    }
     score += recency_factor_->Compute(days_ago) * day_visits_score;
   }
   return score;

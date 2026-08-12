@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/test_extension_system.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "components/omnibox/browser/keyword_provider.h"
@@ -22,7 +21,11 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/browser/unpacked_installer.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -30,14 +33,14 @@ namespace {
 
 class KeywordExtensionsDelegateImplTest : public ExtensionServiceTestBase {
  public:
-  KeywordExtensionsDelegateImplTest() {}
+  KeywordExtensionsDelegateImplTest() = default;
 
   KeywordExtensionsDelegateImplTest(const KeywordExtensionsDelegateImplTest&) =
       delete;
   KeywordExtensionsDelegateImplTest& operator=(
       const KeywordExtensionsDelegateImplTest&) = delete;
 
-  ~KeywordExtensionsDelegateImplTest() override {}
+  ~KeywordExtensionsDelegateImplTest() override = default;
 
  protected:
   void SetUp() override;
@@ -65,7 +68,7 @@ void KeywordExtensionsDelegateImplTest::RunTest(bool incognito) {
 
     TestExtensionRegistryObserver load_observer(registry());
     scoped_refptr<UnpackedInstaller> installer(
-        UnpackedInstaller::Create(service()));
+        UnpackedInstaller::Create(profile()));
     installer->Load(path);
     EXPECT_TRUE(load_observer.WaitForExtensionInstalled());
   }

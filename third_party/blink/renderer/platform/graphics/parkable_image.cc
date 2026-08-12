@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/platform/graphics/parkable_image.h"
 
-#include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
+#include "base/memory/asan_interface.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -28,9 +28,7 @@
 
 namespace blink {
 
-BASE_FEATURE(kDelayParkingImages,
-             "DelayParkingImages",
-             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kDelayParkingImages, base::FEATURE_ENABLED_BY_DEFAULT);
 
 namespace {
 
@@ -73,7 +71,8 @@ void AsanPoisonBuffer(RWBuffer* rw_buffer) {
   auto ro_buffer = rw_buffer->MakeROBufferSnapshot();
   ROBuffer::Iter iter(ro_buffer);
   do {
-    ASAN_POISON_MEMORY_REGION(iter.data(), iter.size());
+    auto data = *iter;
+    ASAN_POISON_MEMORY_REGION(data.data(), data.size());
   } while (iter.Next());
 #endif
 }
@@ -86,7 +85,8 @@ void AsanUnpoisonBuffer(RWBuffer* rw_buffer) {
   auto ro_buffer = rw_buffer->MakeROBufferSnapshot();
   ROBuffer::Iter iter(ro_buffer);
   do {
-    ASAN_UNPOISON_MEMORY_REGION(iter.data(), iter.size());
+    auto data = *iter;
+    ASAN_UNPOISON_MEMORY_REGION(data.data(), data.size());
   } while (iter.Next());
 #endif
 }
@@ -107,7 +107,7 @@ class ParkableImageSegmentReader : public SegmentReader {
   explicit ParkableImageSegmentReader(scoped_refptr<ParkableImage> image);
   size_t size() const override;
   base::span<const uint8_t> GetSomeData(size_t position) const override;
-  sk_sp<SkData> GetAsSkData() const override;
+  sk_sp<const SkData> GetAsSkData() const override;
   void LockData() override;
   void UnlockData() override;
 
@@ -139,7 +139,7 @@ base::span<const uint8_t> ParkableImageSegmentReader::GetSomeData(
   return RWBufferGetSomeData(iter, position_of_block, position);
 }
 
-sk_sp<SkData> ParkableImageSegmentReader::GetAsSkData() const {
+sk_sp<const SkData> ParkableImageSegmentReader::GetAsSkData() const {
   if (!parkable_image_) {
     return nullptr;
   }
@@ -156,8 +156,9 @@ sk_sp<SkData> ParkableImageSegmentReader::GetAsSkData() const {
     // longer limetime than the SkData.
     parkable_image_->AddRef();
     parkable_image_->LockData();
+    auto data = *iter;
     return SkData::MakeWithProc(
-        iter.data(), available_,
+        data.data(), data.size(),
         [](const void* ptr, void* context) -> void {
           auto* parkable_image = static_cast<ParkableImage*>(context);
           {
@@ -190,13 +191,9 @@ void ParkableImageSegmentReader::UnlockData() {
   parkable_image_->UnlockData();
 }
 
-BASE_FEATURE(kUseParkableImageSegmentReader,
-             "UseParkableImageSegmentReader",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 constexpr base::TimeDelta ParkableImageImpl::kParkingDelay;
 
-void ParkableImageImpl::Append(WTF::SharedBuffer* buffer, size_t offset) {
+void ParkableImageImpl::Append(SharedBuffer* buffer, size_t offset) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   base::AutoLock lock(lock_);
   DCHECK(!is_frozen());
@@ -206,7 +203,7 @@ void ParkableImageImpl::Append(WTF::SharedBuffer* buffer, size_t offset) {
   for (auto it = buffer->GetIteratorAt(offset); it != buffer->cend(); ++it) {
     DCHECK_GE(buffer->size(), rw_buffer_->size() + it->size());
     const size_t remaining = buffer->size() - rw_buffer_->size() - it->size();
-    rw_buffer_->Append(it->data(), it->size(), remaining);
+    rw_buffer_->Append(base::as_byte_span(*it), remaining);
   }
   size_ = rw_buffer_->size();
 }
@@ -220,24 +217,10 @@ scoped_refptr<SharedBuffer> ParkableImageImpl::Data() {
   scoped_refptr<SharedBuffer> shared_buffer = SharedBuffer::Create();
   ROBuffer::Iter it(ro_buffer.get());
   do {
-    shared_buffer->Append(it.data(), it.size());
+    shared_buffer->Append(*it);
   } while (it.Next());
 
   return shared_buffer;
-}
-
-scoped_refptr<SegmentReader> ParkableImageImpl::GetROBufferSegmentReader() {
-  base::AutoLock lock(lock_);
-  Unpark();
-  DCHECK(rw_buffer_);
-  // The locking and unlocking here is only needed to make sure ASAN unpoisons
-  // things correctly here.
-  LockData();
-  scoped_refptr<ROBuffer> ro_buffer(rw_buffer_->MakeROBufferSnapshot());
-  scoped_refptr<SegmentReader> segment_reader =
-      SegmentReader::CreateFromROBuffer(std::move(ro_buffer));
-  UnlockData();
-  return segment_reader;
 }
 
 bool ParkableImageImpl::CanParkNow() const {
@@ -318,7 +301,6 @@ void ParkableImageImpl::WriteToDiskInBackground(
   DCHECK(!IsMainThread());
   base::AutoLock lock(parkable_image->lock_);
 
-  DCHECK(ParkableImageManager::IsParkableImagesToDiskEnabled());
   DCHECK(parkable_image);
   DCHECK(parkable_image->reserved_chunk_);
   DCHECK(!parkable_image->on_disk_metadata_);
@@ -334,8 +316,7 @@ void ParkableImageImpl::WriteToDiskInBackground(
       base::checked_cast<wtf_size_t>(parkable_image->size()));
 
   do {
-    vector.Append(reinterpret_cast<const char*>(it.data()),
-                  base::checked_cast<wtf_size_t>(it.size()));
+    vector.append_range(*it);
   } while (it.Next());
 
   auto reserved_chunk = std::move(parkable_image->reserved_chunk_);
@@ -419,7 +400,6 @@ bool ParkableImageImpl::TransientlyUnableToPark() const {
 
 bool ParkableImageImpl::MaybePark(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  DCHECK(ParkableImageManager::IsParkableImagesToDiskEnabled());
   DCHECK(IsMainThread());
 
   base::AutoLock lock(lock_);
@@ -474,8 +454,6 @@ void ParkableImageImpl::Unpark() {
     AsanUnpoisonBuffer(rw_buffer_.get());
     return;
   }
-
-  DCHECK(ParkableImageManager::IsParkableImagesToDiskEnabled());
 
   TRACE_EVENT1("blink", "ParkableImageImpl::Unpark", "size", size());
 
@@ -539,12 +517,7 @@ bool ParkableImage::is_on_disk() const {
 scoped_refptr<SegmentReader> ParkableImage::MakeROSnapshot() {
   DCHECK(impl_);
   DCHECK_CALLED_ON_VALID_THREAD(impl_->thread_checker_);
-
-  if (base::FeatureList::IsEnabled(kUseParkableImageSegmentReader)) {
-    return CreateSegmentReader();
-  } else {
-    return impl_->GetROBufferSegmentReader();
-  }
+  return CreateSegmentReader();
 }
 
 void ParkableImage::Freeze() {
@@ -557,7 +530,7 @@ scoped_refptr<SharedBuffer> ParkableImage::Data() {
   return impl_->Data();
 }
 
-void ParkableImage::Append(WTF::SharedBuffer* buffer, size_t offset) {
+void ParkableImage::Append(SharedBuffer* buffer, size_t offset) {
   DCHECK(impl_);
   impl_->Append(buffer, offset);
 }

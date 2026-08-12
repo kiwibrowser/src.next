@@ -30,9 +30,11 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/custom_scrollbar_theme.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
+#include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 
@@ -324,20 +326,18 @@ gfx::Rect CustomScrollbar::ButtonRect(ScrollbarPart part_type) const {
 
 gfx::Rect CustomScrollbar::TrackRect(int start_length, int end_length) const {
   const LayoutCustomScrollbarPart* part = GetPart(kTrackBGPart);
+  const PhysicalBoxStrut margins =
+      part ? part->MarginOutsets() : PhysicalBoxStrut();
 
   if (Orientation() == kHorizontalScrollbar) {
-    int margin_left = part ? part->MarginLeft().ToInt() : 0;
-    int margin_right = part ? part->MarginRight().ToInt() : 0;
-    start_length += margin_left;
-    end_length += margin_right;
+    start_length += margins.left.ToInt();
+    end_length += margins.right.ToInt();
     int total_length = start_length + end_length;
     return gfx::Rect(X() + start_length, Y(), Width() - total_length, Height());
   }
 
-  int margin_top = part ? part->MarginTop().ToInt() : 0;
-  int margin_bottom = part ? part->MarginBottom().ToInt() : 0;
-  start_length += margin_top;
-  end_length += margin_bottom;
+  start_length += margins.top.ToInt();
+  end_length += margins.bottom.ToInt();
   int total_length = start_length + end_length;
 
   return gfx::Rect(X(), Y() + start_length, Width(), Height() - total_length);
@@ -350,14 +350,15 @@ gfx::Rect CustomScrollbar::TrackPieceRectWithMargins(
   if (!part_layout_object)
     return old_rect;
 
+  const PhysicalBoxStrut margins = part_layout_object->MarginOutsets();
+
   gfx::Rect rect = old_rect;
   if (Orientation() == kHorizontalScrollbar) {
-    rect.set_x((rect.x() + part_layout_object->MarginLeft()).ToInt());
-    rect.set_width((rect.width() - part_layout_object->MarginWidth()).ToInt());
+    rect.set_x((rect.x() + margins.left).ToInt());
+    rect.set_width((rect.width() - margins.HorizontalSum()).ToInt());
   } else {
-    rect.set_y((rect.y() + part_layout_object->MarginTop()).ToInt());
-    rect.set_height(
-        (rect.height() - part_layout_object->MarginHeight()).ToInt());
+    rect.set_y((rect.y() + margins.top).ToInt());
+    rect.set_height((rect.height() - margins.VerticalSum()).ToInt());
   }
   return rect;
 }
@@ -459,15 +460,15 @@ void CustomScrollbar::ClearPaintFlags() {
     part.value->ClearPaintFlags();
 }
 
-void CustomScrollbar::Paint(GraphicsContext& context,
+void CustomScrollbar::Paint(const PaintInfo& paint_info,
                             const PhysicalOffset& paint_offset) const {
   auto& theme = GetTheme();
   // TODO(crbug.com/40105990): We should not round paint_offset but should
   // consider subpixel accumulation when painting scrollbars.
   gfx::Vector2d offset = ToRoundedVector2d(paint_offset);
-  theme.PaintTrackAndButtons(context, *this, FrameRect() + offset);
+  theme.PaintTrackAndButtons(paint_info, *this, FrameRect() + offset);
   if (theme.HasThumb(*this)) {
-    theme.PaintThumb(context, *this, theme.ThumbRect(*this) + offset);
+    theme.PaintThumb(paint_info, *this, theme.ThumbRect(*this) + offset);
   }
 }
 

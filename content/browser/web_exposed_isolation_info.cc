@@ -84,11 +84,6 @@ bool WebExposedIsolationInfo::operator==(
   return true;
 }
 
-bool WebExposedIsolationInfo::operator!=(
-    const WebExposedIsolationInfo& b) const {
-  return !(operator==(b));
-}
-
 bool WebExposedIsolationInfo::operator<(
     const WebExposedIsolationInfo& b) const {
   // Nonisolated < Isolated < Isolated Application.
@@ -107,6 +102,15 @@ bool WebExposedIsolationInfo::operator<(
   // Nonisolated == Nonisolated.
   DCHECK(!is_isolated() && !b.is_isolated());
   return false;
+}
+
+void WebExposedIsolationInfo::WriteIntoTrace(
+    perfetto::TracedProto<TraceProto> proto) const {
+  proto->set_is_isolated(is_isolated());
+  if (is_isolated()) {
+    proto->set_origin(origin_->GetDebugString());
+  }
+  proto->set_is_isolated_application(is_isolated_application());
 }
 
 std::ostream& operator<<(std::ostream& out,

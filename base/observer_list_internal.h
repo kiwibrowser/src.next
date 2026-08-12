@@ -51,9 +51,7 @@ class BASE_EXPORT UncheckedObserverAdapter {
   }
 
 #if DCHECK_IS_ON()
-  std::string GetCreationStackString() const {
-    return "Observer created at:\n" + stack_.ToString();
-  }
+  std::string GetCreationStackString() const { return stack_.ToString(); }
 #endif  // DCHECK_IS_ON()
 
  private:
@@ -161,8 +159,9 @@ class WeakLinkNode : public base::LinkNode<WeakLinkNode<ObserverList>> {
 
   ObserverList* get() const {
 #if EXPENSIVE_DCHECKS_ARE_ON()
-    if (list_)
+    if (list_) {
       DCHECK_CALLED_ON_VALID_SEQUENCE(list_->iteration_sequence_checker_);
+    }
 #endif  // EXPENSIVE_DCHECKS_ARE_ON()
     return list_;
   }

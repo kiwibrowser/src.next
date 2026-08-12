@@ -1,3 +1,5 @@
+# Tokens used by the fuzzers.
+
 # symbols
 " "
 "\""
@@ -256,6 +258,7 @@
 "right"
 "center"
 "justify"
+"match-parent"
 "-webkit-left"
 "-webkit-right"
 "-webkit-center"
@@ -627,7 +630,7 @@
 "fullscreen"
 "standalone"
 "minimal-ui"
-"borderless"
+"unframed"
 "window-controls-overlay"
 "browser"
 "sticky"
@@ -744,8 +747,6 @@
 "path"
 "ray"
 "sides"
-"calc"
-"-webkit-calc"
 "x"
 "y"
 "mandatory"
@@ -940,6 +941,13 @@
 "accentcolor"
 "accentcolortext"
 "-internal-auto-base-select"
+"-internal-partial-interest-content"
+
+# Math functions (TODO: We're missing a lot of them)
+"calc"
+"-webkit-calc"
+"sibling-index"
+"sibling-count"
 
 # display-state
 # normal
@@ -1084,8 +1092,24 @@
 "content"
 "continue"
 "copy-into"
+"corner"
+"corner-block-end"
+"corner-block-start"
+"corner-bottom"
+"corner-bottom-left"
+"corner-bottom-right"
+"corner-end-end"
+"corner-end-start"
+"corner-inline-end"
+"corner-inline-start"
+"corner-left"
+"corner-right"
 "corner-shape"
-"corners"
+"corner-start-end"
+"corner-start-start"
+"corner-top"
+"corner-top-left"
+"corner-top-right"
 "counter-increment"
 "counter-reset"
 "counter-set"
@@ -1436,7 +1460,7 @@
 "z-index"
 "zoom"
 
-# pseudo elements and classes
+# pseudo-elements and classes
 ":hover"
 ":visited"
 ":before"

@@ -7,16 +7,15 @@
 #include "base/test/values_test_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "extensions/browser/browsertest_util.h"
+#include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/renderer_startup_helper.h"
-#include "extensions/browser/script_executor.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
@@ -77,49 +76,15 @@ class UserScriptWorldBrowserTest : public ExtensionApiTest {
       const std::optional<std::string>& world_id = std::nullopt) {
     SCOPED_TRACE(script.c_str());
 
-    ScriptExecutor script_executor(GetActiveWebContents());
-    base::RunLoop run_loop;
-    std::vector<ScriptExecutor::FrameResult> script_results;
-    auto on_complete =
-        [&run_loop, &script_results](
-            std::vector<ScriptExecutor::FrameResult> frame_results) {
-          script_results = std::move(frame_results);
-          run_loop.Quit();
-        };
+    auto frame_result = browsertest_util::ExecuteUserScript(
+        GetActiveWebContents(), extension.id(), script, world_id);
 
-    std::vector<mojom::JSSourcePtr> sources;
-    sources.push_back(mojom::JSSource::New(script, GURL()));
-    script_executor.ExecuteScript(
-        mojom::HostID(mojom::HostID::HostType::kExtensions, extension.id()),
-        mojom::CodeInjection::NewJs(mojom::JSInjection::New(
-            std::move(sources), mojom::ExecutionWorld::kUserScript, world_id,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
-        ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
-        ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
-        mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
-        GURL() /* webview_src */, base::BindLambdaForTesting(on_complete));
-    run_loop.Run();
-
-    if (script_results.size() != 1) {
-      ADD_FAILURE() << "Incorrect script execution result count: "
-                    << script_results.size();
-      return base::Value();
-    }
-
-    ScriptExecutor::FrameResult& frame_result = script_results[0];
-    if (!frame_result.error.empty()) {
-      ADD_FAILURE() << "Unexpected script error: " << frame_result.error;
-      return base::Value();
-    }
-
-    if (frame_result.value.is_none()) {
+    if (frame_result.is_none()) {
       ADD_FAILURE() << "Null return value";
       return base::Value();
     }
 
-    return std::move(frame_result.value);
+    return frame_result;
   }
 
   // Navigates the active web contents to `url`, waiting for the navigation to
@@ -136,10 +101,9 @@ class UserScriptWorldBrowserTest : public ExtensionApiTest {
       const std::string& host_permission) {
     scoped_refptr<const Extension> extension =
         ExtensionBuilder("extension")
-            .SetManifestVersion(3)
             .AddHostPermission(host_permission)
             .Build();
-    extension_service()->AddExtension(extension.get());
+    extension_registrar()->AddExtension(extension);
     EXPECT_TRUE(
         extension_registry()->enabled_extensions().GetByID(extension->id()));
     return extension.get();
@@ -158,8 +122,10 @@ class UserScriptWorldBrowserTest : public ExtensionApiTest {
                                     std::optional<std::string> csp,
                                     bool enable_messaging) {
     RendererStartupHelperFactory::GetForBrowserContext(profile())
-        ->SetUserScriptWorldProperties(extension, std::move(world_id),
-                                       std::move(csp), enable_messaging);
+        ->SetUserScriptWorldProperties(
+            extension,
+            mojom::UserScriptWorldInfo::New(extension.id(), std::move(world_id),
+                                            std::move(csp), enable_messaging));
   }
 
   // Clears associated user script world properties in the renderer(s).
@@ -167,10 +133,6 @@ class UserScriptWorldBrowserTest : public ExtensionApiTest {
                                       std::optional<std::string> world_id) {
     RendererStartupHelperFactory::GetForBrowserContext(profile())
         ->ClearUserScriptWorldProperties(extension, std::move(world_id));
-  }
-
-  content::WebContents* GetActiveWebContents() {
-    return browser()->tab_strip_model()->GetActiveWebContents();
   }
 };
 
@@ -503,13 +465,19 @@ IN_PROC_BROWSER_TEST_F(UserScriptWorldBrowserTest,
          let errorMsg = /User scripts may not message external extensions./;
          chrome.test.runTests([
            function sendMessageToExternalExtensionThrowsError() {
-             chrome.test.assertThrows(chrome.runtime.sendMessage, null,
-                                      [targetId, 'test message'], errorMsg);
+             // Verify `chrome.runtime.sendMessage` throws when messaging
+             // external extensions.
+             chrome.test.assertThrows(
+                 chrome.runtime.sendMessage.bind(
+                     null, targetId, /* message */ 'test message'),
+                 errorMsg);
              chrome.test.succeed();
            },
            function connectToExternalExtensionThrowsError() {
-             chrome.test.assertThrows(chrome.runtime.connect, null,
-                                      [targetId], errorMsg);
+             // Verify `chrome.runtime.connect` throws when connecting to
+             // external extensions.
+             chrome.test.assertThrows(
+                 chrome.runtime.connect.bind(null, targetId), errorMsg);
              chrome.test.succeed();
            },
          ]);

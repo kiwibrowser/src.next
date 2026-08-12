@@ -11,7 +11,9 @@
 
 class FakeCommandUpdaterDelegate : public CommandUpdaterDelegate {
  public:
-  void ExecuteCommandWithDisposition(int id, WindowOpenDisposition) override {
+  void HandleCommandWithDisposition(int id,
+                                    WindowOpenDisposition,
+                                    base::TimeTicks) override {
     EXPECT_EQ(1, id);
   }
 };

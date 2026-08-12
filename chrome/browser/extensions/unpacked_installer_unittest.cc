@@ -2,26 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/unpacked_installer.h"
+#include "extensions/browser/unpacked_installer.h"
 
+#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/extension_service_test_with_install.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/load_error_reporter.h"
 #include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/test_management_policy.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "extensions/common/switches.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -56,7 +63,7 @@ TEST_P(UnpackedInstallerUnitTest, WithheldHostPermissionsWithFlag) {
   TestExtensionRegistryObserver observer(registry());
   base::FilePath extension_path =
       data_dir().AppendASCII("api_test/simple_all_urls");
-  extensions::UnpackedInstaller::Create(service())->Load(extension_path);
+  extensions::UnpackedInstaller::Create(profile())->Load(extension_path);
   scoped_refptr<const Extension> loaded_extension =
       observer.WaitForExtensionLoaded();
 
@@ -72,116 +79,45 @@ TEST_P(UnpackedInstallerUnitTest, WithheldHostPermissionsWithFlag) {
             flag_enabled);
 }
 
-TEST_P(UnpackedInstallerUnitTest,
-       RecordCommandLineDeveloperModeMetrics_EnabledDeveloperModeOff) {
-  // Developer Mode is disabled by default.
-  base::HistogramTester histograms;
+
+class MockLoadErrorReporterObserver : public LoadErrorReporter::Observer {
+ public:
+  explicit MockLoadErrorReporterObserver(base::OnceClosure quit_closure)
+      : quit_closure_(std::move(quit_closure)) {}
+
+  void OnLoadFailure(content::BrowserContext* browser_context,
+                     const base::FilePath& file_path,
+                     const std::u16string& error) override {
+    last_file_path_ = file_path;
+    last_error_ = error;
+    if (quit_closure_) {
+      std::move(quit_closure_).Run();
+    }
+  }
+
+  base::FilePath last_file_path_;
+  std::u16string last_error_;
+  base::OnceClosure quit_closure_;
+};
+
+TEST_P(UnpackedInstallerUnitTest, LoadNonExistentPathPreservesPath) {
   InitializeEmptyExtensionService();
 
-  // Load an extension from command line.
-  base::FilePath path =
-      base::MakeAbsoluteFilePath(data_dir().AppendASCII("good_unpacked"));
-  base::CommandLine::ForCurrentProcess()->AppendSwitchPath(
-      switches::kLoadExtension, path);
-  service()->Init();
-  task_environment()->RunUntilIdle();
+  // Setup error LoadErrorReporter observer.
+  base::RunLoop run_loop;
+  MockLoadErrorReporterObserver observer(run_loop.QuitClosure());
+  LoadErrorReporter::GetInstance()->AddObserver(&observer);
 
-  EXPECT_EQ(1u, registry()->enabled_extensions().size());
-  EXPECT_EQ(1u, registry()->GenerateInstalledExtensionsSet().size());
+  base::FilePath non_existent_path = data_dir().AppendASCII("not_exist");
+  extensions::UnpackedInstaller::Create(profile())->Load(non_existent_path);
 
-  histograms.ExpectBucketCount(
-      /*name=*/"Extensions.CommandLineWithDeveloperModeOff.Enabled",
-      /*sample=*/1,
-      /*expected_count=*/1);
-}
+  // Wait for the error to be reported.
+  run_loop.Run();
 
-TEST_P(UnpackedInstallerUnitTest,
-       RecordCommandLineDeveloperModeMetrics_EnabledDeveloperModeOn) {
-  base::HistogramTester histograms;
-  InitializeEmptyExtensionService();
-  // Enable developer mode.
-  util::SetDeveloperModeForProfile(profile(), true);
+  EXPECT_EQ(observer.last_file_path_, non_existent_path);
+  EXPECT_EQ(observer.last_error_, u"File path cannot be resolved.");
 
-  // Load an extension from command line.
-  base::FilePath path =
-      base::MakeAbsoluteFilePath(data_dir().AppendASCII("good_unpacked"));
-  base::CommandLine::ForCurrentProcess()->AppendSwitchPath(
-      switches::kLoadExtension, path);
-  service()->Init();
-  task_environment()->RunUntilIdle();
-
-  EXPECT_EQ(1u, registry()->enabled_extensions().size());
-  EXPECT_EQ(1u, registry()->GenerateInstalledExtensionsSet().size());
-
-  histograms.ExpectBucketCount(
-      /*name=*/"Extensions.CommandLineWithDeveloperModeOn.Enabled",
-      /*sample=*/1,
-      /*expected_count=*/1);
-}
-
-TEST_P(UnpackedInstallerUnitTest,
-       RecordCommandLineDeveloperModeMetrics_DisabledDeveloperModeOff) {
-  // Developer Mode is disabled by default.
-  base::HistogramTester histograms;
-  InitializeEmptyExtensionService();
-
-  // Register an ExtensionManagementPolicy that disables all extensions, with
-  // a specified disable_reason::DisableReason.
-  GetManagementPolicy()->UnregisterAllProviders();
-  TestManagementPolicyProvider provider(
-      TestManagementPolicyProvider::MUST_REMAIN_DISABLED);
-  provider.SetDisableReason(disable_reason::DISABLE_NOT_VERIFIED);
-  GetManagementPolicy()->RegisterProvider(&provider);
-
-  // Load an extension from command line, it should be installed but disabled.
-  base::FilePath path =
-      base::MakeAbsoluteFilePath(data_dir().AppendASCII("good_unpacked"));
-  base::CommandLine::ForCurrentProcess()->AppendSwitchPath(
-      switches::kLoadExtension, path);
-  service()->Init();
-  task_environment()->RunUntilIdle();
-
-  EXPECT_EQ(0u, registry()->enabled_extensions().size());
-  EXPECT_EQ(1u, registry()->disabled_extensions().size());
-  EXPECT_EQ(1u, registry()->GenerateInstalledExtensionsSet().size());
-
-  histograms.ExpectBucketCount(
-      /*name=*/"Extensions.CommandLineWithDeveloperModeOff.Disabled",
-      /*sample=*/1,
-      /*expected_count=*/1);
-}
-
-TEST_P(UnpackedInstallerUnitTest,
-       RecordCommandLineDeveloperModeMetrics_DisabledDeveloperModeOn) {
-  base::HistogramTester histograms;
-  InitializeEmptyExtensionService();
-  // Enable developer mode.
-  util::SetDeveloperModeForProfile(profile(), true);
-
-  // Register an ExtensionManagementPolicy that disables all extensions, with
-  // a specified disable_reason::DisableReason.
-  GetManagementPolicy()->UnregisterAllProviders();
-  TestManagementPolicyProvider provider(
-      TestManagementPolicyProvider::MUST_REMAIN_DISABLED);
-  provider.SetDisableReason(disable_reason::DISABLE_NOT_VERIFIED);
-  GetManagementPolicy()->RegisterProvider(&provider);
-
-  // Load an extension from command line, it should be installed but disabled.
-  base::FilePath path =
-      base::MakeAbsoluteFilePath(data_dir().AppendASCII("good_unpacked"));
-  base::CommandLine::ForCurrentProcess()->AppendSwitchPath(
-      switches::kLoadExtension, path);
-  service()->Init();
-  task_environment()->RunUntilIdle();
-
-  EXPECT_EQ(0u, registry()->enabled_extensions().size());
-  EXPECT_EQ(1u, registry()->disabled_extensions().size());
-  EXPECT_EQ(1u, registry()->GenerateInstalledExtensionsSet().size());
-
-  histograms.ExpectBucketCount(
-      /*name=*/"Extensions.CommandLineWithDeveloperModeOn.Disabled",
-      /*sample=*/1,
-      /*expected_count=*/1);
+  LoadErrorReporter::GetInstance()->RemoveObserver(&observer);
 }
 
 INSTANTIATE_TEST_SUITE_P(All, UnpackedInstallerUnitTest, testing::Bool());

@@ -42,8 +42,10 @@
 #include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
+#include "third_party/blink/renderer/platform/loader/fetch/integrity_metadata.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -55,6 +57,8 @@ String TechnologyToString(CSSFontFaceSrcValue::FontTechnology font_technology) {
   // https://drafts.csswg.org/cssom/#serialize-a-css-component-value these all
   // need to be serialized as lowercase.
   switch (font_technology) {
+    case CSSFontFaceSrcValue::FontTechnology::kTechnologyAvar2:
+      return "avar2";
     case CSSFontFaceSrcValue::FontTechnology::kTechnologyVariations:
       return "variations";
     case CSSFontFaceSrcValue::FontTechnology::kTechnologyFeaturesAAT:
@@ -92,7 +96,7 @@ bool CSSFontFaceSrcValue::IsSupportedFormat() const {
   const String& resolved_url_string =
       src_value_->UrlData().ResolvedUrl().GetString();
   return ProtocolIs(resolved_url_string, "data") ||
-         !resolved_url_string.EndsWithIgnoringASCIICase(".eot");
+         !resolved_url_string.EndsWithIgnoringAsciiCase(".eot");
 }
 
 void CSSFontFaceSrcValue::AppendTechnology(FontTechnology technology) {
@@ -141,12 +145,19 @@ FontResource& CSSFontFaceSrcValue::Fetch(ExecutionContext* context,
                                          FontResourceClient* client) const {
   if (!fetched_ || fetched_->Options().world_for_csp != world_) {
     const CSSUrlData& url_data = src_value_->UrlData();
+    const CSSUrlRequestModifiers& modifiers = url_data.GetModifiers();
     const Referrer& referrer = url_data.GetReferrer();
-    ResourceRequest resource_request(url_data.ResolvedUrl());
-    resource_request.SetReferrerPolicy(
-        ReferrerUtils::MojoReferrerPolicyResolveDefault(
-            referrer.referrer_policy));
+    ResourceRequest resource_request(url_data.ResolveUrl(*context));
+
+    if (modifiers.referrer_policy) {
+      resource_request.SetReferrerPolicy(*modifiers.referrer_policy);
+    } else {
+      resource_request.SetReferrerPolicy(
+          ReferrerUtils::MojoReferrerPolicyResolveDefault(
+              referrer.referrer_policy));
+    }
     resource_request.SetReferrerString(referrer.referrer);
+
     if (url_data.IsAdRelated()) {
       resource_request.SetIsAdResource();
     }
@@ -167,9 +178,22 @@ FontResource& CSSFontFaceSrcValue::Fetch(ExecutionContext* context,
     // Local fonts are accessible from file: URLs even when
     // allowFileAccessFromFileURLs is false.
     if (!params.Url().IsLocalFile()) {
-      params.SetCrossOriginAccessControl(security_origin,
-                                         kCrossOriginAttributeAnonymous);
+      CrossOriginAttributeValue cross_origin =
+          modifiers.cross_origin != kCrossOriginAttributeNotSet
+              ? modifiers.cross_origin
+              : kCrossOriginAttributeAnonymous;
+      params.SetCrossOriginAccessControl(security_origin, cross_origin);
     }
+
+    if (!modifiers.integrity.IsNull()) {
+      IntegrityMetadataSet metadata_set;
+      SubresourceIntegrity::ParseIntegrityAttribute(modifiers.integrity,
+                                                    metadata_set, context);
+      params.SetIntegrityMetadata(metadata_set);
+      params.MutableResourceRequest().SetFetchIntegrity(modifiers.integrity,
+                                                        context);
+    }
+
     fetched_ = FontResource::Fetch(params, context->Fetcher(), client);
   } else {
     // FIXME: CSSFontFaceSrcValue::Fetch is invoked when @font-face rule

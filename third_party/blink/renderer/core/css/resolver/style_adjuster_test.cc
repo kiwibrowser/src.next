@@ -5,7 +5,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
@@ -302,6 +301,43 @@ TEST_F(StyleAdjusterTest, OverflowClipUseCount) {
   UpdateAllLifecyclePhasesForTest();
   EXPECT_TRUE(
       GetDocument().IsUseCounted(WebFeature::kOverflowClipAlongEitherAxis));
+}
+
+TEST_F(StyleAdjusterTest, SingleAxisScrollerUseCount) {
+  SetBodyInnerHTML(R"HTML(
+    <div style='overflow: clip'></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kSingleAxisScroller));
+  GetDocument().ClearUseCounterForTesting(WebFeature::kSingleAxisScroller);
+
+  SetBodyInnerHTML(R"HTML(
+    <div style='overflow-x: auto; overflow-y: visible'></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(GetDocument().IsUseCounted(WebFeature::kSingleAxisScroller));
+  GetDocument().ClearUseCounterForTesting(WebFeature::kSingleAxisScroller);
+
+  SetBodyInnerHTML(R"HTML(
+    <div style='overflow-x: clip; overflow-y: hidden'></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kSingleAxisScroller));
+  GetDocument().ClearUseCounterForTesting(WebFeature::kSingleAxisScroller);
+
+  SetBodyInnerHTML(R"HTML(
+    <div style='overflow-x: auto; overflow-y: clip'></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(GetDocument().IsUseCounted(WebFeature::kSingleAxisScroller));
+  GetDocument().ClearUseCounterForTesting(WebFeature::kSingleAxisScroller);
+}
+
+// crbug.com/392643253
+TEST_F(StyleAdjusterTest, AdjustForDisplayInlinify) {
+  SetBodyInnerHTML(R"HTML(<ruby><video></video><audio></audio></ruby>)HTML");
+  UpdateAllLifecyclePhasesForTest();
+  // Pass if no crashes.
 }
 
 // crbug.com/1216721

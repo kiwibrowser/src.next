@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/css/css_container_values.h"
 
-#include "third_party/blink/renderer/core/css/container_query_evaluator.h"
+#include "third_party/blink/renderer/core/css/container_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/position_try_fallbacks.h"
 
 namespace blink {
 
@@ -19,35 +21,40 @@ CSSContainerValues::CSSContainerValues(
     ContainerStuckPhysical stuck_horizontal,
     ContainerStuckPhysical stuck_vertical,
     ContainerSnappedFlags snapped,
-    ContainerOverflowingFlags overflowing_horizontal,
-    ContainerOverflowingFlags overflowing_vertical)
+    ContainerScrollableFlags scrollable_horizontal,
+    ContainerScrollableFlags scrollable_vertical,
+    ContainerScrolled scrolled_horizontal,
+    ContainerScrolled scrolled_vertical,
+    WritingDirectionMode abs_container_writing_direction,
+    const PositionTryFallback& anchored_fallback)
     : MediaValuesDynamic(document.GetFrame()),
       element_(&container),
       width_(width),
       height_(height),
       writing_direction_(container.ComputedStyleRef().GetWritingDirection()),
+      abs_container_writing_direction_(abs_container_writing_direction),
       stuck_horizontal_(stuck_horizontal),
       stuck_vertical_(stuck_vertical),
       snapped_(snapped),
-      overflowing_horizontal_(overflowing_horizontal),
-      overflowing_vertical_(overflowing_vertical),
+      scrollable_horizontal_(scrollable_horizontal),
+      scrollable_vertical_(scrollable_vertical),
+      scrolled_horizontal_(scrolled_horizontal),
+      scrolled_vertical_(scrolled_vertical),
+      anchored_fallback_(anchored_fallback),
       font_sizes_(CSSToLengthConversionData::FontSizes(
           container.ComputedStyleRef().GetFontSizeStyle(),
           document.documentElement()->GetComputedStyle())),
       line_height_size_(CSSToLengthConversionData::LineHeightSize(
           container.ComputedStyleRef().GetFontSizeStyle(),
           document.documentElement()->GetComputedStyle())),
-      font_style_(container.GetComputedStyle()),
-      root_font_style_(document.documentElement()->GetComputedStyle()),
-      container_sizes_(
-          ContainerQueryEvaluator::ParentContainerCandidateElement(container)) {
-}
+      container_sizes_(FlatTreeTraversal::ParentElement(container)) {}
 
 void CSSContainerValues::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   visitor->Trace(container_sizes_);
-  visitor->Trace(font_style_);
-  visitor->Trace(root_font_style_);
+  visitor->Trace(font_sizes_);
+  visitor->Trace(line_height_size_);
+  visitor->Trace(anchored_fallback_);
   MediaValuesDynamic::Trace(visitor);
 }
 
@@ -141,20 +148,35 @@ ContainerStuckLogical CSSContainerValues::StuckBlock() const {
   return writing_direction_.IsFlippedBlocks() ? Flip(logical) : logical;
 }
 
-ContainerOverflowingFlags CSSContainerValues::OverflowingInline() const {
-  ContainerOverflowingFlags overflowing_inline =
-      writing_direction_.IsHorizontal() ? OverflowingHorizontal()
-                                        : OverflowingVertical();
-  return writing_direction_.IsRtl() ? Flip(overflowing_inline)
-                                    : overflowing_inline;
+ContainerScrollableFlags CSSContainerValues::ScrollableInline() const {
+  ContainerScrollableFlags scrollable_inline = writing_direction_.IsHorizontal()
+                                                   ? ScrollableHorizontal()
+                                                   : ScrollableVertical();
+  return writing_direction_.IsRtl() ? Flip(scrollable_inline)
+                                    : scrollable_inline;
 }
 
-ContainerOverflowingFlags CSSContainerValues::OverflowingBlock() const {
-  ContainerOverflowingFlags overflowing_block =
-      writing_direction_.IsHorizontal() ? OverflowingVertical()
-                                        : OverflowingHorizontal();
-  return writing_direction_.IsFlippedBlocks() ? Flip(overflowing_block)
-                                              : overflowing_block;
+ContainerScrollableFlags CSSContainerValues::ScrollableBlock() const {
+  ContainerScrollableFlags scrollable_block = writing_direction_.IsHorizontal()
+                                                  ? ScrollableVertical()
+                                                  : ScrollableHorizontal();
+  return writing_direction_.IsFlippedBlocks() ? Flip(scrollable_block)
+                                              : scrollable_block;
+}
+
+ContainerScrolled CSSContainerValues::ScrolledInline() const {
+  ContainerScrolled scrolled_inline = writing_direction_.IsHorizontal()
+                                          ? ScrolledHorizontal()
+                                          : ScrolledVertical();
+  return writing_direction_.IsRtl() ? Flip(scrolled_inline) : scrolled_inline;
+}
+
+ContainerScrolled CSSContainerValues::ScrolledBlock() const {
+  ContainerScrolled scrolled_block = writing_direction_.IsHorizontal()
+                                         ? ScrolledVertical()
+                                         : ScrolledHorizontal();
+  return writing_direction_.IsFlippedBlocks() ? Flip(scrolled_block)
+                                              : scrolled_block;
 }
 
 }  // namespace blink

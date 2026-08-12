@@ -17,7 +17,6 @@
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/strings/string_tokenizer.h"
-#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/http/http_byte_range.h"
@@ -70,8 +69,18 @@ class NET_EXPORT HttpUtil {
   // Parses the value of a "Range" header as defined in RFC 7233 Section 2.1.
   // https://tools.ietf.org/html/rfc7233#section-2.1
   // Returns false on failure.
-  static bool ParseRangeHeader(const std::string& range_specifier,
+  static bool ParseRangeHeader(std::string_view range_specifier,
                                std::vector<HttpByteRange>* ranges);
+
+  // Parses the Fetch Standard's "single range header value" for the
+  // "bytes" range unit. Optional HTTP tab/space around '=' and '-' is
+  // accepted only when |allow_whitespace| is true. At least one side of
+  // the range must contain digits. Returns the parsed range on success
+  // and std::nullopt on failure.
+  // https://fetch.spec.whatwg.org/#simple-range-header-value
+  static std::optional<HttpByteRange> ParseFetchSingleRange(
+      std::string_view range_header_value,
+      bool allow_whitespace);
 
   // Extracts the values in a Content-Range header and returns true if all three
   // values are present and valid for a 206 response; otherwise returns false.
@@ -144,6 +153,12 @@ class NET_EXPORT HttpUtil {
   static void TrimLWS(std::string::const_iterator* begin,
                       std::string::const_iterator* end);
   static std::string_view TrimLWS(std::string_view string);
+  // This operates on the substring of `string` between `begin_offset` and
+  // `end_offset`, for consumers that need to know offsets relative to the
+  // original string.
+  static void TrimLWS(std::string_view string,
+                      size_t& begin_offset,
+                      size_t& end_offset);
 
   // Whether the character is a valid |tchar| as defined in RFC 7230 Sec 3.2.6.
   static bool IsTokenChar(char c);
@@ -221,7 +236,7 @@ class NET_EXPORT HttpUtil {
   // cases as explained at this w3c doc:
   // https://www.w3.org/International/questions/qa-lang-priorities#langtagdetail
   // Note that we do not support Q values (e.g. ;q=0.9) in |language_prefs|.
-  static std::string ExpandLanguageList(const std::string& language_prefs);
+  static std::string ExpandLanguageList(std::string_view language_prefs);
 
   // Given a comma separated ordered list of language codes, return
   // the list with a qvalue appended to each language.
@@ -301,8 +316,9 @@ class NET_EXPORT HttpUtil {
   // does not expect any).
   class NET_EXPORT HeadersIterator {
    public:
-    HeadersIterator(std::string::const_iterator headers_begin,
-                    std::string::const_iterator headers_end,
+    // The data `headers` points to must outlive `this`. GetNext() must be
+    // called before any other method.
+    HeadersIterator(std::string_view headers,
                     const std::string& line_delimiter);
     ~HeadersIterator();
 
@@ -311,50 +327,35 @@ class NET_EXPORT HttpUtil {
     // header name and values.
     bool GetNext();
 
-    // Iterates through the list of headers, starting with the current position
-    // and looks for the specified header.  Note that the name _must_ be
-    // lower cased.
-    // If the header was found, the return value will be true and the current
-    // position points to the header.  If the return value is false, the
-    // current position will be at the end of the headers.
-    bool AdvanceTo(const char* lowercase_name);
+    void Reset() { lines_.Reset(); }
 
-    void Reset() {
-      lines_.Reset();
-    }
-
-    std::string::const_iterator name_begin() const {
-      return name_begin_;
-    }
-    std::string::const_iterator name_end() const {
-      return name_end_;
-    }
-    std::string name() const {
-      return std::string(name_begin_, name_end_);
-    }
+    size_t name_begin() const { return name_begin_; }
+    size_t name_end() const { return name_end_; }
+    std::string name() const { return std::string(name_piece()); }
     std::string_view name_piece() const {
-      return base::MakeStringPiece(name_begin_, name_end_);
+      return headers_.substr(name_begin_, name_end_ - name_begin_);
     }
 
-    std::string::const_iterator values_begin() const {
-      return values_begin_;
-    }
-    std::string::const_iterator values_end() const {
-      return values_end_;
-    }
-    std::string values() const {
-      return std::string(values_begin_, values_end_);
-    }
+    size_t values_begin() const { return values_begin_; }
+    size_t values_end() const { return values_end_; }
+    std::string values() const { return std::string(values_piece()); }
     std::string_view values_piece() const {
-      return base::MakeStringPiece(values_begin_, values_end_);
+      return headers_.substr(values_begin_, values_end_ - values_begin_);
     }
 
    private:
-    base::StringTokenizer lines_;
-    std::string::const_iterator name_begin_;
-    std::string::const_iterator name_end_;
-    std::string::const_iterator values_begin_;
-    std::string::const_iterator values_end_;
+    // The full set of input headers.
+    const std::string_view headers_;
+
+    // Tokenizer over `headers_`.
+    base::StringViewTokenizer lines_;
+
+    // Start/end of the corresponding fields, relative to the start of
+    // `headers_`.
+    size_t name_begin_ = 0;
+    size_t name_end_ = 0;
+    size_t values_begin_ = 0;
+    size_t values_end_ = 0;
   };
 
   // Iterates over delimited values in an HTTP header.  HTTP LWS is
@@ -380,12 +381,28 @@ class NET_EXPORT HttpUtil {
     // is a next value.  Use value* methods to access the resultant value.
     bool GetNext();
 
-    std::string_view value() const { return value_; }
+    std::string_view value() const {
+      return values_.substr(value_begin_, value_end_ - value_begin_);
+    }
+
+    // The begin/end offsets of the current value, relative to the start of
+    // `values`.
+    size_t value_begin() const { return value_begin_; }
+    size_t value_end() const { return value_end_; }
 
    private:
-    base::StringViewTokenizer values_;
-    std::string_view value_;
+    // The original input value.
+    std::string_view values_;
+
     bool ignore_empty_values_;
+
+    base::StringViewTokenizer tokenizer_;
+
+    // These internally track the range of the current value withint `values_`,
+    // to can provide begin/end indices for the current value for
+    // HttpResponseHeaders, the only consumer that needs them.
+    size_t value_begin_ = 0u;
+    size_t value_end_ = 0u;
   };
 
   // Iterates over a delimited sequence of name-value pairs in an HTTP header.

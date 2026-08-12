@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_SIGNIN_ACCOUNT_CONSISTENCY_MODE_MANAGER_H_
 #define CHROME_BROWSER_SIGNIN_ACCOUNT_CONSISTENCY_MODE_MANAGER_H_
 
-#include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "build/buildflag.h"
@@ -73,8 +72,6 @@ class AccountConsistencyModeManager : public KeyedService {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
-                           MigrateAtCreation);
-  FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
                            SigninAllowedChangesDiceState);
   FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
                            AllowBrowserSigninSwitch);
@@ -84,15 +81,10 @@ class AccountConsistencyModeManager : public KeyedService {
   // Returns the account consistency method for the current profile.
   signin::AccountConsistencyMethod GetAccountConsistencyMethod();
 
-  // Computes the account consistency method for the current profile. This is
-  // only called from the constructor, the account consistency method cannot
-  // change during the lifetime of a profile.
-  static signin::AccountConsistencyMethod ComputeAccountConsistencyMethod(
-      Profile* profile);
-
-  raw_ptr<Profile> profile_;
-  signin::AccountConsistencyMethod account_consistency_;
-  bool account_consistency_initialized_;
+  const raw_ptr<Profile> profile_;
+  signin::AccountConsistencyMethod account_consistency_ =
+      signin::AccountConsistencyMethod::kDisabled;
+  bool account_consistency_initialized_ = false;
 };
 
 #endif  // CHROME_BROWSER_SIGNIN_ACCOUNT_CONSISTENCY_MODE_MANAGER_H_

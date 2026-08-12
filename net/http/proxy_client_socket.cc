@@ -4,9 +4,9 @@
 
 #include "net/http/proxy_client_socket.h"
 
-#include <unordered_set>
+#include <string>
+#include <vector>
 
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/host_port_pair.h"
@@ -78,7 +78,7 @@ void ProxyClientSocket::SanitizeProxyAuth(HttpResponseInfo& response) {
   size_t iter = 0;
   std::string header_name;
   std::string header_value;
-  std::unordered_set<std::string> headers_to_remove;
+  std::vector<std::string> headers_to_remove;
   while (response.headers->EnumerateHeaderLines(&iter, &header_name,
                                                 &header_value)) {
     bool remove = true;
@@ -89,7 +89,7 @@ void ProxyClientSocket::SanitizeProxyAuth(HttpResponseInfo& response) {
       }
     }
     if (remove)
-      headers_to_remove.insert(header_name);
+      headers_to_remove.push_back(header_name);
   }
 
   response.headers->RemoveHeaders(headers_to_remove);

@@ -7,6 +7,7 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/cancelable_callback.h"
+#include "base/feature_list.h"
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -19,7 +20,6 @@ class Size;
 }  // namespace gfx
 
 namespace gpu {
-class GpuMemoryBufferManager;
 class ClientSharedImage;
 struct SyncToken;
 namespace raster {
@@ -28,11 +28,13 @@ class RasterInterface;
 }  // namespace gpu
 
 namespace media {
-class RenderableGpuMemoryBufferVideoFramePool;
+class RenderableMappableSharedImageVideoFramePool;
 class VideoFrame;
 }  // namespace media
 
 namespace blink {
+
+PLATFORM_EXPORT BASE_DECLARE_FEATURE(kUseCopyToGpuMemoryBufferAsync);
 
 class WebGraphicsContext3DProviderWrapper;
 
@@ -41,13 +43,9 @@ class WebGraphicsContext3DProviderWrapper;
 // media::VideoFrame.
 class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
  public:
-  // This constructor is valid only on the main thread, as otherwise a
-  // GpuMemoryBufferManager must be provided.
+  // This constructor is valid only on the main thread.
   explicit WebGraphicsContext3DVideoFramePool(
       base::WeakPtr<WebGraphicsContext3DProviderWrapper> weak_context_provider);
-  WebGraphicsContext3DVideoFramePool(
-      base::WeakPtr<WebGraphicsContext3DProviderWrapper> weak_context_provider,
-      gpu::GpuMemoryBufferManager* gmb_manager);
   ~WebGraphicsContext3DVideoFramePool();
 
   gpu::raster::RasterInterface* GetRasterInterface() const;
@@ -55,13 +53,14 @@ class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
   using FrameReadyCallback =
       base::OnceCallback<void(scoped_refptr<media::VideoFrame>)>;
 
-  // On success, this function will issue return true and will call the
-  // specified FrameCallback with the resulting VideoFrame when the frame is
-  // ready. On failure this will return false. The resulting VideoFrame will
-  // always be NV12. Note: If the YUV to RGB matrix of
-  // `dst_color_space` is not Rec601, then this function will use the matrix for
-  // Rec709 (it supports no other values). See https://crbug.com/skia/12545.
-  bool CopyRGBATextureToVideoFrame(
+  // On success, this function will return the completion sync token for the
+  // read operations on `src_shared_image` and will call the specified
+  // FrameCallback with the resulting VideoFrame when the frame is ready. On
+  // failure this will return std::nullopt. The resulting VideoFrame will always
+  // be NV12. Note: If the YUV to RGB matrix of `dst_color_space` is not Rec601,
+  // then this function will use the matrix for Rec709 (it supports no other
+  // values). See https://crbug.com/skia/12545.
+  std::optional<gpu::SyncToken> CopyRGBATextureToVideoFrame(
       const gfx::Size& src_size,
       scoped_refptr<gpu::ClientSharedImage> src_shared_image,
       const gpu::SyncToken& acquire_sync_token,
@@ -83,10 +82,11 @@ class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
  private:
   base::WeakPtr<blink::WebGraphicsContext3DProviderWrapper>
       weak_context_provider_;
-  const std::unique_ptr<media::RenderableGpuMemoryBufferVideoFramePool> pool_;
+  const std::unique_ptr<media::RenderableMappableSharedImageVideoFramePool>
+      pool_;
   base::AtomicSequenceNumber trace_flow_seqno_;
 
-  WTF::Deque<std::unique_ptr<base::CancelableOnceClosure>>
+  Deque<std::unique_ptr<base::CancelableOnceClosure>>
       pending_gpu_completion_callbacks_;
 };
 

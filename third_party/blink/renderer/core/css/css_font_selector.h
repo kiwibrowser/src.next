@@ -47,8 +47,6 @@ class CORE_EXPORT CSSFontSelector : public CSSFontSelectorBase {
   explicit CSSFontSelector(const TreeScope&);
   ~CSSFontSelector() override;
 
-  unsigned Version() const override { return font_face_cache_->Version(); }
-
   const FontData* GetFontData(const FontDescription&,
                               const FontFamily&) override;
 
@@ -83,7 +81,6 @@ class CORE_EXPORT CSSFontSelector : public CSSFontSelectorBase {
 
   // `CSSFontSelectorBase` overrides
   bool IsAlive() const override;
-  FontMatchingMetrics* GetFontMatchingMetrics() const override;
   UseCounter* GetUseCounter() const override;
 
  private:

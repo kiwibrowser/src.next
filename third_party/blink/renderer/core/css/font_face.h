@@ -35,9 +35,11 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_property.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/cascade_layered.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/font_display.h"
 #include "third_party/blink/renderer/core/css/parser/at_rule_descriptors.h"
+#include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -55,7 +57,8 @@ class CSSLengthResolver;
 class ExceptionState;
 class MediaValues;
 class FontFaceDescriptors;
-class StyleRuleFontFace;
+class FontFeatureSettings;
+class FontVariationSettings;
 class V8FontFaceLoadStatus;
 class V8UnionArrayBufferOrArrayBufferViewOrString;
 struct FontMetricsOverride;
@@ -74,10 +77,12 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
       const V8UnionArrayBufferOrArrayBufferViewOrString* source,
       const FontFaceDescriptors* descriptors);
   static FontFace* Create(Document*,
-                          const StyleRuleFontFace*,
+                          const CascadeLayered<const StyleRuleFontFace>&,
                           bool is_user_style);
 
-  FontFace(ExecutionContext*, const StyleRuleFontFace*, bool is_user_style);
+  FontFace(ExecutionContext*,
+           const CascadeLayered<const StyleRuleFontFace>&,
+           bool is_user_style);
   FontFace(ExecutionContext*,
            const AtomicString& family,
            const FontFaceDescriptors*);
@@ -85,13 +90,23 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   FontFace& operator=(const FontFace&) = delete;
   ~FontFace() override;
 
-  const AtomicString& family() const { return family_; }
+  // Stores the authored family name exactly as provided (unquoted). We keep
+  // this raw form for internal matching and caching, where the exact family
+  // name must not change.
+  const AtomicString& familyNameUnquoted() const { return family_; }
+
+  // Returns the CSS-exposed family name. Serialization applies <family-name>
+  // rules and may require quoting names that are invalid. This is kept separate
+  // from the raw authored name so that serialization does not affect matching
+  // or caching behavior.
+  AtomicString family() const;
   String style() const;
   String weight() const;
   String stretch() const;
   String unicodeRange() const;
   String variant() const;
   String featureSettings() const;
+  String variationSettings() const;
   String display() const;
   String ascentOverride() const;
   String descentOverride() const;
@@ -99,15 +114,14 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   String sizeAdjust() const;
 
   // FIXME: Changing these attributes should affect font matching.
-  void setFamily(ExecutionContext*, const AtomicString& s, ExceptionState&) {
-    family_ = s;
-  }
+  void setFamily(ExecutionContext*, const AtomicString& s, ExceptionState&);
   void setStyle(ExecutionContext*, const String&, ExceptionState&);
   void setWeight(ExecutionContext*, const String&, ExceptionState&);
   void setStretch(ExecutionContext*, const String&, ExceptionState&);
   void setUnicodeRange(ExecutionContext*, const String&, ExceptionState&);
   void setVariant(ExecutionContext*, const String&, ExceptionState&);
   void setFeatureSettings(ExecutionContext*, const String&, ExceptionState&);
+  void setVariationSettings(ExecutionContext*, const String&, ExceptionState&);
   void setDisplay(ExecutionContext*, const String&, ExceptionState&);
   void setAscentOverride(ExecutionContext*, const String&, ExceptionState&);
   void setDescentOverride(ExecutionContext*, const String&, ExceptionState&);
@@ -129,6 +143,8 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   CSSFontFace* CssFontFace() { return css_font_face_.Get(); }
   size_t ApproximateBlankCharacterCount() const;
   FontDisplay GetFontDisplay() const;
+
+  void InvalidateFontFaceOnDescriptorUpdate();
 
   void Trace(Visitor*) const override;
 
@@ -157,10 +173,17 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
 
   bool HasSizeAdjust() const { return size_adjust_ != nullptr; }
   float GetSizeAdjust() const;
+  scoped_refptr<FontFeatureSettings> GetFontFeatureSettings() const;
+  scoped_refptr<FontVariationSettings> GetFontVariationSettings() const;
 
   Document* GetDocument() const;
 
-  const StyleRuleFontFace* GetStyleRule() const { return style_rule_.Get(); }
+  const StyleRuleFontFace* GetStyleRule() const {
+    return style_rule_.value.Get();
+  }
+  const CascadeLayered<const StyleRuleFontFace>& GetLayeredStyleRule() const {
+    return style_rule_;
+  }
   bool IsUserStyle() const { return is_user_style_; }
 
   const CSSLengthResolver& EnsureLengthResolver() const;
@@ -184,6 +207,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   bool SetPropertyFromStyle(const CSSPropertyValueSet&, AtRuleDescriptorID);
   bool SetPropertyValue(const CSSValue*, AtRuleDescriptorID);
   void SetFamilyValue(const CSSFontFamilyValue&);
+  void SetFontFamilyNeedsQuoting(const AtomicString&);
   ScriptPromise<FontFace> FontStatusPromise(ScriptState*);
   void RunCallbacks();
 
@@ -191,6 +215,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
 
   HeapVector<Member<LoadFontCallback>> callbacks_;
   AtomicString family_;
+  bool font_family_needs_quoting_;
   String ots_parse_message_;
   Member<const CSSValue> style_;
   Member<const CSSValue> weight_;
@@ -198,6 +223,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
   Member<const CSSValue> unicode_range_;
   Member<const CSSValue> variant_;
   Member<const CSSValue> feature_settings_;
+  Member<const CSSValue> variation_settings_;
   Member<const CSSValue> display_;
   Member<const CSSValue> ascent_override_;
   Member<const CSSValue> descent_override_;
@@ -208,7 +234,7 @@ class CORE_EXPORT FontFace : public ScriptWrappable,
 
   Member<LoadedProperty> loaded_property_;
   Member<CSSFontFace> css_font_face_;
-  Member<const StyleRuleFontFace> style_rule_;
+  CascadeLayered<const StyleRuleFontFace> style_rule_;
 
   LoadStatusType status_;
   // Note that we will also need to distinguish font faces in different tree

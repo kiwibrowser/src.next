@@ -75,8 +75,7 @@ void Attr::setValue(const AtomicString& value,
   // Element::setAttribute will remove the attribute if value is null.
   DCHECK(!value.IsNull());
   if (element_) {
-    element_->SetAttributeWithValidation(GetQualifiedName(), value,
-                                         exception_state);
+    element_->SetAttributeWithValidation(this, value, exception_state);
   } else {
     standalone_value_or_attached_local_name_ = value;
   }
@@ -104,6 +103,7 @@ void Attr::setTextContentForBinding(const V8UnionStringOrTrustedScript* value,
 Node* Attr::Clone(Document& factory,
                   NodeCloningData&,
                   ContainerNode* append_to,
+                  CustomElementRegistry*,
                   ExceptionState& append_exception_state) const {
   DCHECK_EQ(append_to, nullptr) << "Attr::Clone() doesn't support append_to";
   return MakeGarbageCollected<Attr>(factory, name_, value());

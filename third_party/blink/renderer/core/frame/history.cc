@@ -27,7 +27,7 @@
 
 #include <optional>
 
-#include "base/metrics/histogram_functions.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/common/scheduler/task_attribution_id.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/core/loader/history_item.h"
 #include "third_party/blink/renderer/core/navigation_api/navigation_api.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/timing/soft_navigation_heuristics.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
@@ -52,6 +51,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 
 namespace blink {
@@ -77,42 +77,7 @@ unsigned History::length(ExceptionState& exception_state) const {
 
 ScriptValue History::state(ScriptState* script_state,
                            ExceptionState& exception_state) {
-  v8::Isolate* isolate = script_state->GetIsolate();
-  static const V8PrivateProperty::SymbolKey kHistoryStatePrivateProperty;
-  auto private_prop =
-      V8PrivateProperty::GetSymbol(isolate, kHistoryStatePrivateProperty);
-  v8::Local<v8::Object> v8_history =
-      ToV8Traits<History>::ToV8(script_state, this)
-          .As<v8::Object>();
-  v8::Local<v8::Value> v8_state;
-
-  // Returns the same V8 value unless the history gets updated.  This
-  // implementation is mostly the same as the one of [CachedAttribute], but
-  // it's placed in this function rather than in Blink-V8 bindings layer so
-  // that PopStateEvent.state can also access the same V8 value.
-  scoped_refptr<SerializedScriptValue> current_state = StateInternal();
-  if (last_state_object_requested_ == current_state) {
-    if (!private_prop.GetOrUndefined(v8_history).ToLocal(&v8_state))
-      return ScriptValue::CreateNull(isolate);
-    if (!v8_state->IsUndefined())
-      return ScriptValue(isolate, v8_state);
-  }
-
-  if (!DomWindow()) {
-    exception_state.ThrowSecurityError(
-        "May not use a History object associated with a Document that is "
-        "not fully active");
-    v8_state = v8::Null(isolate);
-  } else if (!current_state) {
-    v8_state = v8::Null(isolate);
-  } else {
-    ScriptState::EscapableScope target_context_scope(script_state);
-    v8_state = target_context_scope.Escape(current_state->Deserialize(isolate));
-  }
-
-  last_state_object_requested_ = current_state;
-  private_prop.Set(v8_history, v8_state);
-  return ScriptValue(isolate, v8_state);
+  return StateHelper(script_state, exception_state);
 }
 
 SerializedScriptValue* History::StateInternal() const {
@@ -172,6 +137,47 @@ bool History::IsSameAsCurrentState(SerializedScriptValue* state) const {
   return state == StateInternal();
 }
 
+ScriptValue History::StateHelper(ScriptState* script_state,
+                                 ExceptionState& exception_state) {
+  v8::Isolate* isolate = script_state->GetIsolate();
+  static const V8PrivateProperty::SymbolKey kHistoryStatePrivateProperty;
+  auto private_prop =
+      V8PrivateProperty::GetSymbol(isolate, kHistoryStatePrivateProperty);
+  v8::Local<v8::Object> v8_history =
+      ToV8Traits<History>::ToV8(script_state, this).As<v8::Object>();
+  v8::Local<v8::Value> v8_state;
+
+  // Returns the same V8 value unless the history gets updated.  This
+  // implementation is mostly the same as the one of [CachedAttribute], but
+  // it's placed in this function rather than in Blink-V8 bindings layer so
+  // that PopStateEvent.state can also access the same V8 value.
+  scoped_refptr<SerializedScriptValue> current_state = StateInternal();
+  if (last_state_object_requested_ == current_state) {
+    if (!private_prop.GetOrUndefined(v8_history).ToLocal(&v8_state)) {
+      return ScriptValue::CreateNull(isolate);
+    }
+    if (!v8_state->IsUndefined()) {
+      return ScriptValue(isolate, v8_state);
+    }
+  }
+
+  if (!DomWindow()) {
+    exception_state.ThrowSecurityError(
+        "May not use a History object associated with a Document that is "
+        "not fully active");
+    v8_state = v8::Null(isolate);
+  } else if (!current_state) {
+    v8_state = v8::Null(isolate);
+  } else {
+    ScriptState::EscapableScope target_context_scope(script_state);
+    v8_state = target_context_scope.Escape(current_state->Deserialize(isolate));
+  }
+
+  last_state_object_requested_ = current_state;
+  private_prop.Set(v8_history, v8_state);
+  return ScriptValue(isolate, v8_state);
+}
+
 void History::back(ScriptState* script_state, ExceptionState& exception_state) {
   go(script_state, -1, exception_state);
 }
@@ -184,6 +190,8 @@ void History::forward(ScriptState* script_state,
 void History::go(ScriptState* script_state,
                  int delta,
                  ExceptionState& exception_state) {
+  base::TimeTicks actual_navigation_start = base::TimeTicks::Now();
+
   LocalDOMWindow* window = DomWindow();
   if (!window) {
     exception_state.ThrowSecurityError(
@@ -209,15 +217,16 @@ void History::go(ScriptState* script_state,
 
   if (delta) {
     // Set up propagating the current task state to the navigation commit.
-    std::optional<scheduler::TaskAttributionId> soft_navigation_task_id;
+    std::optional<scheduler::TaskAttributionId> task_state_id;
     if (script_state->World().IsMainWorld() && frame->IsOutermostMainFrame()) {
-      if (auto* heuristics = SoftNavigationHeuristics::From(*window)) {
-        soft_navigation_task_id =
-            heuristics->AsyncSameDocumentNavigationStarted();
+      if (auto* tracker = scheduler::TaskAttributionTracker::From(
+              script_state->GetIsolate())) {
+        task_state_id = tracker->AsyncSameDocumentNavigationStarted();
       }
     }
     DCHECK(frame->Client());
-    if (frame->Client()->NavigateBackForward(delta, soft_navigation_task_id)) {
+    if (frame->Client()->NavigateBackForward(delta, actual_navigation_start,
+                                             task_state_id)) {
       if (Page* page = frame->GetPage())
         page->HistoryNavigationVirtualTimePauser().PauseVirtualTime();
     }
@@ -284,11 +293,9 @@ void History::replaceState(ScriptState* script_state,
 }
 
 KURL History::UrlForState(const String& url_string) {
-  if (url_string.IsNull())
+  if (url_string.IsNull() || url_string.empty()) {
     return DomWindow()->Url();
-  if (url_string.empty())
-    return DomWindow()->BaseURL();
-
+  }
   return KURL(DomWindow()->BaseURL(), url_string);
 }
 
@@ -311,12 +318,6 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
       full_url, window->GetSecurityOrigin(), window->Url());
 
   if (window->GetSecurityOrigin()->IsGrantedUniversalAccess()) {
-    // Log the case when 'pushState'/'replaceState' is allowed only because
-    // of IsGrantedUniversalAccess ie there is no other condition which should
-    // allow the change (!can_change).
-    base::UmaHistogramBoolean(
-        "Android.WebView.UniversalAccess.OriginUrlMismatchInHistoryUtil",
-        !can_change);
     can_change = true;
   }
 
@@ -325,21 +326,21 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
     // place: JavaScript already had this URL, b) JavaScript can only access a
     // same-origin History object.
     exception_state.ThrowSecurityError(
-        "A history state object with URL '" + full_url.ElidedString() +
-        "' cannot be created in a document with origin '" +
-        window->GetSecurityOrigin()->ToString() + "' and URL '" +
-        window->Url().ElidedString() + "'.");
+        StrCat({"A history state object with URL '", full_url.ElidedString(),
+                "' cannot be created in a document with origin '",
+                window->GetSecurityOrigin()->ToString(), "' and URL '",
+                window->Url().ElidedString(), "'."}));
     return;
   }
 
   if (!window->GetFrame()->navigation_rate_limiter().CanProceed()) {
-    // TODO(769592): Get an API spec change so that we can throw an exception:
-    //
-    //  exception_state.ThrowDOMException(DOMExceptionCode::kQuotaExceededError,
-    //                                    "Throttling history state changes to "
-    //                                    "prevent the browser from hanging.");
-    //
-    // instead of merely warning.
+    if (RuntimeEnabledFeatures::
+            ThrottledHistoryAPIThrowsSecurityErrorEnabled()) {
+      exception_state.ThrowSecurityError(
+          "Throttling history state changes to "
+          "prevent the browser from hanging.");
+    }
+
     return;
   }
 
@@ -351,9 +352,12 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
     return;
   }
 
+  // Adding a history entry might require a screenshot.
+  constexpr bool should_skip_screenshot = false;
   window->document()->Loader()->RunURLAndHistoryUpdateSteps(
       full_url, nullptr, mojom::blink::SameDocumentNavigationType::kHistoryApi,
-      std::move(data), type, FirePopstate::kNo);
+      std::move(data), type, FirePopstate::kNo, should_skip_screenshot,
+      params->involvement, params->interaction_id);
 }
 
 }  // namespace blink

@@ -10,12 +10,9 @@
 
 #include "content/common/content_export.h"
 #include "content/public/common/webplugininfo_param_traits.h"
-#include "ipc/ipc_message_macros.h"
+#include "ipc/param_traits_macros.h"
 #include "services/network/public/cpp/network_ipc_param_traits.h"
 #include "ui/base/page_transition_types.h"
-#include "ui/gfx/geometry/transform.h"
-#include "ui/gfx/ipc/geometry/gfx_param_traits.h"
-#include "ui/gfx/ipc/gfx_param_traits.h"
 
 #if BUILDFLAG(IS_MAC)
 #include "content/public/common/drop_data.h"
@@ -43,9 +40,14 @@ IPC_STRUCT_TRAITS_BEGIN(ui::FileInfo)
   IPC_STRUCT_TRAITS_MEMBER(display_name)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(content::DropData)
+IPC_STRUCT_TRAITS_BEGIN(content::DownloadUrlMetadata)
+  IPC_STRUCT_TRAITS_MEMBER(mime_type)
+  IPC_STRUCT_TRAITS_MEMBER(suggested_file_name)
   IPC_STRUCT_TRAITS_MEMBER(url)
-  IPC_STRUCT_TRAITS_MEMBER(url_title)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::DropData)
+  IPC_STRUCT_TRAITS_MEMBER(url_infos)
   IPC_STRUCT_TRAITS_MEMBER(download_metadata)
   IPC_STRUCT_TRAITS_MEMBER(referrer_policy)
   IPC_STRUCT_TRAITS_MEMBER(filenames)
@@ -59,6 +61,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::DropData)
   IPC_STRUCT_TRAITS_MEMBER(file_contents_filename_extension)
   IPC_STRUCT_TRAITS_MEMBER(file_contents_content_disposition)
   IPC_STRUCT_TRAITS_MEMBER(custom_data)
+  IPC_STRUCT_TRAITS_MEMBER(source_effect_allowed)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::DropData::FileSystemFileInfo)
@@ -72,6 +75,11 @@ IPC_STRUCT_TRAITS_BEGIN(content::DropData::Metadata)
   IPC_STRUCT_TRAITS_MEMBER(mime_type)
   IPC_STRUCT_TRAITS_MEMBER(filename)
   IPC_STRUCT_TRAITS_MEMBER(file_system_url)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ui::ClipboardUrlInfo)
+  IPC_STRUCT_TRAITS_MEMBER(url)
+  IPC_STRUCT_TRAITS_MEMBER(title)
 IPC_STRUCT_TRAITS_END()
 
 #endif  // BUILDFLAG(IS_MAC)

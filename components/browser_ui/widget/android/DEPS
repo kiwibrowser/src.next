@@ -1,16 +1,18 @@
 include_rules = [
+  "+chrome/browser/flags",
   "+components/embedder_support/android",
   "+content/public/test/android",
   "+ui/accessibility",
   "+ui/android",
+  "+ui/edge_to_edge",
 ]
 
 specific_include_rules = {
-  "AlwaysDismissedDialog\.java": [
+  "AlwaysDismissedDialog\\.java": [
     # TODO(crbug.com/40411113): remove this exemption.
     "+base/android/java/src/org/chromium/base/ApplicationStatus.java",
   ],
-  ".*Test\.java": [
+  ".*Test\\.java": [
     "+chrome/test/android",
   ],
 }

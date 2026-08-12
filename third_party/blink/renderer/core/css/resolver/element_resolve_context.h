@@ -23,9 +23,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_ELEMENT_RESOLVE_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_ELEMENT_RESOLVE_CONTEXT_H_
 
+#include <array>
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 
 namespace blink {
@@ -78,9 +79,9 @@ class CORE_EXPORT ElementResolveContext {
   // The Element we are resolving styles for. May be a PseudoElement.
   Element* element_;
   // Same as element_ for real elements or ultimate originating element for
-  // pseudo elements.
+  // pseudo-elements.
   Element* ultimate_originating_element_;
-  // The PseudoElement when resolving styles for a pseudo elements, otherwise
+  // The PseudoElement when resolving styles for a pseudo-elements, otherwise
   // null.
   Element* pseudo_element_;
   Element* parent_element_{nullptr};
@@ -88,11 +89,11 @@ class CORE_EXPORT ElementResolveContext {
   const ComputedStyle* root_element_style_{nullptr};
   EInsideLink element_link_state_;
   wtf_size_t pseudo_element_ancestors_size_ = kMaxPseudoElementsNesting;
-  // Originating elements array for matching nested pseudo elements.
-  // E.g. #div::column::scroll-marker and we want to match for column pseudo
-  // element, the array will be [column pseudo element].
+  // Originating elements array for matching nested pseudo-elements.
+  // E.g. #div::column::scroll-marker and we want to match for column pseudo-
+  // element, the array will be [column pseudo-element].
   // So, we start matching with #div and ultimate originating element,
-  // then go to ::column and match it against column pseudo element.
+  // then go to ::column and match it against column pseudo-element.
   PseudoElementAncestors pseudo_element_ancestors_;
 };
 

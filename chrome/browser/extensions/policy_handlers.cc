@@ -31,6 +31,7 @@
 #include "components/prefs/pref_value_map.h"
 #include "components/strings/grit/components_strings.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/url_pattern.h"
 #include "url/gurl.h"
@@ -39,9 +40,7 @@
 #include "base/enterprise_util.h"
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS)
-#include "chrome/browser/ash/crosapi/browser_util.h"
-#endif  // BUILDFLAG(IS_CHROMEOS)
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 namespace {
@@ -55,7 +54,7 @@ bool IsValidIdList(const std::string& extension_ids) {
     return false;
   }
   for (const auto& id : ids) {
-    if (!crx_file::id_util::IdIsValid(std::string(id))) {
+    if (!crx_file::id_util::IdIsValid(id)) {
       return false;
     }
   }
@@ -72,6 +71,7 @@ bool IsValidUpdateUrl(const std::string& update_url) {
 }
 
 }  // namespace
+
 // ExtensionListPolicyHandler implementation -----------------------------------
 
 ExtensionListPolicyHandler::ExtensionListPolicyHandler(const char* policy_name,
@@ -93,7 +93,7 @@ bool ExtensionListPolicyHandler::CheckListEntry(const base::Value& value) {
   return crx_file::id_util::IdIsValid(str);
 }
 
-void ExtensionListPolicyHandler::ApplyList(base::Value::List filtered_list,
+void ExtensionListPolicyHandler::ApplyList(base::ListValue filtered_list,
                                            PrefValueMap* prefs) {
   prefs->SetValue(pref_path_, base::Value(std::move(filtered_list)));
 }
@@ -125,7 +125,7 @@ void ExtensionInstallForceListPolicyHandler::ApplyPolicySettings(
 
 bool ExtensionInstallForceListPolicyHandler::ParseList(
     const base::Value* policy_value,
-    base::Value::Dict* extension_dict,
+    base::DictValue* extension_dict,
     policy::PolicyErrorMap* errors) {
   if (!policy_value) {
     return true;
@@ -190,11 +190,11 @@ bool ExtensionInstallForceListPolicyHandler::ParseList(
   return true;
 }
 
-std::optional<base::Value::Dict>
+std::optional<base::DictValue>
 ExtensionInstallForceListPolicyHandler::GetPolicyDict(
     const policy::PolicyMap& policies) {
   const base::Value* value = nullptr;
-  base::Value::Dict dict;
+  base::DictValue dict;
   if (CheckAndGetValue(policies, nullptr, &value) && value &&
       ParseList(value, &dict, nullptr)) {
     return dict;
@@ -319,7 +319,7 @@ void ExtensionSettingsPolicyHandler::SanitizePolicySettings(
     DCHECK(policy.is_dict());
 
     // Extracts sub dictionary.
-    const base::Value::Dict& sub_dict = policy.GetDict();
+    const base::DictValue& sub_dict = policy.GetDict();
 
     const std::string* installation_mode =
         sub_dict.FindString(schema_constants::kInstallationMode);
@@ -358,7 +358,7 @@ void ExtensionSettingsPolicyHandler::SanitizePolicySettings(
     const int extension_scheme_mask =
         URLPattern::GetValidSchemeMaskForExtensions();
     for (const char* key : host_keys) {
-      const base::Value::List* unparsed_urls = sub_dict.FindList(key);
+      const base::ListValue* unparsed_urls = sub_dict.FindList(key);
       if (unparsed_urls != nullptr) {
         for (const auto& url_value : *unparsed_urls) {
           const std::string& unparsed_url = url_value.GetString();
@@ -394,7 +394,7 @@ void ExtensionSettingsPolicyHandler::SanitizePolicySettings(
       }
     }
 
-    const base::Value::List* runtime_blocked_hosts =
+    const base::ListValue* runtime_blocked_hosts =
         sub_dict.FindList(schema_constants::kPolicyBlockedHosts);
     if (runtime_blocked_hosts != nullptr &&
         runtime_blocked_hosts->size() >
@@ -409,7 +409,7 @@ void ExtensionSettingsPolicyHandler::SanitizePolicySettings(
       }
     }
 
-    const base::Value::List* runtime_allowed_hosts =
+    const base::ListValue* runtime_allowed_hosts =
         sub_dict.FindList(schema_constants::kPolicyAllowedHosts);
     if (runtime_allowed_hosts != nullptr &&
         runtime_allowed_hosts->size() >
@@ -434,6 +434,8 @@ void ExtensionSettingsPolicyHandler::SanitizePolicySettings(
 bool ExtensionSettingsPolicyHandler::CheckPolicySettings(
     const policy::PolicyMap& policies,
     policy::PolicyErrorMap* errors) {
+  checked_value_.reset();
+  check_called_ = true;
   std::unique_ptr<base::Value> policy_value;
   if (!CheckAndGetValue(policies, errors, &policy_value)) {
     return false;
@@ -443,19 +445,25 @@ bool ExtensionSettingsPolicyHandler::CheckPolicySettings(
   }
 
   SanitizePolicySettings(policy_value.get(), errors);
+  checked_value_ = std::move(policy_value);
   return true;
 }
 
 void ExtensionSettingsPolicyHandler::ApplyPolicySettings(
     const policy::PolicyMap& policies,
     PrefValueMap* prefs) {
-  std::unique_ptr<base::Value> policy_value;
-  if (!CheckAndGetValue(policies, nullptr, &policy_value) || !policy_value) {
+  // CheckPolicySettings() must be called before ApplyPolicySettings().
+  // This is guaranteed by the framework (configuration_policy_handler_list.cc)
+  // and documented in ConfigurationPolicyHandler::ApplyPolicySettingsWithParameters().
+  CHECK(check_called_);
+  check_called_ = false;
+
+  if (!checked_value_) {
     return;
   }
-  SanitizePolicySettings(policy_value.get(), nullptr);
+
   prefs->SetValue(pref_names::kExtensionManagement,
-                  base::Value::FromUniquePtrValue(std::move(policy_value)));
+                  base::Value::FromUniquePtrValue(std::move(checked_value_)));
 }
 
 }  // namespace extensions

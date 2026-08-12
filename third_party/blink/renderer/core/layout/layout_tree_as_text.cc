@@ -110,7 +110,7 @@ static String GetTagName(Node* n) {
   if (const auto* element = DynamicTo<Element>(n)) {
     const AtomicString& pseudo = element->ShadowPseudoId();
     if (!pseudo.empty())
-      return "::" + pseudo;
+      return StrCat({"::", pseudo});
   }
   return n->nodeName();
 }
@@ -126,7 +126,7 @@ String QuoteAndEscapeNonPrintables(const String& s) {
     } else if (c == '"') {
       result.Append('\\');
       result.Append('"');
-    } else if (c == '\n' || c == kNoBreakSpaceCharacter) {
+    } else if (c == '\n' || c == uchar::kNoBreakSpace) {
       result.Append(' ');
     } else {
       if (c >= 0x20 && c < 0x7F) {
@@ -227,39 +227,38 @@ void WriteLayoutObject(StringBuilder& ts,
     if (!o.IsBoxModelObject())
       return;
 
-    const auto& box = To<LayoutBoxModelObject>(o);
-    if (box.BorderTop() || box.BorderRight() || box.BorderBottom() ||
-        box.BorderLeft()) {
+    const PhysicalBoxStrut border = To<LayoutBoxModelObject>(o).BorderOutsets();
+    if (!border.IsZero()) {
       ts << " [border:";
 
-      if (!box.BorderTop()) {
+      if (!border.top) {
         ts << " none";
       } else {
-        ts << " (" << box.BorderTop() << "px ";
+        ts << " (" << border.top << "px ";
         PrintBorderStyle(ts, o.StyleRef().BorderTopStyle());
         ts << o.ResolveColor(GetCSSPropertyBorderTopColor()) << ")";
       }
 
-      if (!box.BorderRight()) {
+      if (!border.right) {
         ts << " none";
       } else {
-        ts << " (" << box.BorderRight() << "px ";
+        ts << " (" << border.right << "px ";
         PrintBorderStyle(ts, o.StyleRef().BorderRightStyle());
         ts << o.ResolveColor(GetCSSPropertyBorderRightColor()) << ")";
       }
 
-      if (!box.BorderBottom()) {
+      if (!border.bottom) {
         ts << " none";
       } else {
-        ts << " (" << box.BorderBottom() << "px ";
+        ts << " (" << border.bottom << "px ";
         PrintBorderStyle(ts, o.StyleRef().BorderBottomStyle());
         ts << o.ResolveColor(GetCSSPropertyBorderBottomColor()) << ")";
       }
 
-      if (!box.BorderLeft()) {
+      if (!border.left) {
         ts << " none";
       } else {
-        ts << " (" << box.BorderLeft() << "px ";
+        ts << " (" << border.left << "px ";
         PrintBorderStyle(ts, o.StyleRef().BorderLeftStyle());
         ts << o.ResolveColor(GetCSSPropertyBorderLeftColor()) << ")";
       }
@@ -320,9 +319,6 @@ void WriteLayoutObject(StringBuilder& ts,
     if (needs_layout)
       ts << ")";
   }
-
-  if (o.ChildLayoutBlockedByDisplayLock())
-    ts << " (display-locked)";
 }
 
 static void WriteTextFragment(StringBuilder& ts,
@@ -654,7 +650,7 @@ static void WriteSelection(StringBuilder& ts, const LayoutObject* o) {
     return;
 
   const VisibleSelection& selection =
-      frame->Selection().ComputeVisibleSelectionInDOMTree();
+      frame->Selection().ComputeVisibleSelectionInDomTree();
   if (selection.IsCaret()) {
     ts << "caret: position " << selection.Start().ComputeEditingOffset()
        << " of " << NodePosition(selection.Start().AnchorNode());
@@ -754,7 +750,7 @@ String CounterValueForElement(Element* element) {
           element->PseudoElementLayoutObject(kPseudoIdMarker))
     WriteCounterValuesFromChildren(stream, marker, is_first_counter);
   if (LayoutObject* check =
-          element->PseudoElementLayoutObject(kPseudoIdCheck)) {
+          element->PseudoElementLayoutObject(kPseudoIdCheckMark)) {
     WriteCounterValuesFromChildren(stream, check, is_first_counter);
   }
   if (LayoutObject* before =
@@ -763,9 +759,17 @@ String CounterValueForElement(Element* element) {
   }
   if (LayoutObject* after = element->PseudoElementLayoutObject(kPseudoIdAfter))
     WriteCounterValuesFromChildren(stream, after, is_first_counter);
-  if (LayoutObject* select_arrow =
-          element->PseudoElementLayoutObject(kPseudoIdSelectArrow)) {
-    WriteCounterValuesFromChildren(stream, select_arrow, is_first_counter);
+  if (LayoutObject* expand_icon =
+          element->PseudoElementLayoutObject(kPseudoIdExpandIcon)) {
+    WriteCounterValuesFromChildren(stream, expand_icon, is_first_counter);
+  }
+  if (LayoutObject* picker_icon =
+          element->PseudoElementLayoutObject(kPseudoIdPickerIcon)) {
+    WriteCounterValuesFromChildren(stream, picker_icon, is_first_counter);
+  }
+  if (LayoutObject* interest_button =
+          element->PseudoElementLayoutObject(kPseudoIdInterestButton)) {
+    WriteCounterValuesFromChildren(stream, interest_button, is_first_counter);
   }
   return stream.ReleaseString();
 }

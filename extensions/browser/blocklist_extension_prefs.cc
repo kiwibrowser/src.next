@@ -4,6 +4,7 @@
 
 #include "extensions/browser/blocklist_extension_prefs.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "extensions/browser/blocklist_state.h"
@@ -113,6 +114,13 @@ bool IsExtensionBlocklisted(const ExtensionId& extension_id,
                             ExtensionPrefs* extension_prefs) {
   return GetExtensionBlocklistState(extension_id, extension_prefs) ==
          BitMapBlocklistState::BLOCKLISTED_MALWARE;
+}
+
+bool IsExtensionGreylisted(const ExtensionId& extension_id,
+                           ExtensionPrefs* extension_prefs) {
+  const BitMapBlocklistState state =
+      GetExtensionBlocklistState(extension_id, extension_prefs);
+  return std::ranges::contains(kGreylistStates, state);
 }
 
 void AddOmahaBlocklistState(const ExtensionId& extension_id,

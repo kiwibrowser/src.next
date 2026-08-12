@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 
@@ -15,7 +17,6 @@ import android.view.View;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.filters.SmallTest;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -44,13 +45,13 @@ public class SuggestionHorizontalDividerTest {
     @Mock private SimpleRecyclerViewAdapter.ViewHolder mNoDividerViewHolder;
     @Mock private Canvas mCanvas;
 
-    private PropertyModel mShowDividerModel =
-            new PropertyModel.Builder(DropdownCommonProperties.ALL_KEYS)
-                    .with(DropdownCommonProperties.SHOW_DIVIDER, true)
+    private final PropertyModel mShowDividerModel =
+            new PropertyModel.Builder(SuggestionCommonProperties.ALL_KEYS)
+                    .with(SuggestionCommonProperties.SHOW_DIVIDER, true)
                     .build();
-    private PropertyModel mNoDividerModel =
-            new PropertyModel.Builder(DropdownCommonProperties.ALL_KEYS)
-                    .with(DropdownCommonProperties.SHOW_DIVIDER, false)
+    private final PropertyModel mNoDividerModel =
+            new PropertyModel.Builder(SuggestionCommonProperties.ALL_KEYS)
+                    .with(SuggestionCommonProperties.SHOW_DIVIDER, false)
                     .build();
 
     private Activity mActivity;
@@ -59,7 +60,7 @@ public class SuggestionHorizontalDividerTest {
     @Before
     public void setUp() {
         mActivity = Robolectric.buildActivity(Activity.class).setup().get();
-        mActivity.setTheme(R.style.Theme_BrowserUI);
+        mActivity.setTheme(R.style.Theme_BrowserUI_DayNight);
         mDecoration = new SuggestionHorizontalDivider(mActivity);
         mShowDividerViewHolder.model = mShowDividerModel;
         mNoDividerViewHolder.model = mNoDividerModel;
@@ -78,8 +79,8 @@ public class SuggestionHorizontalDividerTest {
     @Test
     @SmallTest
     public void testShouldDraw() {
-        Assert.assertTrue(mDecoration.shouldDrawDivider(mChildViewWithDivider, mRecyclerView));
-        Assert.assertFalse(mDecoration.shouldDrawDivider(mChildViewWithNoDivider, mRecyclerView));
+        assertTrue(mDecoration.shouldDrawDivider(mChildViewWithDivider, mRecyclerView));
+        assertFalse(mDecoration.shouldDrawDivider(mChildViewWithNoDivider, mRecyclerView));
     }
 
     @Test

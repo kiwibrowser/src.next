@@ -7,11 +7,15 @@
 
 #include "base/base64.h"
 #include "base/check_op.h"
+#include "base/containers/span.h"
+#include "base/features.h"
+#include "base/strings/string_view_util.h"
+#include "base/test/scoped_feature_list.h"
+#include "testing/libfuzzer/libfuzzer_base_wrappers.h"
 
-// Encode some random data, and then decode it.
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data_ptr, size_t size) {
-  // SAFETY: libfuzzer provides a valid pointer and size pair.
-  auto data = UNSAFE_BUFFERS(base::span(data_ptr, size));
+namespace {
+
+void EncodeDecode(base::span<const uint8_t> data) {
   std::string_view data_string = base::as_string_view(data);
 
   const std::string encode_output = base::Base64Encode(data);
@@ -22,6 +26,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data_ptr, size_t size) {
   // Also run the std::string_view variant and check that it gives the same
   // results.
   CHECK_EQ(encode_output, base::Base64Encode(data_string));
+}
 
+}  // namespace
+
+// Encode some random data, and then decode it.
+DEFINE_LLVM_FUZZER_TEST_ONE_INPUT_SPAN(const base::span<const uint8_t> data) {
+  EncodeDecode(data);
+
+  {
+    base::test::ScopedFeatureList enable_simdutf(
+        base::features::kSimdutfBase64Encode);
+    EncodeDecode(data);
+  }
   return 0;
 }

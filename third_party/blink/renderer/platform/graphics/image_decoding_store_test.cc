@@ -26,7 +26,7 @@
 #include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
 
 #include <memory>
-#include "base/memory/memory_pressure_listener.h"
+
 #include "base/run_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
@@ -235,28 +235,68 @@ TEST_F(ImageDecodingStoreTest, MultipleClientsForSameGenerator) {
   EXPECT_EQ(image_decoding_store_.CacheEntries(), 0);
 }
 
-TEST_F(ImageDecodingStoreTest, OnMemoryPressure) {
-  auto decoder = std::make_unique<MockImageDecoder>(this);
-  decoder->SetSize(1, 1);
+// Regression test for crbug.com/500104917.
+TEST_F(ImageDecodingStoreTest, DuplicateInsert) {
+  auto decoder1 = std::make_unique<MockImageDecoder>(this);
+  decoder1->SetSize(1, 1);
   image_decoding_store_.InsertDecoder(generator_.get(),
                                       cc::PaintImage::kDefaultGeneratorClientId,
-                                      std::move(decoder));
+                                      std::move(decoder1));
   EXPECT_EQ(1, image_decoding_store_.CacheEntries());
-  EXPECT_EQ(4u, image_decoding_store_.MemoryUsageInBytes());
 
-  base::MemoryPressureListener::SimulatePressureNotification(
-      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE);
-  base::RunLoop().RunUntilIdle();
+  auto decoder2 = std::make_unique<MockImageDecoder>(this);
+  decoder2->SetSize(1, 1);
 
+  // Duplicate insertion should be handled safely.
+  image_decoding_store_.InsertDecoder(generator_.get(),
+                                      cc::PaintImage::kDefaultGeneratorClientId,
+                                      std::move(decoder2));
+
+  // Should still have only 1 entry.
   EXPECT_EQ(1, image_decoding_store_.CacheEntries());
-  EXPECT_EQ(4u, image_decoding_store_.MemoryUsageInBytes());
 
-  base::MemoryPressureListener::SimulatePressureNotification(
-      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
+  // Pruning should work correctly and not crash.
+  image_decoding_store_.SetCacheLimitInBytes(0);
   EXPECT_EQ(0, image_decoding_store_.CacheEntries());
-  EXPECT_EQ(0u, image_decoding_store_.MemoryUsageInBytes());
+}
+
+// Regression test for crbug.com/500104917.
+// Simulates a race condition where multiple threads experience a cache miss
+// for the same key and both attempt to insert a decoder.
+TEST_F(ImageDecodingStoreTest, LockDecoderMissRace) {
+  const SkISize size = SkISize::Make(1, 1);
+  const ImageDecoder::AlphaOption alpha = ImageDecoder::kAlphaPremultiplied;
+  const cc::PaintImage::GeneratorClientId client_id =
+      cc::PaintImage::kDefaultGeneratorClientId;
+
+  ImageDecoder* decoder;
+  // Thread 1: experiences a cache miss.
+  EXPECT_FALSE(image_decoding_store_.LockDecoder(generator_.get(), size, alpha,
+                                                 client_id, &decoder));
+
+  // Thread 2: also experiences a cache miss for the same key because Thread 1
+  // hasn't called InsertDecoder() yet.
+  EXPECT_FALSE(image_decoding_store_.LockDecoder(generator_.get(), size, alpha,
+                                                 client_id, &decoder));
+
+  // Thread 1: completes decoding and inserts the decoder.
+  auto decoder1 = std::make_unique<MockImageDecoder>(this);
+  decoder1->SetSize(1, 1);
+  image_decoding_store_.InsertDecoder(generator_.get(), client_id,
+                                      std::move(decoder1));
+  EXPECT_EQ(1, image_decoding_store_.CacheEntries());
+
+  // Thread 2: also completes decoding and attempts to insert its own decoder
+  // for the same key. This is a duplicate insertion.
+  auto decoder2 = std::make_unique<MockImageDecoder>(this);
+  decoder2->SetSize(1, 1);
+  image_decoding_store_.InsertDecoder(generator_.get(), client_id,
+                                      std::move(decoder2));
+
+  // The store should handle the duplicate safely and maintain consistency.
+  EXPECT_EQ(1, image_decoding_store_.CacheEntries());
+  image_decoding_store_.SetCacheLimitInBytes(0);
+  EXPECT_EQ(0, image_decoding_store_.CacheEntries());
 }
 
 }  // namespace blink

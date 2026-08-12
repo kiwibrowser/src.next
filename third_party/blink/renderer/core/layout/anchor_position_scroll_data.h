@@ -5,17 +5,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_ANCHOR_POSITION_SCROLL_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_ANCHOR_POSITION_SCROLL_DATA_H_
 
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
-#include "third_party/blink/renderer/core/scroll/scroll_snapshot_client.h"
+#include "third_party/blink/renderer/core/dom/node.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
+#include "third_party/blink/renderer/core/frame/post_layout_snapshot_client.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/gfx/geometry/vector2d.h"
-#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace blink {
 
+enum class RememberedScrollOffsetType;
 class AnchorPositionVisibilityObserver;
 class Element;
 class LayoutObject;
@@ -48,8 +51,8 @@ class LayoutObject;
 // layout and/or paint.
 class AnchorPositionScrollData
     : public GarbageCollected<AnchorPositionScrollData>,
-      public ScrollSnapshotClient,
-      public ElementRareDataField {
+      public PostLayoutSnapshotClient,
+      public NodeRareDataField {
  public:
   explicit AnchorPositionScrollData(Element* anchored_element);
   virtual ~AnchorPositionScrollData();
@@ -66,23 +69,15 @@ class AnchorPositionScrollData
     return default_anchor_adjustment_data_.needs_scroll_adjustment_in_y;
   }
 
-  // Returns the total offset of the anchored element from the layout location
-  // due to scroll and other adjustments from the containers between the given
-  // `anchor_object` and the anchored element and the scroll container of the
-  // anchored element itself. There are two cases:
-  // 1. If `anchor_object` is the anchor object used to create the snapshot,
-  //    The result will be from the last snapshotted result.
-  // 2. Otherwise the result will be calculated on the fly, which may use stale
-  //    layout data if this is called during layout.
-  // ValidateSnapshot() (called after the first layout during a lifecycle
-  // update) will reschedule layout, or ShouldScheduleNextService() (called at
-  // the end of a lifecycle update) will schedule another lifecycle update,
-  // if the final layout data may cause layout changes.
-  gfx::Vector2dF TotalOffset(const LayoutObject& anchor_object) const;
-
-  gfx::Vector2dF AccumulatedAdjustment() const {
+  PhysicalOffset AccumulatedAdjustment() const {
     return default_anchor_adjustment_data_.accumulated_adjustment;
   }
+  PhysicalOffset AccumulatedAdjustmentIncludingChained() const {
+    return default_anchor_adjustment_data_.accumulated_range_adjustment_offset;
+  }
+  PhysicalOffset SpeculativeDefaultAnchorRememberedOffset() const;
+  PhysicalOffset SpeculativeDefaultAnchorRememberedOffsetIncludingChained()
+      const;
   gfx::Vector2d AccumulatedAdjustmentScrollOrigin() const {
     return default_anchor_adjustment_data_.accumulated_adjustment_scroll_origin;
   }
@@ -97,21 +92,22 @@ class AnchorPositionScrollData
   }
 
   // Utility function that returns AccumulatedAdjustment() rounded as a
-  // PhysicalOffset.
+  // PhysicalOffset. This includes chained anchors' offsets. This is used in
+  // things like getBoundingClientRect.
   // TODO(crbug.com/1309178): It's conceptually wrong to use
   // Physical/LogicalOffset, which only represents the location of a box within
   // a container, to represent a scroll offset. Stop using this function.
   PhysicalOffset TranslationAsPhysicalOffset() const {
-    return -PhysicalOffset::FromVector2dFFloor(AccumulatedAdjustment());
+    return -AccumulatedAdjustmentIncludingChained() +
+           SpeculativeDefaultAnchorRememberedOffsetIncludingChained();
   }
 
   // Returns whether `anchored_element_` is still an anchor-positioned element
   // using `this` as its AnchroScrollData.
   bool IsActive() const;
 
-  // ScrollSnapshotClient:
-  void UpdateSnapshot() override;
-  bool ValidateSnapshot() override;
+  // PostLayoutSnapshotClient:
+  bool UpdateSnapshot() override;
   bool ShouldScheduleNextService() override;
   bool IsAnchorPositionScrollData() const override { return true; }
 
@@ -130,14 +126,11 @@ class AnchorPositionScrollData
 
   void Trace(Visitor*) const override;
 
- private:
-  enum class SnapshotDiff { kNone, kScrollersOrFallbackPosition, kOffsetOnly };
-
   struct AdjustmentData {
     DISALLOW_NEW();
 
-    // The anchor object used when calculating this data.
-    Member<const LayoutObject> anchor_object;
+    // The anchor element used when calculating this data.
+    Member<const Element> anchor_element;
 
     // Compositor element ids of the ancestor scroll adjustment containers
     // (see the class documentation) of some element (anchor), up to the
@@ -149,8 +142,15 @@ class AnchorPositionScrollData
     // snapshots of
     // - scroll offsets of scroll containers,
     // - opposite of sticky offsets of stick-positioned containers,
+    // In CSSAnchorUpdate disabled mode, it also includes
     // - `accumulated_adjustment` of anchor-positioned containers.
-    gfx::Vector2dF accumulated_adjustment;
+    PhysicalOffset accumulated_adjustment;
+
+    // Similar to `accumulated_adjustment`, except it always includes
+    // `accumulated_range_adjustment_offset` of anchor-positioned containers.
+    // This is used to compute the non overlapping range for position try
+    // fallbacks.
+    PhysicalOffset accumulated_range_adjustment_offset;
 
     // Sum of the scroll origins of scroll containers in the above containers.
     // Used by the compositor to deal with writing modes.
@@ -159,7 +159,7 @@ class AnchorPositionScrollData
     // The scroll offset of the containing block of `anchored_element_` if it's
     // a scroll container. The offset doesn't contribute to the adjustment, but
     // may affect the results of position fallback and position visibility.
-    gfx::Vector2dF anchored_element_container_scroll_offset;
+    PhysicalOffset anchored_element_container_scroll_offset;
 
     // Whether viewport is in `container_ids`.
     bool containers_include_viewport = false;
@@ -171,23 +171,40 @@ class AnchorPositionScrollData
     bool needs_scroll_adjustment_in_y = false;
 
     bool has_chained_anchor = false;
+    void Trace(Visitor* visitor) const { visitor->Trace(anchor_element); }
 
-    void Trace(Visitor* visitor) const { visitor->Trace(anchor_object); }
-
-    gfx::Vector2dF TotalOffset() const {
-      return accumulated_adjustment + anchored_element_container_scroll_offset;
+    PhysicalOffset TotalOffset() const {
+      return containers_include_viewport
+                 ? accumulated_adjustment +
+                       anchored_element_container_scroll_offset
+                 : accumulated_adjustment;
+    }
+    PhysicalOffset TotalOffsetIncludingChained() const {
+      return containers_include_viewport
+                 ? accumulated_range_adjustment_offset +
+                       anchored_element_container_scroll_offset
+                 : accumulated_range_adjustment_offset;
     }
   };
 
-  AdjustmentData ComputeAdjustmentContainersData(
-      const LayoutObject& anchor) const;
+  static AdjustmentData ComputeAdjustmentContainersData(
+      const Element* anchored_element,
+      const LayoutObject& anchor);
+
+  void AddDependentAnchor(const Node* node) { dependent_anchors_.insert(node); }
+
+ private:
+  enum class SnapshotDiff { kNone, kScrollersOrFallbackPosition, kOffsetOnly };
+
+  PhysicalOffset GetFilteredRememberedOffset(RememberedScrollOffsetType) const;
   AdjustmentData ComputeDefaultAnchorAdjustmentData() const;
   // Takes an up-to-date snapshot, and compares it with the existing one.
   // If `update` is true, also rewrites the existing snapshot.
   SnapshotDiff TakeAndCompareSnapshot(bool update);
   bool IsFallbackPositionValid(const AdjustmentData& new_adjustment_data) const;
 
-  void InvalidateLayoutAndPaint();
+  void InvalidateLayoutAndPaintDependentAndAncestors();
+  void InvalidateLayoutAndPaintDependents();
   void InvalidatePaint();
 
   // The anchor-positioned element.
@@ -196,11 +213,13 @@ class AnchorPositionScrollData
   AdjustmentData default_anchor_adjustment_data_;
 
   Member<AnchorPositionVisibilityObserver> position_visibility_observer_;
+
+  HeapHashSet<WeakMember<const Node>> dependent_anchors_;
 };
 
 template <>
 struct DowncastTraits<AnchorPositionScrollData> {
-  static bool AllowFrom(const ScrollSnapshotClient& client) {
+  static bool AllowFrom(const PostLayoutSnapshotClient& client) {
     return client.IsAnchorPositionScrollData();
   }
 };

@@ -5,12 +5,12 @@
 // This file tests that Web Workers (a Content feature) work in the Chromium
 // embedder.
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/test/bind.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -52,7 +52,7 @@ class ChromeWorkerBrowserTest : public InProcessBrowserTest {
  protected:
   // Tests worker script fetch (always same-origin) is not affected by the
   // third-party cookie blocking configuration.
-  // This is the regression test for https://crbug.com/933287.
+  // This is the regression test for https://crbug.com/41442073.
   void TestWorkerScriptFetchWithThirdPartyCookieBlocking(
       content_settings::CookieControlsMode cookie_controls_mode,
       const std::string& test_url) {
@@ -74,7 +74,7 @@ class ChromeWorkerBrowserTest : public InProcessBrowserTest {
       ASSERT_TRUE(ui_test_utils::NavigateToURL(
           browser(), embedded_test_server()->GetURL(test_url)));
       run_loop.Run();
-      EXPECT_FALSE(base::Contains(header_map_, "Cookie"));
+      EXPECT_FALSE(header_map_.contains("Cookie"));
     }
 
     // Set a cookie.
@@ -89,7 +89,7 @@ class ChromeWorkerBrowserTest : public InProcessBrowserTest {
       ASSERT_TRUE(ui_test_utils::NavigateToURL(
           browser(), embedded_test_server()->GetURL(test_url)));
       run_loop.Run();
-      EXPECT_TRUE(base::Contains(header_map_, "Cookie"));
+      EXPECT_TRUE(header_map_.contains("Cookie"));
       EXPECT_EQ(kCookie, header_map_["Cookie"]);
     }
   }
@@ -102,8 +102,9 @@ class ChromeWorkerBrowserTest : public InProcessBrowserTest {
   std::unique_ptr<net::test_server::HttpResponse> CaptureHeaderHandler(
       const std::string& path,
       const net::test_server::HttpRequest& request) {
-    if (request.GetURL().path() != path)
+    if (request.GetURL().GetPath() != path) {
       return nullptr;
+    }
     // Stash the HTTP request headers.
     header_map_ = request.headers;
     std::move(quit_closure_).Run();
@@ -162,13 +163,13 @@ class ChromeWorkerUserAgentBrowserTest : public InProcessBrowserTest {
                 return false;
 
               std::string path = "chrome/test/data/workers";
-              path.append(std::string(params->url_request.url.path_piece()));
+              path.append(std::string(params->url_request.url.path()));
 
               std::string headers = "HTTP/1.1 200 OK\n";
               base::StrAppend(
                   &headers,
                   {"Content-Type: text/",
-                   base::EndsWith(params->url_request.url.path_piece(), ".js")
+                   base::EndsWith(params->url_request.url.path(), ".js")
                        ? "javascript"
                        : "html",
                    "\n"});

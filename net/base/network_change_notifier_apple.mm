@@ -4,6 +4,8 @@
 
 #include "net/base/network_change_notifier_apple.h"
 
+#include <Network/Network.h>
+#include <dispatch/dispatch.h>
 #include <netinet/in.h>
 #include <resolv.h>
 
@@ -14,23 +16,37 @@
 #include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/memory/scoped_policy.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/features.h"
+#include "net/base/network_change_notifier_apple_buildflags.h"
 #include "net/base/network_interfaces_getifaddrs.h"
 #include "net/dns/dns_config_service.h"
 #include "net/log/net_log.h"
 
-#if BUILDFLAG(IS_IOS)
+#if BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_IOS_TVOS)
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #endif
 
 namespace net {
+
+struct NetworkChangeNotifierApple::NetworkPathMonitorStorage {
+  NetworkPathMonitorStorage() = default;
+  ~NetworkPathMonitorStorage() {
+    if (monitor) {
+      nw_path_monitor_cancel(monitor);
+    }
+  }
+
+  nw_path_monitor_t __strong monitor;
+  dispatch_queue_t __strong queue;
+};
+
 namespace {
 // The maximum number of seconds to wait for the connection type to be
 // determined.
@@ -85,9 +101,9 @@ GetNetworkInterfaceListForNetworkChangeCheck(
   return interfaces;
 }
 
-base::Value::Dict GetNetworkInterfaceValueDict(
+base::DictValue GetNetworkInterfaceValueDict(
     const NetworkInterface& interface) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("name", interface.name);
   dict.Set("friendly_name", interface.friendly_name);
   dict.Set("interface_index", static_cast<int>(interface.interface_index));
@@ -101,33 +117,31 @@ base::Value::Dict GetNetworkInterfaceValueDict(
   return dict;
 }
 
-base::Value::List GetNetworkInterfacesValueList(
+base::ListValue GetNetworkInterfacesValueList(
     const NetworkInterfaceList& interfaces) {
-  base::Value::List list;
+  base::ListValue list;
   for (const NetworkInterface& interface : interfaces) {
     list.Append(GetNetworkInterfaceValueDict(interface));
   }
   return list;
 }
 
-base::Value::Dict NetLogOsConfigChangedParams(
+base::DictValue NetLogOsConfigChangedParams(
     const std::string& result,
     bool net_ipv4_key_found,
     bool net_ipv6_key_found,
     bool net_interface_key_found,
-    bool reduce_ip_address_change_notification,
     const std::string& old_ipv4_primary_interface_name,
     const std::string& old_ipv6_primary_interface_name,
     const std::string& new_ipv4_primary_interface_name,
     const std::string& new_ipv6_primary_interface_name,
     const std::optional<NetworkInterfaceList>& old_interfaces,
     const std::optional<NetworkInterfaceList>& new_interfaces) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("result", result);
   dict.Set("net_ipv4_key", net_ipv4_key_found);
   dict.Set("net_ipv6_key", net_ipv6_key_found);
   dict.Set("net_interface_key", net_interface_key_found);
-  dict.Set("reduce_notification", reduce_ip_address_change_notification);
   dict.Set("old_ipv4_interface", old_ipv4_primary_interface_name);
   dict.Set("old_ipv6_interface", old_ipv6_primary_interface_name);
   dict.Set("new_ipv4_interface", new_ipv4_primary_interface_name);
@@ -156,8 +170,6 @@ NetworkChangeNotifierApple::NetworkChangeNotifierApple()
       initial_connection_type_cv_(&connection_type_lock_),
       forwarder_(this),
 #if BUILDFLAG(IS_MAC)
-      reduce_ip_address_change_notification_(base::FeatureList::IsEnabled(
-          features::kReduceIPAddressChangeNotification)),
       get_network_list_callback_(base::BindRepeating(&GetNetworkList)),
       get_ipv4_primary_interface_name_callback_(
           base::BindRepeating(&GetIPv4PrimaryInterfaceName)),
@@ -173,17 +185,20 @@ NetworkChangeNotifierApple::NetworkChangeNotifierApple()
 }
 
 NetworkChangeNotifierApple::~NetworkChangeNotifierApple() {
+  StopNetworkPathMonitor();
   ClearGlobalPointer();
   // Delete the ConfigWatcher to join the notifier thread, ensuring that
   // StartReachabilityNotifications() has an opportunity to run to completion.
   config_watcher_.reset();
 
+#if defined(COMPILE_OLD_NOTIFIER_IMPL)
   // Now that StartReachabilityNotifications() has either run to completion or
   // never run at all, unschedule reachability_ if it was previously scheduled.
   if (reachability_.get() && run_loop_.get()) {
     SCNetworkReachabilityUnscheduleFromRunLoop(
         reachability_.get(), run_loop_.get(), kCFRunLoopCommonModes);
   }
+#endif  // defined(COMPILE_OLD_NOTIFIER_IMPL)
 }
 
 // static
@@ -241,73 +256,66 @@ NetworkChangeNotifierApple::CalculateConnectionType(
   if (!reachable)
     return CONNECTION_NONE;
 
-#if BUILDFLAG(IS_IOS)
+#if BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_IOS_TVOS)
   if (!(flags & kSCNetworkReachabilityFlagsIsWWAN)) {
     return CONNECTION_WIFI;
   }
-  if (@available(iOS 12, *)) {
-    CTTelephonyNetworkInfo* info = [[CTTelephonyNetworkInfo alloc] init];
-    NSDictionary<NSString*, NSString*>*
-        service_current_radio_access_technology =
-            info.serviceCurrentRadioAccessTechnology;
-    NSSet<NSString*>* technologies_2g = [NSSet
-        setWithObjects:CTRadioAccessTechnologyGPRS, CTRadioAccessTechnologyEdge,
-                       CTRadioAccessTechnologyCDMA1x, nil];
-    NSSet<NSString*>* technologies_3g =
-        [NSSet setWithObjects:CTRadioAccessTechnologyWCDMA,
-                              CTRadioAccessTechnologyHSDPA,
-                              CTRadioAccessTechnologyHSUPA,
-                              CTRadioAccessTechnologyCDMAEVDORev0,
-                              CTRadioAccessTechnologyCDMAEVDORevA,
-                              CTRadioAccessTechnologyCDMAEVDORevB,
-                              CTRadioAccessTechnologyeHRPD, nil];
-    NSSet<NSString*>* technologies_4g =
-        [NSSet setWithObjects:CTRadioAccessTechnologyLTE, nil];
-    // TODO: Use constants from CoreTelephony once Cronet builds with XCode 12.1
-    NSSet<NSString*>* technologies_5g =
-        [NSSet setWithObjects:@"CTRadioAccessTechnologyNRNSA",
-                              @"CTRadioAccessTechnologyNR", nil];
-    int best_network = 0;
-    for (NSString* service in service_current_radio_access_technology) {
-      if (!service_current_radio_access_technology[service]) {
-        continue;
-      }
-      int current_network = 0;
-
-      NSString* network_type = service_current_radio_access_technology[service];
-
-      if ([technologies_2g containsObject:network_type]) {
-        current_network = 2;
-      } else if ([technologies_3g containsObject:network_type]) {
-        current_network = 3;
-      } else if ([technologies_4g containsObject:network_type]) {
-        current_network = 4;
-      } else if ([technologies_5g containsObject:network_type]) {
-        current_network = 5;
-      } else {
-        // New technology?
-        NOTREACHED() << "Unknown network technology: " << network_type;
-      }
-      if (current_network > best_network) {
-        // iOS is supposed to use the best network available.
-        best_network = current_network;
-      }
+  CTTelephonyNetworkInfo* info = [[CTTelephonyNetworkInfo alloc] init];
+  NSDictionary<NSString*, NSString*>* service_current_radio_access_technology =
+      info.serviceCurrentRadioAccessTechnology;
+  NSSet<NSString*>* technologies_2g = [NSSet
+      setWithObjects:CTRadioAccessTechnologyGPRS, CTRadioAccessTechnologyEdge,
+                     CTRadioAccessTechnologyCDMA1x, nil];
+  NSSet<NSString*>* technologies_3g = [NSSet
+      setWithObjects:CTRadioAccessTechnologyWCDMA, CTRadioAccessTechnologyHSDPA,
+                     CTRadioAccessTechnologyHSUPA,
+                     CTRadioAccessTechnologyCDMAEVDORev0,
+                     CTRadioAccessTechnologyCDMAEVDORevA,
+                     CTRadioAccessTechnologyCDMAEVDORevB,
+                     CTRadioAccessTechnologyeHRPD, nil];
+  NSSet<NSString*>* technologies_4g =
+      [NSSet setWithObjects:CTRadioAccessTechnologyLTE, nil];
+  NSSet<NSString*>* technologies_5g =
+      [NSSet setWithObjects:CTRadioAccessTechnologyNRNSA,
+                            CTRadioAccessTechnologyNR, nil];
+  int best_network = 0;
+  for (NSString* service in service_current_radio_access_technology) {
+    if (!service_current_radio_access_technology[service]) {
+      continue;
     }
-    switch (best_network) {
-      case 2:
-        return CONNECTION_2G;
-      case 3:
-        return CONNECTION_3G;
-      case 4:
-        return CONNECTION_4G;
-      case 5:
-        return CONNECTION_5G;
-      default:
-        // Default to CONNECTION_3G to not change existing behavior.
-        return CONNECTION_3G;
+    int current_network = 0;
+
+    NSString* network_type = service_current_radio_access_technology[service];
+
+    if ([technologies_2g containsObject:network_type]) {
+      current_network = 2;
+    } else if ([technologies_3g containsObject:network_type]) {
+      current_network = 3;
+    } else if ([technologies_4g containsObject:network_type]) {
+      current_network = 4;
+    } else if ([technologies_5g containsObject:network_type]) {
+      current_network = 5;
+    } else {
+      // New technology?
+      NOTREACHED() << "Unknown network technology: " << network_type;
     }
-  } else {
-    return CONNECTION_3G;
+    if (current_network > best_network) {
+      // iOS is supposed to use the best network available.
+      best_network = current_network;
+    }
+  }
+  switch (best_network) {
+    case 2:
+      return CONNECTION_2G;
+    case 3:
+      return CONNECTION_3G;
+    case 4:
+      return CONNECTION_4G;
+    case 5:
+      return CONNECTION_5G;
+    default:
+      // Default to CONNECTION_3G to not change existing behavior.
+      return CONNECTION_3G;
   }
 
 #else
@@ -335,7 +343,12 @@ void NetworkChangeNotifierApple::Forwarder::CleanUpOnNotifierThread() {
 
 void NetworkChangeNotifierApple::SetInitialConnectionType() {
   // Called on notifier thread.
+  if (EnsureNetworkPathMonitorStarted()) {
+    WaitOnInitialConnectionType();
+    return;
+  }
 
+#if defined(COMPILE_OLD_NOTIFIER_IMPL)
   // Try to reach 0.0.0.0. This is the approach taken by Firefox:
   //
   // http://mxr.mozilla.org/mozilla2.0/source/netwerk/system/mac/nsNetworkLinkService.mm
@@ -362,12 +375,17 @@ void NetworkChangeNotifierApple::SetInitialConnectionType() {
     connection_type_initialized_ = true;
     initial_connection_type_cv_.Broadcast();
   }
+#endif  // defined(COMPILE_OLD_NOTIFIER_IMPL)
 }
 
 void NetworkChangeNotifierApple::StartReachabilityNotifications() {
   // Called on notifier thread.
   run_loop_.reset(CFRunLoopGetCurrent(), base::scoped_policy::RETAIN);
+  if (EnsureNetworkPathMonitorStarted()) {
+    return;
+  }
 
+#if defined(COMPILE_OLD_NOTIFIER_IMPL)
   DCHECK(reachability_);
   SCNetworkReachabilityContext reachability_context = {
       0,        // version
@@ -386,6 +404,7 @@ void NetworkChangeNotifierApple::StartReachabilityNotifications() {
     LOG(DFATAL) << "Could not schedule network reachability on run loop";
     reachability_.reset();
   }
+#endif  // defined(COMPILE_OLD_NOTIFIER_IMPL)
 }
 
 void NetworkChangeNotifierApple::SetDynamicStoreNotificationKeys(
@@ -410,16 +429,14 @@ void NetworkChangeNotifierApple::SetDynamicStoreNotificationKeys(
   // TODO(willchan): Figure out a proper way to handle this rather than crash.
   CHECK(ret);
 
-  if (reduce_ip_address_change_notification_) {
-    store_ = std::move(store);
-    ipv4_primary_interface_name_ =
-        get_ipv4_primary_interface_name_callback_.Run(store_.get());
-    ipv6_primary_interface_name_ =
-        get_ipv6_primary_interface_name_callback_.Run(store_.get());
-    interfaces_for_network_change_check_ =
-        GetNetworkInterfaceListForNetworkChangeCheck(
-            get_network_list_callback_, ipv6_primary_interface_name_);
-  }
+  store_ = std::move(store);
+  ipv4_primary_interface_name_ =
+      get_ipv4_primary_interface_name_callback_.Run(store_.get());
+  ipv6_primary_interface_name_ =
+      get_ipv6_primary_interface_name_callback_.Run(store_.get());
+  interfaces_for_network_change_check_ =
+      GetNetworkInterfaceListForNetworkChangeCheck(
+          get_network_list_callback_, ipv6_primary_interface_name_);
   if (initialized_callback_for_test_) {
     std::move(initialized_callback_for_test_).Run();
   }
@@ -461,25 +478,12 @@ void NetworkChangeNotifierApple::OnNetworkConfigChange(CFArrayRef changed_keys) 
       return NetLogOsConfigChangedParams(
           "DoNotNotify_NoIPAddressChange", net_ipv4_key_found,
           net_ipv6_key_found, net_interface_key_found,
-          reduce_ip_address_change_notification_, ipv4_primary_interface_name_,
-          ipv6_primary_interface_name_, "", "",
-          interfaces_for_network_change_check_, std::nullopt);
-    });
-    return;
-  }
-  if (!reduce_ip_address_change_notification_) {
-    net_log_.AddEvent(net::NetLogEventType::NETWORK_MAC_OS_CONFIG_CHANGED, [&] {
-      return NetLogOsConfigChangedParams(
-          "Notify_NoReduce", net_ipv4_key_found, net_ipv6_key_found,
-          net_interface_key_found, reduce_ip_address_change_notification_,
           ipv4_primary_interface_name_, ipv6_primary_interface_name_, "", "",
           interfaces_for_network_change_check_, std::nullopt);
     });
-    NotifyObserversOfIPAddressChange();
     return;
   }
-  // When the ReduceIPAddressChangeNotification feature is enabled, we notifies
-  // the IP address change only when:
+  // We notify the IP address change only when:
   //  - The list of network interfaces has changed, excluding local IPv6
   //    addresses of non-primary interfaces.
   //  - or the primary interface name (for IPv4 and IPv6) has changed.
@@ -497,20 +501,20 @@ void NetworkChangeNotifierApple::OnNetworkConfigChange(CFArrayRef changed_keys) 
     net_log_.AddEvent(net::NetLogEventType::NETWORK_MAC_OS_CONFIG_CHANGED, [&] {
       return NetLogOsConfigChangedParams(
           "DoNotNotify_NoChange", net_ipv4_key_found, net_ipv6_key_found,
-          net_interface_key_found, reduce_ip_address_change_notification_,
-          ipv4_primary_interface_name_, ipv6_primary_interface_name_,
-          ipv4_primary_interface_name, ipv6_primary_interface_name,
-          interfaces_for_network_change_check_, interfaces);
+          net_interface_key_found, ipv4_primary_interface_name_,
+          ipv6_primary_interface_name_, ipv4_primary_interface_name,
+          ipv6_primary_interface_name, interfaces_for_network_change_check_,
+          interfaces);
     });
     return;
   }
   net_log_.AddEvent(net::NetLogEventType::NETWORK_MAC_OS_CONFIG_CHANGED, [&] {
     return NetLogOsConfigChangedParams(
         "Notify_Changed", net_ipv4_key_found, net_ipv6_key_found,
-        net_interface_key_found, reduce_ip_address_change_notification_,
-        ipv4_primary_interface_name_, ipv6_primary_interface_name_,
-        ipv4_primary_interface_name, ipv6_primary_interface_name,
-        interfaces_for_network_change_check_, interfaces);
+        net_interface_key_found, ipv4_primary_interface_name_,
+        ipv6_primary_interface_name_, ipv4_primary_interface_name,
+        ipv6_primary_interface_name, interfaces_for_network_change_check_,
+        interfaces);
   });
   ipv4_primary_interface_name_ = std::move(ipv4_primary_interface_name);
   ipv6_primary_interface_name_ = std::move(ipv6_primary_interface_name);
@@ -557,7 +561,146 @@ void NetworkChangeNotifierApple::ReachabilityCallback(
 #endif  // BUILDFLAG(IS_IOS)
 }
 
-#if BUILDFLAG(IS_MAC)
+bool NetworkChangeNotifierApple::ShouldUseNetworkPathMonitor() const {
+  return base::FeatureList::IsEnabled(
+      features::kUseNetworkPathMonitorForNetworkChangeNotifier);
+}
+
+bool NetworkChangeNotifierApple::EnsureNetworkPathMonitorStarted() {
+  if (!ShouldUseNetworkPathMonitor()) {
+    return false;
+  }
+  if (!network_path_monitor_) {
+    network_path_monitor_ = std::make_unique<NetworkPathMonitorStorage>();
+  }
+  auto* storage = network_path_monitor_.get();
+  if (storage->monitor) {
+    return true;
+  }
+
+  storage->monitor = nw_path_monitor_create();
+  if (!storage->monitor) {
+    network_path_monitor_.reset();
+    return false;
+  }
+
+  storage->queue = dispatch_queue_create(
+      "org.chromium.net.network_path_monitor", DISPATCH_QUEUE_SERIAL);
+  if (!storage->queue) {
+    // Tear down the partially constructed monitor before releasing storage.
+    network_path_monitor_.reset();
+    return false;
+  }
+
+  nw_path_monitor_set_update_handler(storage->monitor, ^(nw_path_t path) {
+    // SAFE: StopNetworkPathMonitor() cancels the monitor and synchronously
+    // drains this queue before destruction, so the captured raw pointer cannot
+    // outlive the notifier instance.
+    NetworkChangeNotifier::ConnectionType new_type =
+        NetworkChangeNotifier::CONNECTION_NONE;
+    switch (nw_path_get_status(path)) {
+      case nw_path_status_satisfied:
+        // A fully satisfied path means we can derive the connection type from
+        // the active interfaces.
+        new_type = ConnectionTypeFromInterfaces();
+        break;
+      case nw_path_status_satisfiable:
+        // The path could become satisfied if the system performs extra work
+        // (for example, negotiating captive portals). Treat this as unknown
+        // rather than offline to avoid spurious "no connection" drops.
+        new_type = NetworkChangeNotifier::CONNECTION_UNKNOWN;
+        break;
+      case nw_path_status_unsatisfied:
+      case nw_path_status_invalid:
+      default:
+        // Treat invalid/unsatisfied as offline until better information
+        // arrives.
+        new_type = NetworkChangeNotifier::CONNECTION_NONE;
+        break;
+    }
+    OnNetworkPathConnectionTypeChanged(new_type);
+  });
+
+  nw_path_monitor_set_queue(storage->monitor, storage->queue);
+  nw_path_monitor_start(storage->monitor);
+  return true;
+}
+
+void NetworkChangeNotifierApple::StopNetworkPathMonitor() {
+  if (!network_path_monitor_) {
+    return;
+  }
+  auto* storage = network_path_monitor_.get();
+  dispatch_queue_t queue = storage->queue;
+  if (storage->monitor) {
+    nw_path_monitor_cancel(storage->monitor);
+  }
+  if (queue) {
+    // Flush pending callbacks so none outlive the notifier instance.
+    dispatch_sync(queue, ^{
+                  });
+  }
+  // Resetting the storage runs NetworkPathMonitorStorage's destructor, which
+  // clears the Network.framework monitor and dispatch queue references.
+  network_path_monitor_.reset();
+}
+
+void NetworkChangeNotifierApple::OnNetworkPathConnectionTypeChanged(
+    ConnectionType new_type) {
+  if (run_loop_) {
+    CFRunLoopPerformBlock(run_loop_.get(), kCFRunLoopCommonModes, ^{
+      ProcessConnectionTypeUpdate(new_type, /*should_notify=*/true);
+    });
+    CFRunLoopWakeUp(run_loop_.get());
+    return;
+  }
+
+  ProcessConnectionTypeUpdate(new_type, /*should_notify=*/false);
+}
+
+void NetworkChangeNotifierApple::ProcessConnectionTypeUpdate(
+    ConnectionType new_type,
+    bool should_notify) {
+  bool notify_change = false;
+  {
+    base::AutoLock lock(connection_type_lock_);
+    if (!connection_type_initialized_) {
+      connection_type_ = new_type;
+      connection_type_initialized_ = true;
+      initial_connection_type_cv_.Broadcast();
+    } else if (connection_type_ != new_type) {
+      connection_type_ = new_type;
+      notify_change = true;
+    }
+  }
+
+  if (!should_notify || !notify_change) {
+    return;
+  }
+
+  NotifyObserversOfConnectionTypeChange();
+  double max_bandwidth_mbps =
+      NetworkChangeNotifier::GetMaxBandwidthMbpsForConnectionSubtype(
+          new_type == CONNECTION_NONE ? SUBTYPE_NONE : SUBTYPE_UNKNOWN);
+  NotifyObserversOfMaxBandwidthChange(max_bandwidth_mbps, new_type);
+}
+
+void NetworkChangeNotifierApple::WaitOnInitialConnectionType() {
+  base::AutoLock lock(connection_type_lock_);
+  if (!connection_type_initialized_) {
+    // Mirror the legacy SCNetworkReachability behaviour: wait briefly for
+    // the asynchronous path monitor callback so GetCurrentConnectionType()
+    // observes a deterministic value during early startup.
+    base::TimeTicks end_time =
+        base::TimeTicks::Now() +
+        base::Seconds(kMaxWaitForConnectionTypeInSeconds);
+    while (!connection_type_initialized_ && base::TimeTicks::Now() < end_time) {
+      base::TimeDelta remaining = end_time - base::TimeTicks::Now();
+      initial_connection_type_cv_.TimedWait(remaining);
+    }
+  }
+}
+
 void NetworkChangeNotifierApple::SetCallbacksForTest(
     base::OnceClosure initialized_callback,
     base::RepeatingCallback<bool(NetworkInterfaceList*, int)>
@@ -573,6 +716,5 @@ void NetworkChangeNotifierApple::SetCallbacksForTest(
   get_ipv6_primary_interface_name_callback_ =
       std::move(get_ipv6_primary_interface_name_callback);
 }
-#endif  // BUILDFLAG(IS_MAC)
 
 }  // namespace net

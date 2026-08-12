@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_PERFORMANCE_MONITOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_PERFORMANCE_MONITOR_H_
 
+#include <array>
+
 #include "base/task/sequence_manager/task_time_observer.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -13,7 +15,6 @@
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "v8/include/v8.h"
@@ -34,7 +35,6 @@ class Document;
 class ExecutionContext;
 class Frame;
 class LocalFrame;
-class WindowPerformance;
 class SourceLocation;
 
 // Performance monitor for Web Performance APIs and logging.
@@ -76,7 +76,7 @@ class CORE_EXPORT PerformanceMonitor final
                                      Violation,
                                      const String& text,
                                      base::TimeDelta time,
-                                     std::unique_ptr<SourceLocation>);
+                                     SourceLocation*);
   static base::TimeDelta Threshold(ExecutionContext*, Violation);
 
   // Instrumenting methods.
@@ -112,7 +112,7 @@ class CORE_EXPORT PerformanceMonitor final
   PerformanceMonitor& operator=(const PerformanceMonitor&) = delete;
   ~PerformanceMonitor() override;
 
-  virtual void Trace(Visitor*) const;
+  void Trace(Visitor*) const;
 
  private:
   friend class PerformanceMonitorTest;
@@ -130,7 +130,7 @@ class CORE_EXPORT PerformanceMonitor final
                                    Violation,
                                    const String& text,
                                    base::TimeDelta time,
-                                   std::unique_ptr<SourceLocation>);
+                                   SourceLocation*);
 
   // TaskTimeObserver implementation
   void WillProcessTask(base::TimeTicks start_time) override;
@@ -166,7 +166,7 @@ class CORE_EXPORT PerformanceMonitor final
   v8::Isolate* const isolate_;
   bool task_has_multiple_contexts_ = false;
   bool task_should_be_reported_ = false;
-  using ClientThresholds = HeapHashMap<WeakMember<Client>, base::TimeDelta>;
+  using ClientThresholds = GCedHeapHashMap<WeakMember<Client>, base::TimeDelta>;
   HeapHashMap<Violation,
               Member<ClientThresholds>,
               IntWithZeroKeyHashTraits<size_t>>

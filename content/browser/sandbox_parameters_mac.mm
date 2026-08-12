@@ -16,6 +16,7 @@
 #include "base/files/file_util.h"
 #include "base/mac/mac_util.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/numerics/checked_math.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -26,17 +27,35 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "printing/buildflags/buildflags.h"
-#include "sandbox/mac/sandbox_compiler.h"
+#include "sandbox/mac/sandbox_serializer.h"
 #include "sandbox/policy/mac/params.h"
 #include "sandbox/policy/mac/sandbox_mac.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/switches.h"
-#include "services/screen_ai/buildflags/buildflags.h"
 
 namespace content {
 
 namespace {
+
+// If disabled, the macOS sandbox for child processes will deny access to
+// distributed notifications (https://crbug.com/513454805).
+BASE_FEATURE(kMacSandboxDistributedNotifications,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, the macOS sandbox for the Network process will allow read and
+// write file access to the user's cache and temp directory
+// (https://crbug.com/527885521).
+// TODO(bryanoltman): remove this feature once we have determined the scope of
+// access needed by the Network process, if any.
+BASE_FEATURE(kMacSandboxNetworkUserDirAccess,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, the macOS sandbox for the On-Device Model Execution (ODME)
+// process will allow read and write file access to the user directory, as well
+// as the user's cache and temp directories (https://crbug.com/527915149).
+// TODO(bryanoltman): remove this feature once we have determined the scope of
+// access needed by the ODME process, if any.
+BASE_FEATURE(kMacSandboxOdmeUserDirAccess, base::FEATURE_DISABLED_BY_DEFAULT);
 
 std::optional<base::FilePath>& GetNetworkTestCertsDirectory() {
   // Set by SetNetworkTestCertsDirectoryForTesting().
@@ -61,66 +80,71 @@ std::string GetOSVersion() {
 }
 
 // Retrieves the users shared darwin dirs and adds it to the profile.
-void AddDarwinDirs(sandbox::SandboxCompiler* compiler) {
+void AddDarwinDirs(sandbox::SandboxSerializer* serializer) {
   char dir_path[PATH_MAX + 1];
 
   size_t rv = confstr(_CS_DARWIN_USER_CACHE_DIR, dir_path, sizeof(dir_path));
   PCHECK(rv != 0);
-  CHECK(compiler->SetParameter(
+  CHECK(serializer->SetParameter(
       sandbox::policy::kParamDarwinUserCacheDir,
       sandbox::policy::GetCanonicalPath(base::FilePath(dir_path)).value()));
 
   rv = confstr(_CS_DARWIN_USER_DIR, dir_path, sizeof(dir_path));
   PCHECK(rv != 0);
-  CHECK(compiler->SetParameter(
+  CHECK(serializer->SetParameter(
       sandbox::policy::kParamDarwinUserDir,
       sandbox::policy::GetCanonicalPath(base::FilePath(dir_path)).value()));
 
   rv = confstr(_CS_DARWIN_USER_TEMP_DIR, dir_path, sizeof(dir_path));
   PCHECK(rv != 0);
-  CHECK(compiler->SetParameter(
+  CHECK(serializer->SetParameter(
       sandbox::policy::kParamDarwinUserTempDir,
       sandbox::policy::GetCanonicalPath(base::FilePath(dir_path)).value()));
 }
 
-// All of the below functions populate the `compiler` with the parameters that
+// All of the below functions populate the `serializer` with the parameters that
 // the sandbox needs to resolve information that cannot be known at build time,
 // such as the user's home directory.
 void SetupCommonSandboxParameters(
-    sandbox::SandboxCompiler* compiler,
+    sandbox::SandboxSerializer* serializer,
     const base::CommandLine& target_command_line) {
   const base::CommandLine* browser_command_line =
       base::CommandLine::ForCurrentProcess();
   bool enable_logging = browser_command_line->HasSwitch(
       sandbox::policy::switches::kEnableSandboxLogging);
 
-  CHECK(compiler->SetParameter(
+  CHECK(serializer->SetParameter(
       sandbox::policy::kParamExecutablePath,
       sandbox::policy::GetCanonicalPath(target_command_line.GetProgram())
           .value()));
 
-  CHECK(compiler->SetBooleanParameter(sandbox::policy::kParamEnableLogging,
-                                      enable_logging));
-  CHECK(compiler->SetBooleanParameter(
+  CHECK(serializer->SetBooleanParameter(sandbox::policy::kParamEnableLogging,
+                                        enable_logging));
+  CHECK(serializer->SetBooleanParameter(
       sandbox::policy::kParamDisableSandboxDenialLogging, !enable_logging));
+
+  CHECK(serializer->SetBooleanParameter(
+      sandbox::policy::kParamEnableDistributedNotifications,
+      base::FeatureList::IsEnabled(kMacSandboxDistributedNotifications)));
 
   std::string bundle_path =
       sandbox::policy::GetCanonicalPath(base::apple::MainBundlePath()).value();
-  CHECK(compiler->SetParameter(sandbox::policy::kParamBundlePath, bundle_path));
+  CHECK(
+      serializer->SetParameter(sandbox::policy::kParamBundlePath, bundle_path));
 
-  std::string bundle_id = base::apple::BaseBundleID();
+  std::string bundle_id(base::apple::BaseBundleID());
   DCHECK(!bundle_id.empty()) << "base::apple::OuterBundle is unset";
-  CHECK(compiler->SetParameter(sandbox::policy::kParamBundleId, bundle_id));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamBundleId, bundle_id));
 
-  CHECK(compiler->SetParameter(sandbox::policy::kParamBrowserPid,
-                               base::NumberToString(getpid())));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamBrowserPid,
+                                 base::NumberToString(getpid())));
 
   std::string logging_path = GetContentClient()
                                  ->browser()
                                  ->GetLoggingFileName(*browser_command_line)
                                  .value();
-  CHECK(
-      compiler->SetParameter(sandbox::policy::kParamLogFilePath, logging_path));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamLogFilePath,
+                                 logging_path));
 
 #if defined(COMPONENT_BUILD)
   // For component builds, allow access to one directory level higher, where
@@ -128,61 +152,62 @@ void SetupCommonSandboxParameters(
   base::FilePath component_path = base::apple::MainBundlePath().Append("..");
   std::string component_path_canonical =
       sandbox::policy::GetCanonicalPath(component_path).value();
-  CHECK(compiler->SetParameter(sandbox::policy::kParamComponentPath,
-                               component_path_canonical));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamComponentPath,
+                                 component_path_canonical));
 #endif
 
-  CHECK(
-      compiler->SetParameter(sandbox::policy::kParamOsVersion, GetOSVersion()));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamOsVersion,
+                                 GetOSVersion()));
 
   std::string homedir =
       sandbox::policy::GetCanonicalPath(base::GetHomeDir()).value();
-  CHECK(
-      compiler->SetParameter(sandbox::policy::kParamHomedirAsLiteral, homedir));
-
-  CHECK(compiler->SetBooleanParameter(
-      sandbox::policy::kParamFilterSyscalls,
-      base::FeatureList::IsEnabled(features::kMacSyscallSandbox)));
-
-  CHECK(compiler->SetBooleanParameter(
-      sandbox::policy::kParamFilterSyscallsDebug, false));
+  CHECK(serializer->SetParameter(sandbox::policy::kParamHomedirAsLiteral,
+                                 homedir));
 }
 
-void SetupNetworkSandboxParameters(sandbox::SandboxCompiler* compiler,
+void SetupNetworkSandboxParameters(sandbox::SandboxSerializer* serializer,
                                    const base::CommandLine& command_line) {
-  SetupCommonSandboxParameters(compiler, command_line);
+  SetupCommonSandboxParameters(serializer, command_line);
 
   std::vector<base::FilePath> storage_paths =
       GetContentClient()->browser()->GetNetworkContextsParentDirectory();
 
-  AddDarwinDirs(compiler);
+  AddDarwinDirs(serializer);
 
-  CHECK(compiler->SetParameter(
+  CHECK(serializer->SetParameter(
       sandbox::policy::kParamNetworkServiceStoragePathsCount,
       base::NumberToString(storage_paths.size())));
   for (size_t i = 0; i < storage_paths.size(); ++i) {
     base::FilePath path = sandbox::policy::GetCanonicalPath(storage_paths[i]);
     std::string param_name = base::StringPrintf(
         "%s%zu", sandbox::policy::kParamNetworkServiceStoragePathN, i);
-    CHECK(compiler->SetParameter(param_name, path.value())) << param_name;
+    CHECK(serializer->SetParameter(param_name, path.value())) << param_name;
   }
 
   if (GetNetworkTestCertsDirectory().has_value()) {
-    CHECK(compiler->SetParameter(
+    CHECK(serializer->SetParameter(
         sandbox::policy::kParamNetworkServiceTestCertsDir,
         sandbox::policy::GetCanonicalPath(*GetNetworkTestCertsDirectory())
             .value()));
   }
+
+  CHECK(serializer->SetBooleanParameter(
+      sandbox::policy::kParamNetworkUserDirAccess,
+      base::FeatureList::IsEnabled(kMacSandboxNetworkUserDirAccess)));
 }
 
-bool SetupGpuSandboxParameters(sandbox::SandboxCompiler* compiler,
+bool SetupGpuSandboxParameters(sandbox::SandboxSerializer* serializer,
                                const base::CommandLine& command_line) {
-  SetupCommonSandboxParameters(compiler, command_line);
-  AddDarwinDirs(compiler);
-  CHECK(compiler->SetBooleanParameter(
+  SetupCommonSandboxParameters(serializer, command_line);
+  AddDarwinDirs(serializer);
+  CHECK(serializer->SetBooleanParameter(
       sandbox::policy::kParamDisableMetalShaderCache,
       command_line.HasSwitch(
           sandbox::policy::switches::kDisableMetalShaderCache)));
+
+  CHECK(serializer->SetBooleanParameter(
+      sandbox::policy::kParamOdmeUserDirAccess,
+      base::FeatureList::IsEnabled(kMacSandboxOdmeUserDirAccess)));
 
   base::FilePath helper_bundle_path =
       base::apple::GetInnermostAppBundlePath(command_line.GetProgram());
@@ -197,7 +222,7 @@ bool SetupGpuSandboxParameters(sandbox::SandboxCompiler* compiler,
         return false;
       }
 
-      return compiler->SetParameter(
+      return serializer->SetParameter(
           sandbox::policy::kParamHelperBundleId,
           base::SysNSStringToUTF8(helper_bundle.bundleIdentifier));
     }
@@ -206,44 +231,54 @@ bool SetupGpuSandboxParameters(sandbox::SandboxCompiler* compiler,
   return true;
 }
 
+void SetupProxyResolverSandboxParameters(
+    sandbox::SandboxSerializer* serializer,
+    const base::CommandLine& command_line) {
+  SetupCommonSandboxParameters(serializer, command_line);
+
+  // Controls whether the sandbox allows the network access needed to fetch and
+  // execute PAC/WPAD scripts.
+  // TODO(crbug.com/442313607): Set this to true when PAC/WPAD is implemented.
+  CHECK(serializer->SetBooleanParameter(
+      sandbox::policy::kParamSystemProxyNetworkAccess, /*value=*/false));
+}
+
 }  // namespace
 
 bool SetupSandboxParameters(sandbox::mojom::Sandbox sandbox_type,
                             const base::CommandLine& command_line,
-                            sandbox::SandboxCompiler* compiler) {
+                            sandbox::SandboxSerializer* serializer) {
   switch (sandbox_type) {
     case sandbox::mojom::Sandbox::kAudio:
     case sandbox::mojom::Sandbox::kCdm:
     case sandbox::mojom::Sandbox::kMirroring:
-#if BUILDFLAG(ENABLE_OOP_PRINTING)
     case sandbox::mojom::Sandbox::kPrintBackend:
-#endif
     case sandbox::mojom::Sandbox::kPrintCompositor:
     case sandbox::mojom::Sandbox::kRenderer:
     case sandbox::mojom::Sandbox::kService:
     case sandbox::mojom::Sandbox::kServiceWithJit:
     case sandbox::mojom::Sandbox::kUtility:
-      SetupCommonSandboxParameters(compiler, command_line);
+      SetupCommonSandboxParameters(serializer, command_line);
+      break;
+    case sandbox::mojom::Sandbox::kProxyResolver:
+      SetupProxyResolverSandboxParameters(serializer, command_line);
       break;
     case sandbox::mojom::Sandbox::kOnDeviceModelExecution:
     case sandbox::mojom::Sandbox::kGpu:
-      return SetupGpuSandboxParameters(compiler, command_line);
+      return SetupGpuSandboxParameters(serializer, command_line);
     case sandbox::mojom::Sandbox::kNetwork:
-      SetupNetworkSandboxParameters(compiler, command_line);
+      SetupNetworkSandboxParameters(serializer, command_line);
       break;
     case sandbox::mojom::Sandbox::kNoSandbox:
-      CHECK(false) << "Unhandled parameters for sandbox_type "
+      NOTREACHED() << "Unhandled parameters for sandbox_type "
                    << static_cast<int>(sandbox_type);
-      break;
     // Setup parameters for sandbox types handled by embedders below.
-#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
     case sandbox::mojom::Sandbox::kScreenAI:
-#endif
     case sandbox::mojom::Sandbox::kSpeechRecognition:
     case sandbox::mojom::Sandbox::kOnDeviceTranslation:
-      SetupCommonSandboxParameters(compiler, command_line);
+      SetupCommonSandboxParameters(serializer, command_line);
       CHECK(GetContentClient()->browser()->SetupEmbedderSandboxParameters(
-          sandbox_type, compiler));
+          sandbox_type, serializer));
       break;
   }
   return true;

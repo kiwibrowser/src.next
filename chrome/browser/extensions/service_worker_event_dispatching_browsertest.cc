@@ -5,10 +5,10 @@
 #include <utility>
 
 #include "base/test/scoped_feature_list.h"
+#include "base/test/with_feature_override.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -17,11 +17,14 @@
 #include "content/public/test/service_worker_test_helpers.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/service_worker/service_worker_test_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/service_worker/embedded_worker_status.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_database.mojom-forward.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -112,10 +115,6 @@ class ServiceWorkerEventDispatchingBrowserTest : public ExtensionBrowserTest {
     sw_context_ = nullptr;
   }
 
-  content::WebContents* web_contents() const {
-    return browser()->tab_strip_model()->GetActiveWebContents();
-  }
-
   DispatchWebNavigationEventCallback CreateDispatchWebNavEventCallback(
       int num_events_to_dispatch = 1) {
     return base::BindOnce(
@@ -126,7 +125,8 @@ class ServiceWorkerEventDispatchingBrowserTest : public ExtensionBrowserTest {
   // Broadcasts a webNavigation.onBeforeNavigate events.
   void DispatchWebNavigationEvent(int num_events_to_dispatch = 1) {
     EventRouter* router = EventRouter::EventRouter::Get(profile());
-    testing::NiceMock<content::MockNavigationHandle> handle(web_contents());
+    testing::NiceMock<content::MockNavigationHandle> handle(
+        GetActiveWebContents());
     for (int i = 0; i < num_events_to_dispatch; i++) {
       auto event =
           web_navigation_api_helpers::CreateOnBeforeNavigateEvent(&handle);
@@ -162,8 +162,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEventDispatchingBrowserTest,
 
   // Stop the worker, and wait for it to stop. We must stop it first before we
   // can observe the kRunning status.
-  browsertest_util::StopServiceWorkerForExtensionGlobalScope(
-      browser()->profile(), extension->id());
+  browsertest_util::StopServiceWorkerForExtensionGlobalScope(profile(),
+                                                             extension->id());
   sw_started_observer.WaitForWorkerStopped();
   ASSERT_TRUE(content::CheckServiceWorkerIsStopped(sw_context_,
                                                    test_worker_version_id));
@@ -236,8 +236,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEventDispatchingBrowserTest,
   TestExtensionServiceWorkerRunningStatusObserver worker_restarted_observer(
       GetServiceWorkerContext());
   // Stop the worker, and wait for it to stop.
-  browsertest_util::StopServiceWorkerForExtensionGlobalScope(
-      browser()->profile(), extension->id());
+  browsertest_util::StopServiceWorkerForExtensionGlobalScope(profile(),
+                                                             extension->id());
   sw_started_stopped_observer.WaitForWorkerStopped();
   // TODO(crbug.com/40276609): Add a more guaranteed check that the worker was
   // stopped when we dispatch the event. This check confirms the worker is
@@ -294,8 +294,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEventDispatchingBrowserTest,
 
   // Stop the worker, and wait for it to stop. We must stop it first before we
   // can start and observe the kStarting status.
-  browsertest_util::StopServiceWorkerForExtensionGlobalScope(
-      browser()->profile(), extension->id());
+  browsertest_util::StopServiceWorkerForExtensionGlobalScope(profile(),
+                                                             extension->id());
   sw_started_stopped_observer.WaitForWorkerStopped();
 
   // Add observer that will watch for changes to the running status of the
@@ -415,8 +415,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEventDispatchingBrowserTest,
 
   // Stop the worker, and wait for it to stop. We must stop it first before we
   // can start and observe the kStarting status.
-  browsertest_util::StopServiceWorkerForExtensionGlobalScope(
-      browser()->profile(), extension->id());
+  browsertest_util::StopServiceWorkerForExtensionGlobalScope(profile(),
+                                                             extension->id());
   sw_started_stopped_observer.WaitForWorkerStopped();
 
   // Add observer that will watch for changes to the running status of the
@@ -490,10 +490,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerEventDispatchingBrowserTest,
 
   // Confirm the expected number of start requests that are sent to the
   // extension worker during event dispatch.
-  // TODO(crbug.com/40276609): Once we no longer unnecessarily start the worker
-  // this will become 0.
   EXPECT_EQ(
-      1, start_count_observer.GetRequestedWorkerStartedCount(extension->id()));
+      0, start_count_observer.GetRequestedWorkerStartedCount(extension->id()));
 }
 
 // TODO(crbug.com/40276609): Create test for event dispatching that uses the

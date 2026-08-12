@@ -7,22 +7,22 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <initializer_list>
 #include <tuple>
 #include <type_traits>
 
-#include "base/containers/contains.h"
 
 namespace base {
 
 // Checks if any of the elements in |ilist| is true.
 inline constexpr bool any_of(std::initializer_list<bool> ilist) {
-  return base::Contains(ilist, true);
+  return std::ranges::contains(ilist, true);
 }
 
 // Checks if all of the elements in |ilist| are true.
 inline constexpr bool all_of(std::initializer_list<bool> ilist) {
-  return !base::Contains(ilist, false);
+  return !std::ranges::contains(ilist, false);
 }
 
 // Counts the elements in |ilist| that are equal to |value|.
@@ -59,8 +59,9 @@ struct ParameterPack {
   static constexpr size_t IndexInPack() {
     size_t index = 0;
     for (bool value : {std::is_same_v<Type, Ts>...}) {
-      if (value)
+      if (value) {
         return index;
+      }
       index++;
     }
     return pack_npos;
@@ -74,6 +75,25 @@ struct ParameterPack {
   using IsAllSameType =
       std::bool_constant<all_of({std::is_same_v<NthType<0>, Ts>...})>;
 };
+
+template <typename... Packs>
+struct ConcatParameterPacksImpl;
+
+template <typename... Ts1, typename... Ts2, typename... RemainingPacks>
+struct ConcatParameterPacksImpl<ParameterPack<Ts1...>,
+                                ParameterPack<Ts2...>,
+                                RemainingPacks...> {
+  using type = typename ConcatParameterPacksImpl<ParameterPack<Ts1..., Ts2...>,
+                                                 RemainingPacks...>::type;
+};
+
+template <typename... Ts>
+struct ConcatParameterPacksImpl<ParameterPack<Ts...>> {
+  using type = ParameterPack<Ts...>;
+};
+
+template <typename... Packs>
+using ConcatParameterPacks = typename ConcatParameterPacksImpl<Packs...>::type;
 
 }  // namespace base
 

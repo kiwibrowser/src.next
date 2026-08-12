@@ -22,15 +22,20 @@
 
 #include "third_party/blink/renderer/core/dom/events/event.h"
 
+#include "third_party/blink/renderer/core/dom/css_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/events/window_event_context.h"
+#include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
+#include "third_party/blink/renderer/core/events/drag_event.h"
 #include "third_party/blink/renderer/core/events/focus_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
+#include "third_party/blink/renderer/core/events/wheel_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -38,8 +43,11 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
+#include "third_party/blink/renderer/core/timing/worker_global_scope_performance.h"
+#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -195,10 +203,6 @@ bool Event::IsPointerEvent() const {
   return false;
 }
 
-bool Event::IsHighlightPointerEvent() const {
-  return false;
-}
-
 bool Event::IsInputEvent() const {
   return false;
 }
@@ -231,6 +235,14 @@ bool Event::IsErrorEvent() const {
   return false;
 }
 
+bool Event::IsPatchEvent() const {
+  return false;
+}
+
+bool Event::IsRouteEvent() const {
+  return false;
+}
+
 void Event::preventDefault() {
   if (handling_passive_ != PassiveMode::kNotPassive &&
       handling_passive_ != PassiveMode::kNotPassiveDefault) {
@@ -250,6 +262,14 @@ void Event::preventDefault() {
     prevent_default_called_on_uncancelable_event_ = true;
 }
 
+EventTarget* Event::target() const {
+  DCHECK(!target_ || !target_->ToNode() ||
+         !target_->ToNode()->IsPseudoElement())
+      << "Event target should not be a pseudo-element, but got "
+      << target_->ToNode()->DebugName();
+  return target_.Get();
+}
+
 void Event::SetTarget(EventTarget* target) {
   if (target_ == target)
     return;
@@ -259,17 +279,20 @@ void Event::SetTarget(EventTarget* target) {
     ReceivedTarget();
 }
 
-void Event::SetRelatedTargetIfExists(EventTarget* related_target) {
-  if (auto* mouse_event = DynamicTo<MouseEvent>(this)) {
-    mouse_event->SetRelatedTarget(related_target);
-  } else if (auto* pointer_event = DynamicTo<PointerEvent>(this)) {
-    pointer_event->SetRelatedTarget(related_target);
-  } else if (auto* focus_event = DynamicTo<FocusEvent>(this)) {
-    focus_event->SetRelatedTarget(related_target);
-  }
-}
-
 void Event::ReceivedTarget() {}
+
+Element* Event::Retarget(Element* element) const {
+  if (!element) {
+    return nullptr;
+  }
+  if (EventTarget* current_target = currentTarget()) {
+    if (auto* current_target_node = current_target->ToNode()) {
+      return &current_target_node->GetTreeScope().Retarget(*element);
+    }
+  }
+  // retarget against the topmost TreeScope if there isn't a current target.
+  return &element->GetDocument().Retarget(*element);
+}
 
 void Event::SetUnderlyingEvent(const Event* ue) {
   // Prohibit creation of a cycle -- just do nothing in that case.
@@ -320,19 +343,24 @@ HeapVector<Member<EventTarget>> Event::composedPath(
   if (Node* node = current_target_->ToNode()) {
     DCHECK(event_path_);
     for (auto& context : event_path_->NodeEventContexts()) {
-      if (node == context.GetNode())
-        return context.GetTreeScopeEventContext().EnsureEventPath(*event_path_);
+      if (node == context.GetNode()) {
+        return HeapVector<Member<EventTarget>>(
+            context.GetTreeScopeEventContext().EnsureEventPath(*event_path_));
+      }
     }
     NOTREACHED();
   }
+  LocalDOMWindow* window = current_target_->ToLocalDOMWindow();
+  if (window && event_path_ && !event_path_->IsEmpty()) {
+    return HeapVector<Member<EventTarget>>(event_path_->TopNodeEventContext()
+                                               .GetTreeScopeEventContext()
+                                               .EnsureEventPath(*event_path_));
+  }
 
-  if (LocalDOMWindow* window = current_target_->ToLocalDOMWindow()) {
-    if (event_path_ && !event_path_->IsEmpty()) {
-      return event_path_->TopNodeEventContext()
-          .GetTreeScopeEventContext()
-          .EnsureEventPath(*event_path_);
-    }
-    return HeapVector<Member<EventTarget>>(1, window);
+  if (RuntimeEnabledFeatures::ComposedPathReturnTargetBeingDispatchedEnabled()
+          ? IsBeingDispatched()
+          : !!window) {
+    return HeapVector<Member<EventTarget>>(1, current_target_);
   }
 
   return HeapVector<Member<EventTarget>>();
@@ -350,15 +378,23 @@ EventTarget* Event::currentTarget() const {
 }
 
 double Event::timeStamp(ScriptState* script_state) const {
-  double time_stamp = 0;
-  if (script_state && LocalDOMWindow::From(script_state)) {
-    WindowPerformance* performance =
-        DOMWindowPerformance::performance(*LocalDOMWindow::From(script_state));
-    time_stamp =
-        performance->MonotonicTimeToDOMHighResTimeStamp(platform_time_stamp_);
+  if (!script_state) {
+    return 0;
   }
 
-  return time_stamp;
+  if (auto* window = LocalDOMWindow::From(script_state)) {
+    Performance* performance = DOMWindowPerformance::performance(*window);
+    return performance->MonotonicTimeToDOMHighResTimeStamp(
+        platform_time_stamp_);
+  } else if (auto* worker = DynamicTo<WorkerGlobalScope>(
+                 ExecutionContext::From(script_state))) {
+    Performance* performance =
+        WorkerGlobalScopePerformance::performance(*worker);
+    return performance->MonotonicTimeToDOMHighResTimeStamp(
+        platform_time_stamp_);
+  }
+
+  return 0;
 }
 
 void Event::setCancelBubble(ScriptState* script_state, bool cancel) {
@@ -370,12 +406,47 @@ DispatchEventResult Event::DispatchEvent(EventDispatcher& dispatcher) {
   return dispatcher.Dispatch();
 }
 
+void Event::SetPseudoElementTarget(PseudoElement* pseudo_element_target) {
+  if (!RuntimeEnabledFeatures::CSSPseudoElementInterfaceEnabled()) {
+    return;
+  }
+  pseudo_element_target_ = CSSPseudoElement::From(pseudo_element_target);
+}
+
 void Event::Trace(Visitor* visitor) const {
   visitor->Trace(current_target_);
   visitor->Trace(target_);
+  visitor->Trace(pseudo_element_target_);
   visitor->Trace(underlying_event_);
   visitor->Trace(event_path_);
   ScriptWrappable::Trace(visitor);
+}
+
+CSSPseudoElement* Event::pseudoTarget() const {
+  if (!RuntimeEnabledFeatures::CSSPseudoElementInterfaceEnabled()) {
+    return nullptr;
+  }
+  if (!pseudo_element_target_) {
+    return nullptr;
+  }
+
+  // Boundary events like mouseover/mouseout/pointerover/pointerout and
+  // related enter/leave events do not currently define a pseudoTarget.
+  // Return null for those event types.
+  if (IsMouseEvent() || IsPointerEvent()) {
+    if (type() == event_type_names::kMouseover ||
+        type() == event_type_names::kMouseout ||
+        type() == event_type_names::kMouseenter ||
+        type() == event_type_names::kMouseleave ||
+        type() == event_type_names::kPointerover ||
+        type() == event_type_names::kPointerout ||
+        type() == event_type_names::kPointerenter ||
+        type() == event_type_names::kPointerleave) {
+      return nullptr;
+    }
+  }
+
+  return pseudo_element_target_.Get();
 }
 
 }  // namespace blink

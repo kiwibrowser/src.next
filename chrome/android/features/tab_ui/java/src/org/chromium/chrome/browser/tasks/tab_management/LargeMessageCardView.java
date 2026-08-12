@@ -15,13 +15,13 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.chrome.browser.tab.state.ShoppingPersistedTabData;
-import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.tab.state.ShoppingPersistedTabData.PriceDrop;
 import org.chromium.chrome.tab_ui.R;
-import org.chromium.components.browser_ui.styles.ChromeColors;
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.components.browser_ui.widget.MaterialCardViewNoShadow;
 import org.chromium.components.browser_ui.widget.textbubble.TextBubble;
 import org.chromium.ui.widget.ButtonCompat;
@@ -34,8 +34,9 @@ import java.lang.ref.WeakReference;
  * Represents a large message card view in Grid Tab Switcher. The view contains a customized content
  * section, an action button for acceptance, and a close button for dismissal.
  */
+@NullMarked
 class LargeMessageCardView extends FrameLayout {
-    private static WeakReference<Bitmap> sCloseButtonBitmapWeakRef;
+    private static @Nullable WeakReference<Bitmap> sCloseButtonBitmapWeakRef;
 
     private final Context mContext;
     private final int mLandscapeSidePadding;
@@ -158,7 +159,7 @@ class LargeMessageCardView extends FrameLayout {
     }
 
     /** Setup the price info box. */
-    void setupPriceInfoBox(@Nullable ShoppingPersistedTabData.PriceDrop priceDrop) {
+    void setupPriceInfoBox(@Nullable PriceDrop priceDrop) {
         if (priceDrop != null) {
             mPriceInfoBox.setPriceStrings(priceDrop.price, priceDrop.previousPrice);
             mPriceInfoBox.setVisibility(View.VISIBLE);
@@ -218,14 +219,13 @@ class LargeMessageCardView extends FrameLayout {
     public static void showPriceDropTooltip(View view) {
         ViewRectProvider rectProvider = new ViewRectProvider(view);
         TextBubble textBubble =
-                new TextBubble(
-                        view.getContext(),
-                        view,
-                        R.string.price_drop_spotted_lower_price,
-                        R.string.price_drop_spotted_lower_price,
-                        true,
-                        rectProvider,
-                        ChromeAccessibilityUtil.get().isAccessibilityEnabled());
+                new TextBubble.Builder(
+                                view.getContext(),
+                                view,
+                                rectProvider,
+                                R.string.price_drop_spotted_lower_price,
+                                R.string.price_drop_spotted_lower_price)
+                        .build();
         textBubble.setFocusable(true);
         textBubble.setDismissOnTouchInteraction(true);
         textBubble.show();
@@ -284,8 +284,7 @@ class LargeMessageCardView extends FrameLayout {
                 ColorStateList.valueOf(
                         isIncognito
                                 ? mContext.getColor(R.color.incognito_card_bg_color)
-                                : ChromeColors.getSurfaceColor(
-                                        mContext, R.dimen.default_elevation_2));
+                                : SemanticColorUtils.getColorSurfaceContainer(mContext));
         mMaterialCardViewNoShadow.setBackgroundTintList(backgroundTint);
     }
 }

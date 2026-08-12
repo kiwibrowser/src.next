@@ -5,19 +5,24 @@
 #include "third_party/blink/renderer/core/loader/base_fetch_context.h"
 
 #include "base/command_line.h"
+#include "services/network/public/cpp/connection_allowlist.h"
+#include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/request_mode.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-blink.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/connection_allowlist_violation_report_body.h"
+#include "third_party/blink/renderer/core/frame/integrity_policy.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
-#include "third_party/blink/renderer/core/loader/idna_util.h"
 #include "third_party/blink/renderer/core/loader/subresource_filter.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -28,8 +33,10 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 
 namespace blink {
 
@@ -76,18 +83,37 @@ BaseFetchContext::CanRequestBasedOnSubresourceFilterOnly(
   return std::nullopt;
 }
 
-bool BaseFetchContext::CalculateIfAdSubresource(
+std::optional<AdProvenance> BaseFetchContext::CalculateIfAdSubresource(
     const ResourceRequestHead& request,
     base::optional_ref<const KURL> alias_url,
     ResourceType type,
-    const FetchInitiatorInfo& initiator_info) {
+    const FetchInitiatorInfo& initiator_info,
+    bool scan_stack_for_ads) {
   // A derived class should override this if they have more signals than just
   // the SubresourceFilter.
+
+  // 1. Check if the request is already flagged as an ad.
+  if (const std::optional<AdProvenance>& ad_provenance =
+          request.GetAdProvenance()) {
+    return ad_provenance;
+  }
+
+  // 2. Check the SubresourceFilter.
   SubresourceFilter* filter = GetSubresourceFilter();
   const KURL& url = alias_url.has_value() ? alias_url.value() : request.Url();
 
-  return request.IsAdResource() ||
-         (filter && filter->IsAdResource(url, request.GetRequestDestination()));
+  subresource_filter::ScopedRule rule;
+
+  // Retrieve matching rule only for frame contexts to save resources. This
+  // decision can be revisited if worker contexts later require support.
+  subresource_filter::ScopedRule* out_rule = IsFrameContext() ? &rule : nullptr;
+
+  if (filter &&
+      filter->IsAdResource(url, request.GetRequestDestination(), out_rule)) {
+    return std::move(rule);
+  }
+
+  return std::nullopt;
 }
 
 void BaseFetchContext::PrintAccessDeniedMessage(const KURL& url) const {
@@ -96,16 +122,16 @@ void BaseFetchContext::PrintAccessDeniedMessage(const KURL& url) const {
   }
 
   String message;
+  StringView prefix("Unsafe attempt to load URL ");
   if (Url().IsNull()) {
-    message = "Unsafe attempt to load URL " + url.ElidedString() + '.';
-  } else if (url.IsLocalFile() || Url().IsLocalFile()) {
-    message = "Unsafe attempt to load URL " + url.ElidedString() +
-              " from frame with URL " + Url().ElidedString() +
-              ". 'file:' URLs are treated as unique security origins.\n";
+    message = StrCat({prefix, url.ElidedString(), "."});
   } else {
-    message = "Unsafe attempt to load URL " + url.ElidedString() +
-              " from frame with URL " + Url().ElidedString() +
-              ". Domains, protocols and ports must match.\n";
+    message =
+        StrCat({prefix, url.ElidedString(), " from frame with URL ",
+                Url().ElidedString(),
+                url.IsLocalFile() || Url().IsLocalFile()
+                    ? ". 'file:' URLs are treated as unique security origins.\n"
+                    : ". Domains, protocols and ports must match.\n"});
   }
 
   console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
@@ -117,14 +143,15 @@ std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CheckCSPForRequest(
     mojom::blink::RequestContextType request_context,
     network::mojom::RequestDestination request_destination,
+    network::mojom::RequestMode request_mode,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
     const KURL& url_before_redirects,
     ResourceRequest::RedirectStatus redirect_status) const {
   return CheckCSPForRequestInternal(
-      request_context, request_destination, url, options, reporting_disposition,
-      url_before_redirects, redirect_status,
+      request_context, request_destination, request_mode, url, options,
+      reporting_disposition, url_before_redirects, redirect_status,
       ContentSecurityPolicy::CheckHeaderType::kCheckReportOnly);
 }
 
@@ -132,14 +159,15 @@ std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CheckAndEnforceCSPForRequest(
     mojom::blink::RequestContextType request_context,
     network::mojom::RequestDestination request_destination,
+    network::mojom::RequestMode request_mode,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
     const KURL& url_before_redirects,
     ResourceRequest::RedirectStatus redirect_status) const {
   return CheckCSPForRequestInternal(
-      request_context, request_destination, url, options, reporting_disposition,
-      url_before_redirects, redirect_status,
+      request_context, request_destination, request_mode, url, options,
+      reporting_disposition, url_before_redirects, redirect_status,
       ContentSecurityPolicy::CheckHeaderType::kCheckAll);
 }
 
@@ -147,6 +175,7 @@ std::optional<ResourceRequestBlockedReason>
 BaseFetchContext::CheckCSPForRequestInternal(
     mojom::blink::RequestContextType request_context,
     network::mojom::RequestDestination request_destination,
+    network::mojom::RequestMode request_mode,
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
@@ -160,14 +189,16 @@ BaseFetchContext::CheckCSPForRequestInternal(
 
   ContentSecurityPolicy* csp =
       GetContentSecurityPolicyForWorld(options.world_for_csp.Get());
+
   if (csp &&
-      !csp->AllowRequest(request_context, request_destination, url,
-                         options.content_security_policy_nonce,
+      !csp->AllowRequest(request_context, request_destination, request_mode,
+                         url, options.content_security_policy_nonce,
                          options.integrity_metadata, options.parser_disposition,
                          url_before_redirects, redirect_status,
                          reporting_disposition, check_header_type)) {
     return ResourceRequestBlockedReason::kCSP;
   }
+
   return std::nullopt;
 }
 
@@ -190,29 +221,33 @@ BaseFetchContext::CanRequestInternal(
     return ResourceRequestBlockedReason::kInspector;
   }
 
+  mojom::blink::RequestContextType request_context =
+      resource_request.GetRequestContext();
+  network::mojom::RequestDestination request_destination =
+      resource_request.GetRequestDestination();
+  const auto request_mode = resource_request.GetMode();
+
   scoped_refptr<const SecurityOrigin> origin =
       resource_request.RequestorOrigin();
 
-  const auto request_mode = resource_request.GetMode();
   // On navigation cases, Context().GetSecurityOrigin() may return nullptr, so
   // the request's origin may be nullptr.
   // TODO(yhirano): Figure out if it's actually fine.
-  DCHECK(request_mode == network::mojom::RequestMode::kNavigate || origin);
+  CHECK(request_mode == network::mojom::RequestMode::kNavigate || origin);
   if (request_mode != network::mojom::RequestMode::kNavigate &&
       !resource_request.CanDisplay(url)) {
     if (reporting_disposition == ReportingDisposition::kReport) {
       console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
           mojom::ConsoleMessageSource::kJavaScript,
           mojom::ConsoleMessageLevel::kError,
-          "Not allowed to load local resource: " + url.GetString()));
+          StrCat({"Not allowed to load local resource: ", url.GetString()})));
     }
     RESOURCE_LOADING_DVLOG(1) << "ResourceFetcher::requestResource URL was not "
                                  "allowed by SecurityOrigin::CanDisplay";
     return ResourceRequestBlockedReason::kOther;
   }
 
-  if (!(base::FeatureList::IsEnabled(features::kOptimizeLoadingDataUrls) &&
-        url.ProtocolIsData())) {
+  if (!url.ProtocolIsData()) {
     // CORS is defined only for HTTP(S) requests. See
     // https://fetch.spec.whatwg.org/#http-extensions.
     if (request_mode == network::mojom::RequestMode::kSameOrigin &&
@@ -224,19 +259,14 @@ BaseFetchContext::CanRequestInternal(
     }
   }
 
-  // User Agent CSS stylesheets should only support loading images and should be
-  // restricted to data urls.
+  // User Agent CSS stylesheets should only support loading images and should
+  // be restricted to data urls.
   if (options.initiator_info.name == fetch_initiator_type_names::kUacss) {
     if (type == ResourceType::kImage && url.ProtocolIsData()) {
       return std::nullopt;
     }
     return ResourceRequestBlockedReason::kOther;
   }
-
-  mojom::blink::RequestContextType request_context =
-      resource_request.GetRequestContext();
-  network::mojom::RequestDestination request_destination =
-      resource_request.GetRequestDestination();
 
   const KURL& url_before_redirects =
       redirect_info.has_value() ? redirect_info->original_url : url;
@@ -245,14 +275,23 @@ BaseFetchContext::CanRequestInternal(
           ? ResourceRequestHead::RedirectStatus::kFollowedRedirect
           : ResourceRequestHead::RedirectStatus::kNoRedirect;
   // We check the 'report-only' headers before upgrading the request (in
-  // populateResourceRequest). We check the enforced headers here to ensure we
-  // block things we ought to block.
+  // populateResourceRequest). We check the enforced headers here to ensure
+  // we block things we ought to block.
   if (CheckCSPForRequestInternal(
-          request_context, request_destination, url, options,
+          request_context, request_destination, request_mode, url, options,
           reporting_disposition, url_before_redirects, redirect_status,
           ContentSecurityPolicy::CheckHeaderType::kCheckEnforce) ==
       ResourceRequestBlockedReason::kCSP) {
     return ResourceRequestBlockedReason::kCSP;
+  }
+
+  CHECK(!GetResourceFetcherProperties().IsDetached() ||
+        resource_request.GetKeepalive() || redirect_info.has_value());
+
+  if (!IntegrityPolicy::AllowRequest(
+          GetExecutionContext(), options.world_for_csp.Get(),
+          request_destination, request_mode, options.integrity_metadata, url)) {
+    return ResourceRequestBlockedReason::kIntegrity;
   }
 
   if (type == ResourceType::kScript) {
@@ -280,8 +319,7 @@ BaseFetchContext::CanRequestInternal(
   }
 
   // Nothing below this point applies to data: URL images.
-  if (base::FeatureList::IsEnabled(features::kOptimizeLoadingDataUrls) &&
-      type == ResourceType::kImage && url.ProtocolIsData()) {
+  if (type == ResourceType::kImage && url.ProtocolIsData()) {
     return std::nullopt;
   }
 
@@ -306,9 +344,53 @@ BaseFetchContext::CanRequestInternal(
     return ResourceRequestBlockedReason::kMixedContent;
   }
 
-  if (url.PotentiallyDanglingMarkup() && url.ProtocolIsInHTTPFamily()) {
+  if (url.PotentiallyDanglingMarkup() && url.ProtocolIsInHttpFamily()) {
     CountDeprecation(WebFeature::kCanRequestURLHTTPContainingNewline);
     return ResourceRequestBlockedReason::kOther;
+  }
+
+  // Enforce Connection-Allowlist when the document is controlled by a service
+  // worker. Only perform enforcement when we don't have a redirect_info;
+  // If the request has reached the point where it has been redirected, or
+  // synthetic redirect info is provided in the case of post-request checks,
+  // then Connection-Allowlist checks for the request should have already
+  // occurred in the network service URLLoaderFactory checks.
+  if (base::FeatureList::IsEnabled(network::features::kConnectionAllowlists) &&
+      GetResourceFetcherProperties().GetControllerServiceWorkerMode() !=
+          mojom::blink::ControllerServiceWorkerMode::kNoController &&
+      !redirect_info.has_value()) {
+    if (GetExecutionContext() && GetExecutionContext()->GetPolicyContainer()) {
+      const auto& policies =
+          GetExecutionContext()->GetPolicyContainer()->GetPolicies();
+
+      auto check_allowlist_and_report =
+          [&](const network::ConnectionAllowlist& allowlist,
+              const V8ConnectionAllowlistDisposition::Enum ca_disposition) {
+            bool matched =
+                network::ConnectionAllowlistMatchesUrl(allowlist, GURL(url));
+            if (!matched) {
+              if (reporting_disposition == ReportingDisposition::kReport) {
+                PrintAccessDeniedMessage(url);
+                ConnectionAllowlistViolationReportBody::
+                    QueueServiceWorkerReport(url, ca_disposition,
+                                             *GetExecutionContext());
+              }
+            }
+            return matched;
+          };
+
+      if (policies.connection_allowlists.report_only.has_value()) {
+        check_allowlist_and_report(
+            policies.connection_allowlists.report_only.value(),
+            V8ConnectionAllowlistDisposition::Enum::kReport);
+      }
+      if (policies.connection_allowlists.enforced.has_value() &&
+          !check_allowlist_and_report(
+              policies.connection_allowlists.enforced.value(),
+              V8ConnectionAllowlistDisposition::Enum::kEnforce)) {
+        return ResourceRequestBlockedReason::kOther;
+      }
+    }
   }
 
   // Let the client have the final say into whether or not the load should
@@ -317,24 +399,6 @@ BaseFetchContext::CanRequestInternal(
     if (!GetSubresourceFilter()->AllowLoad(url, request_destination,
                                            reporting_disposition)) {
       return ResourceRequestBlockedReason::kSubresourceFilter;
-    }
-  }
-
-  // Warn if the resource URL's hostname contains IDNA deviation characters.
-  // Only warn if the resource URL's origin is different than its requestor
-  // (we don't want to warn for <img src="faß.de/image.img"> on faß.de).
-  // TODO(crbug.com/1396475): Remove once Non-Transitional mode is shipped.
-  if (url.HasIDNA2008DeviationCharacter() &&
-      !resource_request.RequestorOrigin()->IsSameOriginWith(
-          SecurityOrigin::Create(url).get())) {
-    String message = GetConsoleWarningForIDNADeviationCharacters(url);
-    if (!message.empty()) {
-      console_logger_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-          mojom::ConsoleMessageSource::kSecurity,
-          mojom::ConsoleMessageLevel::kWarning, message));
-      UseCounter::Count(
-          GetExecutionContext(),
-          WebFeature::kIDNA2008DeviationCharacterInHostnameOfSubresource);
     }
   }
 

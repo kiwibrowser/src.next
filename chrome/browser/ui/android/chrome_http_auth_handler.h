@@ -8,12 +8,14 @@
 #include <jni.h>
 
 #include <string>
+#include <string_view>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/login/login_handler.h"
 #include "components/password_manager/core/browser/http_auth_observer.h"
+#include "url/gurl.h"
 
 namespace password_manager {
 class HttpAuthManager;
@@ -27,6 +29,7 @@ class ChromeHttpAuthHandler : public password_manager::HttpAuthObserver {
  public:
   ChromeHttpAuthHandler(const std::u16string& authority,
                         const std::u16string& explanation,
+                        const GURL& challenger_url,
                         LoginHandler::LoginModelData* login_model_data);
 
   ChromeHttpAuthHandler(const ChromeHttpAuthHandler&) = delete;
@@ -47,8 +50,8 @@ class ChromeHttpAuthHandler : public password_manager::HttpAuthObserver {
   void CloseDialog();
 
   // password_manager::HttpAuthObserver:
-  void OnAutofillDataAvailable(const std::u16string& username,
-                               const std::u16string& password) override;
+  void OnAutofillDataAvailable(std::u16string_view username,
+                               std::u16string_view password) override;
   void OnLoginModelDestroying() override;
 
   // --------------------------------------------------------------
@@ -57,17 +60,14 @@ class ChromeHttpAuthHandler : public password_manager::HttpAuthObserver {
 
   // Submits the username and password to the observer.
   void SetAuth(JNIEnv* env,
-               const base::android::JavaParamRef<jobject>&,
-               const base::android::JavaParamRef<jstring>& username,
-               const base::android::JavaParamRef<jstring>& password);
+               const std::u16string& username,
+               const std::u16string& password);
 
   // Cancels the authentication attempt of the observer.
-  void CancelAuth(JNIEnv* env, const base::android::JavaParamRef<jobject>&);
+  void CancelAuth(JNIEnv* env);
 
   // These functions return the strings needed to display a login form.
-  base::android::ScopedJavaLocalRef<jstring> GetMessageBody(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>&);
+  std::u16string GetMessageBody(JNIEnv* env);
 
  private:
   void SetAuthSync(const std::u16string& username,
@@ -80,6 +80,7 @@ class ChromeHttpAuthHandler : public password_manager::HttpAuthObserver {
   base::android::ScopedJavaGlobalRef<jobject> java_chrome_http_auth_handler_;
   std::u16string authority_;
   std::u16string explanation_;
+  GURL challenger_url_;
 
   // If not null, points to a model we need to notify of our own destruction
   // so it doesn't try and access this when its too late.

@@ -7,21 +7,29 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/containers/span.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
-#include "base/not_fatal_until.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/pickle.h"
 #include "base/task/single_thread_task_runner.h"
+#include "net/base/features.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/http/cache_body_compressor.h"
 #include "net/http/http_cache_transaction.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_status_code.h"
 #include "net/http/partial_data.h"
+#include "net/shared_dictionary/shared_dictionary_constants.h"
 
 namespace net {
 
 namespace {
+
+constexpr int kMaxFinalizeRounds = 32;
 
 bool IsValidResponseForWriter(bool is_partial,
                               const HttpResponseInfo* response_info) {
@@ -106,10 +114,21 @@ bool HttpCache::Writers::StopCaching(bool keep_entry) {
   }
 
   network_read_only_ = true;
+
+  // If compressed bytes have been written, the entry is corrupt (mixed
+  // uncompressed + compressed). Force doom regardless of keep_entry.
+  if (compressing_for_cache_ && compressor_ &&
+      compressor_->total_input_bytes() > 0) {
+    keep_entry = false;
+  }
+
   if (!keep_entry) {
     should_keep_entry_ = false;
     cache_->WritersDoomEntryRestartTransactions(entry_.get());
   }
+
+  compressor_.reset();
+  compressing_for_cache_ = false;
 
   return true;
 }
@@ -192,7 +211,7 @@ void HttpCache::Writers::EraseTransaction(Transaction* transaction,
                                           int result) {
   // The transaction should be part of all_writers.
   auto it = all_writers_.find(transaction);
-  CHECK(it != all_writers_.end(), base::NotFatalUntil::M130);
+  CHECK(it != all_writers_.end());
   EraseTransaction(it, result);
 }
 
@@ -270,17 +289,52 @@ void HttpCache::Writers::ProcessFailure(int error) {
 
 void HttpCache::Writers::TruncateEntry() {
   DCHECK(ShouldTruncate());
-  auto data = base::MakeRefCounted<PickledIOBuffer>();
-  response_info_truncation_.Persist(data->pickle(),
-                                    true /* skip_transient_headers*/,
-                                    true /* response_truncated */);
-  data->Done();
-  io_buf_len_ = data->pickle()->size();
+  auto data = base::MakeRefCounted<PickledIOBuffer>(
+      response_info_truncation_.MakePickle(
+          /*skip_transient_headers=*/true,
+          /*response_truncated=*/true));
+  io_buf_len_ = data->size();
+  entry_->GetEntry()->WriteData(kResponseInfoIndex, 0, data.get(), io_buf_len_,
+                                base::DoNothing(), true);
+}
+
+void HttpCache::Writers::UpdateEncodedBodySizeInCacheEntry() {
+  if (!network_transaction_ || !entry_) {
+    return;
+  }
+
+  // Only store the encoded body size for shared dictionary responses, where
+  // the cache stores the decompressed body and we need to remember the
+  // original on-the-wire size. For other content encodings (e.g., gzip),
+  // decompression happens after cache, so the cached size already matches
+  // the encoded size.
+  if (!response_info_truncation_.did_use_shared_dictionary) {
+    return;
+  }
+
+  base::ByteSize encoded_body_bytes =
+      network_transaction_->GetReceivedBodyBytes();
+  if (encoded_body_bytes.is_zero()) {
+    return;
+  }
+
+  response_info_truncation_.encoded_body_size = encoded_body_bytes;
+  auto data = base::MakeRefCounted<PickledIOBuffer>(
+      response_info_truncation_.MakePickle(
+          /*skip_transient_headers=*/true,
+          /*response_truncated=*/false));
+  io_buf_len_ = data->size();
   entry_->GetEntry()->WriteData(kResponseInfoIndex, 0, data.get(), io_buf_len_,
                                 base::DoNothing(), true);
 }
 
 bool HttpCache::Writers::ShouldTruncate() {
+  // A partial zstd frame is undecodable. Doom rather than truncate.
+  if (compressing_for_cache_) {
+    should_keep_entry_ = false;
+    return false;
+  }
+
   // Don't set the flag for sparse entries or for entries that cannot be
   // resumed.
   if (!should_keep_entry_ || partial_do_not_truncate_) {
@@ -290,7 +344,9 @@ bool HttpCache::Writers::ShouldTruncate() {
   // Check the response headers for strong validators.
   // Note that if this is a 206, content-length was already fixed after calling
   // PartialData::ResponseHeadersOK().
-  if (response_info_truncation_.headers->GetContentLength() <= 0 ||
+  std::optional<base::ByteCount> content_length =
+      response_info_truncation_.headers->GetContentLength();
+  if (!content_length.has_value() || content_length->is_zero() ||
       response_info_truncation_.headers->HasHeaderValue("Accept-Ranges",
                                                         "none") ||
       !response_info_truncation_.headers->HasStrongValidators()) {
@@ -310,9 +366,7 @@ bool HttpCache::Writers::ShouldTruncate() {
     return false;
   }
 
-  int64_t content_length =
-      response_info_truncation_.headers->GetContentLength();
-  if (content_length >= 0 && content_length <= current_size) {
+  if (content_length->InBytes() <= current_size) {
     return false;
   }
 
@@ -362,6 +416,18 @@ int HttpCache::Writers::DoLoop(int result) {
         break;
       case State::CACHE_WRITE_DATA_COMPLETE:
         rv = DoCacheWriteDataComplete(rv);
+        break;
+      case State::CACHE_WRITE_COMPRESSED_FINALIZE:
+        rv = DoCacheWriteCompressedFinalize(rv);
+        break;
+      case State::CACHE_WRITE_COMPRESSED_FINALIZE_COMPLETE:
+        rv = DoCacheWriteCompressedFinalizeComplete(rv);
+        break;
+      case State::CACHE_WRITE_COMPRESSED_METADATA:
+        rv = DoCacheWriteCompressedMetadata();
+        break;
+      case State::CACHE_WRITE_COMPRESSED_METADATA_COMPLETE:
+        rv = DoCacheWriteCompressedMetadataComplete(rv);
         break;
       case State::UNSET:
         NOTREACHED() << "bad state";
@@ -440,6 +506,9 @@ int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
   next_state_ = State::CACHE_WRITE_DATA_COMPLETE;
   write_len_ = num_bytes;
   if (!num_bytes || network_read_only_) {
+    if (compressing_for_cache_) {
+      compressed_write_len_ = 0;
+    }
     return num_bytes;
   }
 
@@ -461,9 +530,22 @@ int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
 
   if (!partial) {
     last_disk_cache_access_start_time_ = base::TimeTicks::Now();
-    rv = entry_->GetEntry()->WriteData(kResponseContentIndex, current_size,
-                                       read_buf_.get(), num_bytes,
-                                       std::move(io_callback), true);
+
+    // On the first data chunk, decide whether to compress.
+    // Require single writer to prevent parallel writer corruption.
+    if (current_size == 0 && !compressing_for_cache_ && !compressor_ &&
+        all_writers_.size() == 1 && ShouldCompressForCache()) {
+      InitCompression();
+    }
+
+    if (compressing_for_cache_) {
+      rv = CompressAndWriteBlock(num_bytes, current_size,
+                                 std::move(io_callback));
+    } else {
+      rv = entry_->GetEntry()->WriteData(kResponseContentIndex, current_size,
+                                         read_buf_.get(), num_bytes,
+                                         std::move(io_callback), true);
+    }
   } else {
     rv = partial->CacheWrite(entry_->GetEntry(), read_buf_.get(), num_bytes,
                              std::move(io_callback));
@@ -475,7 +557,9 @@ int HttpCache::Writers::DoCacheWriteDataComplete(int result) {
   DCHECK(!all_writers_.empty());
   DCHECK_GE(write_len_, 0);
 
-  if (result != write_len_) {
+  int expected_result =
+      compressing_for_cache_ ? compressed_write_len_ : write_len_;
+  if (result != expected_result) {
     next_state_ = State::NONE;
 
     // Note that it is possible for cache write to fail if the size of the file
@@ -495,6 +579,13 @@ int HttpCache::Writers::DoCacheWriteDataComplete(int result) {
 
   next_state_ = State::NONE;
   OnDataReceived(write_len_);
+
+  // If OnDataReceived started the compressed-finalize state machine,
+  // let DoLoop continue processing those states before returning to the
+  // caller. The finalize path will return write_len_ when complete.
+  if (next_state_ != State::NONE) {
+    return OK;
+  }
 
   return write_len_;
 }
@@ -518,32 +609,37 @@ void HttpCache::Writers::OnDataReceived(int result) {
   if (result == 0) {
     // Check if the response is actually completed or if not, attempt to mark
     // the entry as truncated in OnNetworkReadFailure.
-    int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
+    // For CDT, Content-Length is wire bytes while the cache stores decompressed
+    // plaintext. Compare against actual wire bytes received to detect
+    // truncation.
     DCHECK(network_transaction_);
+    int64_t bytes_received =
+        compressing_for_cache_
+            ? network_transaction_->GetReceivedBodyBytes().InBytes()
+            : entry_->GetEntry()->GetDataSize(kResponseContentIndex);
     const HttpResponseInfo* response_info =
         network_transaction_->GetResponseInfo();
-    int64_t content_length = response_info->headers->GetContentLength();
-    if (content_length >= 0 && content_length > current_size) {
+    std::optional<base::ByteCount> content_length =
+        response_info->headers->GetContentLength();
+    if (content_length && content_length->InBytes() > bytes_received) {
       OnNetworkReadFailure(result);
       return;
     }
 
-    if (active_transaction_) {
-      EraseTransaction(active_transaction_, result);
+    // If compressing, finalize the zstd frame and persist metadata before
+    // completing. The normal EOF cleanup runs inside
+    // DoCacheWriteCompressedFinalizeComplete after the frame is flushed.
+    if (compressing_for_cache_) {
+      next_state_ = State::CACHE_WRITE_COMPRESSED_FINALIZE;
+      return;
     }
-    active_transaction_ = nullptr;
-    CompleteWaitingForReadTransactions(write_len_);
 
-    // Invoke entry processing.
-    DCHECK(ContainsOnlyIdleWriters());
-    TransactionSet make_readers;
-    for (auto& writer : all_writers_) {
-      make_readers.insert(writer.first);
-    }
-    all_writers_.clear();
-    SetCacheCallback(true, make_readers);
-    // We assume the set callback will be called immediately.
-    DCHECK_EQ(next_state_, State::NONE);
+    // Store the original encoded body size in the cached response info so
+    // that future reads from cache can report the correct encodedBodySize
+    // for Resource Timing.
+    UpdateEncodedBodySizeInCacheEntry();
+
+    CompleteWritingAndNotifyTransactions();
     return;
   }
 
@@ -561,6 +657,8 @@ void HttpCache::Writers::OnCacheWriteFailure() {
 
   // Now writers will only be reading from the network.
   network_read_only_ = true;
+  compressor_.reset();
+  compressing_for_cache_ = false;
 
   active_transaction_ = nullptr;
 
@@ -580,8 +678,8 @@ void HttpCache::Writers::CompleteWaitingForReadTransactions(int result) {
     if (result >= 0) {  // success
       // Save the data in the waiting transaction's read buffer.
       it->second.write_len = std::min(it->second.read_buf_len, result);
-      memcpy(it->second.read_buf->data(), read_buf_->data(),
-             it->second.write_len);
+      it->second.read_buf->span().copy_prefix_from(
+          read_buf_->first(it->second.write_len));
       callback_result = it->second.write_len;
     }
 
@@ -620,6 +718,271 @@ void HttpCache::Writers::SetCacheCallback(bool success,
   cache_callback_ = base::BindOnce(&HttpCache::WritersDoneWritingToEntry,
                                    cache_->GetWeakPtr(), entry_, success,
                                    should_keep_entry_, make_readers);
+}
+
+bool HttpCache::Writers::ShouldCompressForCache() const {
+#if defined(NET_DISABLE_ZSTD_COMPRESS)
+  return false;
+#else
+  if (!base::FeatureList::IsEnabled(features::kHttpCacheZstdCompression)) {
+    return false;
+  }
+  if (!base::FeatureList::IsEnabled(features::kHttpCacheZstdDecompression)) {
+    return false;
+  }
+  if (!response_info_truncation_.did_use_shared_dictionary) {
+    return false;
+  }
+  // CDT responses carry Content-Encoding: dcb or dcz, which is fine -
+  // the shared dictionary layer already decoded them. Reject only standard
+  // transport encodings (gzip, br, etc.) to avoid double-compression.
+  std::optional<std::string> content_encoding =
+      response_info_truncation_.headers->GetNormalizedHeader(
+          "Content-Encoding");
+  if (content_encoding &&
+      *content_encoding !=
+          shared_dictionary::kSharedBrotliContentEncodingName &&
+      *content_encoding != shared_dictionary::kSharedZstdContentEncodingName) {
+    return false;
+  }
+  return true;
+#endif
+}
+
+void HttpCache::Writers::InitCompression() {
+  compressor_ = std::make_unique<CacheBodyCompressor>();
+  if (!compressor_->Init()) {
+    compressor_.reset();
+    return;
+  }
+  if (const auto max_size = cache_->compression_max_size_for_testing()) {
+    compressor_->set_max_uncompressed_size_for_testing(*max_size);  // IN-TEST
+  }
+  compressing_for_cache_ = true;
+}
+
+bool HttpCache::Writers::CanJoin() const {
+  // compressor_ is transiently null during the metadata write after
+  // finalization, so block joins once compression has started.
+  if (compressing_for_cache_) {
+    return compressor_ && compressor_->total_input_bytes() == 0;
+  }
+  return true;
+}
+
+int HttpCache::Writers::CompressAndWriteBlock(
+    int num_bytes,
+    int current_size,
+    CompletionOnceCallback io_callback) {
+  CHECK(compressor_);
+  const int compressed = compressor_->Compress(
+      read_buf_->span().first(static_cast<size_t>(num_bytes)),
+      /*is_last_chunk=*/false);
+
+  if (compressed < 0) {
+    return ERR_CACHE_WRITE_FAILURE;
+  }
+
+  if (compressed == 0) {
+    compressed_write_len_ = 0;
+    return 0;
+  }
+
+  compressed_write_len_ = compressed;
+  return entry_->GetEntry()->WriteData(
+      kResponseContentIndex, current_size, compressor_->output_buffer(),
+      compressed_write_len_, std::move(io_callback), true);
+}
+
+int HttpCache::Writers::DoCacheWriteCompressedFinalize(int result) {
+  DCHECK_EQ(OK, result);
+
+  // StopCaching() may have been called during a prior async disk write,
+  // resetting compressor_. The entry is already doomed; clean up.
+  if (!compressor_) {
+    next_state_ = State::NONE;
+    should_keep_entry_ = false;
+    CompleteWaitingForReadTransactions(write_len_);
+    if (active_transaction_) {
+      EraseTransaction(active_transaction_, 0);
+    }
+    active_transaction_ = nullptr;
+    SetCacheCallback(false, TransactionSet());
+    return write_len_;
+  }
+  next_state_ = State::CACHE_WRITE_COMPRESSED_FINALIZE_COMPLETE;
+
+  const int remaining = compressor_->Finalize();
+  if (remaining < 0) {
+    return ERR_CACHE_WRITE_FAILURE;
+  }
+
+  finalize_remaining_ = remaining;
+  compressed_write_len_ = base::checked_cast<int>(compressor_->output_length());
+
+  if (compressed_write_len_ == 0 && finalize_remaining_ == 0) {
+    return OK;
+  }
+
+  int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
+  CompletionOnceCallback io_callback = base::BindOnce(
+      &HttpCache::Writers::OnIOComplete, weak_factory_.GetWeakPtr());
+
+  return entry_->GetEntry()->WriteData(
+      kResponseContentIndex, current_size, compressor_->output_buffer(),
+      compressed_write_len_, std::move(io_callback), true);
+}
+
+int HttpCache::Writers::DoCacheWriteCompressedFinalizeComplete(int result) {
+  DCHECK(!all_writers_.empty());
+
+  if (result != compressed_write_len_) {
+    // Finalize write failed, but the download itself completed successfully.
+    // Doom the entry but return success to the consumer.
+    next_state_ = State::NONE;
+    compressor_.reset();
+    should_keep_entry_ = false;
+    CompleteWaitingForReadTransactions(write_len_);
+    if (active_transaction_) {
+      EraseTransaction(active_transaction_, 0);
+    }
+    active_transaction_ = nullptr;
+    SetCacheCallback(false, TransactionSet());
+    return write_len_;
+  }
+
+  // StopCaching() may have been called during the async disk write,
+  // resetting compressor_. The entry is already doomed; clean up.
+  if (!compressor_) {
+    next_state_ = State::NONE;
+    should_keep_entry_ = false;
+    CompleteWaitingForReadTransactions(write_len_);
+    if (active_transaction_) {
+      EraseTransaction(active_transaction_, 0);
+    }
+    active_transaction_ = nullptr;
+    SetCacheCallback(false, TransactionSet());
+    return write_len_;
+  }
+
+  // If zstd still has more output to flush, loop back.
+  if (finalize_remaining_ > 0) {
+    if (++finalize_rounds_ > kMaxFinalizeRounds) {
+      DVLOG(1) << "zstd finalization exceeded max rounds";
+      next_state_ = State::NONE;
+      compressor_.reset();
+      should_keep_entry_ = false;
+      CompleteWaitingForReadTransactions(write_len_);
+      if (active_transaction_) {
+        EraseTransaction(active_transaction_, 0);
+      }
+      active_transaction_ = nullptr;
+      SetCacheCallback(false, TransactionSet());
+      return write_len_;
+    }
+    next_state_ = State::CACHE_WRITE_COMPRESSED_FINALIZE;
+    return OK;
+  }
+
+  // Frame complete. Persist the uncompressed size and encoded body size
+  // metadata in a single awaited disk write.
+  UpdateResponseInfoForCompression();
+
+  compressor_.reset();
+
+  next_state_ = State::CACHE_WRITE_COMPRESSED_METADATA;
+  return OK;
+}
+
+void HttpCache::Writers::UpdateResponseInfoForCompression() {
+  CHECK(compressor_);
+  response_info_truncation_.zstd_uncompressed_body_size =
+      compressor_->total_input_bytes();
+
+  // Also set encoded_body_size so we don't need a second metadata write
+  // (UpdateEncodedBodySizeInCacheEntry would write the same index entry again).
+  if (network_transaction_) {
+    base::ByteSize encoded_body_bytes =
+        network_transaction_->GetReceivedBodyBytes();
+    if (!encoded_body_bytes.is_zero()) {
+      response_info_truncation_.encoded_body_size = encoded_body_bytes;
+    }
+  }
+
+  metadata_buf_ = base::MakeRefCounted<PickledIOBuffer>(
+      response_info_truncation_.MakePickle(
+          /*skip_transient_headers=*/true,
+          /*response_truncated=*/false));
+  metadata_buf_len_ = metadata_buf_->size();
+}
+
+int HttpCache::Writers::DoCacheWriteCompressedMetadata() {
+  DCHECK(metadata_buf_);
+  next_state_ = State::CACHE_WRITE_COMPRESSED_METADATA_COMPLETE;
+
+  CompletionOnceCallback io_callback = base::BindOnce(
+      &HttpCache::Writers::OnIOComplete, weak_factory_.GetWeakPtr());
+
+  return entry_->GetEntry()->WriteData(kResponseInfoIndex, 0,
+                                       metadata_buf_.get(), metadata_buf_len_,
+                                       std::move(io_callback), true);
+}
+
+int HttpCache::Writers::DoCacheWriteCompressedMetadataComplete(int result) {
+  DCHECK(!all_writers_.empty());
+
+  if (result != metadata_buf_len_) {
+    // Metadata write failed. The body on disk is compressed but has no
+    // decompression marker - doom the entry to prevent serving raw zstd.
+    next_state_ = State::NONE;
+    metadata_buf_.reset();
+    should_keep_entry_ = false;
+    CompleteWaitingForReadTransactions(write_len_);
+    if (active_transaction_) {
+      EraseTransaction(active_transaction_, 0);
+    }
+    active_transaction_ = nullptr;
+    SetCacheCallback(false, TransactionSet());
+    return write_len_;
+  }
+
+  metadata_buf_.reset();
+
+  next_state_ = State::NONE;
+  CompleteWritingAndNotifyTransactions();
+  return write_len_;
+}
+
+void HttpCache::Writers::CompleteWritingAndNotifyTransactions() {
+  DCHECK_EQ(next_state_, State::NONE);
+  if (active_transaction_) {
+    EraseTransaction(active_transaction_, 0);
+  }
+  active_transaction_ = nullptr;
+  CompleteWaitingForReadTransactions(write_len_);
+
+  CHECK(ContainsOnlyIdleWriters());
+
+  if (compressing_for_cache_) {
+    // Idle writers haven't read the updated metadata
+    // (zstd_uncompressed_body_size) so they cannot become direct readers.
+    // Erase them with ERR_CACHE_RACE to trigger a full restart.
+    for (auto it = all_writers_.begin(); it != all_writers_.end();) {
+      it = EraseTransaction(it, ERR_CACHE_RACE);
+    }
+    // success=false with should_keep_entry_=true causes
+    // WritersDoneWritingToEntry to call RestartHeadersPhaseTransactions,
+    // which restarts done_headers_queue_ transactions via ERR_CACHE_RACE.
+    SetCacheCallback(false, TransactionSet());
+    return;
+  }
+
+  TransactionSet make_readers;
+  for (auto& writer : all_writers_) {
+    make_readers.insert(writer.first);
+  }
+  all_writers_.clear();
+  SetCacheCallback(true, make_readers);
 }
 
 void HttpCache::Writers::OnIOComplete(int result) {

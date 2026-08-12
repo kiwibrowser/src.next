@@ -47,6 +47,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_shader.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -172,7 +173,7 @@ PaintImage Image::ResizeAndOrientImage(
     sampling = SkSamplingOptions(SkCubicResampler::CatmullRom());
 
   SkCanvas* canvas = surface->getCanvas();
-  canvas->concat(AffineTransformToSkMatrix(transform));
+  canvas->concat(transform.ToSkMatrix());
   canvas->drawImage(image.GetSwSkImage(), 0, 0, sampling, &paint);
 
   return PaintImageBuilder::WithProperties(std::move(image))
@@ -236,7 +237,6 @@ sk_sp<PaintShader> CreatePatternShader(const PaintImage& image,
 }
 
 SkTileMode ComputeTileMode(float left, float right, float min, float max) {
-  DCHECK(left < right);
   return left >= min && right <= max ? SkTileMode::kClamp : SkTileMode::kRepeat;
 }
 
@@ -252,14 +252,23 @@ void Image::DrawPattern(GraphicsContext& context,
   if (dest_rect.IsEmpty())
     return;  // nothing to draw
 
-  PaintImage image = PaintImageForCurrentFrame();
+  PaintImage image;
+  if (auto* bitmap = DynamicTo<BitmapImage>(this);
+      bitmap && draw_options.image_node_animation_info &&
+      draw_options.image_node_animation_info->node_id != kInvalidDOMNodeId) {
+    image = bitmap->PaintImageForCurrentFrameWithInfo(
+        draw_options.image_node_animation_info);
+  } else {
+    image = PaintImageForCurrentFrame();
+  }
+
   if (!image)
     return;  // nothing to draw
 
   // Fetch orientation data if needed.
   ImageOrientation orientation = ImageOrientationEnum::kDefault;
   if (draw_options.respect_orientation)
-    orientation = CurrentFrameOrientation();
+    orientation = Orientation();
 
   // |tiling_info.image_rect| is in source image space, unscaled but oriented.
   // image-resolution information is baked into |tiling_info.scale|,
@@ -323,10 +332,9 @@ void Image::DrawPattern(GraphicsContext& context,
 
   StartAnimation();
 
-  if (CurrentFrameIsLazyDecoded()) {
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
-                         "Draw LazyPixelRef", TRACE_EVENT_SCOPE_THREAD,
-                         "LazyPixelRef", image_id);
+  if (IsLazyDecoded()) {
+    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
+                        "Draw LazyPixelRef", "LazyPixelRef", image_id);
   }
 }
 
@@ -340,13 +348,15 @@ scoped_refptr<Image> Image::ImageForDefaultFrame() {
   return image;
 }
 
-PaintImageBuilder Image::CreatePaintImageBuilder() {
+PaintImageBuilder Image::CreatePaintImageBuilder(
+    std::optional<PaintImage::Id> paint_id) {
   auto animation_type = MaybeAnimated() ? PaintImage::AnimationType::kAnimated
                                         : PaintImage::AnimationType::kStatic;
-  return PaintImageBuilder::WithDefault()
-      .set_id(stable_image_id_)
-      .set_animation_type(animation_type)
-      .set_is_multipart(is_multipart_);
+  auto builder = PaintImageBuilder::WithDefault();
+  builder.set_id(paint_id.value_or(stable_image_id_));
+  builder.set_animation_type(animation_type).set_is_multipart(is_multipart_);
+
+  return builder;
 }
 
 bool Image::ApplyShader(cc::PaintFlags& flags,
@@ -355,7 +365,15 @@ bool Image::ApplyShader(cc::PaintFlags& flags,
                         const ImageDrawOptions& draw_options) {
   // Default shader impl: attempt to build a shader based on the current frame
   // SkImage.
-  PaintImage image = PaintImageForCurrentFrame();
+  PaintImage image;
+  if (auto* bitmap = DynamicTo<BitmapImage>(this);
+      bitmap && draw_options.image_node_animation_info &&
+      draw_options.image_node_animation_info->node_id != kInvalidDOMNodeId) {
+    image = bitmap->PaintImageForCurrentFrameWithInfo(
+        draw_options.image_node_animation_info);
+  } else {
+    image = PaintImageForCurrentFrame();
+  }
   if (!image)
     return false;
 
@@ -388,7 +406,7 @@ SkBitmap Image::AsSkBitmapForCurrentFrame(
 
     ImageOrientation orientation = ImageOrientationEnum::kDefault;
     if (respect_image_orientation == kRespectImageOrientation)
-      orientation = bitmap_image->CurrentFrameOrientation();
+      orientation = bitmap_image->Orientation();
 
     gfx::Vector2dF image_scale(1, 1);
     if (density_corrected_size != paint_image_size) {
@@ -420,7 +438,7 @@ DarkModeImageCache* Image::GetDarkModeImageCache() {
 
 gfx::RectF Image::CorrectSrcRectForImageOrientation(gfx::SizeF image_size,
                                                     gfx::RectF src_rect) const {
-  ImageOrientation orientation = CurrentFrameOrientation();
+  ImageOrientation orientation = Orientation();
   DCHECK(orientation != ImageOrientationEnum::kDefault);
   AffineTransform forward_map = orientation.TransformFromDefault(image_size);
   AffineTransform inverse_map = forward_map.Inverse();

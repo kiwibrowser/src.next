@@ -8,17 +8,23 @@ import android.content.res.ColorStateList;
 
 import androidx.annotation.ColorRes;
 import androidx.annotation.DrawableRes;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.omnibox.AutocompleteRequestType;
+import org.chromium.components.security_state.ConnectionMaliciousContentStatus;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.url.GURL;
 
 /** Interface defining a provider for data needed by the {@link LocationBar}. */
 // TODO(crbug.com/40154848): Refine split between LocationBar properties and sub-component
 // properties, e.g. security state, which is only used by the status icon.
+@NullMarked
 public interface LocationBarDataProvider {
     /**
      * Observer interface for consumers who wish to subscribe to updates of LocationBarData. Since
@@ -45,7 +51,20 @@ public interface LocationBarDataProvider {
 
         default void onTitleChanged() {}
 
-        default void onUrlChanged() {}
+        /**
+         * Notifies when the tab changed. This is guaranteed to be called before onUrlChanged().
+         *
+         * @param previousTab The tab that was active before this change. May be null if there was
+         *     no previously selected tab.
+         */
+        default void onTabChanged(@Nullable Tab previousTab) {}
+
+        /**
+         * Notifies when the URL changed.
+         *
+         * @param isTabChanging whether this URL change event was caused by a tab change.
+         */
+        default void onUrlChanged(boolean isTabChanging) {}
 
         default void hintZeroSuggestRefresh() {}
 
@@ -63,11 +82,9 @@ public interface LocationBarDataProvider {
      * Returns the url of the current tab, represented as a GURL. Returns an empty GURL when there
      * is no tab.
      */
-    @NonNull
     GURL getCurrentGurl();
 
     /** Returns the delegate for the NewTabPage shown for the current tab. */
-    @NonNull
     NewTabPageDelegate getNewTabPageDelegate();
 
     /** Returns whether the currently active page is loading. */
@@ -101,17 +118,34 @@ public interface LocationBarDataProvider {
     boolean isOffTheRecord();
 
     /** Returns the currently active tab, if there is one. */
-    @Nullable
-    Tab getTab();
+    @Nullable Tab getTab();
+
+    /**
+     * Returns the default request type for this provider. This allows the omnibox to maintain a
+     * specialized state even when not focused.
+     */
+    default @AutocompleteRequestType int getDefaultRequestType() {
+        return AutocompleteRequestType.SEARCH;
+    }
+
+    /**
+     * Returns the FuseboxSessionState linked to the current tab (if present) or context
+     * (otherwise).
+     */
+    @Nullable FuseboxSessionState getFuseboxSessionState();
 
     /** Returns whether the LocationBarDataProvider currently has an active tab. */
     boolean hasTab();
+
+    /** Returns the active WebContents. */
+    default @Nullable WebContents getWebContents() {
+        return null;
+    }
 
     /** Returns the contents of the {@link UrlBar}. */
     UrlBarData getUrlBarData();
 
     /** Returns the title of the current page, or the empty string if there is currently no tab. */
-    @NonNull
     String getTitle();
 
     /** Returns the primary color to use for the background. */
@@ -132,13 +166,17 @@ public interface LocationBarDataProvider {
     @ConnectionSecurityLevel
     int getSecurityLevel();
 
+    /** Returns the current {@link ConnectionMaliciousContentStatus}. */
+    @ConnectionMaliciousContentStatus
+    int getMaliciousContentStatus();
+
     /**
      * Returns the current page classification.
      *
-     * @param isPrefetch If the page classification for prefetching is requested.
+     * @param prefetch whether retrieving page class in prefetch context.
      * @return Integer value representing the {@code OmniboxEventProto.PageClassification}.
      */
-    int getPageClassification(boolean isPrefetch);
+    int getPageClassification(boolean prefetch);
 
     /**
      * Returns the resource ID of the icon that should be displayed or 0 if no icon should be shown.
@@ -155,4 +193,7 @@ public interface LocationBarDataProvider {
     /** Returns the resource ID of the content description for the security icon. */
     @StringRes
     int getSecurityIconContentDescriptionResourceId();
+
+    /** Returns the user-selected placement of the Toolbar. */
+    NonNullObservableSupplier<@ControlsPosition Integer> getToolbarPositionSupplier();
 }

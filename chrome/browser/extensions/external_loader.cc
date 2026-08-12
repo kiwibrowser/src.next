@@ -6,8 +6,11 @@
 
 #include "base/check_op.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/external_provider_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/external_provider_interface.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 using content::BrowserThread;
 
@@ -15,7 +18,7 @@ namespace extensions {
 
 ExternalLoader::ExternalLoader() = default;
 
-void ExternalLoader::Init(ExternalProviderImpl* owner) {
+void ExternalLoader::Init(ExternalProviderInterface* owner) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   owner_ = owner;
 }
@@ -35,13 +38,13 @@ void ExternalLoader::OwnerShutdown() {
 
 ExternalLoader::~ExternalLoader() = default;
 
-void ExternalLoader::LoadFinished(base::Value::Dict prefs) {
+void ExternalLoader::LoadFinished(base::DictValue prefs) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (owner_)
     owner_->SetPrefs(std::move(prefs));
 }
 
-void ExternalLoader::OnUpdated(base::Value::Dict updated_prefs) {
+void ExternalLoader::OnUpdated(base::DictValue updated_prefs) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (owner_)
     owner_->UpdatePrefs(std::move(updated_prefs));

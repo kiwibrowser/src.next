@@ -27,13 +27,6 @@ class DownloadUtils {
                                           const GURL& url,
                                           const std::string& file_name);
   static bool ShouldAutoOpenDownload(download::DownloadItem* item);
-  static bool IsOmaDownloadDescription(const std::string& mime_type);
-
-  // Called to show the download manager, with a choice to focus on prefetched
-  // content instead of regular downloads. |download_open_source| is the source
-  // of the action.
-  static void ShowDownloadManager(bool show_prefetched_content,
-                                  DownloadOpenSource open_source);
   static bool IsDownloadUserInitiated(download::DownloadItem* download);
 };
 

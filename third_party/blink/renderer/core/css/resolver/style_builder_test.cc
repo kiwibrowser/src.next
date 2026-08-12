@@ -38,7 +38,8 @@ TEST_F(StyleBuilderTest, WritingModeChangeDirtiesFont) {
       StyleResolverState state(GetDocument(), *GetDocument().body(),
                                nullptr /* StyleRecalcContext */,
                                StyleRequest(&parent_style));
-      state.SetStyle(GetDocument().GetStyleResolver().InitialStyle());
+      state.CreateNewClonedStyle(
+          GetDocument().GetStyleResolver().InitialStyle());
 
       // This test assumes that initial 'writing-mode' is not 'vertical-lr'.
       ASSERT_NE(WritingMode::kVerticalLr,
@@ -71,7 +72,8 @@ TEST_F(StyleBuilderTest, TextOrientationChangeDirtiesFont) {
       StyleResolverState state(GetDocument(), *GetDocument().body(),
                                nullptr /* StyleRecalcContext */,
                                StyleRequest(&parent_style));
-      state.SetStyle(GetDocument().GetStyleResolver().InitialStyle());
+      state.CreateNewClonedStyle(
+          GetDocument().GetStyleResolver().InitialStyle());
 
       // This test assumes that initial 'text-orientation' is not 'upright'.
       ASSERT_NE(ETextOrientation::kUpright,
@@ -86,11 +88,14 @@ TEST_F(StyleBuilderTest, TextOrientationChangeDirtiesFont) {
 }
 
 TEST_F(StyleBuilderTest, HasExplicitInheritance) {
-  const auto& parent_style = GetDocument().GetStyleResolver().InitialStyle();
+  const ComputedStyle* parent_style =
+      GetDocument().GetStyleResolver().InitialStyleForElement();
   StyleResolverState state(GetDocument(), *GetDocument().body(),
                            nullptr /* StyleRecalcContext */,
-                           StyleRequest(&parent_style));
-  state.SetStyle(GetDocument().GetStyleResolver().InitialStyle());
+                           StyleRequest(parent_style));
+  state.CreateNewClonedStyle(*parent_style);
+
+  EXPECT_FALSE(state.ParentStyle()->ChildHasExplicitInheritance());
   EXPECT_FALSE(state.StyleBuilder().HasExplicitInheritance());
 
   const CSSValue& inherited = *CSSInheritedValue::Create();
@@ -102,6 +107,7 @@ TEST_F(StyleBuilderTest, HasExplicitInheritance) {
   StyleBuilder::ApplyProperty(GetCSSPropertyBackgroundColor(), state,
                               inherited);
   EXPECT_TRUE(state.StyleBuilder().HasExplicitInheritance());
+  EXPECT_TRUE(state.ParentStyle()->ChildHasExplicitInheritance());
 }
 
 TEST_F(StyleBuilderTest, GridTemplateAreasApplyOrder) {
@@ -128,7 +134,7 @@ TEST_F(StyleBuilderTest, GridTemplateAreasApplyOrder) {
                            StyleRequest(&parent_style));
 
   // grid-template-areas applied first.
-  state.SetStyle(parent_style);
+  state.CreateNewClonedStyle(parent_style);
   StyleBuilder::ApplyProperty(grid_template_areas, state,
                               *grid_template_areas_value);
   StyleBuilder::ApplyProperty(grid_template_columns, state,
@@ -138,7 +144,7 @@ TEST_F(StyleBuilderTest, GridTemplateAreasApplyOrder) {
   const ComputedStyle* style1 = state.TakeStyle();
 
   // grid-template-areas applied last.
-  state.SetStyle(parent_style);
+  state.CreateNewClonedStyle(parent_style);
   StyleBuilder::ApplyProperty(grid_template_columns, state,
                               *grid_template_columns_value);
   StyleBuilder::ApplyProperty(grid_template_rows, state,

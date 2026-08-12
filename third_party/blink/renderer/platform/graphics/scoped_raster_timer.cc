@@ -17,9 +17,7 @@ ScopedRasterTimer::ScopedRasterTimer(
     : raster_interface_(raster_interface), host_(host) {
   // Subsample the RasterTimer metrics to reduce overhead.
   constexpr float kRasterMetricProbability = 0.01;
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::MetricsSubSampler, metrics_subsampler,
-                                  ());
-  if (!metrics_subsampler.ShouldSample(kRasterMetricProbability) &&
+  if (!base::ShouldRecordSubsampledMetric(kRasterMetricProbability) &&
       !always_measure_for_testing) {
     return;
   }
@@ -100,10 +98,10 @@ bool ScopedRasterTimer::AsyncGpuRasterTimer::CheckTimer(
 void ScopedRasterTimer::Host::CheckGpuTimers(
     gpu::raster::RasterInterface* raster_interface) {
   CHECK(raster_interface);
-  WTF::EraseIf(gpu_timers_,
-               [raster_interface](std::unique_ptr<AsyncGpuRasterTimer>& timer) {
-                 return timer->CheckTimer(*raster_interface);
-               });
+  EraseIf(gpu_timers_,
+          [raster_interface](std::unique_ptr<AsyncGpuRasterTimer>& timer) {
+            return timer->CheckTimer(*raster_interface);
+          });
 }
 
 void ScopedRasterTimer::Host::AddGpuTimer(

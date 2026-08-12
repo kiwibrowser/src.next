@@ -6,20 +6,22 @@
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_
 
 #include "base/memory/raw_ptr.h"
-#include "ui/gfx/native_widget_types.h"
+#include "extensions/buildflags/buildflags.h"
+#include "ui/gfx/native_ui_types.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 class ExtensionFunction;
 
 namespace extensions {
 class WindowController;
-}
 
 // Provides Chrome-specific details to ExtensionFunction
 // implementations.
 class ChromeExtensionFunctionDetails {
  public:
-  // Constructs a new ChromeExtensionFunctionDetails instance for |function|.
-  // This instance does not own |function|. |function| must outlive this
+  // Constructs a new ChromeExtensionFunctionDetails instance for `function`.
+  // This instance does not own `function`. `function` must outlive this
   // instance.
   explicit ChromeExtensionFunctionDetails(ExtensionFunction* function);
 
@@ -50,7 +52,7 @@ class ChromeExtensionFunctionDetails {
   // TODO(devlin): This method is incredibly non-deterministic (sometimes just
   // returning "any" browser), and almost never the right thing to use. Instead,
   // use ExtensionFunction::GetSenderWebContents(). We should get rid of this.
-  extensions::WindowController* GetCurrentWindowController() const;
+  WindowController* GetCurrentWindowController() const;
 
   // Find a UI surface to display any UI (like a permission prompt) for the
   // extension calling this function. This will check, in order of preference,
@@ -70,5 +72,7 @@ class ChromeExtensionFunctionDetails {
   // ChromeExtensionFunctionDetails instance.
   raw_ptr<ExtensionFunction> function_;
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_

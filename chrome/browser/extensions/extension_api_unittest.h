@@ -8,31 +8,27 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/values.h"
-#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/browser/extensions/extension_service_test_base.h"
 
 class ExtensionFunction;
 
 namespace extensions {
 
 // Use this class to enable calling API functions in a unittest.
-// By default, this class will create and load an empty unpacked |extension_|,
+// By default, this class will create and load an empty unpacked `extension_`,
 // which will be used in all API function calls. This extension can be
 // overridden using set_extension().
 // By default, this class does not create a WebContents for the API functions.
-// When calling RunFunction[AndReturn*], |args| should be in JSON format,
+// When calling RunFunction[AndReturn*], `args` should be in JSON format,
 // wrapped in a list. See also RunFunction* in api_test_utils.h.
 // TODO(yoz): Move users of this base class to use the equivalent base class
 // in extensions/browser/api_unittest.h.
-class ExtensionApiUnittest : public BrowserWithTestWindowTest {
+class ExtensionApiUnittest : public ExtensionServiceTestBase {
  public:
-  template <typename... TaskEnvironmentTraits>
-  explicit ExtensionApiUnittest(TaskEnvironmentTraits&&... traits)
-      : BrowserWithTestWindowTest(
-            std::forward<TaskEnvironmentTraits>(traits)...) {}
+  ExtensionApiUnittest();
   ~ExtensionApiUnittest() override;
 
   const Extension* extension() const { return extension_.get(); }
@@ -46,7 +42,7 @@ class ExtensionApiUnittest : public BrowserWithTestWindowTest {
   void SetUp() override;
 
   // Various ways of running an API function. These methods take ownership of
-  // |function|. |args| should be in JSON format, wrapped in a list.
+  // `function`. `args` should be in JSON format, wrapped in a list.
   // See also the RunFunction* methods in api_test_utils.h.
 
   // Return the function result as a base::Value, if successful, or nullopt on
@@ -55,16 +51,16 @@ class ExtensionApiUnittest : public BrowserWithTestWindowTest {
       scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 
-  // Return the function result as a base::Value::Dict, if successful, or
+  // Return the function result as a base::DictValue, if successful, or
   // nullopt on failure. This will EXPECT-fail if the result is not a
-  // base::Value::Dict.
-  std::optional<base::Value::Dict> RunFunctionAndReturnDictionary(
+  // base::DictValue.
+  std::optional<base::DictValue> RunFunctionAndReturnDictionary(
       scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 
-  // Return the function result as a base::Value::List, if successful, or
+  // Return the function result as a base::ListValue, if successful, or
   // nullopt on failure. This will EXPECT-fail if the result is not a list.
-  std::optional<base::Value::List> RunFunctionAndReturnList(
+  std::optional<base::ListValue> RunFunctionAndReturnList(
       scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 

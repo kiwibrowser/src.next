@@ -12,14 +12,13 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "components/signin/public/base/signin_client.h"
 #include "extensions/buildflags/buildflags.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 class WaitForNetworkCallbackHelper;
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
 class ForceSigninVerifier;
 #endif
 class Profile;
@@ -52,19 +51,15 @@ class ChromeSigninClient : public SigninClient {
   //   destruction (See ChromeSigninClient::PreSignOut(),
   //   PrimaryAccountPolicyManager::EnsurePrimaryAccountAllowedForProfile()).
   // - Supervised users on Android.IsRevokeSyncConsentAllowed
-  // - Lacros main profile: the primary account
-  //   must be the device account and can't be changed/cleared.
-  bool IsClearPrimaryAccountAllowed(bool has_sync_account) const override;
+  bool IsClearPrimaryAccountAllowed() const override;
 
-  // TODO(crbug.com/40240844): Remove revoke sync restriction when allowing
-  // enterprise users to revoke sync fully launches.
-  bool IsRevokeSyncConsentAllowed() const override;
   void PreSignOut(
       base::OnceCallback<void(SignoutDecision)> on_signout_decision_reached,
-      signin_metrics::ProfileSignout signout_source_metric,
-      bool has_sync_account) override;
+      signin_metrics::ProfileSignout signout_source_metric) override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   network::mojom::CookieManager* GetCookieManager() override;
+  network::mojom::DeviceBoundSessionManager* GetDeviceBoundSessionManager()
+      const override;
   network::mojom::NetworkContext* GetNetworkContext() override;
   bool AreSigninCookiesAllowed() override;
   bool AreSigninCookiesDeletedOnExit() override;
@@ -81,17 +76,10 @@ class ChromeSigninClient : public SigninClient {
   void OnPrimaryAccountChanged(
       signin::PrimaryAccountChangeEvent event_details) override;
 
-#if BUILDFLAG(ENABLE_BOUND_SESSION_CREDENTIALS)
   std::unique_ptr<signin::BoundSessionOAuthMultiLoginDelegate>
   CreateBoundSessionOAuthMultiloginDelegate() const override;
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  std::optional<account_manager::Account> GetInitialPrimaryAccount() override;
-  std::optional<bool> IsInitialPrimaryAccountChild() const override;
-  void RemoveAccount(const account_manager::AccountKey& account_key) override;
-  void RemoveAllAccounts() override;
-#endif
+  signin::OAuthConsumer GetOAuthConsumerFromId(
+      signin::OAuthConsumerId oauth_consumer_id) const override;
 
   // Used in tests to override the URLLoaderFactory returned by
   // GetURLLoaderFactory().
@@ -103,38 +91,26 @@ class ChromeSigninClient : public SigninClient {
   virtual void LockForceSigninProfile(const base::FilePath& profile_path);
 
  private:
-  // Returns what kind of signout is possible given `has_sync_account` and the
-  // optional `signout_source`. If `signout_source` is provided, it will be
-  // check against some sources that must always allow signout regardless of any
-  // restriction, otherwise the decision is made based on the profile's status.
+  // Returns what kind of signout is possible given the optional
+  // `signout_source`. If `signout_source` is provided, it will be check against
+  // some sources that must always allow signout regardless of any restriction,
+  // otherwise the decision is made based on the profile's status.
   SigninClient::SignoutDecision GetSignoutDecision(
-      bool has_sync_account,
       const std::optional<signin_metrics::ProfileSignout> signout_source) const;
   void VerifySyncToken();
   void OnCloseBrowsersSuccess(
       const signin_metrics::ProfileSignout signout_source_metric,
       bool should_sign_out,
-      bool has_sync_account,
       const base::FilePath& profile_path);
   void OnCloseBrowsersAborted(const base::FilePath& profile_path);
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
   // Used as the `on_token_fetch_complete` callback in the
   // `ForceSigninVerifier`.
   void OnTokenFetchComplete(bool token_is_valid);
 #endif
 
-  // virtual for unit testing: cut down dependency on `BookmarkModel`.
-  // The following two functions will return `std::nullopt` if the
-  // `BookmarkModel` is nullptr.
-  virtual std::optional<size_t> GetAllBookmarksCount();
-  virtual std::optional<size_t> GetBookmarkBarBookmarksCount();
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // Returns `std::nullopt` if the `ExtensionRegistry` is nullptr.
-  virtual std::optional<size_t> GetExtensionsCount();
-#endif
-
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
   void RecordOpenTabCount(signin_metrics::AccessPoint access_point,
                           signin::ConsentLevel consent_level);
 #endif
@@ -147,12 +123,15 @@ class ChromeSigninClient : public SigninClient {
   base::OnceCallback<void(SignoutDecision)> on_signout_decision_reached_;
 
   bool should_display_user_manager_ = true;
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
   std::unique_ptr<ForceSigninVerifier> force_signin_verifier_;
 #endif
 
   scoped_refptr<network::SharedURLLoaderFactory>
       url_loader_factory_for_testing_;
+
+  // Used to convert OAuthConsumerIds to OAuthConsumers.
+  std::unique_ptr<signin::OAuthConsumerRegistry> oauth_consumer_registry_;
 };
 
 #endif  // CHROME_BROWSER_SIGNIN_CHROME_SIGNIN_CLIENT_H_

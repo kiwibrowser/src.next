@@ -4,10 +4,11 @@
 
 import type {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReached, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 
 import type {ItemDelegate} from './item.js';
+import {TOAST_DURATION_MS} from './item_util.js';
 
 type Constructor<T> = new (...args: any[]) => T;
 
@@ -26,8 +27,8 @@ export const ItemMixin = <T extends Constructor<CrLitElement>>(
       };
     }
 
-    data?: chrome.developerPrivate.ExtensionInfo;
-    delegate?: ItemDelegate;
+    accessor data: chrome.developerPrivate.ExtensionInfo|undefined;
+    accessor delegate: ItemDelegate|undefined;
 
     /**
      * Prevents reloading the same item while it's already being reloaded.
@@ -49,8 +50,12 @@ export const ItemMixin = <T extends Constructor<CrLitElement>>(
         case ExtensionType.EXTENSION:
         case ExtensionType.SHARED_MODULE:
           return extensionLabel;
+        case ExtensionType.THEME:
+          assertNotReached(
+              'Don\'t send themes to the chrome://extensions page');
+        default:
+          assertNotReachedCase(type, 'Item type is not App or Extension.');
       }
-      assertNotReached('Item type is not App or Extension.');
     }
 
     /**
@@ -111,7 +116,7 @@ export const ItemMixin = <T extends Constructor<CrLitElement>>(
       try {
         await this.delegate.reloadItem(this.data.id);
         toastManager.hide();
-        toastManager.duration = 3000;
+        toastManager.duration = TOAST_DURATION_MS;
         toastManager.show(loadTimeData.getString('itemReloaded'));
       } catch (loadError) {
         toastManager.hide();

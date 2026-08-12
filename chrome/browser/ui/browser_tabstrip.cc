@@ -7,9 +7,10 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -25,26 +26,35 @@
 namespace chrome {
 
 content::WebContents* AddAndReturnTabAt(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     const GURL& url,
     int idx,
     bool foreground,
-    std::optional<tab_groups::TabGroupId> group) {
+    std::optional<tab_groups::TabGroupId> group,
+    bool pinned) {
   // Time new tab page creation time.  We keep track of the timing data in
   // WebContents, but we want to include the time it takes to create the
   // WebContents object too.
   base::TimeTicks new_tab_start_time = base::TimeTicks::Now();
-  NavigateParams params(browser, url.is_empty() ? browser->GetNewTabURL() : url,
-                        ui::PAGE_TRANSITION_TYPED);
+  const GURL resolved_url =
+      url.is_empty() ? browser->GetBrowserForMigrationOnly()->GetNewTabURL()
+                     : url;
+  NavigateParams params(browser, resolved_url, ui::PAGE_TRANSITION_TYPED);
   params.disposition = foreground ? WindowOpenDisposition::NEW_FOREGROUND_TAB
                                   : WindowOpenDisposition::NEW_BACKGROUND_TAB;
   params.tabstrip_index = idx;
   params.group = group;
-  params.pwa_navigation_capturing_force_off = true;
+  if (pinned) {
+    params.tabstrip_add_types |= AddTabTypes::ADD_PINNED;
+  }
+
+  params.web_app_navigation_data.emplace();
+  params.web_app_navigation_data->SetNavigationCapturingForceOff(true);
   Navigate(&params);
 
-  if (!params.navigated_or_inserted_contents)
+  if (!params.navigated_or_inserted_contents) {
     return nullptr;
+  }
 
   CoreTabHelper* core_tab_helper =
       CoreTabHelper::FromWebContents(params.navigated_or_inserted_contents);
@@ -53,12 +63,14 @@ content::WebContents* AddAndReturnTabAt(
   return params.navigated_or_inserted_contents;
 }
 
-void AddTabAt(Browser* browser,
+void AddTabAt(BrowserWindowInterface* browser,
               const GURL& url,
               int idx,
               bool foreground,
-              std::optional<tab_groups::TabGroupId> group) {
-  /*void*/ AddAndReturnTabAt(browser, url, idx, foreground, std::move(group));
+              std::optional<tab_groups::TabGroupId> group,
+              bool pinned) {
+  /*void*/ AddAndReturnTabAt(browser, url, idx, foreground, std::move(group),
+                             pinned);
 }
 
 content::WebContents* AddSelectedTabWithURL(Browser* browser,
@@ -66,19 +78,21 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
                                             ui::PageTransition transition) {
   NavigateParams params(browser, url, transition);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  params.pwa_navigation_capturing_force_off = true;
+  params.web_app_navigation_data.emplace();
+  params.web_app_navigation_data->SetNavigationCapturingForceOff(true);
   Navigate(&params);
   return params.navigated_or_inserted_contents;
 }
 
 content::WebContents* AddWebContents(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     content::WebContents* source_contents,
     std::unique_ptr<content::WebContents> new_contents,
     const GURL& target_url,
     WindowOpenDisposition disposition,
     const blink::mojom::WindowFeatures& window_features,
-    NavigateParams::WindowAction window_action) {
+    NavigateParams::WindowAction window_action,
+    bool user_gesture) {
   // No code for this yet.
   DCHECK(disposition != WindowOpenDisposition::SAVE_TO_DISK);
   // Can't create a new contents for the current tab - invalid case.
@@ -94,6 +108,7 @@ content::WebContents* AddWebContents(
   // was created without a user gesture, we have to set |user_gesture| to true,
   // so it gets correctly focused.
   params.user_gesture = true;
+  params.original_user_gesture = user_gesture;
 
   ConfigureTabGroupForNavigation(&params);
 
@@ -111,21 +126,32 @@ void CloseWebContents(Browser* browser,
     return;
   }
 
-  browser->tab_strip_model()->CloseWebContentsAt(
-      index, add_to_history ? TabCloseTypes::CLOSE_CREATE_HISTORICAL_TAB
-                            : TabCloseTypes::CLOSE_NONE);
+  uint32_t close_types = TabCloseTypes::CLOSE_NONE;
+  if (auto* data = TabCloseTypesData::FromWebContents(contents)) {
+    close_types = data->close_types();
+    contents->RemoveUserData(TabCloseTypesData::UserDataKey());
+  }
+
+  if (add_to_history) {
+    close_types |= TabCloseTypes::CLOSE_CREATE_HISTORICAL_TAB;
+  }
+
+  browser->tab_strip_model()->CloseWebContentsAt(index, close_types);
 }
 
 void ConfigureTabGroupForNavigation(NavigateParams* nav_params) {
-  if (!nav_params->source_contents)
-    return;
-
-  if (!nav_params->browser || !nav_params->browser->SupportsWindowFeature(
-                                  Browser::WindowFeature::FEATURE_TABSTRIP)) {
+  if (!nav_params->source_contents) {
     return;
   }
 
-  TabStripModel* model = nav_params->browser->tab_strip_model();
+  if (!nav_params->browser ||
+      !nav_params->browser->GetBrowserForMigrationOnly()->SupportsWindowFeature(
+          Browser::WindowFeature::kFeatureTabStrip)) {
+    return;
+  }
+
+  TabStripModel* model =
+      nav_params->browser->GetBrowserForMigrationOnly()->tab_strip_model();
   DCHECK(model);
 
   const int source_index =
@@ -134,8 +160,9 @@ void ConfigureTabGroupForNavigation(NavigateParams* nav_params) {
   // If the source tab is not in the current tab strip (e.g. if the current
   // navigation is in a new window), don't set the group. Groups cannot be
   // shared across multiple windows.
-  if (source_index == TabStripModel::kNoTab)
+  if (source_index == TabStripModel::kNoTab) {
     return;
+  }
 
   // Do not set the group when the navigation is from bookmarks.
   if (ui::PageTransitionCoreTypeIs(nav_params->transition,

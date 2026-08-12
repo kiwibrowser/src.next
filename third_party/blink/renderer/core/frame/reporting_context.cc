@@ -9,9 +9,12 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/connection_allowlist_violation_report_body.h"
+#include "third_party/blink/renderer/core/frame/csp/csp_hash_report_body.h"
 #include "third_party/blink/renderer/core/frame/csp/csp_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation_report_body.h"
 #include "third_party/blink/renderer/core/frame/document_policy_violation_report_body.h"
+#include "third_party/blink/renderer/core/frame/integrity_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/intervention_report_body.h"
 #include "third_party/blink/renderer/core/frame/permissions_policy_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/report.h"
@@ -45,6 +48,10 @@ class DictionaryValueReportBody final : public ReportBody {
   const mojom::blink::ReportBodyPtr body_;
 };
 
+bool ShouldReportBeVisibleToObservers(Report* report) {
+  return report->type() != ReportType::kCSPHash;
+}
+
 }  // namespace
 
 // static
@@ -54,7 +61,7 @@ ReportingContext::ReportingContext(ExecutionContext& context)
     : Supplement<ExecutionContext>(context),
       execution_context_(context),
       reporting_service_(&context),
-      receiver_(this, &context) {}
+      receivers_(this, &context) {}
 
 // static
 ReportingContext* ReportingContext::From(ExecutionContext* context) {
@@ -69,8 +76,7 @@ ReportingContext* ReportingContext::From(ExecutionContext* context) {
 
 void ReportingContext::Bind(
     mojo::PendingReceiver<mojom::blink::ReportingObserver> receiver) {
-  receiver_.reset();
-  receiver_.Bind(std::move(receiver),
+  receivers_.Add(std::move(receiver),
                  execution_context_->GetTaskRunner(TaskType::kMiscPlatformAPI));
 }
 
@@ -122,7 +128,7 @@ void ReportingContext::Trace(Visitor* visitor) const {
   visitor->Trace(report_buffer_);
   visitor->Trace(execution_context_);
   visitor->Trace(reporting_service_);
-  visitor->Trace(receiver_);
+  visitor->Trace(receivers_);
   Supplement<ExecutionContext>::Trace(visitor);
 }
 
@@ -132,7 +138,8 @@ void ReportingContext::CountReport(Report* report) {
 
   if (type == ReportType::kDeprecation) {
     feature = WebFeature::kDeprecationReport;
-  } else if (type == ReportType::kPermissionsPolicyViolation) {
+  } else if (type == ReportType::kPermissionsPolicyViolation ||
+             type == ReportType::kPotentialPermissionsPolicyViolation) {
     feature = WebFeature::kFeaturePolicyReport;
   } else if (type == ReportType::kIntervention) {
     feature = WebFeature::kInterventionReport;
@@ -154,11 +161,15 @@ ReportingContext::GetReportingService() const {
 }
 
 void ReportingContext::NotifyInternal(Report* report) {
+  if (!ShouldReportBeVisibleToObservers(report)) {
+    return;
+  }
+
   // Buffer the report.
   if (!report_buffer_.Contains(report->type())) {
     report_buffer_.insert(
         report->type(),
-        MakeGarbageCollected<HeapLinkedHashSet<Member<Report>>>());
+        MakeGarbageCollected<GCedHeapLinkedHashSet<Member<Report>>>());
   }
   report_buffer_.find(report->type())->value->insert(report);
 
@@ -175,10 +186,32 @@ void ReportingContext::NotifyInternal(Report* report) {
 void ReportingContext::SendToReportingAPI(Report* report,
                                           const String& endpoint) const {
   const String& type = report->type();
-  if (!(type == ReportType::kCSPViolation || type == ReportType::kDeprecation ||
+  if (!(type == ReportType::kCSPViolation || type == ReportType::kCSPHash ||
+        type == ReportType::kDeprecation ||
         type == ReportType::kPermissionsPolicyViolation ||
+        type == ReportType::kPotentialPermissionsPolicyViolation ||
+        type == ReportType::kIntegrityViolation ||
         type == ReportType::kIntervention ||
-        type == ReportType::kDocumentPolicyViolation)) {
+        type == ReportType::kDocumentPolicyViolation ||
+        type == ReportType::kConnectionAllowlistViolation)) {
+    return;
+  }
+
+  KURL url = KURL(report->url());
+  // CSP Hash and IntegrityPolicy reports are not a LocationReportBody.
+  if (type == ReportType::kCSPHash) {
+    const CSPHashReportBody* body =
+        static_cast<CSPHashReportBody*>(report->body());
+    GetReportingService()->QueueCSPHashReport(
+        url, endpoint, body->subresourceURL(), body->hash(), body->type(),
+        body->destination());
+    return;
+  } else if (type == ReportType::kIntegrityViolation) {
+    const IntegrityViolationReportBody* body =
+        static_cast<IntegrityViolationReportBody*>(report->body());
+    GetReportingService()->QueueIntegrityViolationReport(
+        url, endpoint, body->documentURL(), body->blockedURL(),
+        body->destination(), body->reportOnly());
     return;
   }
 
@@ -186,7 +219,6 @@ void ReportingContext::SendToReportingAPI(Report* report,
       static_cast<LocationReportBody*>(report->body());
   int line_number = location_body->lineNumber().value_or(0);
   int column_number = location_body->columnNumber().value_or(0);
-  KURL url = KURL(report->url());
 
   if (type == ReportType::kCSPViolation) {
     // Send the CSP violation report.
@@ -198,7 +230,8 @@ void ReportingContext::SendToReportingAPI(Report* report,
         body->effectiveDirective() ? body->effectiveDirective() : "",
         body->originalPolicy() ? body->originalPolicy() : "",
         body->sourceFile(), body->sample(), body->disposition().AsString(),
-        body->statusCode(), line_number, column_number);
+        body->statusCode(), line_number, column_number, body->urlHash(),
+        body->evalHash());
   } else if (type == ReportType::kDeprecation) {
     // Send the deprecation report.
     const DeprecationReportBody* body =
@@ -214,6 +247,14 @@ void ReportingContext::SendToReportingAPI(Report* report,
     GetReportingService()->QueuePermissionsPolicyViolationReport(
         url, endpoint, body->featureId(), body->disposition(), body->message(),
         body->sourceFile(), line_number, column_number);
+  } else if (type == ReportType::kPotentialPermissionsPolicyViolation) {
+    // Send the potential permissions policy violation report.
+    const PermissionsPolicyViolationReportBody* body =
+        static_cast<PermissionsPolicyViolationReportBody*>(report->body());
+    GetReportingService()->QueuePotentialPermissionsPolicyViolationReport(
+        url, endpoint, body->featureId(), body->disposition(), body->message(),
+        body->allowAttribute(), body->srcAttribute(), body->sourceFile(),
+        line_number, column_number);
   } else if (type == ReportType::kIntervention) {
     // Send the intervention report.
     const InterventionReportBody* body =
@@ -229,6 +270,12 @@ void ReportingContext::SendToReportingAPI(Report* report,
     GetReportingService()->QueueDocumentPolicyViolationReport(
         url, endpoint, body->featureId(), body->disposition(), body->message(),
         body->sourceFile(), line_number, column_number);
+  } else if (type == ReportType::kConnectionAllowlistViolation) {
+    const ConnectionAllowlistViolationReportBody* body =
+        static_cast<ConnectionAllowlistViolationReportBody*>(report->body());
+    GetReportingService()->QueueConnectionAllowlistViolationReport(
+        url, endpoint, body->url(), body->connection(), body->allowlist(),
+        body->disposition().AsString());
   }
 }
 

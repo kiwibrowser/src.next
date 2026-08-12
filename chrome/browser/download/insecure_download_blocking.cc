@@ -12,6 +12,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -23,7 +24,9 @@
 #include "components/download/public/common/download_stats.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/download_item_utils.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/url_util.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -82,80 +85,6 @@ const base::FeatureParam<std::string> kWarnExtensionList(
 const char kSafeExtensions[] =
     ("txt,css,json,csv,tsv,jpg,jpeg,png,gif,tif,tiff,ico,webp,aac,midi,ogg,"
      "wav,webm,mp3,webm,mp4,mpeg,mov,wmv");
-
-// Map the string file extension to the corresponding histogram enum.
-InsecureDownloadExtensions GetExtensionEnumFromString(
-    const std::string& extension) {
-  if (extension.empty())
-    return InsecureDownloadExtensions::kNone;
-
-  auto lower_extension = base::ToLowerASCII(extension);
-  for (auto candidate : kExtensionsToEnum) {
-    if (candidate.extension == lower_extension)
-      return candidate.value;
-  }
-  return InsecureDownloadExtensions::kUnknown;
-}
-
-// Get the appropriate histogram metric name for the initiator/download security
-// state combo.
-std::string GetDownloadBlockingExtensionMetricName(
-    InsecureDownloadSecurityStatus status) {
-  switch (status) {
-    case InsecureDownloadSecurityStatus::kInitiatorUnknownFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorUnknown,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::kInitiatorUnknownFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorUnknown,
-          kInsecureDownloadHistogramTargetInsecure);
-    case InsecureDownloadSecurityStatus::kInitiatorSecureFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorSecure,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::kInitiatorSecureFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorSecure,
-          kInsecureDownloadHistogramTargetInsecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInsecureFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInsecure,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInsecureFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInsecure,
-          kInsecureDownloadHistogramTargetInsecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInferredSecureFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInferredSecure,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInferredSecureFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInferredSecure,
-          kInsecureDownloadHistogramTargetInsecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInferredInsecureFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInferredInsecure,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::kInitiatorInferredInsecureFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInferredInsecure,
-          kInsecureDownloadHistogramTargetInsecure);
-    case InsecureDownloadSecurityStatus::kDownloadIgnored:
-      NOTREACHED();
-    case InsecureDownloadSecurityStatus::kInitiatorInsecureNonUniqueFileSecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInsecureNonUnique,
-          kInsecureDownloadHistogramTargetSecure);
-    case InsecureDownloadSecurityStatus::
-        kInitiatorInsecureNonUniqueFileInsecure:
-      return GetDLBlockingHistogramName(
-          kInsecureDownloadExtensionInitiatorInsecureNonUnique,
-          kInsecureDownloadHistogramTargetInsecure);
-  }
-  NOTREACHED();
-}
 
 // Get appropriate enum value for the initiator/download security state combo
 // for histogram reporting. |dl_secure| signifies whether the download was
@@ -225,6 +154,14 @@ struct InsecureDownloadData {
     // Extract extension.
 #if BUILDFLAG(IS_WIN)
     extension_ = base::WideToUTF8(path.FinalExtension());
+#elif BUILDFLAG(IS_ANDROID)
+    // If the file path is a content URI, extension should come from the file
+    // name.
+    if (path.IsContentUri()) {
+      extension_ = item->GetFileNameToReportUser().FinalExtension();
+    } else {
+      extension_ = path.FinalExtension();
+    }
 #else
     extension_ = path.FinalExtension();
 #endif
@@ -260,7 +197,7 @@ struct InsecureDownloadData {
     bool insecure_nonunique = false;
     if (initiator_.has_value() &&
         !network::IsUrlPotentiallyTrustworthy(initiator_->GetURL()) &&
-        net::IsHostnameNonUnique(initiator_->GetURL().host())) {
+        net::IsHostnameNonUnique(initiator_->GetURL().GetHost())) {
       insecure_nonunique = true;
     }
 
@@ -281,12 +218,16 @@ struct InsecureDownloadData {
     auto download_source = item->GetDownloadSource();
     auto transition_type = item->GetTransitionType();
     if (download_source == DownloadSource::RETRY ||
-        (transition_type & ui::PAGE_TRANSITION_RELOAD) ||
-        (transition_type & ui::PAGE_TRANSITION_TYPED) ||
+        ui::PageTransitionCoreTypeIs(transition_type,
+                                     ui::PAGE_TRANSITION_RELOAD) ||
+        ui::PageTransitionCoreTypeIs(transition_type,
+                                     ui::PAGE_TRANSITION_TYPED) ||
         (transition_type & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) ||
         (transition_type & ui::PAGE_TRANSITION_FORWARD_BACK) ||
-        (transition_type & ui::PAGE_TRANSITION_AUTO_TOPLEVEL) ||
-        (transition_type & ui::PAGE_TRANSITION_AUTO_BOOKMARK) ||
+        ui::PageTransitionCoreTypeIs(transition_type,
+                                     ui::PAGE_TRANSITION_AUTO_TOPLEVEL) ||
+        ui::PageTransitionCoreTypeIs(transition_type,
+                                     ui::PAGE_TRANSITION_AUTO_BOOKMARK) ||
         (transition_type & ui::PAGE_TRANSITION_FROM_API) ||
         download_source == DownloadSource::OFFLINE_PAGE ||
         download_source == DownloadSource::INTERNAL_API ||
@@ -301,16 +242,8 @@ struct InsecureDownloadData {
       auto security_status =
           GetDownloadBlockingEnum(initiator_, download_delivered_securely,
                                   initiator_inferred, insecure_nonunique);
-      base::UmaHistogramEnumeration(
-          GetDownloadBlockingExtensionMetricName(security_status),
-          GetExtensionEnumFromString(extension_));
       base::UmaHistogramEnumeration(kInsecureDownloadHistogramName,
                                     security_status);
-      download::RecordDownloadValidationMetrics(
-          download::DownloadMetricsCallsite::kMixContentDownloadBlocking,
-          download::CheckDownloadConnectionSecurity(item->GetURL(),
-                                                    item->GetUrlChain()),
-          download::DownloadContentFromMimeType(item->GetMimeType(), false));
 
       // Mixed downloads are those initiated by a secure initiator but not
       // delivered securely.
@@ -325,7 +258,8 @@ struct InsecureDownloadData {
     // downloads. For example, downloads are blocked even if they're initiated
     // from the omnibox.
     if (download_source == DownloadSource::RETRY ||
-        (transition_type & ui::PAGE_TRANSITION_RELOAD) ||
+        ui::PageTransitionCoreTypeIs(transition_type,
+                                     ui::PAGE_TRANSITION_RELOAD) ||
         (transition_type & ui::PAGE_TRANSITION_FROM_API) ||
         download_source == DownloadSource::OFFLINE_PAGE ||
         download_source == DownloadSource::INTERNAL_API ||
@@ -343,6 +277,23 @@ struct InsecureDownloadData {
            !download_delivered_securely) &&
           !net::IsLocalhost(dl_url);
     }
+
+    // A download is considered initiated from a trusted WebUI (e.g. chrome://)
+    // if either:
+    // 1. The download's Tab URL is a trusted WebUI scheme. This covers cases
+    //    where the user clicked a link on a WebUI page. This URL persists even
+    //    if the user navigates away or closes the tab (in which case the
+    //    RenderFrameHost might be null or point to a different page).
+    // 2. The RenderFrameHost's last committed URL is a trusted WebUI scheme.
+    //    This covers top-level navigations (e.g. typing a file URL in the
+    //    Omnibox on the NTP). In this case, the download's Tab URL reflects the
+    //    pending file URL (not the NTP), so we must rely on the RenderFrameHost
+    //    to identify the initiating context.
+    content::RenderFrameHost* rfh =
+        content::DownloadItemUtils::GetRenderFrameHost(item);
+    is_initiated_from_trusted_webui_ =
+        item->GetTabUrl().SchemeIs(content::kChromeUIScheme) ||
+        (rfh && rfh->GetLastCommittedURL().SchemeIs(content::kChromeUIScheme));
   }
 
   std::optional<url::Origin> initiator_;
@@ -355,6 +306,14 @@ struct InsecureDownloadData {
   bool is_mixed_content_;
   // Was the download initiated by an insecure origin or delivered insecurely?
   bool is_insecure_download_;
+  // Was the download initiated from a trusted WebUI page (chrome://...)?
+  // This can happen in the following cases:
+  // 1) Clicking on a HTTP downloadable link on a WebUI page (e.g. NTP or
+  //    chrome://history).
+  // 2) Right clicking "Save Link As..." to a HTTP link on a WebUI page.
+  // 3) Top-level navigation to a downloadable HTTP URL initiated from a WebUI
+  //    page (e.g. typing a file URL in the Omnibox on NTP).
+  bool is_initiated_from_trusted_webui_;
 };
 
 // Check if |extension| is contained in the comma separated |extension_list|.
@@ -374,14 +333,14 @@ bool ContainsExtension(const std::string& extension_list,
 // Just print a descriptive message to the console about the blocked download.
 // |is_blocked| indicates whether this download will be blocked now.
 void PrintConsoleMessage(const InsecureDownloadData& data) {
-  content::WebContents* web_contents =
-      content::DownloadItemUtils::GetWebContents(data.item_);
-  if (!web_contents) {
+  content::RenderFrameHost* rfh =
+      content::DownloadItemUtils::GetRenderFrameHost(data.item_);
+  if (!rfh) {
     return;
   }
 
   if (data.is_mixed_content_) {
-    web_contents->GetPrimaryMainFrame()->AddMessageToConsole(
+    rfh->AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kError,
         base::StringPrintf(
             "Mixed Content: The site at '%s' was loaded over a secure "
@@ -396,7 +355,15 @@ void PrintConsoleMessage(const InsecureDownloadData& data) {
     return;
   }
 
-  web_contents->GetPrimaryMainFrame()->AddMessageToConsole(
+  // The user saved a HTTP resource from a chrome:// WebUI page
+  // (e.g. NTP or history). This is arguably a valid use case unless we
+  // completely ban users from visiting HTTP sites, so don't warn. Otherwise,
+  // an error will be generated and uploaded to the crash server.
+  if (data.is_initiated_from_trusted_webui_) {
+    return;
+  }
+
+  rfh->AddMessageToConsole(
       blink::mojom::ConsoleMessageLevel::kError,
       base::StringPrintf(
           "The file at '%s' was %s an insecure connection. "

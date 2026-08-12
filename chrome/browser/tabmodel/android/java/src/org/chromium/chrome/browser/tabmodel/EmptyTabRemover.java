@@ -4,23 +4,31 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-
+import org.chromium.base.Callback;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
 
 /** Empty implementation of {@link TabRemover}. */
+@NullMarked
 public class EmptyTabRemover implements TabRemover {
     @Override
     public void closeTabs(
-            @NonNull TabClosureParams tabClosureParams,
+            TabClosureParams tabClosureParams,
             boolean allowDialog,
             @Nullable TabModelActionListener listener) {}
 
     @Override
-    public void forceCloseTabs(@NonNull TabClosureParams tabClosureParams) {}
+    public void prepareCloseTabs(
+            TabClosureParams tabClosureParams,
+            boolean allowDialog,
+            @Nullable TabModelActionListener listener,
+            Callback<TabClosureParams> onPreparedCallback) {}
+
+    @Override
+    public void forceCloseTabs(TabClosureParams tabClosureParams) {}
 
     @Override
     public void removeTab(
-            @NonNull Tab tab, boolean allowDialog, @Nullable TabModelActionListener listener) {}
+            Tab tab, boolean allowDialog, @Nullable TabModelActionListener listener) {}
 }

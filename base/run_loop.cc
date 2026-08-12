@@ -11,8 +11,9 @@
 #include "base/functional/callback.h"
 #include "base/observer_list.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/trace_event/base_tracing.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace base {
 
@@ -63,8 +64,8 @@ RunLoop::Delegate::~Delegate() {
 bool RunLoop::Delegate::ShouldQuitWhenIdle() {
   const auto* top_loop = active_run_loops_.top().get();
   if (top_loop->quit_when_idle_) {
-    TRACE_EVENT_WITH_FLOW0("toplevel.flow", "RunLoop_ExitedOnIdle",
-                           TRACE_ID_LOCAL(top_loop), TRACE_EVENT_FLAG_FLOW_IN);
+    TRACE_EVENT("toplevel.flow", "RunLoop_ExitedOnIdle",
+                perfetto::TerminatingFlow::FromPointer(top_loop));
     return true;
   }
   return false;
@@ -111,8 +112,9 @@ void RunLoop::Run(const Location& location) {
   // explicit action making this trace event very useful.
   TRACE_EVENT("test", "RunLoop::Run", "location", location);
 
-  if (!BeforeRun())
+  if (!BeforeRun()) {
     return;
+  }
 
   // If there is a RunLoopTimeout active then set the timeout.
   // TODO(crbug.com/40602467): Use real-time for Run() timeouts so that they
@@ -164,8 +166,8 @@ void RunLoop::Quit() {
   // While Quit() is an "OUT" call to reach one of the quit-states ("IN"),
   // OUT|IN is used to visually link multiple Quit*() together which can help
   // when debugging flaky tests.
-  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "RunLoop::Quit", TRACE_ID_LOCAL(this),
-                         TRACE_EVENT_FLAG_FLOW_OUT | TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("toplevel.flow", "RunLoop::Quit",
+              perfetto::Flow::FromPointer(this));
 
   quit_called_ = true;
   if (running_ && delegate_->active_run_loops_.top() == this) {
@@ -187,9 +189,8 @@ void RunLoop::QuitWhenIdle() {
   }
 
   // OUT|IN as in Quit() to link all Quit*() together should there be multiple.
-  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "RunLoop::QuitWhenIdle",
-                         TRACE_ID_LOCAL(this),
-                         TRACE_EVENT_FLAG_FLOW_OUT | TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("toplevel.flow", "RunLoop::QuitWhenIdle",
+              perfetto::Flow::FromPointer(this));
 
   quit_when_idle_ = true;
   quit_when_idle_called_ = true;
@@ -243,20 +244,21 @@ void RunLoop::RemoveNestingObserverOnCurrentThread(NestingObserver* observer) {
   delegate->nesting_observers_.RemoveObserver(observer);
 }
 
-
 #if DCHECK_IS_ON()
 ScopedDisallowRunningRunLoop::ScopedDisallowRunningRunLoop()
     : current_delegate_(delegate),
       previous_run_allowance_(current_delegate_ &&
                               current_delegate_->allow_running_for_testing_) {
-  if (current_delegate_)
+  if (current_delegate_) {
     current_delegate_->allow_running_for_testing_ = false;
+  }
 }
 
 ScopedDisallowRunningRunLoop::~ScopedDisallowRunningRunLoop() {
   DCHECK_EQ(current_delegate_, delegate);
-  if (current_delegate_)
+  if (current_delegate_) {
     current_delegate_->allow_running_for_testing_ = previous_run_allowance_;
+  }
 }
 #else   // DCHECK_IS_ON()
 // Defined out of line so that the compiler doesn't inline these and realize
@@ -300,8 +302,8 @@ bool RunLoop::BeforeRun() {
 
   // Allow Quit to be called before Run.
   if (quit_called_) {
-    TRACE_EVENT_WITH_FLOW0("toplevel.flow", "RunLoop_ExitedEarly",
-                           TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_IN);
+    TRACE_EVENT("toplevel.flow", "RunLoop_ExitedEarly",
+                perfetto::TerminatingFlow::FromPointer(this));
     return false;
   }
 
@@ -311,10 +313,12 @@ bool RunLoop::BeforeRun() {
   const bool is_nested = active_run_loops.size() > 1;
 
   if (is_nested) {
-    for (auto& observer : delegate_->nesting_observers_)
+    for (auto& observer : delegate_->nesting_observers_) {
       observer.OnBeginNestedRunLoop();
-    if (type_ == Type::kNestableTasksAllowed)
+    }
+    if (type_ == Type::kNestableTasksAllowed) {
       delegate_->EnsureWorkScheduled();
+    }
   }
 
   running_ = true;
@@ -326,8 +330,8 @@ void RunLoop::AfterRun() {
 
   running_ = false;
 
-  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "RunLoop_Exited",
-                         TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("toplevel.flow", "RunLoop_Exited",
+              perfetto::TerminatingFlow::FromPointer(this));
 
   auto& active_run_loops = delegate_->active_run_loops_;
   DCHECK_EQ(active_run_loops.top(), this);
@@ -335,12 +339,14 @@ void RunLoop::AfterRun() {
 
   // Exiting a nested RunLoop?
   if (!active_run_loops.empty()) {
-    for (auto& observer : delegate_->nesting_observers_)
+    for (auto& observer : delegate_->nesting_observers_) {
       observer.OnExitNestedRunLoop();
+    }
 
     // Execute deferred Quit, if any:
-    if (active_run_loops.top()->quit_called_)
+    if (active_run_loops.top()->quit_called_) {
       delegate_->Quit();
+    }
   }
 }
 

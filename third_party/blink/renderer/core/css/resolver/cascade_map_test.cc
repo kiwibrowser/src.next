@@ -11,33 +11,39 @@
 
 namespace blink {
 
+using CascadePriorityList = CascadeMap::CascadePriorityList;
+using BackingVector = CascadeMap::CascadePriorityList::BackingVector;
+
 namespace {
-CascadePriority UaPriority(wtf_size_t position) {
+CascadePriority UaPriority(wtf_size_t rule_index,
+                           wtf_size_t declaration_index) {
   return CascadePriority(CascadeOrigin::kUserAgent,
                          /* important */ false,
                          /* tree_order */ 0,
                          /* is_inline_style */ false,
                          /* is_try_style */ false,
                          /* is_try_tactics_style */ false,
-                         /* layer_order */ 0, position);
+                         /* layer_order */ 0, rule_index, declaration_index);
 }
-CascadePriority UserPriority(wtf_size_t position) {
+CascadePriority UserPriority(wtf_size_t rule_index,
+                             wtf_size_t declaration_index) {
   return CascadePriority(CascadeOrigin::kUser,
                          /* important */ false,
                          /* tree_order */ 0,
                          /* is_inline_style */ false,
                          /* is_try_style */ false,
                          /* is_try_tactics_style */ false,
-                         /* layer_order */ 0, position);
+                         /* layer_order */ 0, rule_index, declaration_index);
 }
-CascadePriority AuthorPriority(wtf_size_t position) {
+CascadePriority AuthorPriority(wtf_size_t rule_index,
+                               wtf_size_t declaration_index) {
   return CascadePriority(CascadeOrigin::kAuthor,
                          /* important */ false,
                          /* tree_order */ 0,
                          /* is_inline_style */ false,
                          /* is_try_style */ false,
                          /* is_try_tactics_style */ false,
-                         /* layer_order */ 0, position);
+                         /* layer_order */ 0, rule_index, declaration_index);
 }
 
 bool AddTo(CascadeMap& map,
@@ -51,6 +57,17 @@ bool AddTo(CascadeMap& map,
   }
   CascadePriority after = map.At(name);
   return before != after;
+}
+
+Vector<CascadePriority> ToCascadePriorityVector(
+    const CascadePriorityList& list,
+    const BackingVector& backing_vector) {
+  Vector<CascadePriority> v;
+  for (CascadePriorityList::Iterator i = list.Begin(backing_vector);
+       i != list.End(backing_vector); ++i) {
+    v.push_back(*i);
+  }
+  return v;
 }
 
 }  // namespace
@@ -269,43 +286,198 @@ TEST(CascadeMapTest, FindOrigin) {
   CSSPropertyName right(CSSPropertyID::kRight);
   CSSPropertyName bottom(CSSPropertyID::kBottom);
 
-  map.Add(color.Id(), UaPriority(1));
-  map.Add(display.Id(), UaPriority(2));
-  map.Add(top.Id(), UaPriority(3));
-  map.Add(left.Id(), UaPriority(4));
-  map.Add(right.Id(), UaPriority(5));
+  map.Add(color.Id(), UaPriority(0, 1));
+  map.Add(display.Id(), UaPriority(0, 2));
+  map.Add(top.Id(), UaPriority(0, 3));
+  map.Add(left.Id(), UaPriority(0, 4));
+  map.Add(right.Id(), UaPriority(0, 5));
 
-  map.Add(display.Id(), UserPriority(10));
-  map.Add(right.Id(), UserPriority(11));
+  map.Add(display.Id(), UserPriority(0, 10));
+  map.Add(right.Id(), UserPriority(0, 11));
 
-  map.Add(color.Id(), AuthorPriority(20));
-  map.Add(display.Id(), AuthorPriority(21));
-  map.Add(top.Id(), AuthorPriority(22));
-  map.Add(bottom.Id(), AuthorPriority(23));
+  map.Add(color.Id(), AuthorPriority(0, 20));
+  map.Add(display.Id(), AuthorPriority(0, 21));
+  map.Add(top.Id(), AuthorPriority(0, 22));
+  map.Add(bottom.Id(), AuthorPriority(2000, 23));
 
   // Final result of the cascade:
-  EXPECT_EQ(AuthorPriority(20), *map.Find(color));
-  EXPECT_EQ(AuthorPriority(21), *map.Find(display));
-  EXPECT_EQ(AuthorPriority(22), *map.Find(top));
-  EXPECT_EQ(UaPriority(4), *map.Find(left));
-  EXPECT_EQ(UserPriority(11), *map.Find(right));
-  EXPECT_EQ(AuthorPriority(23), *map.Find(bottom));
+  EXPECT_EQ(AuthorPriority(0, 20), *map.Find(color));
+  EXPECT_EQ(AuthorPriority(0, 21), *map.Find(display));
+  EXPECT_EQ(AuthorPriority(0, 22), *map.Find(top));
+  EXPECT_EQ(UaPriority(0, 4), *map.Find(left));
+  EXPECT_EQ(UserPriority(0, 11), *map.Find(right));
+  EXPECT_EQ(AuthorPriority(2000, 23), *map.Find(bottom));
 
   // Final result up to and including kUser:
-  EXPECT_EQ(UaPriority(1), *map.Find(color, CascadeOrigin::kUser));
-  EXPECT_EQ(UserPriority(10), *map.Find(display, CascadeOrigin::kUser));
-  EXPECT_EQ(UaPriority(3), *map.Find(top, CascadeOrigin::kUser));
-  EXPECT_EQ(UaPriority(4), *map.Find(left, CascadeOrigin::kUser));
-  EXPECT_EQ(UserPriority(11), *map.Find(right, CascadeOrigin::kUser));
+  EXPECT_EQ(UaPriority(0, 1), *map.Find(color, CascadeOrigin::kUser));
+  EXPECT_EQ(UserPriority(0, 10), *map.Find(display, CascadeOrigin::kUser));
+  EXPECT_EQ(UaPriority(0, 3), *map.Find(top, CascadeOrigin::kUser));
+  EXPECT_EQ(UaPriority(0, 4), *map.Find(left, CascadeOrigin::kUser));
+  EXPECT_EQ(UserPriority(0, 11), *map.Find(right, CascadeOrigin::kUser));
   EXPECT_FALSE(map.Find(bottom, CascadeOrigin::kUser));
 
   // Final result up to and including kUserAgent:
-  EXPECT_EQ(UaPriority(1), *map.Find(color, CascadeOrigin::kUserAgent));
-  EXPECT_EQ(UaPriority(2), *map.Find(display, CascadeOrigin::kUserAgent));
-  EXPECT_EQ(UaPriority(3), *map.Find(top, CascadeOrigin::kUserAgent));
-  EXPECT_EQ(UaPriority(4), *map.Find(left, CascadeOrigin::kUserAgent));
-  EXPECT_EQ(UaPriority(5), *map.Find(right, CascadeOrigin::kUserAgent));
+  EXPECT_EQ(UaPriority(0, 1), *map.Find(color, CascadeOrigin::kUserAgent));
+  EXPECT_EQ(UaPriority(0, 2), *map.Find(display, CascadeOrigin::kUserAgent));
+  EXPECT_EQ(UaPriority(0, 3), *map.Find(top, CascadeOrigin::kUserAgent));
+  EXPECT_EQ(UaPriority(0, 4), *map.Find(left, CascadeOrigin::kUserAgent));
+  EXPECT_EQ(UaPriority(0, 5), *map.Find(right, CascadeOrigin::kUserAgent));
   EXPECT_FALSE(map.Find(bottom, CascadeOrigin::kUserAgent));
+}
+
+TEST(CascadeMapTest, FindRevertRule) {
+  CascadeMap map;
+  CSSPropertyName color(CSSPropertyID::kColor);
+
+  CascadePriority p1 =
+      AuthorPriority(/*rule_index=*/0, /*declaration_index=*/0);
+  CascadePriority p2 =
+      AuthorPriority(/*rule_index=*/1, /*declaration_index=*/0);
+
+  map.Add(color.Id(), p1);
+  map.Add(color.Id(), p2);
+
+  {
+    const CascadePriority* p = map.FindRevertRule(color, /*revert_from=*/p2);
+    ASSERT_TRUE(p);
+    EXPECT_EQ(p1, *p);
+  }
+
+  {
+    const CascadePriority* p = map.FindRevertRule(color, /*revert_from=*/p1);
+    EXPECT_FALSE(p);
+  }
+}
+
+TEST(CascadeMapTest, FindRevertRuleDuplicateDeclarations) {
+  CascadeMap map;
+  CSSPropertyName color(CSSPropertyID::kColor);
+
+  CascadePriority p1 =
+      AuthorPriority(/*rule_index=*/0, /*declaration_index=*/0);
+  CascadePriority p2 =
+      AuthorPriority(/*rule_index=*/1, /*declaration_index=*/0);
+
+  // Add one declaration from one "rule".
+  map.Add(color.Id(), p1);
+  // Add the same declaration again from a separate "rule", twice.
+  // There is no known way to do this *currently*, but the scenario should still
+  // have a reasonable behavior in order to guard against future changes.
+  map.Add(color.Id(), p2);
+  map.Add(color.Id(), p2);
+
+  const CascadePriority* p = map.FindRevertRule(color, /*revert_from=*/p2);
+  ASSERT_TRUE(p);
+  // We should have reverted past both instances of p2.
+  EXPECT_EQ(p1, *p);
+}
+
+TEST(CascadeMapTest, InsertIntoEmptyList) {
+  CascadePriority p1 = AuthorPriority(0, 1);
+
+  BackingVector backing_vector;
+  CascadePriorityList list;
+  EXPECT_TRUE(list.IsEmpty());
+
+  list.InsertKeepingSorted(backing_vector, p1);
+
+  EXPECT_EQ(Vector<CascadePriority>({p1}),
+            ToCascadePriorityVector(list, backing_vector));
+}
+
+TEST(CascadeMapTest, InsertStronger) {
+  CascadePriority p1 = AuthorPriority(0, 1);
+  CascadePriority p2 = AuthorPriority(0, 2);
+  CascadePriority p3 = AuthorPriority(0, 3);
+
+  BackingVector backing_vector;
+  CascadePriorityList list;
+  EXPECT_TRUE(list.IsEmpty());
+
+  list.InsertKeepingSorted(backing_vector, p1);
+  EXPECT_EQ(Vector<CascadePriority>({p1}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p2);
+  EXPECT_EQ(Vector<CascadePriority>({p2, p1}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p3);
+  EXPECT_EQ(Vector<CascadePriority>({p3, p2, p1}),
+            ToCascadePriorityVector(list, backing_vector));
+}
+
+TEST(CascadeMapTest, InsertWeaker) {
+  CascadePriority p1 = AuthorPriority(0, 1);
+  CascadePriority p2 = AuthorPriority(0, 2);
+  CascadePriority p3 = AuthorPriority(0, 3);
+
+  BackingVector backing_vector;
+  CascadePriorityList list;
+  EXPECT_TRUE(list.IsEmpty());
+
+  list.InsertKeepingSorted(backing_vector, p3);
+  EXPECT_EQ(Vector<CascadePriority>({p3}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p2);
+  EXPECT_EQ(Vector<CascadePriority>({p3, p2}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p1);
+  EXPECT_EQ(Vector<CascadePriority>({p3, p2, p1}),
+            ToCascadePriorityVector(list, backing_vector));
+}
+
+TEST(CascadeMapTest, InsertMiddle) {
+  CascadePriority p1 = AuthorPriority(0, 1);
+  CascadePriority p2 = AuthorPriority(0, 2);
+  CascadePriority p3 = AuthorPriority(0, 3);
+
+  BackingVector backing_vector;
+  CascadePriorityList list;
+  EXPECT_TRUE(list.IsEmpty());
+
+  list.InsertKeepingSorted(backing_vector, p1);
+  EXPECT_EQ(Vector<CascadePriority>({p1}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p3);
+  EXPECT_EQ(Vector<CascadePriority>({p3, p1}),
+            ToCascadePriorityVector(list, backing_vector));
+  list.InsertKeepingSorted(backing_vector, p2);
+  EXPECT_EQ(Vector<CascadePriority>({p3, p2, p1}),
+            ToCascadePriorityVector(list, backing_vector));
+}
+
+TEST(CascadeMapTest, InsertTwoListsInterleaved) {
+  CascadePriority p1 = AuthorPriority(0, 1);
+  CascadePriority p2 = AuthorPriority(0, 2);
+  CascadePriority p3 = AuthorPriority(0, 3);
+  CascadePriority p4 = AuthorPriority(0, 4);
+  CascadePriority p5 = AuthorPriority(0, 5);
+  CascadePriority p6 = AuthorPriority(0, 6);
+
+  BackingVector backing_vector;
+  CascadePriorityList list1;
+  CascadePriorityList list2;
+
+  list1.InsertKeepingSorted(backing_vector, p1);
+  list2.InsertKeepingSorted(backing_vector, p2);
+  EXPECT_EQ(Vector<CascadePriority>({p1}),
+            ToCascadePriorityVector(list1, backing_vector));
+  EXPECT_EQ(Vector<CascadePriority>({p2}),
+            ToCascadePriorityVector(list2, backing_vector));
+
+  list1.InsertKeepingSorted(backing_vector, p5);
+  list2.InsertKeepingSorted(backing_vector, p6);
+  EXPECT_EQ(Vector<CascadePriority>({p5, p1}),
+            ToCascadePriorityVector(list1, backing_vector));
+  EXPECT_EQ(Vector<CascadePriority>({p6, p2}),
+            ToCascadePriorityVector(list2, backing_vector));
+
+  // Inserts in the middle.
+  list1.InsertKeepingSorted(backing_vector, p3);
+  list2.InsertKeepingSorted(backing_vector, p4);
+  EXPECT_EQ(Vector<CascadePriority>({p5, p3, p1}),
+            ToCascadePriorityVector(list1, backing_vector));
+  EXPECT_EQ(Vector<CascadePriority>({p6, p4, p2}),
+            ToCascadePriorityVector(list2, backing_vector));
 }
 
 }  // namespace blink

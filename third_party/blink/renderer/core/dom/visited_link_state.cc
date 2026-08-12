@@ -32,6 +32,7 @@
 
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "net/base/schemeful_site.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -43,8 +44,10 @@
 #include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/mathml/mathml_anchor_element.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -60,8 +63,9 @@ static inline const SecurityOrigin* CalculateFrameOrigin(
 
 static inline const AtomicString& LinkAttribute(const Element& element) {
   DCHECK(element.IsLink());
-  if (element.IsHTMLElement())
+  if (element.IsHTMLElement() || IsA<MathMLAnchorElement>(element)) {
     return element.FastGetAttribute(html_names::kHrefAttr);
+  }
   DCHECK(element.IsSVGElement());
   return SVGURIReference::LegacyHrefString(To<SVGElement>(element));
 }
@@ -93,8 +97,8 @@ static inline LinkHash PartitionedLinkHashForElement(
   // NOTE: for all Documents which have a valid VisitedLinkState, we should not
   // ever encounter an invalid GetFrame() or an invalid TopFrameOrigin().
   DCHECK(element.GetDocument().TopFrameOrigin());
-  const net::SchemefulSite top_level_site(
-      element.GetDocument().TopFrameOrigin()->ToUrlOrigin());
+  const net::SchemefulSite& top_level_site =
+      element.GetDocument().TopFrameOrigin()->GetSchemefulSite();
   // (3) Frame Origin.
   const SecurityOrigin* frame_origin =
       CalculateFrameOrigin(element.GetDocument());
@@ -111,10 +115,7 @@ static inline LinkHash LinkHashForElement(
     const AtomicString& attribute = AtomicString()) {
   DCHECK(attribute.IsNull() || LinkAttribute(element) == attribute);
   return base::FeatureList::IsEnabled(
-             blink::features::kPartitionVisitedLinkDatabase) ||
-                 base::FeatureList::IsEnabled(
-                     blink::features::
-                         kPartitionVisitedLinkDatabaseWithSelfLinks)
+             blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks)
              ? PartitionedLinkHashForElement(element, attribute)
              : UnpartitionedLinkHashForElement(element, attribute);
 }
@@ -192,8 +193,6 @@ EInsideLink VisitedLinkState::DetermineLinkStateSlowCase(
   // Cache the feature status to avoid frequent calculation.
   static const bool are_partitioned_visited_links_enabled =
       base::FeatureList::IsEnabled(
-          blink::features::kPartitionVisitedLinkDatabase) ||
-      base::FeatureList::IsEnabled(
           blink::features::kPartitionVisitedLinkDatabaseWithSelfLinks);
 
   if (are_partitioned_visited_links_enabled) {
@@ -210,13 +209,8 @@ EInsideLink VisitedLinkState::DetermineLinkStateSlowCase(
     // inside Fenced Frames or any frame which has a Fenced Frame in its
     // FrameTree.
     if (GetDocument().GetFrame()->IsInFencedFrameTree()) {
-      UMA_HISTOGRAM_BOOLEAN("Blink.History.VisitedLinks.InFencedFrameTree",
-                            true);
       return EInsideLink::kNotInsideLink;
     }
-    // Record in our histogram that we are not in or a child of a Fenced Frame.
-    UMA_HISTOGRAM_BOOLEAN("Blink.History.VisitedLinks.InFencedFrameTree",
-                          false);
   }
 
   // An empty attribute refers to the document itself which is always
@@ -224,22 +218,16 @@ EInsideLink VisitedLinkState::DetermineLinkStateSlowCase(
   // links can be tested in platform independent manner, without
   // explicit support in the test harness.
   if (attribute.empty()) {
-    base::UmaHistogramBoolean(
-        "Blink.History.VisitedLinks.IsLinkStyledAsVisited", true);
     return EInsideLink::kInsideVisitedLink;
   }
 
   if (LinkHash hash = LinkHashForElement(element, attribute)) {
     links_checked_for_visited_state_.insert(hash);
     if (Platform::Current()->IsLinkVisited(hash)) {
-      base::UmaHistogramBoolean(
-          "Blink.History.VisitedLinks.IsLinkStyledAsVisited", true);
       return EInsideLink::kInsideVisitedLink;
     }
   }
 
-  base::UmaHistogramBoolean("Blink.History.VisitedLinks.IsLinkStyledAsVisited",
-                            false);
   return EInsideLink::kInsideUnvisitedLink;
 }
 

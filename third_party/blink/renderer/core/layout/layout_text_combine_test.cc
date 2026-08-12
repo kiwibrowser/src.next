@@ -256,7 +256,37 @@ TEST_F(LayoutTextCombineTest, InkOverflowEmphasisMark) {
   const auto& root =
       *To<LayoutBlockFlow>(GetElementById("root")->GetLayoutObject());
 
-  EXPECT_EQ(R"DUMP(
+  if (RuntimeEnabledFeatures::TextEmphasisAsRubyEnabled()) {
+    EXPECT_EQ(R"DUMP(
+{Line #descendants=5 LTR Standard}
+                 Rect "0,0 110x300"
+          InkOverflow "0,0 155x300"
+      SelfInkOverflow "0,0 110x300"
+  ContentsInkOverflow "0,0 155x300"
+{Text 0-1 LTR Standard}
+                 Rect "5,0 100x100"
+          InkOverflow "0,0 150x100"
+      SelfInkOverflow "0,0 150x100"
+  ContentsInkOverflow "0,0 0x0"
+{Box #descendants=2 Standard}
+                 Rect "5,100 100x100"
+          InkOverflow "-5,0 155x100"
+      SelfInkOverflow "0,0 100x100"
+  ContentsInkOverflow "-5,0 155x100"
+{Box #descendants=1 AtomicInlineLTR Standard}
+                 Rect "5,100 100x100"
+          InkOverflow "-5,0 155x100"
+      SelfInkOverflow "0,0 100x100"
+  ContentsInkOverflow "-5,0 155x100"
+{Text 2-3 LTR Standard}
+                 Rect "5,200 100x100"
+          InkOverflow "0,0 150x100"
+      SelfInkOverflow "0,0 150x100"
+  ContentsInkOverflow "0,0 0x0"
+)DUMP",
+              AsInkOverflowString(root));
+  } else {
+    EXPECT_EQ(R"DUMP(
 {Line #descendants=5 LTR Standard}
                  Rect "0,0 155x300"
           InkOverflow "0,0 155x300"
@@ -283,7 +313,8 @@ TEST_F(LayoutTextCombineTest, InkOverflowEmphasisMark) {
       SelfInkOverflow "0,0 150x100"
   ContentsInkOverflow "0,0 0x0"
 )DUMP",
-            AsInkOverflowString(root));
+              AsInkOverflowString(root));
+  }
 
   // Note: Emphasis mark is part of text-combine box instead of combined text.
   // Note: text item rect has non-scaled size.
@@ -624,7 +655,8 @@ TEST_F(LayoutTextCombineTest, ListMarkerWidthOfSymbol) {
       " text-combine-upright: all;"
       " writing-mode: vertical-lr;"
       " font-size: 1e-7px;"
-      "}");
+      "}"
+      "li { list-style-position: inside; }");
   SetBodyInnerHTML("<li id=root>ab</li>");
   auto& root = *GetElementById("root");
   const auto& root_layout_object = *To<LayoutBlockFlow>(root.GetLayoutObject());

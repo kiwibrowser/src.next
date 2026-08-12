@@ -12,6 +12,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -54,7 +55,7 @@ class ContentGpuClient;
 class ContentRendererClient;
 class ContentUtilityClient;
 struct CdmInfo;
-struct ContentPluginInfo;
+struct WebPluginInfo;
 
 // Setter and getter for the client. The client should be set early, before any
 // content code is called.
@@ -101,10 +102,7 @@ class CONTENT_EXPORT ContentClient {
   virtual void SetGpuInfo(const gpu::GPUInfo& gpu_info) {}
 
   // Gives the embedder a chance to register its own plugins.
-  virtual void AddPlugins(std::vector<content::ContentPluginInfo>* plugins) {}
-
-  // Returns a list of origins that are allowed to use PDF internal plugin.
-  virtual std::vector<url::Origin> GetPdfInternalPluginAllowedOrigins();
+  virtual void AddPlugins(std::vector<content::WebPluginInfo>* plugins) {}
 
   // Gives the embedder a chance to register the Content Decryption Modules
   // (CDM) it supports, as well as the CDM host file paths to verify CDM host.
@@ -149,6 +147,8 @@ class CONTENT_EXPORT ContentClient {
     // described in the Custom Handler specification.
     // https://html.spec.whatwg.org/multipage/system-state.html#normalize-protocol-handler-parameters
     std::vector<std::pair<std::string, std::string>> predefined_handler_schemes;
+    // Registers a URL scheme as an Isolated Web App scheme.
+    std::vector<std::string> isolated_app_schemes;
 #if BUILDFLAG(IS_ANDROID)
     // Normally, non-standard schemes canonicalize to opaque origins. However,
     // Android WebView requires non-standard schemes to still be preserved.
@@ -193,6 +193,17 @@ class CONTENT_EXPORT ContentClient {
   // supported by the embedder.
   virtual blink::OriginTrialPolicy* GetOriginTrialPolicy();
 
+  // Cross-origin subframes are generally not allowed to display a file picker
+  // for security reasons. This method allows content embedders to specify
+  // whether a cross-origin subframe of a particular origin should be allowed to
+  // display the file picker.
+  //
+  // For example, Chrome's built-in PDF viewer may be hosted in a cross-origin
+  // subframe. To allow this viewer to function correctly, Chrome uses this
+  // method to grant it access to the file picker.
+  virtual bool IsFilePickerAllowedForCrossOriginSubframe(
+      const url::Origin& origin);
+
 #if BUILDFLAG(IS_ANDROID)
   // Returns true for clients like Android WebView that uses synchronous
   // compositor. Note setting this to true will permit synchronous IPCs from
@@ -209,6 +220,33 @@ class CONTENT_EXPORT ContentClient {
   virtual void ExposeInterfacesToBrowser(
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
       mojo::BinderMap* binders);
+
+  // Whether the embedder wants to allow default SiteInstanceGroups to be used
+  // in cases where full site isolation is not available.
+  // TODO(crbug.com/419595581): This method is here so we can disable default
+  // SiteInstanceGroups on Android WebView while still enabling the feature by
+  // default. Remove this carveout once remaining WebView issues are resolved.
+  virtual bool ShouldAllowDefaultSiteInstanceGroup();
+
+  // Returns whether duplicate navigations should be ignored.
+  //
+  // Currently, returns true (ignore) if:
+  // 1. The specific initiator's skip param (browser or renderer) is disabled.
+  // 2. AND one of the following origin criteria is met:
+  //    - It is a browser-initiated navigation.
+  //    - The origin list `kIgnoreDuplicateNavsOrigins` is empty (applies to all
+  //      origins).
+  //    - The navigation's origin matches one in the origin list.
+  // Returns false otherwise.
+  virtual bool ShouldIgnoreDuplicateNavs(const GURL& url,
+                                         bool is_renderer_initiated) const;
+
+  virtual base::TimeDelta GetIgnoreDuplicateNavsThreshold() const;
+
+  // Returns whether the navigation's origin is included in the
+  // kIgnoreDuplicateNavsOrigins parameter list for the
+  // IgnoreDuplicateNavs feature. If the origin list is empty, returns false.
+  virtual bool IsUrlInIgnoreDuplicateNavsOrigins(const GURL& url) const;
 
  private:
   // For SetBrowserClientAlwaysAllowForTesting().

@@ -11,12 +11,13 @@ import android.os.Bundle;
 import android.text.style.ClickableSpan;
 import android.view.View;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.content.res.AppCompatResources;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.feedback.FeedbackPolicyManager;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.night_mode.NightModeMetrics.ThemeSettingsEntry;
@@ -46,6 +47,7 @@ import org.chromium.ui.text.SpanApplier.SpanInfo;
  * A controller class for the messages that will educate the user about the auto-dark web contents
  * feature.
  */
+@NullMarked
 public class WebContentsDarkModeMessageController {
     @VisibleForTesting static final String FEEDBACK_DIALOG_PARAM = "feedback_dialog";
     @VisibleForTesting static final String OPT_OUT_PARAM = "opt_out";
@@ -162,7 +164,7 @@ public class WebContentsDarkModeMessageController {
     private static void sendOptInMessage(
             Activity activity,
             Profile profile,
-            WebContents webContents,
+            @Nullable WebContents webContents,
             MessageDispatcher messageDispatcher) {
         Resources resources = activity.getResources();
         PropertyModel message =
@@ -218,7 +220,7 @@ public class WebContentsDarkModeMessageController {
      * The primary action associated with the created message for the opt-in arm. In this case, the
      * global setting is enabled.
      */
-    private static void onOptInPrimaryAction(Profile profile, WebContents webContents) {
+    private static void onOptInPrimaryAction(Profile profile, @Nullable WebContents webContents) {
         WebContentsDarkModeController.setGlobalUserSettings(profile, true);
         if (webContents != null) {
             webContents.notifyRendererPreferenceUpdate();
@@ -274,9 +276,10 @@ public class WebContentsDarkModeMessageController {
         Resources resources = activity.getResources();
         boolean feedbackDialogEnabled =
                 ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                        ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING,
-                        FEEDBACK_DIALOG_PARAM,
-                        false);
+                                ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING,
+                                FEEDBACK_DIALOG_PARAM,
+                                false)
+                        && FeedbackPolicyManager.getInstance().isUserFeedbackAllowed();
         int titleId =
                 feedbackDialogEnabled
                         ? R.string.auto_dark_dialog_title
@@ -293,8 +296,6 @@ public class WebContentsDarkModeMessageController {
                 new Controller() {
                     @Override
                     public void onClick(PropertyModel model, int buttonType) {
-                        // TODO(crbug.com/40200588): Set clickable to false for title icon.
-                        if (buttonType == ButtonType.TITLE_ICON) return;
                         if (buttonType == ButtonType.POSITIVE) {
                             if (feedbackDialogEnabled) {
                                 showFeedback(activity, profile, url);
@@ -342,8 +343,10 @@ public class WebContentsDarkModeMessageController {
     /** Show feedback. */
     private static void showFeedback(Activity activity, Profile profile, String url) {
         // TODO(crbug.com/40201746): Import ScreenshotMode instead of hardcoding value once new
-        // build
-        //  target added.
+        // build target added.
+        if (!FeedbackPolicyManager.getInstance().isUserFeedbackAllowed()) {
+            return;
+        }
         HelpAndFeedbackLauncherFactory.getForProfile(profile)
                 .showFeedback(activity, url, null, /* ScreenshotMode.DEFAULT */ 0, null);
     }
@@ -368,14 +371,14 @@ public class WebContentsDarkModeMessageController {
 
     @VisibleForTesting
     static class AutoDarkClickableSpan extends ClickableSpan {
-        private Context mContext;
+        private final Context mContext;
 
         AutoDarkClickableSpan(Context context) {
             mContext = context;
         }
 
         @Override
-        public void onClick(@NonNull View view) {
+        public void onClick(View view) {
             openSettings(mContext);
         }
     }

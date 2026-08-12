@@ -25,7 +25,7 @@ enum class DownloadConfirmationReason {
   // There were unresolved conflicts with the target path.
   TARGET_CONFLICT,
 
-  // The target path isn't writeable. Also may indicate that a previous attempt
+  // The target path isn't writable. Also may indicate that a previous attempt
   // to write to the path failed.
   TARGET_PATH_NOT_WRITEABLE,
 

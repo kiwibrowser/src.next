@@ -28,7 +28,8 @@ class Extension;
 class HostedAppBrowserController : public web_app::AppBrowserController,
                                    public ExtensionUninstallDialog::Delegate {
  public:
-  explicit HostedAppBrowserController(Browser* browser);
+  HostedAppBrowserController(BrowserWindowInterface* browser,
+                             webapps::AppId app_id);
 
   HostedAppBrowserController(const HostedAppBrowserController&) = delete;
   HostedAppBrowserController& operator=(const HostedAppBrowserController&) =
@@ -43,13 +44,12 @@ class HostedAppBrowserController : public web_app::AppBrowserController,
   std::u16string GetTitle() const override;
   std::u16string GetAppShortName() const override;
   std::u16string GetFormattedUrlOrigin() const override;
-  GURL GetAppStartUrl() const override;
+  const GURL& GetAppStartUrl() const override;
   bool IsUrlInAppScope(const GURL& url) const override;
   bool CanUserUninstall() const override;
   void Uninstall(
       webapps::WebappUninstallSource webapp_uninstall_source) override;
   bool IsInstalled() const override;
-  bool IsHostedApp() const override;
 
  protected:
   // ExtensionUninstallDialog::Delegate:

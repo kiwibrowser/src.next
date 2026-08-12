@@ -19,9 +19,12 @@
 #include "extensions/browser/external_install_info.h"
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 using content::BrowserThread;
 using extensions::mojom::ManifestLocation;
@@ -53,7 +56,7 @@ class MockExternalPolicyProviderVisitor
 
   // Initialize a provider with |policy_forcelist|, and check that it installs
   // exactly the extensions specified in |expected_extensions|.
-  void Visit(const base::Value::Dict& policy_forcelist,
+  void Visit(const base::DictValue& policy_forcelist,
              const std::set<std::string>& expected_extensions) {
     profile_ = std::make_unique<TestingProfile>();
     profile_->GetTestingPrefService()->SetManagedPref(
@@ -122,7 +125,7 @@ class MockExternalPolicyProviderVisitor
 };
 
 TEST_F(ExternalPolicyLoaderTest, PolicyIsParsed) {
-  base::Value::Dict forced_extensions;
+  base::DictValue forced_extensions;
   std::set<std::string> expected_extensions;
   ExternalPolicyLoader::AddExtension(forced_extensions,
                                      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -138,7 +141,7 @@ TEST_F(ExternalPolicyLoaderTest, PolicyIsParsed) {
 }
 
 TEST_F(ExternalPolicyLoaderTest, InvalidEntriesIgnored) {
-  base::Value::Dict forced_extensions;
+  base::DictValue forced_extensions;
   std::set<std::string> expected_extensions;
 
   ExternalPolicyLoader::AddExtension(forced_extensions,

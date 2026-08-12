@@ -1,0 +1,49 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+package org.chromium.chrome.browser.tabmodel;
+
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabState;
+import org.chromium.components.embedder_support.util.UrlUtilities;
+
+/** Utility class for tab persistence. */
+@NullMarked
+public class TabPersistenceUtils {
+    /**
+     * Returns true if the tab should be skipped when persisting tabs.
+     *
+     * @param tab The tab to check.
+     * @param isRecreating Whether the current activity is recreating.
+     */
+    public static boolean shouldSkipTab(Tab tab, boolean isRecreating) {
+        // Don't skip the tab if it is pinned or the activity is recreating.
+        if (isRecreating || tab.getIsPinned()) return false;
+
+        boolean isNtp = tab.isNativePage() && UrlUtilities.isNtpUrl(tab.getUrl());
+        if (!isNtp) return false;
+
+        // Only skip NTP tabs that are not in a tab group.
+        return tab.getTabGroupId() == null;
+    }
+
+    /**
+     * Returns true if the tab should be skipped when loading persisted tabs.
+     *
+     * @param tabState The tab state to check.
+     */
+    public static boolean shouldSkipTab(TabState tabState) {
+        if (tabState.isPinned || tabState.tabGroupId != null) {
+            return false;
+        }
+
+        // We only want to skip NTPs.
+        if (tabState.url == null) return false;
+
+        return UrlUtilities.isNtpUrl(tabState.url);
+    }
+
+    private TabPersistenceUtils() {}
+}

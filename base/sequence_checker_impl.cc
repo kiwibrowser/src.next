@@ -9,9 +9,7 @@
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/debug/stack_trace.h"
-#include "base/ranges/algorithm.h"
 #include "base/sequence_token.h"
 #include "base/synchronization/lock_subtle.h"
 #include "base/threading/platform_thread.h"
@@ -98,7 +96,7 @@ bool SequenceCheckerImpl::CalledOnValidSequence(
   if (!is_valid) {
 #if DCHECK_IS_ON()
     for (uintptr_t lock : subtle::GetTrackedLocksHeldByCurrentThread()) {
-      if (Contains(locks_, lock)) {
+      if (std::ranges::contains(locks_, lock)) {
         is_valid = true;
         break;
       }
@@ -150,7 +148,8 @@ bool SequenceCheckerImpl::CalledOnValidSequence(
   // `locks_` must contain locks held at binding time and for all calls to
   // `CalledOnValidSequence` that returned true afterwards.
   std::erase_if(locks_, [](uintptr_t lock_ptr) {
-    return !Contains(subtle::GetTrackedLocksHeldByCurrentThread(), lock_ptr);
+    return !std::ranges::contains(subtle::GetTrackedLocksHeldByCurrentThread(),
+                                  lock_ptr);
   });
 #endif  // DCHECK_IS_ON()
 
@@ -191,9 +190,9 @@ void SequenceCheckerImpl::EnsureAssigned() const {
   // detail of `SequenceCheckerImpl` and doesn't provide mutual exclusion
   // guarantees to the caller).
   DCHECK(locks_.empty());
-  ranges::remove_copy(subtle::GetTrackedLocksHeldByCurrentThread(),
-                      std::back_inserter(locks_),
-                      reinterpret_cast<uintptr_t>(&lock_));
+  std::ranges::remove_copy(subtle::GetTrackedLocksHeldByCurrentThread(),
+                           std::back_inserter(locks_),
+                           reinterpret_cast<uintptr_t>(&lock_));
 #endif  // DCHECK_IS_ON()
 
   DCHECK(sequence_token_.IsValid());

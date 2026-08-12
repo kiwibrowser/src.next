@@ -5,14 +5,10 @@
 #ifndef BASE_FEATURE_VISITOR_H_
 #define BASE_FEATURE_VISITOR_H_
 
-#include <map>
 #include <string>
 
 #include "base/feature_list.h"
-
-namespace variations::cros_early_boot::evaluate_seed {
-class EarlyBootFeatureVisitor;
-}
+#include "base/metrics/field_trial_params.h"
 
 namespace gin {
 class V8FeatureVisitor;
@@ -39,12 +35,11 @@ class FeatureVisitor {
   // is called once per feature.
   virtual void Visit(const std::string& feature_name,
                      FeatureList::OverrideState override_state,
-                     const std::map<std::string, std::string>& params,
+                     const FieldTrialParams& params,
                      const std::string& trial_name,
                      const std::string& group_name) = 0;
 
  private:
-  friend variations::cros_early_boot::evaluate_seed::EarlyBootFeatureVisitor;
   friend gin::V8FeatureVisitor;
   friend TestFeatureVisitor;
 

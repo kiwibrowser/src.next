@@ -6,7 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_OWNER_H_
 
 #include "third_party/blink/public/common/frame/frame_policy.h"
+#include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -43,9 +45,15 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr) = 0;
   virtual void DispatchLoad() = 0;
 
-  // The intrinsic dimensions of the embedded object changed. This is only
+  // The natural dimensions of the embedded object changed. This is only
   // relevant for SVG documents that are embedded via <object> or <embed>.
-  virtual void IntrinsicSizingInfoChanged() = 0;
+  virtual void NaturalSizingInfoChanged() = 0;
+
+  // Clear the last natural sizing info stored in the frame owner.
+  virtual void ClearLastNaturalSizingInfo() = 0;
+  // Clear both the last natural sizing info in this frame owner, and the
+  // current one in the embedded `FrameView`.
+  virtual void ClearAllNaturalSizingInfo() = 0;
 
   // Indicates that a child frame requires its parent frame to track whether the
   // child frame is occluded or has visual effects applied.
@@ -61,6 +69,7 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual bool AllowFullscreen() const = 0;
   virtual bool AllowPaymentRequest() const = 0;
   virtual bool IsDisplayNone() const = 0;
+  virtual mojom::blink::FrameResponsiveSizing GetResponsiveSizing() const = 0;
   virtual mojom::blink::ColorScheme GetColorScheme() const = 0;
   virtual mojom::blink::PreferredColorScheme GetPreferredColorScheme()
       const = 0;

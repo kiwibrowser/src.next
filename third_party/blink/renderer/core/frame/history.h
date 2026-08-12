@@ -26,7 +26,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_HISTORY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_HISTORY_H_
 
-#include "base/gtest_prod_util.h"
 #include "third_party/blink/public/mojom/page_state/page_state.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
@@ -44,6 +43,7 @@ class KURL;
 class ExceptionState;
 class HistoryItem;
 class ScriptState;
+class ScriptValue;
 class V8ScrollRestoration;
 
 // This class corresponds to the History interface.
@@ -77,6 +77,8 @@ class CORE_EXPORT History final : public ScriptWrappable,
   V8ScrollRestoration scrollRestoration(ExceptionState&);
 
   bool IsSameAsCurrentState(SerializedScriptValue*) const;
+
+  ScriptValue StateHelper(ScriptState*, ExceptionState&);
 
   void Trace(Visitor*) const override;
 

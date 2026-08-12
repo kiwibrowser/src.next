@@ -4,17 +4,22 @@
 
 #include "content/public/common/content_client.h"
 
+#include <algorithm>
 #include <string_view>
 
+#include "base/feature_list.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
-#include "base/notreached.h"
+#include "base/notimplemented.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_view_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/origin_util.h"
-#include "content/public/common/user_agent.h"
 #include "ui/gfx/image/image.h"
 
 namespace content {
@@ -95,10 +100,6 @@ ContentClient::ContentClient()
 ContentClient::~ContentClient() {
 }
 
-std::vector<url::Origin> ContentClient::GetPdfInternalPluginAllowedOrigins() {
-  return {};
-}
-
 std::u16string ContentClient::GetLocalizedString(int message_id) {
   return std::u16string();
 }
@@ -159,5 +160,72 @@ media::MediaDrmBridgeClient* ContentClient::GetMediaDrmBridgeClient() {
 void ContentClient::ExposeInterfacesToBrowser(
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
     mojo::BinderMap* binders) {}
+
+bool ContentClient::ShouldAllowDefaultSiteInstanceGroup() {
+  return true;
+}
+
+base::TimeDelta ContentClient::GetIgnoreDuplicateNavsThreshold() const {
+  return features::kDuplicateNavThreshold.Get();
+}
+
+bool ContentClient::ShouldIgnoreDuplicateNavs(
+    const GURL& url,
+    bool is_renderer_initiated) const {
+  if (!base::FeatureList::IsEnabled(features::kIgnoreDuplicateNavs)) {
+    return false;
+  }
+
+  const std::string& origins_list_str =
+      features::kIgnoreDuplicateNavsOrigins.Get();
+
+  bool is_match = false;
+  // Check if the origin matches the origins list if it is not empty.
+  if (!origins_list_str.empty()) {
+    is_match = IsUrlInIgnoreDuplicateNavsOrigins(url);
+    base::UmaHistogramBoolean(
+        is_renderer_initiated
+            ? "Navigation.RendererInitiated.DuplicateNavOriginMatch"
+            : "Navigation.BrowserInitiated.DuplicateNavOriginMatch",
+        is_match);
+  }
+
+  // Browser-initiated navigations are ignored if the skip flag is off.
+  if (!is_renderer_initiated) {
+    return !features::kSkipIgnoreBrowserInitiatedNavs.Get();
+  }
+  // Renderer-initiated navigations are ignored if the origin matches and the
+  // skip flag is off.
+  return (origins_list_str.empty() || is_match) &&
+         !features::kSkipIgnoreRendererInitiatedNavs.Get();
+}
+
+bool ContentClient::IsUrlInIgnoreDuplicateNavsOrigins(const GURL& url) const {
+  const std::string& origins_list_str =
+      features::kIgnoreDuplicateNavsOrigins.Get();
+  if (origins_list_str.empty()) {
+    return false;
+  }
+  static const base::NoDestructor<std::vector<url::Origin>>
+      target_origin_ignorelist([&origins_list_str] {
+        std::vector<url::Origin> origins;
+        const auto& origin_strings =
+            base::SplitString(origins_list_str, ",", base::TRIM_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY);
+        origins.reserve(origin_strings.size());
+        for (const auto& origin_str : origin_strings) {
+          origins.push_back(url::Origin::Create(GURL(origin_str)));
+        }
+        return origins;
+      }());
+
+  return std::ranges::contains(*target_origin_ignorelist,
+                               url::Origin::Create(url));
+}
+
+bool ContentClient::IsFilePickerAllowedForCrossOriginSubframe(
+    const url::Origin& origin) {
+  return false;
+}
 
 }  // namespace content

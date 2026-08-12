@@ -33,7 +33,7 @@ class ValidationMessageOverlayDelegateTest : public PaintTestConfigurations,
     // an extra step is required to ensure that the system font is configured.
     // See https://crbug.com/969622
     blink::WebFontRendering::SetMenuFontMetrics(
-        blink::WebString::FromASCII("Arial"), 12);
+        blink::WebString::FromAscii("Arial"), 12);
   }
 #endif
 
@@ -67,6 +67,7 @@ TEST_P(ValidationMessageOverlayDelegateTest,
       DocumentUpdateReason::kTest));
 
   // Trigger the overlay animations.
+  delegate_ptr->UpdateFrameViewState(*overlay);
   delegate_ptr->UpdateFrameViewState(*overlay);
 
   // Now find the related animations, and make sure they weren't composited.

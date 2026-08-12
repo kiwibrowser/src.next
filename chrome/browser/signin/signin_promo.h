@@ -7,11 +7,11 @@
 
 #include <string>
 
+#include "base/functional/callback_forward.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
-
-class GURL;
+#include "url/gurl.h"
 
 namespace content {
 class BrowserContext;
@@ -31,7 +31,7 @@ extern const char kSignInPromoQueryKeyAutoClose[];
 extern const char kSignInPromoQueryKeyForceKeepData[];
 extern const char kSignInPromoQueryKeyReason[];
 
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
 // These functions are only used to unlock the profile from the desktop user
 // manager and the windows credential provider.
 
@@ -49,7 +49,7 @@ GURL GetEmbeddedPromoURL(signin_metrics::AccessPoint access_point,
 GURL GetEmbeddedReauthURLWithEmail(signin_metrics::AccessPoint access_point,
                                    signin_metrics::Reason reason,
                                    const std::string& email);
-#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 // Controls the information displayed around the Gaia Sign In page via the
 // "flow" url parameter.
@@ -66,6 +66,18 @@ enum class Flow {
   EMBEDDED_PROMO
 };
 
+// Maps to a subset of `signin_metrics::AccessPoint`. Is used for both signin
+// and sync promos.
+enum class SignInPromoType {
+  kPassword,
+  kAddress,
+  kBookmark,
+  kExtension,
+  kSearchAIMode,
+  kSendTabToSelf,
+  // Add other types here if other access points will show a signin promo.
+};
+
 // Wraps arguments for `GetChromeSyncURLForDice()`. They are all optional.
 struct ChromeSyncUrlArgs {
   // If not empty, will be passed as hint to the page so that it will be
@@ -79,9 +91,16 @@ struct ChromeSyncUrlArgs {
   Flow flow = Flow::NONE;
 };
 
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
 // Returns the URL to be used to signin and turn on Sync when DICE is enabled.
 // See `ChromeSyncUrlArgs` docs for details on the arguments.
 GURL GetChromeSyncURLForDice(ChromeSyncUrlArgs args);
+
+// Checks asynchronously whether bluetooth is supported and enabled on the
+// device.
+void IsHybridTransportSupportedForQrCodeSignin(
+    base::OnceCallback<void(bool)> callback);
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 // Returns the URL to be used to reauth.
 // As part of `args` only `email` and `continue_url` are used:
@@ -103,6 +122,9 @@ GURL GetChromeReauthURL(ChromeSyncUrlArgs args);
 // If email is not empty, then it will pass email as hint to the page so that it
 // will be autofilled by Gaia.
 // If |continue_url| is empty, this may redirect to myaccount.
+// Deprecated for secondary DICE account addition (crbug.com/420635510):
+// For this case, use `GetChromeSyncURLForDice` instead.
+// The method remains valid for cases relating to users' re-authentication.
 GURL GetAddAccountURLForDice(const std::string& email,
                              const GURL& continue_url);
 
@@ -111,7 +133,8 @@ content::StoragePartition* GetSigninPartition(
     content::BrowserContext* browser_context);
 
 // Gets the access point from the query portion of the sign in promo URL.
-signin_metrics::AccessPoint GetAccessPointForEmbeddedPromoURL(const GURL& url);
+std::optional<signin_metrics::AccessPoint> GetAccessPointForEmbeddedPromoURL(
+    const GURL& url);
 
 // Gets the sign in reason from the query portion of the sign in promo URL.
 signin_metrics::Reason GetSigninReasonForEmbeddedPromoURL(const GURL& url);

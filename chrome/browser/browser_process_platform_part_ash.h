@@ -7,8 +7,9 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/sequence_checker.h"
-#include "chrome/browser/browser_process_platform_part_chromeos.h"
+#include "chrome/browser/browser_process_platform_part_base.h"
 #include "chrome/browser/component_updater/cros_component_installer_chromeos.h"
 #include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 
@@ -23,6 +24,7 @@ class EssentialSearchManager;
 namespace ash {
 class AccountManagerFactory;
 class AshProxyMonitor;
+class AutoSignOutService;
 class BrowserContextFlusher;
 class ChromeSessionManager;
 class CrosSettingsHolder;
@@ -46,14 +48,18 @@ class SystemClock;
 namespace policy {
 class BrowserPolicyConnectorAsh;
 class DeviceRestrictionScheduleController;
-class DeviceRestrictionScheduleControllerDelegateImpl;
 }  // namespace policy
 
+namespace session_manager {
+class SessionManager;
+}  // namespace session_manager
+
 namespace user_manager {
+class MultiUserSignInPolicyController;
 class UserManager;
 }  // namespace user_manager
 
-class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
+class BrowserProcessPlatformPart : public BrowserProcessPlatformPartBase {
  public:
   BrowserProcessPlatformPart();
 
@@ -101,6 +107,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
   // primary profile.
   void InitializePrimaryProfileServices(Profile* primary_profile);
 
+  void InitializeTimezoneResolverManager();
+
   // Used to register a KeepAlive when Ash is initialized, and release it
   // when until Chrome starts exiting. Ensure we stay running the whole time.
   void RegisterKeepAlive();
@@ -116,11 +124,16 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
 
   policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash();
 
-  ash::ChromeSessionManager* session_manager() {
-    return session_manager_.get();
+  ash::ChromeSessionManager* chrome_session_manager() {
+    return chrome_session_manager_.get();
   }
 
   user_manager::UserManager* user_manager() { return user_manager_.get(); }
+
+  user_manager::MultiUserSignInPolicyController*
+  multi_user_sign_in_policy_controller() {
+    return multi_user_sign_in_policy_controller_.get();
+  }
 
   ash::SchedulerConfigurationManager* scheduler_configuration_manager() {
     return scheduler_configuration_manager_.get();
@@ -154,22 +167,19 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
     return in_session_password_change_manager_.get();
   }
 
+  ash::AutoSignOutService* auto_sign_out_service() {
+    return auto_sign_out_service_.get();
+  }
+
   ash::system::TimeZoneResolverManager* GetTimezoneResolverManager();
 
   // Overridden from BrowserProcessPlatformPartBase:
   void StartTearDown() override;
-  void AttemptExit(bool try_to_quit_application) override;
 
   ash::system::SystemClock* GetSystemClock();
   void DestroySystemClock();
 
-  ash::AccountManagerFactory* GetAccountManagerFactory();
-
   static void EnsureFactoryBuilt();
-
- protected:
-  // BrowserProcessPlatformPartChromeOS:
-  bool CanRestoreUrlsForProfile(const Profile* profile) const override;
 
  private:
   friend class BrowserProcessPlatformPartTestApi;
@@ -178,7 +188,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
 
   void ShutdownPrimaryProfileServices();
 
-  std::unique_ptr<ash::ChromeSessionManager> session_manager_;
+  std::unique_ptr<session_manager::SessionManager> session_manager_;
+  std::unique_ptr<ash::ChromeSessionManager> chrome_session_manager_;
 
   bool created_profile_helper_;
   std::unique_ptr<ash::ProfileHelper> profile_helper_;
@@ -198,8 +209,9 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
 
   std::unique_ptr<ash::UserImageManagerRegistry> user_image_manager_registry_;
 
-  std::unique_ptr<policy::DeviceRestrictionScheduleControllerDelegateImpl>
-      device_restriction_schedule_controller_delegate_impl_;
+  std::unique_ptr<user_manager::MultiUserSignInPolicyController>
+      multi_user_sign_in_policy_controller_;
+
   std::unique_ptr<policy::DeviceRestrictionScheduleController>
       device_restriction_schedule_controller_;
 
@@ -222,6 +234,7 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
   bool using_testing_component_manager_ash_ = false;
   scoped_refptr<component_updater::ComponentManagerAsh> component_manager_ash_;
 
+  // NOTE: Use ash::AccountManagerFactory::Get() to get the singleton instance.
   std::unique_ptr<ash::AccountManagerFactory> account_manager_factory_;
 
   std::unique_ptr<app_list::EssentialSearchManager> essential_search_manager_;
@@ -237,6 +250,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
   std::unique_ptr<ash::AshProxyMonitor> ash_proxy_monitor_;
 
   std::unique_ptr<ash::SecureDnsManager> secure_dns_manager_;
+
+  std::unique_ptr<ash::AutoSignOutService> auto_sign_out_service_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

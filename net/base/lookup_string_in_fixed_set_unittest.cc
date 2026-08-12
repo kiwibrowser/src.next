@@ -4,55 +4,51 @@
 
 #include "net/base/lookup_string_in_fixed_set.h"
 
-#include <string.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ostream>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "base/base_paths.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "net/base/registry_controlled_domain_constants.h"
+#include "net/base/registry_controlled_domains/effective_tld_names_unittest1-inc.cc"
+#include "net/base/registry_controlled_domains/effective_tld_names_unittest3-inc.cc"
+#include "net/base/registry_controlled_domains/effective_tld_names_unittest4-inc.cc"
+#include "net/base/registry_controlled_domains/effective_tld_names_unittest5-inc.cc"
+#include "net/base/registry_controlled_domains/effective_tld_names_unittest6-inc.cc"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 namespace {
-namespace test1 {
-#include "net/base/registry_controlled_domains/effective_tld_names_unittest1-inc.cc"
-}
-namespace test3 {
-#include "net/base/registry_controlled_domains/effective_tld_names_unittest3-inc.cc"
-}
-namespace test4 {
-#include "net/base/registry_controlled_domains/effective_tld_names_unittest4-inc.cc"
-}
-namespace test5 {
-#include "net/base/registry_controlled_domains/effective_tld_names_unittest5-inc.cc"
-}
-namespace test6 {
-#include "net/base/registry_controlled_domains/effective_tld_names_unittest6-inc.cc"
-}
 
 struct Expectation {
-  const char* const key;
-  int value;
+  std::string_view key;
+  std::optional<int> value;
 };
 
 void PrintTo(const Expectation& expectation, std::ostream* os) {
-  *os << "{\"" << expectation.key << "\", " << expectation.value << "}";
+  *os << "{\"" << expectation.key << "\", "
+      << (expectation.value ? base::NumberToString(expectation.value.value())
+                            : "std::nullopt")
+      << "}";
 }
 
 class LookupStringInFixedSetTest : public testing::TestWithParam<Expectation> {
  protected:
-  int LookupInGraph(base::span<const uint8_t> graph, const char* key) {
-    return LookupStringInFixedSet(graph, key, strlen(key));
+  std::optional<int> LookupInGraph(base::span<const uint8_t> graph,
+                                   std::string_view key) {
+    return LookupStringInFixedSet(graph, key);
   }
 };
 
@@ -64,18 +60,26 @@ TEST_P(Dafsa1Test, BasicTest) {
 }
 
 const Expectation kBasicTestCases[] = {
-    {"", -1},      {"j", -1},          {"jp", 0}, {"jjp", -1}, {"jpp", -1},
-    {"bar.jp", 2}, {"pref.bar.jp", 1}, {"c", 2},  {"b.c", 1},  {"priv.no", 4},
+    {"", std::nullopt},
+    {"j", std::nullopt},
+    {"jp", 0},
+    {"jjp", std::nullopt},
+    {"jpp", std::nullopt},
+    {"bar.jp", 2},
+    {"pref.bar.jp", 1},
+    {"c", 2},
+    {"b.c", 1},
+    {"priv.no", 4},
 };
 
 // Helper function for EnumerateDafsaLanaguage.
 void RecursivelyEnumerateDafsaLanguage(const FixedSetIncrementalLookup& lookup,
                                        std::vector<char>* sequence,
                                        std::vector<std::string>* language) {
-  int result = lookup.GetResultForCurrentSequence();
-  if (result != kDafsaNotFound) {
+  std::optional<int> result = lookup.GetResultForCurrentSequence();
+  if (result) {
     std::string line(sequence->begin(), sequence->end());
-    line += base::StringPrintf(", %d", result);
+    line += base::StringPrintf(", %d", result.value());
     language->emplace_back(std::move(line));
   }
   // Try appending each char value.
@@ -130,7 +134,7 @@ const Expectation kTwoByteOffsetTestCases[] = {
      4},
     {"a________________________________________________________________________"
      "____________________________8",
-     -1},
+     std::nullopt},
 };
 
 INSTANTIATE_TEST_SUITE_P(LookupStringInFixedSetTest,
@@ -163,7 +167,7 @@ const Expectation kThreeByteOffsetTestCases[] = {
      4},
     {"Za_______________________________________________________________________"
      "_____________________________Z8",
-     -1},
+     std::nullopt},
 };
 
 INSTANTIATE_TEST_SUITE_P(LookupStringInFixedSetTest,
@@ -181,8 +185,14 @@ TEST_P(Dafsa5Test, TestDafsaJoinedPrefixes) {
 }
 
 const Expectation kJoinedPrefixesTestCases[] = {
-    {"ai", 0},   {"bj", 4},   {"aak", 0},   {"bbl", 4},
-    {"aaa", -1}, {"bbb", -1}, {"aaaam", 0}, {"bbbbn", 0},
+    {"ai", 0},
+    {"bj", 4},
+    {"aak", 0},
+    {"bbl", 4},
+    {"aaa", std::nullopt},
+    {"bbb", std::nullopt},
+    {"aaaam", 0},
+    {"bbbbn", 0},
 };
 
 INSTANTIATE_TEST_SUITE_P(LookupStringInFixedSetTest,
@@ -200,8 +210,14 @@ TEST_P(Dafsa6Test, TestDafsaJoinedSuffixes) {
 }
 
 const Expectation kJoinedSuffixesTestCases[] = {
-    {"ia", 0},   {"jb", 4},   {"kaa", 0},   {"lbb", 4},
-    {"aaa", -1}, {"bbb", -1}, {"maaaa", 0}, {"nbbbb", 0},
+    {"ia", 0},
+    {"jb", 4},
+    {"kaa", 0},
+    {"lbb", 4},
+    {"aaa", std::nullopt},
+    {"bbb", std::nullopt},
+    {"maaaa", 0},
+    {"nbbbb", 0},
 };
 
 INSTANTIATE_TEST_SUITE_P(LookupStringInFixedSetTest,
@@ -216,9 +232,10 @@ TEST(LookupStringInFixedSetTest, Dafsa1EnumerateLanguage) {
   // These are the lines of effective_tld_names_unittest1.gperf, in sorted
   // order.
   std::vector<std::string> expected_language = {
-      "ac.jp, 0",       "b.c, 1",     "bar.baz.com, 0", "bar.jp, 2",
-      "baz.bar.jp, 2",  "c, 2",       "jp, 0",          "no, 0",
-      "pref.bar.jp, 1", "priv.no, 4", "private, 4",     "xn--fiqs8s, 0",
+      "ac.jp, 0",      "b.c, 1",         "bar.baz.com, 0", "bar.jp, 2",
+      "baz.bar.jp, 2", "c, 2",           "er, 2",          "jp, 0",
+      "no, 0",         "pref.bar.jp, 1", "priv.no, 4",     "private, 4",
+      "xn--fiqs8s, 0",
   };
 
   EXPECT_EQ(expected_language, language);

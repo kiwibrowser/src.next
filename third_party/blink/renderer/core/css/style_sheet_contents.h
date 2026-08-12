@@ -23,11 +23,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_SHEET_CONTENTS_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/mixin_map.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
-#include "third_party/blink/renderer/core/css/rule_set.h"
 #include "third_party/blink/renderer/core/css/rule_set_diff.h"
-#include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/render_blocking_behavior.h"
@@ -43,12 +42,16 @@
 namespace blink {
 
 class CSSStyleSheet;
+class CSSStyleSheetResource;
 class Document;
+class MediaQueryEvaluator;
 class Node;
 class StyleRuleBase;
 class StyleRuleFontFace;
+class RuleSet;
 class RuleSetDiff;
 class StyleRuleImport;
+class StyleRuleLayerStatement;
 class StyleRuleNamespace;
 enum class ParseSheetResult;
 
@@ -96,13 +99,14 @@ class CORE_EXPORT StyleSheetContents final
   Document* SingleOwnerDocument() const;
   bool HasSingleOwnerDocument() const { return has_single_owner_document_; }
 
+  // Gets a client in the given TreeScope.
+  CSSStyleSheet* ClientInTreeScope(const TreeScope& tree_scope) const;
+
   // Gets the first owner document in the list of registered clients, or nullptr
   // if there are none.
   Document* AnyOwnerDocument() const;
 
-  const WTF::TextEncoding& Charset() const {
-    return parser_context_->Charset();
-  }
+  const TextEncoding& Charset() const { return parser_context_->Charset(); }
 
   bool LoadCompleted() const;
   bool HasFailedOrCanceledSubresources() const;
@@ -132,9 +136,9 @@ class CORE_EXPORT StyleSheetContents final
   // call on the same (new) rule. The position_hint is not capable of describing
   // rules nested within other rules; the result will still be correct, but the
   // search will be slow for such rules.
-  wtf_size_t ReplaceRuleIfExists(StyleRuleBase* old_rule,
-                                 StyleRuleBase* new_rule,
-                                 wtf_size_t position_hint);
+  wtf_size_t ReplaceChildRuleIfExists(StyleRuleBase* old_rule,
+                                      StyleRuleBase* new_rule,
+                                      wtf_size_t position_hint);
 
   // Notify the style sheet that a rule has changed externally, for diff
   // purposes (see RuleSetDiff). In particular, if a rule changes selector
@@ -151,6 +155,7 @@ class CORE_EXPORT StyleSheetContents final
     if (rule_set_diff_) {
       rule_set_diff_->MarkUnrepresentable();
     }
+    has_cached_mixins_ = false;
   }
 
   // Get/clear the diff between last time we did StartMutation()
@@ -214,9 +219,25 @@ class CORE_EXPORT StyleSheetContents final
   bool IsMutable() const { return is_mutable_; }
   void StartMutation();
 
+  // Set to true whenever this StyleSheetContents was returned as a cache hit
+  // from the text cache (StyleEngine::CreateSheet()). If this flag is true,
+  // is means that this StyleSheetContents may be shared between multiple
+  // CSSStyleSheets.
   bool IsUsedFromTextCache() const { return is_used_from_text_cache_; }
   void SetIsUsedFromTextCache() { is_used_from_text_cache_ = true; }
 
+  // Set to true whenever this StyleSheetContents was returned as a cache hit
+  // from the resource cache [1]. If this flag is true, is means that this
+  // StyleSheetContents may be shared between multiple CSSStyleSheets.
+  //
+  // [1] CSSStyleSheetResource::CreateParsedStyleSheetFromCache
+  bool IsUsedFromResourceCache() const { return is_used_from_resource_cache_; }
+  void SetIsUsedFromResourceCache() { is_used_from_resource_cache_ = true; }
+
+  // The CSSStyleSheetResource is set whenever this StyleSheetContents is
+  // the cached stylesheet of that CSSStyleSheetResource. We must not modify
+  // this StyleSheetContents while this is true, and any mutations must
+  // therefore perform a copy-on-write first.
   bool IsReferencedFromResource() const {
     return referenced_from_resource_ != nullptr;
   }
@@ -228,14 +249,28 @@ class CORE_EXPORT StyleSheetContents final
 
   bool DidLoadErrorOccur() const { return did_load_error_occur_; }
 
+  // NOTE: “medium” must be the same as is later used for EnsureRuleSet(),
+  // or the set of mixins and the rule set may be inconsistent.
+  //
+  // If mixins were not already cached, and there is or previously was
+  // at least one mixin, the generation counter will be increased.
+  MixinMap& ExtractMixins(const MediaQueryEvaluator& medium,
+                          uint64_t& mixin_generation);
+
   RuleSet& GetRuleSet() {
     DCHECK(rule_set_);
     return *rule_set_.Get();
   }
 
   bool HasRuleSet() { return rule_set_.Get(); }
-  RuleSet& EnsureRuleSet(const MediaQueryEvaluator&);
+  RuleSet& EnsureRuleSet(const MediaQueryEvaluator& medium,
+                         const MixinMap& mixins);
   void ClearRuleSet();
+  // Create a RuleSet which is not associated (i.e. not owned)
+  // by this StyleSheetContents. This is useful for matching rules
+  // in  an "alternate reality", which is the case for InspectorGhostRules.
+  RuleSet* CreateUnconnectedRuleSet(const MediaQueryEvaluator& medium,
+                                    const MixinMap& mixins) const;
 
   String SourceMapURL() const { return source_map_url_; }
 
@@ -275,11 +310,26 @@ class CORE_EXPORT StyleSheetContents final
   bool has_media_queries_ : 1;
   bool has_single_owner_document_ : 1;
   bool is_used_from_text_cache_ : 1;
+  bool is_used_from_resource_cache_ : 1;
 
   Member<const CSSParserContext> parser_context_;
 
   HeapHashSet<WeakMember<CSSStyleSheet>> loading_clients_;
   HeapHashSet<WeakMember<CSSStyleSheet>> completed_clients_;
+
+  // Mixins extracted from this stylesheet. We cache this not because
+  // it is expensive to compute (it isn't), but to have better control
+  // over when we need to invalidate based on mixins changing.
+  // Generally cleared whenever rule_set_ is; this isn't strictly
+  // required (if this style sheet only exports mixins that it doesn't
+  // use itself), but it simplifies things a bit as long as we don't
+  // have precise mixin invalidation.
+  //
+  // Note that if has_cached_mixins_ = false, mixins_ will contain the
+  // _previous_ mixin map, which helps us to know if we have any mixins
+  // that may have been removed.
+  MixinMap mixins_;
+  bool has_cached_mixins_ = false;
 
   Member<RuleSet> rule_set_;
   // If we have modified the style sheet since last creating

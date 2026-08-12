@@ -12,6 +12,7 @@ android_library("java") {
     "java/src/org/chromium/components/external_intents/ExternalIntentsSwitches.java",
     "java/src/org/chromium/components/external_intents/ExternalNavigationDelegate.java",
     "java/src/org/chromium/components/external_intents/ExternalNavigationHandler.java",
+    "java/src/org/chromium/components/external_intents/ExternalNavigationHelper.java",
     "java/src/org/chromium/components/external_intents/ExternalNavigationParams.java",
     "java/src/org/chromium/components/external_intents/InterceptNavigationDelegateClient.java",
     "java/src/org/chromium/components/external_intents/InterceptNavigationDelegateImpl.java",
@@ -35,6 +36,7 @@ android_library("java") {
     "//third_party/blink/public/mojom:web_feature_mojo_bindings_java",
     "//third_party/jni_zero:jni_zero_java",
     "//ui/android:ui_java",
+    "//ui/base/mojom:mojom_java",
     "//url:gurl_java",
   ]
   resources_package = "org.chromium.components.external_intents"
@@ -89,6 +91,7 @@ android_library("unit_device_javatests") {
     "//third_party/androidx:androidx_core_core_java",
     "//third_party/androidx:androidx_test_monitor_java",
     "//third_party/androidx:androidx_test_runner_java",
+    "//third_party/google-truth:google_truth_java",
     "//third_party/hamcrest:hamcrest_core_java",
     "//third_party/hamcrest:hamcrest_library_java",
     "//third_party/junit",
@@ -127,7 +130,7 @@ source_set("test_support") {
   deps = [
     ":test_support_java_jni_headers",
     "//base",
-    "//content/public/browser:browser",
+    "//content/public/browser",
   ]
 }
 

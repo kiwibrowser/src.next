@@ -10,6 +10,13 @@
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
+#include "extensions/buildflags/buildflags.h"
+
+#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
+namespace extensions {
+class ExtensionsBrowserClient;
+}
+#endif
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -85,9 +92,15 @@ class StartupData {
   TakeProtoDatabaseProvider();
 #endif
 
-  ChromeFeatureListCreator* chrome_feature_list_creator() {
-    return chrome_feature_list_creator_.get();
-  }
+#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
+  // Passes ownership of the `extensions_browser_client_` to the caller.
+  std::unique_ptr<extensions::ExtensionsBrowserClient>
+  TakeExtensionsBrowserClient();
+#endif
+
+  // TODO(martinkong): Remove this function and replace its usage with
+  // ChromeFeatureListCreator::GetInstance()
+  ChromeFeatureListCreator* chrome_feature_list_creator();
 
  private:
 #if BUILDFLAG(IS_ANDROID)
@@ -107,7 +120,10 @@ class StartupData {
   std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider_;
 #endif
 
-  std::unique_ptr<ChromeFeatureListCreator> chrome_feature_list_creator_;
+#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
+  std::unique_ptr<extensions::ExtensionsBrowserClient>
+      extensions_browser_client_;
+#endif
 };
 
 #endif  // CHROME_BROWSER_STARTUP_DATA_H_

@@ -40,14 +40,23 @@ class EventFilter {
   // Retrieve the EventMatcher with the given id.
   EventMatcher* GetEventMatcher(MatcherID id);
 
-  // Retrieve the name of the event that the EventMatcher specified by |id| is
+  // Retrieve the name of the event that the EventMatcher specified by `id` is
   // referring to.
   const std::string& GetEventName(MatcherID id) const;
 
   // Removes an event matcher, returning the name of the event that it was for.
-  std::string RemoveEventMatcher(MatcherID id);
+  // If `condition_sets_for_bulk_removal` is non-null, the
+  // `MatcherStringPattern::ID`s are appended to
+  // `condition_sets_for_bulk_removal` and should be unregistered in batch via
+  // `URLMatcher::RemoveConditionSets()`.
+  std::string RemoveEventMatcher(MatcherID id,
+                                 std::vector<base::MatcherStringPattern::ID>*
+                                     condition_sets_for_bulk_removal);
 
-  // Match an event named |event_name| with filtering info |event_info| against
+  // Removes all event matchers in `ids`.
+  void RemoveEventMatchers(const std::vector<MatcherID>& ids);
+
+  // Match an event named `event_name` with filtering info `event_info` against
   // our set of event matchers. Returns a set of ids that correspond to the
   // event matchers that matched the event.
   // TODO(koz): Add a std::string* parameter for retrieving error messages.
@@ -59,13 +68,17 @@ class EventFilter {
 
   bool IsURLMatcherEmptyForTesting() const { return url_matcher_.IsEmpty(); }
 
+  size_t GetConditionSetIdToEventMatcherIdMapSizeForTesting() const {
+    return condition_set_id_to_event_matcher_id_.size();
+  }
+
  private:
   class EventMatcherEntry {
    public:
-    // Adds |condition_sets| to |url_matcher| on construction and removes them
-    // again on destruction. |condition_sets| should be the
+    // Adds `condition_sets` to `url_matcher` on construction and removes them
+    // again on destruction. `condition_sets` should be the
     // URLMatcherConditionSets that match the URL constraints specified by
-    // |event_matcher|.
+    // `event_matcher`.
     EventMatcherEntry(
         std::unique_ptr<EventMatcher> event_matcher,
         url_matcher::URLMatcher* url_matcher,
@@ -82,13 +95,16 @@ class EventFilter {
     // and clean them up anyway.
     void DontRemoveConditionSetsInDestructor();
 
-    EventMatcher* event_matcher() {
-      return event_matcher_.get();
+    EventMatcher* event_matcher() { return event_matcher_.get(); }
+
+    const std::vector<base::MatcherStringPattern::ID>& condition_set_ids()
+        const {
+      return condition_set_ids_;
     }
 
    private:
     std::unique_ptr<EventMatcher> event_matcher_;
-    // The id sets in |url_matcher_| that this EventMatcher owns.
+    // The id sets in `url_matcher_` that this EventMatcher owns.
     std::vector<base::MatcherStringPattern::ID> condition_set_ids_;
     raw_ptr<url_matcher::URLMatcher> url_matcher_;
   };
@@ -100,13 +116,13 @@ class EventFilter {
   // Maps from event name to the map of matchers that are registered for it.
   using EventMatcherMultiMap = std::map<std::string, EventMatcherMap>;
 
-  // Adds the list of URL filters in |matcher| to the URL matcher.
+  // Adds the list of URL filters in `matcher` to the URL matcher.
   bool CreateConditionSets(
       EventMatcher* matcher,
       url_matcher::URLMatcherConditionSet::Vector* condition_sets);
 
   bool AddDictionaryAsConditionSet(
-      const base::Value::Dict& url_filter,
+      const base::DictValue& url_filter,
       url_matcher::URLMatcherConditionSet::Vector* condition_sets);
 
   url_matcher::URLMatcher url_matcher_;

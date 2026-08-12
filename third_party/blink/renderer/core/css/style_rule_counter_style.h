@@ -11,8 +11,6 @@
 
 namespace blink {
 
-class CascadeLayer;
-
 class CORE_EXPORT StyleRuleCounterStyle : public StyleRuleBase {
  public:
   StyleRuleCounterStyle(const AtomicString&, CSSPropertyValueSet*);
@@ -25,18 +23,30 @@ class CORE_EXPORT StyleRuleCounterStyle : public StyleRuleBase {
   // 'additive-symbols'. Returns true if the requirement is met.
   // https://drafts.csswg.org/css-counter-styles-3/#counter-style-symbols
   bool HasValidSymbols() const;
+  static bool HasValidSymbols(const CSSValue* system,
+                              const CSSValue* symbols,
+                              const CSSValue* additive_symbols);
 
   AtomicString GetName() const { return name_; }
-  const CSSValue* GetSystem() const { return system_.Get(); }
-  const CSSValue* GetNegative() const { return negative_.Get(); }
-  const CSSValue* GetPrefix() const { return prefix_.Get(); }
-  const CSSValue* GetSuffix() const { return suffix_.Get(); }
-  const CSSValue* GetRange() const { return range_.Get(); }
-  const CSSValue* GetPad() const { return pad_.Get(); }
-  const CSSValue* GetFallback() const { return fallback_.Get(); }
-  const CSSValue* GetSymbols() const { return symbols_.Get(); }
-  const CSSValue* GetAdditiveSymbols() const { return additive_symbols_.Get(); }
-  const CSSValue* GetSpeakAs() const { return speak_as_.Get(); }
+
+  // Do not hold onto this pointer. Requesting this updates the version,
+  // causing layout to be invalidated. See
+  // CSSCounterStyleRule::MutableStyleForInspector for more details.
+  MutableCSSPropertyValueSet& MutableStyleForInspector();
+
+  // For inspector use only. Do not modify.
+  MutableCSSPropertyValueSet& Properties();
+
+  const CSSValue* GetSystem() const;
+  const CSSValue* GetNegative() const;
+  const CSSValue* GetPrefix() const;
+  const CSSValue* GetSuffix() const;
+  const CSSValue* GetRange() const;
+  const CSSValue* GetPad() const;
+  const CSSValue* GetFallback() const;
+  const CSSValue* GetSymbols() const;
+  const CSSValue* GetAdditiveSymbols() const;
+  const CSSValue* GetSpeakAs() const;
 
   // Returns false if the new value is invalid or equivalent to the old value.
   bool NewValueInvalidOrEqual(AtRuleDescriptorID, const CSSValue*);
@@ -52,34 +62,14 @@ class CORE_EXPORT StyleRuleCounterStyle : public StyleRuleBase {
     return false;
   }
 
-  StyleRuleCounterStyle* Copy() const {
-    return MakeGarbageCollected<StyleRuleCounterStyle>(*this);
-  }
-
-  void SetCascadeLayer(const CascadeLayer* layer) { layer_ = layer; }
-  const CascadeLayer* GetCascadeLayer() const { return layer_.Get(); }
-
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
-  Member<const CSSValue>& GetDescriptorReference(AtRuleDescriptorID);
-
   AtomicString name_;
-  Member<const CSSValue> system_;
-  Member<const CSSValue> negative_;
-  Member<const CSSValue> prefix_;
-  Member<const CSSValue> suffix_;
-  Member<const CSSValue> range_;
-  Member<const CSSValue> pad_;
-  Member<const CSSValue> fallback_;
-  Member<const CSSValue> symbols_;
-  Member<const CSSValue> additive_symbols_;
-  Member<const CSSValue> speak_as_;
-
-  Member<const CascadeLayer> layer_;
 
   // Tracks mutations due to setter functions.
   int version_ = 0;
+  Member<CSSPropertyValueSet> properties_;
 };
 
 template <>

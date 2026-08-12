@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_CHILD_THREAD_TYPE_SWITCHER_LINUX_H_
 
 #include "base/process/process_handle.h"
+#include "content/common/content_export.h"
 #include "content/common/thread_type_switcher.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -15,7 +16,8 @@ namespace content {
 // Browser-side implementation of mojom::ThreadTypeSwitcher which allows a
 // sandboxed process's threads to change their priority (which can't be done
 // inside the sandbox).
-class ChildThreadTypeSwitcher : public mojom::ThreadTypeSwitcher {
+class CONTENT_EXPORT ChildThreadTypeSwitcher
+    : public mojom::ThreadTypeSwitcher {
  public:
   // Constructs an unbound ChildThreadTypeSwitcher.
   explicit ChildThreadTypeSwitcher();
@@ -36,7 +38,7 @@ class ChildThreadTypeSwitcher : public mojom::ThreadTypeSwitcher {
   void SetPid(base::ProcessId child_pid);
 
   // mojom::ThreadTypeSwitcher:
-  void SetThreadType(int32_t ns_tid, base::ThreadType thread_type) override;
+  void SetThreadTypes(std::vector<mojom::ThreadTypeChangePtr> changes) override;
 
  private:
   base::ProcessId child_pid_ = base::kNullProcessHandle;

@@ -16,20 +16,24 @@
 
 namespace fullscreen_utils {
 
-bool IsInContentFullscreen(BrowserWindowInterface* browser_window_interface) {
-  if (!browser_window_interface->GetExclusiveAccessManager()) {
+bool IsInContentFullscreen(
+    const BrowserWindowInterface* browser_window_interface) {
+  // Const cast because ExclusiveAccessManager and its accessors are not
+  // const-correct.
+  auto* const manager = ExclusiveAccessManager::From(
+      const_cast<BrowserWindowInterface*>(browser_window_interface));
+  if (!manager) {
     return false;
   }
-  FullscreenController* const controller =
-      browser_window_interface->GetExclusiveAccessManager()
-          ->fullscreen_controller();
+  FullscreenController* const controller = manager->fullscreen_controller();
   return controller && (controller->IsWindowFullscreenForTabOrPending() ||
                         controller->IsExtensionFullscreenOrPending());
 }
 
 bool IsAlwaysShowToolbarEnabled(const Browser* browser) {
   if (web_app::AppBrowserController::IsWebApp(browser)) {
-    const web_app::AppBrowserController* controller = browser->app_controller();
+    const web_app::AppBrowserController* controller =
+        web_app::AppBrowserController::From(browser);
     return controller->AlwaysShowToolbarInFullscreen();
   }
   return browser->profile()->GetPrefs()->GetBoolean(

@@ -10,8 +10,10 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "base/byte_size.h"
 #include "base/compiler_specific.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -68,6 +70,8 @@ using MockTransactionHandler =
                                  std::string* response_status,
                                  std::string* response_headers,
                                  std::string* response_data)>;
+using MockTransactionStartHandler =
+    base::RepeatingCallback<Error(const HttpRequestInfo* request)>;
 
 // Default TransportInfo suitable for most MockTransactions.
 // Describes a direct connection to (127.0.0.1, 80).
@@ -86,7 +90,7 @@ struct MockTransaction {
   const char* response_headers;
   // If |response_time| is unspecified, the current time will be used.
   base::Time response_time;
-  const char* data;
+  std::string_view data;
   // Any aliases for the requested URL, as read from DNS records. Includes all
   // known aliases, e.g. from A, AAAA, or HTTPS, not just from the address used
   // for the connection, in no particular order.
@@ -105,6 +109,9 @@ struct MockTransaction {
   // Value returned by MockNetworkTransaction::Read (potentially
   // asynchronously if |!(test_mode & TEST_MODE_SYNC_NET_START)|.)
   Error read_return_code;
+  bool is_shared_resource = false;
+  bool did_use_shared_dictionary = false;
+  MockTransactionStartHandler start_handler;
 };
 
 extern const MockTransaction kSimpleGET_Transaction;
@@ -211,11 +218,11 @@ class MockNetworkTransaction final : public HttpTransaction {
 
   void StopCaching() override;
 
-  int64_t GetTotalReceivedBytes() const override;
+  base::ByteSize GetTotalReceivedBytes() const override;
 
-  int64_t GetTotalSentBytes() const override;
+  base::ByteSize GetTotalSentBytes() const override;
 
-  int64_t GetReceivedBodyBytes() const override;
+  base::ByteSize GetReceivedBodyBytes() const override;
 
   void DoneReading() override;
 
@@ -223,9 +230,10 @@ class MockNetworkTransaction final : public HttpTransaction {
 
   LoadState GetLoadState() const override;
 
-  void SetQuicServerInfo(QuicServerInfo* quic_server_info) override;
-
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
+
+  void PopulateLoadTimingInternalInfo(
+      LoadTimingInternalInfo* load_timing_internal_info) const override;
 
   bool GetRemoteEndpoint(IPEndPoint* endpoint) const override;
 
@@ -233,9 +241,6 @@ class MockNetworkTransaction final : public HttpTransaction {
 
   void SetWebSocketHandshakeStreamCreateHelper(
       CreateHelper* create_helper) override;
-
-  void SetBeforeNetworkStartCallback(
-      BeforeNetworkStartCallback callback) override;
 
   void SetConnectedCallback(const ConnectedCallback& callback) override;
 
@@ -249,12 +254,9 @@ class MockNetworkTransaction final : public HttpTransaction {
   void SetIsSharedDictionaryReadAllowedCallback(
       base::RepeatingCallback<bool()> callback) override {}
 
-  int ResumeNetworkStart() override;
-
   ConnectionAttempts GetConnectionAttempts() const override;
 
   void CloseConnectionOnDestruction() override;
-  bool IsMdlMatchForMetrics() const override;
 
   CreateHelper* websocket_handshake_stream_create_helper() {
     return websocket_handshake_stream_create_helper_;
@@ -268,17 +270,16 @@ class MockNetworkTransaction final : public HttpTransaction {
 
   // Bogus value that will be returned by GetTotalReceivedBytes() if the
   // MockNetworkTransaction was started.
-  static const int64_t kTotalReceivedBytes;
+  static const base::ByteSize kTotalReceivedBytes;
   // Bogus value that will be returned by GetTotalSentBytes() if the
   // MockNetworkTransaction was started.
-  static const int64_t kTotalSentBytes;
+  static const base::ByteSize kTotalSentBytes;
   // Bogus value that will be returned by GetReceivedBodyBytes() if the
   // MockNetworkTransaction was started.
-  static const int64_t kReceivedBodyBytes;
+  static const base::ByteSize kReceivedBodyBytes;
 
  private:
   enum class State {
-    NOTIFY_BEFORE_CREATE_STREAM,
     CREATE_STREAM,
     CREATE_STREAM_COMPLETE,
     CONNECTED_CALLBACK,
@@ -293,7 +294,6 @@ class MockNetworkTransaction final : public HttpTransaction {
   };
 
   int StartInternal(HttpRequestInfo request, CompletionOnceCallback callback);
-  int DoNotifyBeforeCreateStream();
   int DoCreateStream();
   int DoCreateStreamComplete(int result);
   int DoConnectedCallback();
@@ -321,18 +321,17 @@ class MockNetworkTransaction final : public HttpTransaction {
   CompletionOnceCallback callback_;
 
   HttpResponseInfo response_;
-  std::string data_;
+  std::vector<uint8_t> data_;
   int64_t data_cursor_ = 0;
   int64_t content_length_ = 0;
   int test_mode_;
   RequestPriority priority_;
   raw_ptr<CreateHelper> websocket_handshake_stream_create_helper_ = nullptr;
-  BeforeNetworkStartCallback before_network_start_callback_;
   ConnectedCallback connected_callback_;
   base::WeakPtr<MockNetworkLayer> transaction_factory_;
-  int64_t received_bytes_ = 0;
-  int64_t sent_bytes_ = 0;
-  int64_t received_body_bytes_ = 0;
+  base::ByteSize received_bytes_;
+  base::ByteSize sent_bytes_;
+  base::ByteSize received_body_bytes_;
 
   // NetLog ID of the fake / non-existent underlying socket used by the
   // connection. Requires Start() be passed a NetLogWithSource with a real
@@ -388,8 +387,8 @@ class MockNetworkLayer final : public HttpTransactionFactory {
   }
 
   // HttpTransactionFactory:
-  int CreateTransaction(RequestPriority priority,
-                        std::unique_ptr<HttpTransaction>* trans) override;
+  std::unique_ptr<HttpTransaction> CreateTransaction(
+      RequestPriority priority) override;
   HttpCache* GetCache() override;
   HttpNetworkSession* GetSession() override;
 

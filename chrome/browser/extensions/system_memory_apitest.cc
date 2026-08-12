@@ -5,6 +5,9 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/browser/api/system_memory/memory_info_provider.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -27,25 +30,10 @@ class MockMemoryInfoProviderImpl : public MemoryInfoProvider {
   ~MockMemoryInfoProviderImpl() override = default;
 };
 
-using ContextType = ExtensionBrowserTest::ContextType;
+using SystemMemoryApiTest = ExtensionApiTest;
 
-class SystemMemoryApiTest : public ExtensionApiTest,
-                            public testing::WithParamInterface<ContextType> {
- public:
-  SystemMemoryApiTest() : ExtensionApiTest(GetParam()) {}
-  ~SystemMemoryApiTest() override = default;
-  SystemMemoryApiTest(const SystemMemoryApiTest&) = delete;
-  SystemMemoryApiTest& operator=(const SystemMemoryApiTest&) = delete;
-};
-
-INSTANTIATE_TEST_SUITE_P(EventPage,
-                         SystemMemoryApiTest,
-                         ::testing::Values(ContextType::kEventPage));
-INSTANTIATE_TEST_SUITE_P(ServiceWorker,
-                         SystemMemoryApiTest,
-                         ::testing::Values(ContextType::kServiceWorker));
-
-IN_PROC_BROWSER_TEST_P(SystemMemoryApiTest, Memory) {
+// Tests the system.memory extension API.
+IN_PROC_BROWSER_TEST_F(SystemMemoryApiTest, Memory) {
   scoped_refptr<MemoryInfoProvider> provider = new MockMemoryInfoProviderImpl;
   // The provider is owned by the single MemoryInfoProvider instance.
   MemoryInfoProvider::InitializeForTesting(provider);

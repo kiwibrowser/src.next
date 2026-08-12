@@ -28,12 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
+
+#include <array>
 
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -48,11 +45,14 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
+#include "third_party/blink/renderer/platform/graphics/css_image_animation_data_interface.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
+#include "third_party/blink/renderer/platform/graphics/image_node_animation_info.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/test/mock_image_decoder.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
-#include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/test/task_environment.h"
+#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -100,12 +100,32 @@ void GenerateBitmapForPaintImage(cc::PaintImage paint_image,
   canvas.drawImage(paint_image, 0u, 0u);
 }
 
+class FakeElementImageAnimationData : public ElementImageAnimationData {
+ public:
+  std::optional<ImageAnimationData> GetImageAnimationData(
+      ImageResourceContent*) const override {
+    return data_;
+  }
+  void SetImageAnimationData(ImageResourceContent*,
+                             ImageAnimationData data) override {
+    data_ = data;
+  }
+  void EraseImageAnimationData(ImageResourceContent*) override {
+    data_ = std::nullopt;
+  }
+
+  const std::optional<ImageAnimationData>& data() const { return data_; }
+
+ private:
+  std::optional<ImageAnimationData> data_;
+};
+
 }  // namespace
 
-// Extends TestingPlatformSupportWithMockScheduler to add the ability to set the
+// Extends TestingPlatformSupport to add the ability to set the
 // return value of MaxDecodedImageBytes().
 class TestingPlatformSupportWithMaxDecodedBytes
-    : public TestingPlatformSupportWithMockScheduler {
+    : public TestingPlatformSupport {
  public:
   TestingPlatformSupportWithMaxDecodedBytes() {}
   TestingPlatformSupportWithMaxDecodedBytes(
@@ -270,6 +290,8 @@ class BitmapImageTest : public testing::Test {
  protected:
   Persistent<FakeImageObserver> image_observer_;
   scoped_refptr<BitmapImage> image_;
+  test::TaskEnvironmentWithMainThreadScheduler task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMaxDecodedBytes>
       platform_;
 };
@@ -287,6 +309,126 @@ TEST_F(BitmapImageTest, destroyDecodedData) {
 TEST_F(BitmapImageTest, maybeAnimated) {
   LoadImage("gif-loop-count.gif");
   EXPECT_TRUE(image_->MaybeAnimated());
+}
+
+TEST_F(BitmapImageTest, SharedTimelineOnlyResetLeavesOwnTimeline) {
+  LoadImage("animated-10color.gif");
+
+  FakeElementImageAnimationData shared_data;
+  FakeElementImageAnimationData own_data;
+  // Only used as an opaque, never-dereferenced key; a real ImageResourceContent
+  // lives in renderer/core, which platform tests cannot depend on.
+  ImageResourceContent* fake_image =
+      reinterpret_cast<ImageResourceContent*>(0x1);
+  ImageNodeAnimationInfo shared_info(1, ImageAnimationEnum::kNormal,
+                                     &shared_data, fake_image);
+  ImageNodeAnimationInfo own_info(2, ImageAnimationEnum::kRunning, &own_data,
+                                  fake_image);
+
+  const PaintImage::AnimationSequenceId shared_before =
+      image_->PaintImageForCurrentFrameWithInfo(&shared_info)
+          .reset_animation_sequence_id();
+  const PaintImage::AnimationSequenceId own_before =
+      image_->PaintImageForCurrentFrameWithInfo(&own_info)
+          .reset_animation_sequence_id();
+
+  image_->ResetAnimationSharedTimelineOnly();
+
+  EXPECT_GT(image_->PaintImageForCurrentFrameWithInfo(&shared_info)
+                .reset_animation_sequence_id(),
+            shared_before);
+  EXPECT_EQ(image_->PaintImageForCurrentFrameWithInfo(&own_info)
+                .reset_animation_sequence_id(),
+            own_before);
+}
+
+TEST_F(BitmapImageTest, FullResetAffectsBothTimelines) {
+  LoadImage("animated-10color.gif");
+
+  FakeElementImageAnimationData shared_data;
+  FakeElementImageAnimationData own_data;
+  // Only used as an opaque, never-dereferenced key; a real ImageResourceContent
+  // lives in renderer/core, which platform tests cannot depend on.
+  ImageResourceContent* fake_image =
+      reinterpret_cast<ImageResourceContent*>(0x1);
+  ImageNodeAnimationInfo shared_info(1, ImageAnimationEnum::kNormal,
+                                     &shared_data, fake_image);
+  ImageNodeAnimationInfo own_info(2, ImageAnimationEnum::kRunning, &own_data,
+                                  fake_image);
+
+  const PaintImage::AnimationSequenceId shared_before =
+      image_->PaintImageForCurrentFrameWithInfo(&shared_info)
+          .reset_animation_sequence_id();
+  const PaintImage::AnimationSequenceId own_before =
+      image_->PaintImageForCurrentFrameWithInfo(&own_info)
+          .reset_animation_sequence_id();
+
+  image_->ResetAnimation();
+
+  EXPECT_GT(image_->PaintImageForCurrentFrameWithInfo(&shared_info)
+                .reset_animation_sequence_id(),
+            shared_before);
+  EXPECT_GT(image_->PaintImageForCurrentFrameWithInfo(&own_info)
+                .reset_animation_sequence_id(),
+            own_before);
+}
+
+TEST_F(BitmapImageTest, OutdatedOwnEntryIsReDerivedAfterReset) {
+  LoadImage("animated-10color.gif");
+
+  FakeElementImageAnimationData animation_data;
+  // Only used as an opaque, never-dereferenced key; a real ImageResourceContent
+  // lives in renderer/core, which platform tests cannot depend on.
+  ImageResourceContent* fake_image =
+      reinterpret_cast<ImageResourceContent*>(0x1);
+  const DOMNodeId node_id = 3;
+  ImageNodeAnimationInfo info(node_id, ImageAnimationEnum::kRunning,
+                              &animation_data, fake_image);
+
+  PaintImage first = image_->PaintImageForCurrentFrameWithInfo(&info);
+  const PaintImage::Id first_paint_id = animation_data.data()->paint_id;
+  const PaintImage::AnimationSequenceId first_reset =
+      first.reset_animation_sequence_id();
+
+  image_->ResetAnimation();
+
+  PaintImage second = image_->PaintImageForCurrentFrameWithInfo(&info);
+  ASSERT_TRUE(animation_data.data().has_value());
+  EXPECT_NE(animation_data.data()->paint_id, first_paint_id);
+  EXPECT_EQ(animation_data.data()->reset_sequence,
+            second.reset_animation_sequence_id());
+  EXPECT_GT(second.reset_animation_sequence_id(), first_reset);
+  EXPECT_NE(second.stable_id(), first.stable_id());
+}
+
+TEST_F(BitmapImageTest, NormalSharedEntryTracksSharedResetSequence) {
+  LoadImage("animated-10color.gif");
+
+  FakeElementImageAnimationData animation_data;
+  // Only used as an opaque, never-dereferenced key; a real ImageResourceContent
+  // lives in renderer/core, which platform tests cannot depend on.
+  ImageResourceContent* fake_image =
+      reinterpret_cast<ImageResourceContent*>(0x1);
+  const DOMNodeId node_id = 4;
+  ImageNodeAnimationInfo info(node_id, ImageAnimationEnum::kNormal,
+                              &animation_data, fake_image);
+
+  PaintImage first = image_->PaintImageForCurrentFrameWithInfo(&info);
+  ASSERT_TRUE(animation_data.data().has_value());
+  EXPECT_EQ(animation_data.data()->sync_sequence,
+            PaintImage::AnimationSyncSequence::kShared);
+  EXPECT_EQ(animation_data.data()->paint_id, image_->paint_image_id());
+  EXPECT_EQ(animation_data.data()->reset_sequence,
+            first.reset_animation_sequence_id());
+  const PaintImage::AnimationSequenceId first_reset =
+      first.reset_animation_sequence_id();
+
+  image_->ResetAnimationSharedTimelineOnly();
+
+  PaintImage second = image_->PaintImageForCurrentFrameWithInfo(&info);
+  EXPECT_EQ(animation_data.data()->reset_sequence,
+            second.reset_animation_sequence_id());
+  EXPECT_GT(second.reset_animation_sequence_id(), first_reset);
 }
 
 TEST_F(BitmapImageTest, isAllDataReceived) {
@@ -323,6 +465,14 @@ TEST_F(BitmapImageTest, pngHasColorProfile) {
   image_->PaintImageForCurrentFrame();
   EXPECT_EQ(65536u, DecodedSize());
   EXPECT_TRUE(image_->HasColorProfile());
+}
+
+TEST_F(BitmapImageTest, pngHasInvalidColorProfile) {
+  LoadImage("png-zero-gamma-color-profile.png");
+  auto actualBitmap = GenerateBitmap(0u);
+  auto expectedBitmap =
+      GenerateBitmapForImage("png-zero-gamma-color-profile-ref.png");
+  VerifyBitmap(actualBitmap, expectedBitmap);
 }
 
 TEST_F(BitmapImageTest, webpHasColorProfile) {
@@ -367,8 +517,8 @@ TEST_F(BitmapImageTest, ConstantImageIdForPartiallyLoadedImages) {
 
   // Create a new buffer to partially supply the data.
   scoped_refptr<SharedBuffer> partial_buffer = SharedBuffer::Create();
-  partial_buffer->Append(image_data_binary.data(),
-                         image_data_binary.size() - 4);
+  partial_buffer->Append(
+      base::span(image_data_binary).first(image_data_binary.size() - 4));
 
   // First partial load. Repeated calls for a PaintImage should have the same
   // image until the data changes or the decoded data is destroyed.
@@ -479,9 +629,13 @@ TEST_F(BitmapImageTest, GifDecoderMultiThreaded) {
     cc::PaintImage::GeneratorClientId client_id;
   };
 
-  Decode decodes[4];
-  SkColor expected_color[4] = {SkColorSetARGB(255, 0, 128, 0), SK_ColorRED,
-                               SK_ColorBLUE, SK_ColorYELLOW};
+  std::array<Decode, 4> decodes;
+  std::array<SkColor, 4> expected_color = {
+      SkColorSetARGB(255, 0, 128, 0),
+      SK_ColorRED,
+      SK_ColorBLUE,
+      SK_ColorYELLOW,
+  };
   for (int i = 0; i < 4; ++i) {
     decodes[i].thread =
         std::make_unique<base::Thread>("Decode" + std::to_string(i));
@@ -659,7 +813,7 @@ TEST_F(BitmapImageTestWithMockDecoder, ImageMetadataTracking) {
   repetition_count_ = kAnimationLoopOnce;
   frame_count_ = 4u;
   last_frame_complete_ = false;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
 
   PaintImage image = image_->PaintImageForCurrentFrame();
   ASSERT_TRUE(image);
@@ -681,7 +835,7 @@ TEST_F(BitmapImageTestWithMockDecoder, ImageMetadataTracking) {
   repetition_count_ = kAnimationLoopInfinite;
   frame_count_ = 6u;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), true);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), true);
 
   image = image_->PaintImageForCurrentFrame();
   ASSERT_TRUE(image);
@@ -703,7 +857,7 @@ TEST_F(BitmapImageTestWithMockDecoder,
   repetition_count_ = kAnimationNone;
   frame_count_ = 4u;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
 
   PaintImage image = image_->PaintImageForCurrentFrame();
   EXPECT_EQ(image.repetition_count(), repetition_count_);
@@ -734,7 +888,7 @@ TEST_F(BitmapImageTestWithMockDecoder,
   repetition_count_ = kAnimationLoopOnce;
   frame_count_ = 4u;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
 
   PaintImage image = image_->PaintImageForCurrentFrame();
   EXPECT_EQ(image.repetition_count(), repetition_count_);
@@ -766,7 +920,7 @@ TEST_F(BitmapImageTestWithMockDecoder,
   repetition_count_ = kAnimationLoopInfinite;
   frame_count_ = 4u;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
 
   PaintImage image = image_->PaintImageForCurrentFrame();
   EXPECT_EQ(image.repetition_count(), repetition_count_);
@@ -796,7 +950,20 @@ TEST_F(BitmapImageTestWithMockDecoder, ResetAnimation) {
   repetition_count_ = kAnimationLoopInfinite;
   frame_count_ = 4u;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
+
+  PaintImage image = image_->PaintImageForCurrentFrame();
+  image_->ResetAnimation();
+  PaintImage image2 = image_->PaintImageForCurrentFrame();
+  EXPECT_GT(image2.reset_animation_sequence_id(),
+            image.reset_animation_sequence_id());
+}
+
+TEST_F(BitmapImageTestWithMockDecoder, ResetAnimationForStaticImage) {
+  repetition_count_ = kAnimationNone;
+  frame_count_ = 1u;
+  last_frame_complete_ = true;
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), true);
 
   PaintImage image = image_->PaintImageForCurrentFrame();
   image_->ResetAnimation();
@@ -809,7 +976,7 @@ TEST_F(BitmapImageTestWithMockDecoder, PaintImageForStaticBitmapImage) {
   repetition_count_ = kAnimationLoopInfinite;
   frame_count_ = 5;
   last_frame_complete_ = true;
-  image_->SetData(SharedBuffer::Create("data", sizeof("data")), false);
+  image_->SetData(SharedBuffer::Create(base::span_from_cstring("data")), false);
 
   // PaintImage for the original image is animated.
   EXPECT_TRUE(image_->PaintImageForCurrentFrame().ShouldAnimate());
@@ -849,11 +1016,11 @@ TEST_F(BitmapHistogramTest, DecodedImageType) {
                            BitmapImageMetrics::DecodedImageType::kICO);
   ExpectImageRecordsSample("gracehopper.bmp", "Blink.DecodedImageType",
                            BitmapImageMetrics::DecodedImageType::kBMP);
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
   ExpectImageRecordsSample("red-full-ranged-8bpc.avif",
                            "Blink.DecodedImageType",
                            BitmapImageMetrics::DecodedImageType::kAVIF);
-#endif  // BUILDFLAG(ENABLE_AV1_DECODER)
+#endif  // BUILDFLAG(ENABLE_DAV1D_DECODER)
 }
 
 TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted) {
@@ -863,7 +1030,7 @@ TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted) {
     LoadImage("rgb-jpeg-red.jpg");           // 64x64
     // 500x500 but animation is not reported.
     LoadBlinkWebTestsImage("webp-animated-large.webp");
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
     LoadImage("red-full-ranged-8bpc.avif");  // 3x3
     // 159x159 but animation is not reported.
     LoadBlinkWebTestsImage("avif/star-animated-8bpc.avif");
@@ -876,7 +1043,7 @@ TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted) {
         "Blink.DecodedImage.JpegDensity.KiBWeighted", 0);
     histogram_tester.ExpectTotalCount(
         "Blink.DecodedImage.WebPDensity.KiBWeighted2", 0);
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
     histogram_tester.ExpectTotalCount(
         "Blink.DecodedImage.AvifDensity.KiBWeighted2", 0);
 #endif
@@ -897,11 +1064,11 @@ TEST_F(BitmapHistogramTest, DecodedImageDensityKiBWeighted) {
                            "Blink.DecodedImage.WebPDensity.KiBWeighted2", 24,
                            19);
 
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
   // 840x1120, 18769 bytes --> 0.16, 18 KiB
   ExpectImageRecordsSample(
       "happy_dog.avif", "Blink.DecodedImage.AvifDensity.KiBWeighted2", 16, 18);
-#endif  // BUILDFLAG(ENABLE_AV1_DECODER)
+#endif  // BUILDFLAG(ENABLE_DAV1D_DECODER)
 }
 
 }  // namespace blink

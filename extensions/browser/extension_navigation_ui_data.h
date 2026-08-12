@@ -9,7 +9,11 @@
 #include <optional>
 
 #include "content/public/browser/global_routing_id.h"
+#include "content/public/common/child_process_id.h"
 #include "extensions/browser/extension_api_frame_id_map.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace content {
 class NavigationHandle;
@@ -47,6 +51,7 @@ class ExtensionNavigationUIData {
   struct WebViewData {
     int web_view_instance_id = 0;
     int web_view_rules_registry_id = 0;
+    content::ChildProcessId web_view_embedder_process_id;
   };
 
   bool is_web_view() const { return web_view_data_.has_value(); }
@@ -55,6 +60,9 @@ class ExtensionNavigationUIData {
   }
   int web_view_rules_registry_id() const {
     return web_view_data_->web_view_rules_registry_id;
+  }
+  content::ChildProcessId web_view_embedder_process_id() const {
+    return web_view_data_->web_view_embedder_process_id;
   }
 
   const content::GlobalRenderFrameHostId& parent_routing_id() const {

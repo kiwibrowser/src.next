@@ -4,15 +4,14 @@
 
 #include "chrome/browser/download/download_warning_desktop_hats_utils.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -83,10 +82,6 @@ std::string GetDangerTypeStringData(const DownloadItemModel& model) {
     case DownloadUIModel::TailoredWarningType::kCookieTheft:
       base::StrAppend(&danger_type_string, {", Cookie theft"});
       break;
-    case DownloadUIModel::TailoredWarningType::kCookieTheftWithAccountInfo:
-      base::StrAppend(&danger_type_string,
-                      {", Cookie theft with account info"});
-      break;
     case DownloadUIModel::TailoredWarningType::kSuspiciousArchive:
       base::StrAppend(&danger_type_string, {", Suspicious archive"});
       break;
@@ -142,7 +137,7 @@ std::string SerializeWarningActionEvents(
   std::vector<std::string> event_strings;
   event_strings.reserve(events.size() + 1);
   event_strings.push_back(std::move(first_event_string));
-  base::ranges::transform(
+  std::ranges::transform(
       events.begin(), events.end(), std::back_inserter(event_strings),
       [](const DownloadItemWarningData::WarningActionEvent& event) {
         return event.ToString();
@@ -403,7 +398,7 @@ bool DelayedDownloadWarningHatsLauncher::TryScheduleTask(
     download::DownloadItem* download) {
   CHECK(download);
   TaskKey key = GetTaskKey(download);
-  if (base::Contains(tasks_, key)) {
+  if (tasks_.contains(key)) {
     return false;
   }
 

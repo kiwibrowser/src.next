@@ -4,26 +4,30 @@
 
 #include "extensions/browser/extension_navigation_throttle.h"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "components/guest_view/buildflags/buildflags.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/storage_partition_config.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_host_registry.h"
+#include "extensions/browser/extension_navigation_registry.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/url_request_util.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
@@ -39,9 +43,12 @@
 
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
 #include "components/guest_view/browser/guest_view_base.h"
-#include "extensions/browser/guest_view/app_view/app_view_guest.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_embedder.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
+#include "extensions/browser/guest_view/app_view/app_view_guest.h"
+#endif
 #endif
 
 #if BUILDFLAG(ENABLE_PLATFORM_APPS)
@@ -58,30 +65,9 @@ namespace {
 bool ShouldBlockNavigationToPlatformAppResource(
     const Extension* platform_app,
     content::NavigationHandle& navigation_handle) {
-  content::WebContents* web_contents = navigation_handle.GetWebContents();
-  mojom::ViewType view_type = GetViewType(web_contents);
-  DCHECK_NE(mojom::ViewType::kInvalid, view_type);
-
-  // Navigation to platform app's background page.
-  if (view_type == mojom::ViewType::kExtensionBackgroundPage)
-    return false;
-
-#if BUILDFLAG(ENABLE_PLATFORM_APPS)
-  // Navigation within an app window. The app window must belong to the
-  // |platform_app|.
-  if (view_type == mojom::ViewType::kAppWindow) {
-    AppWindowRegistry* registry =
-        AppWindowRegistry::Get(web_contents->GetBrowserContext());
-    DCHECK(registry);
-    AppWindow* app_window = registry->GetAppWindowForWebContents(web_contents);
-    DCHECK(app_window);
-    return app_window->extension_id() != platform_app->id();
-  }
-#endif
-
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
-  // Navigation within a guest web contents.
-  if (view_type == mojom::ViewType::kExtensionGuest) {
+  if (auto* guest =
+          guest_view::GuestViewBase::FromNavigationHandle(&navigation_handle)) {
     // Navigating within a PDF viewer extension (see crbug.com/1252154). This
     // exemption is only for the PDF resource. The initial navigation to the PDF
     // loads the PDF viewer extension, which would have already passed the
@@ -94,17 +80,18 @@ bool ShouldBlockNavigationToPlatformAppResource(
       return false;
     }
 
+#if BUILDFLAG(IS_CHROMEOS)
     // Platform apps can be embedded by other platform apps using an <appview>
     // tag.
-    auto* app_view = AppViewGuest::FromNavigationHandle(&navigation_handle);
+    auto* app_view = AppViewGuest::FromGuestViewBase(guest);
     if (app_view) {
       return false;
     }
+#endif
 
     // Webviews owned by the platform app can embed platform app resources via
     // "accessible_resources".
-    auto* web_view_guest =
-        WebViewGuest::FromNavigationHandle(&navigation_handle);
+    auto* web_view_guest = WebViewGuest::FromGuestViewBase(guest);
     if (web_view_guest) {
       return web_view_guest->owner_host() != platform_app->id();
     }
@@ -112,6 +99,28 @@ bool ShouldBlockNavigationToPlatformAppResource(
     // Otherwise, it's a guest view that's neither a webview nor an appview
     // (such as an extensionoptions view). Disallow.
     return true;
+  }
+#endif
+
+  content::WebContents* web_contents = navigation_handle.GetWebContents();
+  mojom::ViewType view_type = GetViewType(web_contents);
+  DCHECK_NE(mojom::ViewType::kInvalid, view_type);
+
+  // Navigation to platform app's background page.
+  if (view_type == mojom::ViewType::kExtensionBackgroundPage) {
+    return false;
+  }
+
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
+  // Navigation within an app window. The app window must belong to the
+  // |platform_app|.
+  if (view_type == mojom::ViewType::kAppWindow) {
+    AppWindowRegistry* registry =
+        AppWindowRegistry::Get(web_contents->GetBrowserContext());
+    DCHECK(registry);
+    AppWindow* app_window = registry->GetAppWindowForWebContents(web_contents);
+    DCHECK(app_window);
+    return app_window->extension_id() != platform_app->id();
   }
 #endif
 
@@ -130,8 +139,8 @@ bool ShouldBlockNavigationToPlatformAppResource(
 }  // namespace
 
 ExtensionNavigationThrottle::ExtensionNavigationThrottle(
-    content::NavigationHandle* navigation_handle)
-    : content::NavigationThrottle(navigation_handle) {}
+    content::NavigationThrottleRegistry& registry)
+    : content::NavigationThrottle(registry) {}
 
 ExtensionNavigationThrottle::~ExtensionNavigationThrottle() = default;
 
@@ -176,7 +185,7 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   if (url_has_extension_scheme) {
     // "chrome-extension://" URL.
     target_extension = registry->enabled_extensions().GetExtensionOrAppByURL(
-        url, true /*include_guid*/);
+        url, /*include_guid=*/true);
   } else if (target_origin.scheme() == kExtensionScheme) {
     // "blob:chrome-extension://" or "filesystem:chrome-extension://" URL.
     DCHECK(url.SchemeIsFileSystem() || url.SchemeIsBlob());
@@ -190,14 +199,16 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
     if (guest) {
       const Extension* hosted_app =
           registry->enabled_extensions().GetHostedAppByURL(url);
-      if (hosted_app && hosted_app->id() == kWebStoreAppId)
+      if (hosted_app && hosted_app->id() == kWebStoreAppId) {
         return content::NavigationThrottle::BLOCK_REQUEST;
+      }
       // Also apply the same blocking if the URL maps to the new webstore
       // domain. Note: We can't use the extension_urls::IsWebstoreDomain check
       // here, as the webstore hosted app is associated with a specific path and
       // we don't want to block navigations to other paths on that domain.
-      if (url.DomainIs(extension_urls::GetNewWebstoreLaunchURL().host()))
+      if (url.DomainIs(extension_urls::GetNewWebstoreLaunchURL().GetHost())) {
         return content::NavigationThrottle::BLOCK_REQUEST;
+      }
     }
 #endif
 
@@ -210,16 +221,16 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   // If the navigation is to an unknown or disabled extension, block it.
   if (!target_extension) {
     // TODO(nick): This yields an unsatisfying error page; use a different error
-    // code once that's supported. https://crbug.com/649869
+    // code once that's supported. https://crbug.com/40486262
     return content::NavigationThrottle::BLOCK_REQUEST;
   }
+  CHECK(target_extension);
 
   // Hosted apps don't have any associated resources outside of icons, so
   // block any requests to URLs in their extension origin.
   if (target_extension->is_hosted_app()) {
     std::string_view resource_root_relative_path =
-        url.path_piece().empty() ? std::string_view()
-                                 : url.path_piece().substr(1);
+        url.path().empty() ? std::string_view() : url.path().substr(1);
     if (!IconsInfo::GetIcons(target_extension)
              .ContainsPath(resource_root_relative_path)) {
       return content::NavigationThrottle::BLOCK_REQUEST;
@@ -227,15 +238,17 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   }
 
   // Block all navigations to blob: or filesystem: URLs with extension
-  // origin from non-extension processes.  See https://crbug.com/645028 and
-  // https://crbug.com/836858.
+  // origin from non-extension processes.  See https://crbug.com/40085339 and
+  // https://crbug.com/40091207.
+  const auto& starting_principal =
+      navigation_handle()->GetStartingSiteInstance()->GetSecurityPrincipal();
   bool current_frame_is_extension_process =
-      !!registry->enabled_extensions().GetExtensionOrAppByURL(
-          navigation_handle()->GetStartingSiteInstance()->GetSiteURL());
+      starting_principal.SchemeIs(kExtensionScheme) &&
+      !!registry->enabled_extensions().GetByID(starting_principal.GetHost());
 
   if (!url_has_extension_scheme && !current_frame_is_extension_process) {
     // Relax this restriction for apps that use <webview>.  See
-    // https://crbug.com/652077.
+    // https://crbug.com/41278508.
     bool has_webview_permission =
         target_extension->permissions_data()->HasAPIPermission(
             mojom::APIPermissionID::kWebView);
@@ -258,19 +271,25 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
 
     content::StoragePartitionConfig storage_partition_config =
         content::StoragePartitionConfig::CreateDefault(browser_context);
-    bool is_guest = navigation_handle()->GetStartingSiteInstance()->IsGuest();
+    bool is_guest = navigation_handle()
+                        ->GetStartingSiteInstance()
+                        ->GetSecurityPrincipal()
+                        .IsGuest();
     if (is_guest) {
       storage_partition_config = navigation_handle()
                                      ->GetStartingSiteInstance()
-                                     ->GetStoragePartitionConfig();
+                                     ->GetSecurityPrincipal()
+                                     .GetStoragePartitionConfig();
     }
-    CHECK_EQ(is_guest,
-             navigation_handle()->GetStartingSiteInstance()->IsGuest());
+    CHECK_EQ(is_guest, navigation_handle()
+                           ->GetStartingSiteInstance()
+                           ->GetSecurityPrincipal()
+                           .IsGuest());
 
     bool allowed = true;
     url_request_util::AllowCrossRendererResourceLoadHelper(
         is_guest, target_extension, owner_extension,
-        storage_partition_config.partition_name(), url.path(),
+        storage_partition_config.partition_name(), url.GetPath(),
         navigation_handle()->GetPageTransition(), &allowed);
     if (!allowed) {
       return content::NavigationThrottle::BLOCK_REQUEST;
@@ -294,15 +313,38 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
     // to be reached again if there are more redirects in the same navigation.
     const GURL& upstream = redirect_chain[redirect_chain.size() - 2];
     auto upstream_origin = url::Origin::Create(upstream);
+
+    // In the case of a server redirect where there's no initiator, the
+    // upstream (redirecting) URL is the initiator. For instance, example.com
+    // redirected to an extension resource, example.com will be treated as
+    // the initiator for the purpose of web-accessible resource checks. In other
+    // cases, the initiator associated with the request (if any) should be the
+    // right one to use.
+    std::optional<url::Origin> initiator_origin;
+    if (navigation_handle()->GetInitiatorOrigin().has_value()) {
+      initiator_origin = *navigation_handle()->GetInitiatorOrigin();
+    } else if (navigation_handle()->WasServerRedirect()) {
+      initiator_origin = upstream_origin;
+    }
+
     // Cross-origin-redirects require that the resource is accessible in the
     // "web_accessible_resources" section of the manifest.
     if (!upstream_origin.opaque() && upstream_origin != target_origin) {
-      base::UmaHistogramBoolean(
-          target_extension->manifest_version() < 3
-              ? "Extensions.WAR.XOriginWebAccessible.MV2"
-              : "Extensions.WAR.XOriginWebAccessible.MV3",
+      bool is_accessible =
           WebAccessibleResourcesInfo::IsResourceWebAccessibleRedirect(
-              target_extension, url, target_origin, upstream));
+              target_extension, url, initiator_origin, upstream);
+
+      base::UmaHistogramBoolean(target_extension->manifest_version() < 3
+                                    ? "Extensions.WAR.XOriginWebAccessible.MV2"
+                                    : "Extensions.WAR.XOriginWebAccessible.MV3",
+                                is_accessible);
+
+      if (!is_accessible &&
+          !ExtensionNavigationRegistry::Get(browser_context)
+               ->CanRedirect(navigation_handle()->GetNavigationId(), url,
+                             *target_extension)) {
+        return content::NavigationThrottle::BLOCK_REQUEST;
+      }
     }
   }
 
@@ -313,8 +355,9 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   // * Renderer-initiated navigations without an initiator origin represent a
   //   history traversal to an entry that was originally loaded in a
   //   browser-initiated navigation.
-  if (!navigation_handle()->GetInitiatorOrigin().has_value())
+  if (!navigation_handle()->GetInitiatorOrigin().has_value()) {
     return content::NavigationThrottle::PROCEED;
+  }
 
   // Not automatically trusted navigation:
   // * Some browser-initiated navigations with an initiator origin are not
@@ -327,14 +370,14 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   const url::Origin& initiator_origin =
       navigation_handle()->GetInitiatorOrigin().value();
   if (initiator_origin.scheme() == kExtensionScheme &&
-      base::Contains(MimeTypesHandler::GetMIMETypeAllowlist(),
-                     initiator_origin.host())) {
+      std::ranges::contains(MimeTypesHandler::GetMIMETypeAllowlist(),
+                            initiator_origin.host())) {
     return content::NavigationThrottle::PROCEED;
   }
 
   // Navigations from chrome://, devtools:// or chrome-search:// pages need to
   // be allowed, even if the target |url| is not web-accessible.  See also:
-  // - https://crbug.com/662602
+  // - https://crbug.com/41284772
   // - similar checks in extensions::ResourceRequestPolicy::CanRequestResource
   if (initiator_origin.scheme() == content::kChromeUIScheme ||
       initiator_origin.scheme() == content::kChromeDevToolsScheme ||
@@ -344,8 +387,9 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   }
 
   // An extension can initiate navigations to any of its resources.
-  if (initiator_origin == target_origin)
+  if (initiator_origin == target_origin) {
     return content::NavigationThrottle::PROCEED;
+  }
 
   // Cancel cross-origin-initiator navigations to blob: or filesystem: URLs.
   if (!url_has_extension_scheme) {
@@ -403,11 +447,12 @@ ExtensionNavigationThrottle::WillProcessResponse() {
     return PROCEED;
   }
 
-#if BUILDFLAG(ENABLE_GUEST_VIEW)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   auto* mime_handler_view_embedder =
       MimeHandlerViewEmbedder::Get(navigation_handle()->GetFrameTreeNodeId());
-  if (!mime_handler_view_embedder)
+  if (!mime_handler_view_embedder) {
     return PROCEED;
+  }
 
   // If we have a MimeHandlerViewEmbedder, the frame might embed a resource. If
   // the frame is sandboxed, however, we shouldn't show the embedded resource.

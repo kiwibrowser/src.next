@@ -22,6 +22,7 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/external_provider_manager.h"
 #include "chrome/browser/extensions/external_testing_loader.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/web_applications/preinstalled_app_install_features.h"
@@ -34,13 +35,17 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_registrar.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/pending_extension_manager.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/updater/extension_cache_fake.h"
 #include "extensions/browser/updater/extension_downloader_test_helper.h"
+#include "extensions/common/constants.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "testing/gmock/include/gmock/gmock.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/customization/customization_document.h"
@@ -48,6 +53,8 @@
 #include "chromeos/ash/components/system/fake_statistics_provider.h"
 #include "chromeos/ash/components/system/statistics_provider.h"
 #include "components/user_manager/scoped_user_manager.h"
+#else
+#include "chrome/browser/extensions/preinstalled_extensions.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -81,60 +88,74 @@ constexpr const TestServerExtension kTestServerExtensions[] = {
 };
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-const char kExternalAppId[] = "kekdneafjmhmndejhmbcadfiiofngffo";
+const char kExternalExtensionId[] = "ghpipljflpbfljcfjlhfbfcpoklobpji";
 #endif
 
 #if BUILDFLAG(IS_WIN)
-const char kExternalAppCrxPath[] =
-    "external\\kekdneafjmhmndejhmbcadfiiofngffo.crx";
-const wchar_t kExternalAppRegistryKey[] =
-    L"Software\\Google\\Chrome\\Extensions\\kekdneafjmhmndejhmbcadfiiofngffo";
+const char kExternalExtensionCrxPath[] =
+    "external\\ghpipljflpbfljcfjlhfbfcpoklobpji.crx";
+const wchar_t kExternalExtensionRegistryKey[] =
+    L"Software\\Google\\Chrome\\Extensions\\ghpipljflpbfljcfjlhfbfcpoklobpji";
 #endif
 
 class ExternalProviderImplTest : public ExtensionServiceTestBase {
  public:
-  ExternalProviderImplTest() {}
+  ExternalProviderImplTest() = default;
 
   ExternalProviderImplTest(const ExternalProviderImplTest&) = delete;
   ExternalProviderImplTest& operator=(const ExternalProviderImplTest&) = delete;
 
-  ~ExternalProviderImplTest() override {}
+  ~ExternalProviderImplTest() override = default;
 
-  void InitService() {
+  ExternalProviderManager* external_provider_manager() {
+    return ExternalProviderManager::Get(profile());
+  }
+
+  ExtensionUpdater* extension_updater() {
+    return ExtensionUpdater::Get(profile());
+  }
+
+  void InitService(bool autoupdate_enabled) {
 #if BUILDFLAG(IS_CHROMEOS)
     user_manager::ScopedUserManager scoped_user_manager(
         std::make_unique<ash::FakeChromeUserManager>());
 #endif
-    InitializeExtensionServiceWithUpdaterAndPrefs();
+    InitializeExtensionServiceWithUpdaterAndPrefs(autoupdate_enabled);
 
-    service()->updater()->SetExtensionCacheForTesting(
+    extension_updater()->SetExtensionCacheForTesting(
         test_extension_cache_.get());
 
-    // Don't install pre-installed apps. Some of the pre-installed apps are
-    // downloaded from the webstore, ignoring the url we pass to
-    // kAppsGalleryUpdateURL, which would cause the external updates to never
-    // finish install.
-    profile_->GetPrefs()->SetString(prefs::kPreinstalledApps, "");
+    // For tests using autoupdate, skip preinstalled extension install, which
+    // can cause updates to never finish install. Otherwise preinstall the
+    // extensions, which allows testing of the preinstalled extension provider.
+    profile()->GetPrefs()->SetString(prefs::kPreinstalledExtensions,
+                                     autoupdate_enabled ? "" : "install");
   }
 
   void InitServiceWithExternalProviders(
-      const std::optional<bool> block_external = std::nullopt) {
-    InitService();
+      const std::optional<bool> block_external = std::nullopt,
+      bool autoupdate_enabled = true) {
+    InitService(autoupdate_enabled);
 
     if (block_external.has_value())
       SetExternalExtensionsBlockedByPolicy(block_external.value());
 
+    AddExternalProviders();
+  }
+
+  // Creates and adds the external app/extension providers.
+  void AddExternalProviders() {
     // This switch is set when creating a TestingProfile, but needs to be
     // removed for some ExternalProviders to be created.
     base::CommandLine::ForCurrentProcess()->RemoveSwitch(
         switches::kDisableDefaultApps);
 
     ProviderCollection providers;
-    ExternalProviderImpl::CreateExternalProviders(service_, profile_.get(),
-                                                  &providers);
+    ExternalProviderImpl::CreateExternalProviders(external_provider_manager(),
+                                                  profile(), &providers);
 
     for (std::unique_ptr<ExternalProviderInterface>& provider : providers)
-      service_->AddProviderForTesting(std::move(provider));
+      external_provider_manager()->AddProviderForTesting(std::move(provider));
   }
 
   void OverrideExternalExtensionsPath() {
@@ -144,40 +165,50 @@ class ExternalProviderImplTest : public ExtensionServiceTestBase {
 #if BUILDFLAG(IS_WIN)
     EXPECT_NO_FATAL_FAILURE(
         registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
-    EXPECT_EQ(ERROR_SUCCESS,
-              external_extension_key_.Create(
-                  HKEY_CURRENT_USER, kExternalAppRegistryKey, KEY_ALL_ACCESS));
-    EXPECT_EQ(ERROR_SUCCESS,
-              external_extension_key_.WriteValue(
-                  L"path",
-                  data_dir().AppendASCII(kExternalAppCrxPath).value().c_str()));
+    EXPECT_EQ(
+        ERROR_SUCCESS,
+        external_extension_key_.Create(
+            HKEY_CURRENT_USER, kExternalExtensionRegistryKey, KEY_ALL_ACCESS));
+    EXPECT_EQ(
+        ERROR_SUCCESS,
+        external_extension_key_.WriteValue(
+            L"path",
+            data_dir().AppendASCII(kExternalExtensionCrxPath).value().c_str()));
     EXPECT_EQ(ERROR_SUCCESS,
               external_extension_key_.WriteValue(L"version", L"1"));
 #else
     external_externsions_overrides_ =
         std::make_unique<base::ScopedPathOverride>(
             chrome::DIR_EXTERNAL_EXTENSIONS,
-            data_dir().AppendASCII("external"));
+            data_dir().AppendASCII("external_extension"));
 #endif
   }
 
   void SetExternalExtensionsBlockedByPolicy(const bool block_external) {
-    profile_->GetPrefs()->SetBoolean(pref_names::kBlockExternalExtensions,
-                                     block_external);
+    profile()->GetPrefs()->SetBoolean(pref_names::kBlockExternalExtensions,
+                                      block_external);
   }
 
-  void InitializeExtensionServiceWithUpdaterAndPrefs() {
+  void InitializeExtensionServiceWithUpdaterAndPrefs(bool autoupdate_enabled) {
     ExtensionServiceInitParams params;
     // Create prefs file to make the profile not new.
     params.prefs_content = "{}";
-    params.autoupdate_enabled = true;
+    params.autoupdate_enabled = autoupdate_enabled;
     InitializeExtensionService(std::move(params));
-    service_->updater()->Start();
+    if (autoupdate_enabled) {
+      extension_updater()->Start();
+    }
     content::RunAllTasksUntilIdle();
   }
 
   // ExtensionServiceTestBase overrides:
   void SetUp() override {
+    // Prevent ExtensionService from creating an initial set of external
+    // providers, which has side effects (setting prefs). We create providers in
+    // AddExternalProviders() above. Adding this switch is similar to browser
+    // test behavior (see chrome/test/base/test_launcher_utils.cc).
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kDisableDefaultApps);
     ExtensionServiceTestBase::SetUp();
     test_server_ = std::make_unique<net::test_server::EmbeddedTestServer>();
 
@@ -191,11 +222,19 @@ class ExternalProviderImplTest : public ExtensionServiceTestBase {
         test_server_->GetURL(kInAppPaymentsApp.update_path));
   }
 
+  void TearDown() override {
+    // Avoid dangling pointers.
+    extension_updater()->SetExtensionCacheForTesting(nullptr);
+    test_extension_cache_.reset();
+    ExtensionServiceTestBase::TearDown();
+  }
+
   void AwaitCheckForExternalUpdates() {
     base::RunLoop run_loop;
-    service_->set_external_updates_finished_callback_for_test(
-        run_loop.QuitWhenIdleClosure());
-    service_->CheckForExternalUpdates();
+    external_provider_manager()
+        ->set_external_updates_finished_callback_for_test(
+            run_loop.QuitWhenIdleClosure());
+    external_provider_manager()->CheckForExternalUpdates();
     run_loop.Run();
   }
 
@@ -207,7 +246,7 @@ class ExternalProviderImplTest : public ExtensionServiceTestBase {
       const net::test_server::HttpRequest& request) {
     GURL url = test_server_->GetURL(request.relative_url);
     for (const TestServerExtension& test_extension : kTestServerExtensions) {
-      if (url.path() == test_extension.update_path) {
+      if (url.GetPath() == test_extension.update_path) {
         auto response = std::make_unique<net::test_server::BasicHttpResponse>();
         response->set_code(net::HTTP_OK);
         response->set_content(CreateUpdateManifest(
@@ -218,7 +257,7 @@ class ExternalProviderImplTest : public ExtensionServiceTestBase {
         response->set_content_type("text/xml");
         return std::move(response);
       }
-      if (url.path() == test_extension.app_path) {
+      if (url.GetPath() == test_extension.app_path) {
         base::FilePath test_data_dir;
         base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
         std::string contents;
@@ -253,14 +292,52 @@ class ExternalProviderImplTest : public ExtensionServiceTestBase {
 }  // namespace
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if !BUILDFLAG(IS_ANDROID)
+// The in-app payments app is not bundled on Android, see crbug.com/409396604.
 TEST_F(ExternalProviderImplTest, InAppPayments) {
   InitServiceWithExternalProviders();
 
   AwaitCheckForExternalUpdates();
 
   EXPECT_TRUE(registry()->GetInstalledExtension(kInAppPaymentsApp.app_id));
-  EXPECT_TRUE(service_->IsExtensionEnabled(kInAppPaymentsApp.app_id));
+  EXPECT_TRUE(registrar()->IsExtensionEnabled(kInAppPaymentsApp.app_id));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_CHROMEOS)
+TEST_F(ExternalProviderImplTest, DocsOfflineExtensionIsDefaultInstalled) {
+  // No need to test the actual auto update, that's tested above and below.
+  // Also, we don't have a dummy test CRX for Docs Offline like we do for
+  // In-App Payments above. Attempting to test with the real Docs Offline CRX
+  // causes test crashes in service worker setup and isn't really appropriate
+  // for a unit test anyway. We just want to ensure the update is scheduled.
+  InitServiceWithExternalProviders(std::nullopt, /*autoupdate_enabled=*/false);
+
+  AwaitCheckForExternalUpdates();
+
+  // Verify the loader successfully registered the pending extension.
+  auto* manager = PendingExtensionManager::Get(profile());
+  ASSERT_TRUE(manager);
+  EXPECT_TRUE(manager->IsIdPending(extension_misc::kDocsOfflineExtensionId));
+}
+
+TEST_F(ExternalProviderImplTest, DocsOfflineExtensionIsNotReinstalled) {
+  InitService(/*autoupdate_enabled=*/false);
+
+  // Simulate external extensions being installed on a previous Chrome run.
+  profile()->GetPrefs()->SetInteger(
+      prefs::kPreinstalledExtensionsInstallState,
+      static_cast<int>(preinstalled_extensions::InstallState::
+                           kAlreadyInstalledPreinstalledExtensions));
+  AddExternalProviders();
+
+  AwaitCheckForExternalUpdates();
+
+  // The extension should not be pending.
+  auto* manager = PendingExtensionManager::Get(profile());
+  EXPECT_FALSE(manager->IsIdPending(extension_misc::kDocsOfflineExtensionId));
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 TEST_F(ExternalProviderImplTest, BlockedExternalUserProviders) {
   OverrideExternalExtensionsPath();
@@ -268,21 +345,25 @@ TEST_F(ExternalProviderImplTest, BlockedExternalUserProviders) {
 
   AwaitCheckForExternalUpdates();
 
-  EXPECT_FALSE(registry()->GetInstalledExtension(kExternalAppId));
+  EXPECT_FALSE(registry()->GetInstalledExtension(kExternalExtensionId));
 }
 
 TEST_F(ExternalProviderImplTest, NotBlockedExternalUserProviders) {
   OverrideExternalExtensionsPath();
   InitServiceWithExternalProviders(false);
 
+  TestExtensionRegistryObserver observer(registry());
   AwaitCheckForExternalUpdates();
+  observer.WaitForExtensionInstalled();
 
-  EXPECT_TRUE(registry()->GetInstalledExtension(kExternalAppId));
+  EXPECT_TRUE(registry()->GetInstalledExtension(kExternalExtensionId));
 }
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
+// Desktop Android does not support web apps.
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
 TEST_F(ExternalProviderImplTest, WebAppMigrationFlag) {
-  InitService();
+  InitService(/*autoupdate_enabled=*/true);
 
   const std::string json = base::StringPrintf(
       R"(
@@ -295,12 +376,13 @@ TEST_F(ExternalProviderImplTest, WebAppMigrationFlag) {
       )",
       kGoodApp.app_id,
       test_server_->GetURL(kGoodApp.update_path).spec().c_str());
-  service_->AddProviderForTesting(std::make_unique<ExternalProviderImpl>(
-      service_,
-      base::MakeRefCounted<ExternalTestingLoader>(
-          json, base::FilePath(FILE_PATH_LITERAL("//absolute/path"))),
-      profile_.get(), mojom::ManifestLocation::kExternalPref,
-      mojom::ManifestLocation::kExternalPrefDownload, Extension::NO_FLAGS));
+  external_provider_manager()->AddProviderForTesting(
+      std::make_unique<ExternalProviderImpl>(
+          external_provider_manager(),
+          base::MakeRefCounted<ExternalTestingLoader>(
+              json, base::FilePath(FILE_PATH_LITERAL("//absolute/path"))),
+          profile(), mojom::ManifestLocation::kExternalPref,
+          mojom::ManifestLocation::kExternalPrefDownload, Extension::NO_FLAGS));
 
   // App is not installed, we should not install if the flag is enabled.
   {
@@ -324,5 +406,6 @@ TEST_F(ExternalProviderImplTest, WebAppMigrationFlag) {
     EXPECT_TRUE(registry()->GetInstalledExtension(kGoodApp.app_id));
   }
 }
+#endif  // BUILDFLAG(ENABLE_PLATFORM_APPS)
 
 }  // namespace extensions

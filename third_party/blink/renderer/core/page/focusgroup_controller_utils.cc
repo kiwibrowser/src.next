@@ -4,37 +4,208 @@
 
 #include "third_party/blink/renderer/core/page/focusgroup_controller_utils.h"
 
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/keywords.h"
 #include "third_party/blink/renderer/core/layout/table/layout_table.h"
 #include "third_party/blink/renderer/core/layout/table/layout_table_cell.h"
+#include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/grid_focusgroup_structure_info.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
-FocusgroupDirection FocusgroupControllerUtils::FocusgroupDirectionForEvent(
-    KeyboardEvent* event) {
-  DCHECK(event);
-  if (event->ctrlKey() || event->metaKey() || event->shiftKey())
-    return FocusgroupDirection::kNone;
+namespace {
 
-  const AtomicString key(event->key());
-  // TODO(bebeaudr): Support RTL. Will it be as simple as inverting the
-  // direction associated with the left and right arrows when in a RTL element?
-  if (key == keywords::kArrowDown) {
-    return FocusgroupDirection::kForwardBlock;
-  } else if (key == keywords::kArrowRight) {
-    return FocusgroupDirection::kForwardInline;
-  } else if (key == keywords::kArrowUp) {
-    return FocusgroupDirection::kBackwardBlock;
-  } else if (key == keywords::kArrowLeft) {
-    return FocusgroupDirection::kBackwardInline;
+// Helper class to manage visual-order traversal that respects reading-flow
+// for focusgroup. Similar to FocusNavigation, but scoped to only the needs
+// of focusgroup traversal.
+class FocusgroupVisualOrderTraversalContext {
+  STACK_ALLOCATED();
+
+ public:
+  bool VisitReadingFlowContainerIfNeeded(const Element* element) {
+    if (const ContainerNode* container =
+            FocusController::ReadingFlowContainerOrDisplayContents(
+                element, /*find_for_items*/ true)) {
+      const Element* container_element = DynamicTo<Element>(container);
+      if (container_element &&
+          !reading_flow_elements_.Contains(container_element)) {
+        BuildReadingFlowElementMappings(*container_element);
+        return true;
+      }
+    }
+    return false;
   }
 
-  return FocusgroupDirection::kNone;
+  Element* Next(const Element* current, bool skip_subtree) {
+    VisitReadingFlowContainerIfNeeded(current);
+    const auto it = reading_flow_next_elements_.find(current);
+    if (it != reading_flow_next_elements_.end()) {
+      return it->value;
+    }
+
+    return FocusgroupControllerUtils::NextElement(current, skip_subtree);
+  }
+
+  Element* Previous(const Element* current, bool skip_subtree) {
+    VisitReadingFlowContainerIfNeeded(current);
+
+    const auto it = reading_flow_previous_elements_.find(current);
+    Element* previous =
+        it != reading_flow_previous_elements_.end()
+            ? it->value.Get()
+            : FocusgroupControllerUtils::PreviousElement(current, skip_subtree);
+
+    // It is possible that |previous| itself is inside a reading-flow container
+    // that we haven't built mappings for yet. In that case, we need to build
+    // those mappings.
+    VisitReadingFlowContainerIfNeeded(previous);
+
+    // Now that we've built the necessary mappings, check again.
+    const auto recheck_it = reading_flow_previous_elements_.find(current);
+    if (recheck_it != reading_flow_previous_elements_.end()) {
+      return recheck_it->value;
+    }
+    return previous;
+  }
+
+  Element* NextInDirection(const Element* current,
+                           mojom::blink::FocusType direction,
+                           bool skip_subtree) {
+    switch (direction) {
+      case mojom::blink::FocusType::kForward:
+        return Next(current, skip_subtree);
+      case mojom::blink::FocusType::kBackward:
+        return Previous(current, skip_subtree);
+      default:
+        NOTREACHED();
+    }
+  }
+
+  void BuildReadingFlowElementMappings(const Element& reading_flow_element) {
+    DCHECK(reading_flow_element.GetLayoutBox());
+    DCHECK(!reading_flow_elements_.Contains(&reading_flow_element));
+    reading_flow_elements_.insert(&reading_flow_element);
+    // The reading flow container itself may be reordered, save the next element
+    // so we can stitch the ordering together at the end.
+    const auto it = reading_flow_next_elements_.find(&reading_flow_element);
+    Element* after_reading_flow =
+        it != reading_flow_next_elements_.end()
+            ? it->value.Get()
+            : FocusgroupControllerUtils::NextElement(&reading_flow_element,
+                                                     /*skip_subtree=*/true);
+    const auto& reading_flow_children =
+        reading_flow_element.ReadingFlowChildren();
+
+    // This has the chance of over-allocating in the case where some children
+    // are not elements or are pseudo-elements, but that's preferable to
+    // an additional pass to count or dynamic resizing during insertion.
+    reading_flow_next_elements_.ReserveCapacityForSize(
+        reading_flow_next_elements_.size() + reading_flow_children.size());
+    reading_flow_previous_elements_.ReserveCapacityForSize(
+        reading_flow_previous_elements_.size() + reading_flow_children.size());
+
+    Element* prev_element = const_cast<Element*>(&reading_flow_element);
+    for (Node* reading_flow_node : reading_flow_children) {
+      Element* child = DynamicTo<Element>(reading_flow_node);
+      // Pseudo-elements in reading-flow are not focusable and should not be
+      // included in the elements to traverse. Keep in sync with the behavior
+      // in FocusNavigation::SetReadingFlowInfo.
+      if (!child || child->IsPseudoElement()) {
+        continue;
+      }
+      reading_flow_previous_elements_.Set(child, prev_element);
+      if (prev_element) {
+        reading_flow_next_elements_.Set(prev_element, child);
+      }
+      prev_element = child;
+    }
+    if (prev_element) {
+      reading_flow_next_elements_.Set(prev_element, after_reading_flow);
+      if (after_reading_flow) {
+        reading_flow_previous_elements_.Set(after_reading_flow, prev_element);
+      }
+    }
+  }
+
+ private:
+  // Set of reading flow containers we've already built mappings for.
+  HeapHashSet<Member<const Element>> reading_flow_elements_;
+
+  // Mappings of elements in reading-flow order, with the "current" element as
+  // the key. If the focusgroup contains elements re-ordered different reading
+  // flow containers, these mappings will combine them together to produce an
+  // overall mapping.
+  HeapHashMap<Member<const Element>, Member<Element>>
+      reading_flow_next_elements_;
+  HeapHashMap<Member<const Element>, Member<Element>>
+      reading_flow_previous_elements_;
+};
+
+}  // namespace
+
+FocusgroupDirection FocusgroupControllerUtils::FocusgroupDirectionForEvent(
+    const KeyboardEvent* event,
+    const Element& focused_element) {
+  DCHECK(event);
+  if (event->ctrlKey() || event->metaKey() || event->shiftKey() ||
+      event->altKey()) {
+    return FocusgroupDirection::kNone;
+  }
+
+  // Determine the physical direction for the pressed arrow key.
+  const AtomicString key(event->key());
+  LogicalDirection logical_direction;
+  if (key == keywords::kArrowDown || key == keywords::kArrowRight ||
+      key == keywords::kArrowUp || key == keywords::kArrowLeft) {
+    // Resolve the writing direction from the focused element's computed style.
+    // This means arrow keys follow the element's local writing direction (e.g.,
+    // an RTL item inside an LTR focusgroup uses RTL key mappings). Falls back
+    // to horizontal-tb LTR when no style is available.
+    const ComputedStyle* style = focused_element.GetComputedStyle();
+    if (!style) {
+      return FocusgroupDirection::kNone;
+    }
+    WritingDirectionMode writing_direction = style->GetWritingDirection();
+
+    // Map the physical arrow key to a logical direction using the focused
+    // element's writing direction. This correctly handles RTL (left/right
+    // swap for inline) and vertical writing modes (axes swap).
+    if (key == keywords::kArrowDown) {
+      logical_direction = writing_direction.Bottom();
+    } else if (key == keywords::kArrowRight) {
+      logical_direction = writing_direction.Right();
+    } else if (key == keywords::kArrowUp) {
+      logical_direction = writing_direction.Top();
+    } else {
+      logical_direction = writing_direction.Left();
+    }
+  } else {
+    return FocusgroupDirection::kNone;
+  }
+
+  switch (logical_direction) {
+    case LogicalDirection::kInlineStart:
+      return FocusgroupDirection::kBackwardInline;
+    case LogicalDirection::kInlineEnd:
+      return FocusgroupDirection::kForwardInline;
+    case LogicalDirection::kBlockStart:
+      return FocusgroupDirection::kBackwardBlock;
+    case LogicalDirection::kBlockEnd:
+      return FocusgroupDirection::kForwardBlock;
+  }
 }
 
 bool FocusgroupControllerUtils::IsDirectionForward(
@@ -75,20 +246,6 @@ bool FocusgroupControllerUtils::WrapsInDirection(
          ((flags & FocusgroupFlags::kWrapBlock) && IsDirectionBlock(direction));
 }
 
-bool FocusgroupControllerUtils::FocusgroupExtendsInAxis(
-    FocusgroupFlags extending_focusgroup,
-    FocusgroupFlags focusgroup,
-    FocusgroupDirection direction) {
-  if (focusgroup == FocusgroupFlags::kNone ||
-      extending_focusgroup == FocusgroupFlags::kNone) {
-    return false;
-  }
-
-  return extending_focusgroup & FocusgroupFlags::kExtend &&
-         (IsAxisSupported(focusgroup, direction) ==
-          IsAxisSupported(extending_focusgroup, direction));
-}
-
 Element* FocusgroupControllerUtils::FindNearestFocusgroupAncestor(
     const Element* element,
     FocusgroupType type) {
@@ -97,20 +254,25 @@ Element* FocusgroupControllerUtils::FindNearestFocusgroupAncestor(
 
   for (Element* ancestor = FlatTreeTraversal::ParentElement(*element); ancestor;
        ancestor = FlatTreeTraversal::ParentElement(*ancestor)) {
-    FocusgroupFlags ancestor_flags = ancestor->GetFocusgroupFlags();
-    if (ancestor_flags != FocusgroupFlags::kNone) {
+    FocusgroupBehavior ancestor_behavior =
+        ancestor->GetFocusgroupData().behavior;
+    if (ancestor_behavior != FocusgroupBehavior::kNoBehavior) {
       switch (type) {
         case FocusgroupType::kGrid:
+          // Respect the FocusgroupGrid feature gate.
+          CHECK(RuntimeEnabledFeatures::FocusgroupGridEnabled(
+              element->GetExecutionContext()));
           // TODO(bebeaudr): Support grid focusgroups that aren't based on the
           // table layout objects.
-          if (ancestor_flags & FocusgroupFlags::kGrid &&
+          if (ancestor_behavior == FocusgroupBehavior::kGrid &&
               IsA<LayoutTable>(ancestor->GetLayoutObject())) {
             return ancestor;
           }
           break;
         case FocusgroupType::kLinear:
-          if (!(ancestor_flags & FocusgroupFlags::kGrid))
+          if (ancestor_behavior != FocusgroupBehavior::kGrid) {
             return ancestor;
+          }
           break;
         default:
           NOTREACHED();
@@ -126,10 +288,11 @@ Element* FocusgroupControllerUtils::NextElement(const Element* current,
                                                 bool skip_subtree) {
   DCHECK(current);
   Node* node;
-  if (skip_subtree)
+  if (skip_subtree) {
     node = FlatTreeTraversal::NextSkippingChildren(*current);
-  else
+  } else {
     node = FlatTreeTraversal::Next(*current);
+  }
 
   Element* next_element;
   // Here, we don't need to skip the subtree when getting the next element since
@@ -137,152 +300,638 @@ Element* FocusgroupControllerUtils::NextElement(const Element* current,
   // NextSkippingChildren above.
   for (; node; node = FlatTreeTraversal::Next(*node)) {
     next_element = DynamicTo<Element>(node);
-    if (next_element)
+    if (next_element) {
       return next_element;
-  }
-  return nullptr;
-}
-
-Element* FocusgroupControllerUtils::PreviousElement(const Element* current) {
-  DCHECK(current);
-  Node* node = FlatTreeTraversal::Previous(*current);
-
-  Element* previous_element;
-  for (; node; node = FlatTreeTraversal::Previous(*node)) {
-    previous_element = DynamicTo<Element>(node);
-    if (previous_element)
-      return previous_element;
-  }
-  return nullptr;
-}
-
-Element* FocusgroupControllerUtils::LastElementWithin(const Element* current) {
-  DCHECK(current);
-  Node* last_node = FlatTreeTraversal::LastWithin(*current);
-
-  // We now have the last Node, but it might not be the last Element. Find it
-  // by going to the previous element in preorder if needed.
-  Element* last_element;
-  for (; last_node && last_node != current;
-       last_node = FlatTreeTraversal::Previous(*last_node)) {
-    last_element = DynamicTo<Element>(last_node);
-    if (last_element)
-      return last_element;
-  }
-  return nullptr;
-}
-
-bool FocusgroupControllerUtils::IsFocusgroupItem(const Element* element) {
-  if (!element || !element->IsFocusable())
-    return false;
-
-  // All children of a focusgroup are considered focusgroup items if they are
-  // focusable.
-  Element* parent = FlatTreeTraversal::ParentElement(*element);
-  if (!parent)
-    return false;
-
-  FocusgroupFlags parent_flags = parent->GetFocusgroupFlags();
-  return parent_flags != FocusgroupFlags::kNone;
-}
-
-// This function is called whenever the |element| passed by parameter has fallen
-// into a subtree while navigating backward. Its objective is to prevent
-// |element| from having descended into a non-extending focusgroup. When it
-// detects its the case, it returns |element|'s first ancestor who is still part
-// of the same focusgroup as |stop_ancestor|. The returned element is
-// necessarily an element part of the previous focusgroup, but not necessarily a
-// focusgroup item.
-//
-// |stop_ancestor| might be a focusgroup root itself or be a descendant of one.
-// Regardless, given the assumption that |stop_ancestor| is always part of the
-// previous focusgroup, we can stop going up |element|'s ancestors chain as soon
-// as we reached it.
-//
-// Let's consider this example:
-//           fg1
-//      ______|_____
-//      |          |
-//      a1       a2
-//      |
-//     fg2
-//    __|__
-//    |   |
-//    b1  b2
-//
-// where |fg2| is a focusgroup that doesn't extend the focusgroup |fg1|. While
-// |fg2| is part of the focusgroup |fg1|, its subtree isn't. If the focus is on
-// |a2|, the second item of the top-most focusgroup, and we go backward using
-// the arrow keys, the focus should move to |fg2|. It shouldn't go inside of
-// |fg2|, since it's a different focusgroup that doesn't extend its parent
-// focusgroup.
-//
-// However, the previous element in preorder traversal from |a2| is |b2|, which
-// isn't part of the same focusgroup. This function aims at fixing this by
-// moving the current element to its parent, which is part of the previous
-// focusgroup we were in (when we were on |a2|), |fg1|.
-Element* FocusgroupControllerUtils::AdjustElementOutOfUnrelatedFocusgroup(
-    Element* element,
-    Element* stop_ancestor,
-    FocusgroupDirection direction) {
-  DCHECK(element);
-  DCHECK(stop_ancestor);
-
-  // Get the previous focusgroup we were part of (|stop_ancestor| was
-  // necessarily part of it: it was either the focusgroup itself or a descendant
-  // of that focusgroup).
-  FocusgroupFlags focusgroup_flags = stop_ancestor->GetFocusgroupFlags();
-  if (focusgroup_flags == FocusgroupFlags::kNone) {
-    Element* focusgroup =
-        FindNearestFocusgroupAncestor(stop_ancestor, FocusgroupType::kLinear);
-    DCHECK(focusgroup);
-    focusgroup_flags = focusgroup->GetFocusgroupFlags();
-  }
-
-  // Go over each ancestor of the |element| in order to validate that it is
-  // still part of the previous focusgroup. If it isn't, set the ancestor that
-  // broke one of the conditions as the |adjusted_element| and continue the
-  // loop from there.
-  Element* adjusted_element = element;
-  for (Element* ancestor = FlatTreeTraversal::ParentElement(*element); ancestor;
-       ancestor = FlatTreeTraversal::ParentElement(*ancestor)) {
-    if (ancestor == stop_ancestor)
-      break;
-
-    // We consider |element| as being part of a different focusgroup than the
-    // one we were previously in when one of its ancestor is a focusgroup that
-    // doesn't extend the previous one.
-    FocusgroupFlags ancestor_flags = ancestor->GetFocusgroupFlags();
-    if (ancestor_flags != FocusgroupFlags::kNone &&
-        !FocusgroupExtendsInAxis(ancestor_flags, focusgroup_flags, direction)) {
-      adjusted_element = ancestor;
     }
   }
+  return nullptr;
+}
 
-  return adjusted_element;
+Element* FocusgroupControllerUtils::PreviousElement(const Element* current,
+                                                    bool skip_subtree) {
+  DCHECK(current);
+  Node* node;
+  if (skip_subtree) {
+    node = FlatTreeTraversal::PreviousAbsoluteSibling(*current);
+  } else {
+    node = FlatTreeTraversal::Previous(*current);
+  }
+  for (; node; node = FlatTreeTraversal::Previous(*node)) {
+    if (Element* previous_element = DynamicTo<Element>(node)) {
+      return previous_element;
+    }
+  }
+  return nullptr;
+}
+
+Element* FocusgroupControllerUtils::NextElementInDirection(
+    const Element* current,
+    FocusgroupDirection direction,
+    bool skip_subtree) {
+  DCHECK_NE(IsDirectionForward(direction), IsDirectionBackward(direction));
+  mojom::blink::FocusType focus_type = IsDirectionForward(direction)
+                                           ? mojom::blink::FocusType::kForward
+                                           : mojom::blink::FocusType::kBackward;
+  return NextElementInDirection(current, focus_type, skip_subtree);
+}
+
+Element* FocusgroupControllerUtils::NextElementInDirection(
+    const Element* current,
+    mojom::blink::FocusType direction,
+    bool skip_subtree) {
+  if (!current) {
+    return nullptr;
+  }
+  switch (direction) {
+    case mojom::blink::FocusType::kForward:
+      return NextElement(current, skip_subtree);
+    case mojom::blink::FocusType::kBackward:
+      return PreviousElement(current, skip_subtree);
+    default:
+      NOTREACHED();
+  }
+}
+
+// Returns next candidate focusgroup item inside |owner| relative to
+// |current_item| in the specified direction.
+Element* FocusgroupControllerUtils::NextFocusgroupItemInDirection(
+    const Element* owner,
+    const Element* current_item,
+    FocusgroupDirection direction) {
+  if (!owner || !current_item || owner == current_item) {
+    return nullptr;
+  }
+  mojom::blink::FocusType focus_direction =
+      IsDirectionForward(direction) ? mojom::blink::FocusType::kForward
+                                    : mojom::blink::FocusType::kBackward;
+
+  // Use a stack of traversal contexts to handle reading-flow containers.
+  FocusgroupVisualOrderTraversalContext traversal_context;
+
+  Element* next_element = traversal_context.NextInDirection(
+      current_item, focus_direction, /*skip_subtree=*/false);
+  while (next_element &&
+         FlatTreeTraversal::IsDescendantOf(*next_element, *owner)) {
+    // Handle opted-out subtrees and top-layer elements: skip entirely.
+    // Top-layer elements are excluded from ancestor focusgroups regardless of
+    // whether they define their own focusgroup; they are never entry elements
+    // for the ancestor.
+    if (HasExplicitOptOut(next_element) || next_element->IsInTopLayer()) {
+      next_element =
+          traversal_context.NextInDirection(next_element, focus_direction,
+                                            /*skip_subtree=*/true);
+      continue;
+    }
+
+    // Handle nested focusgroups: they can participate as items in the parent
+    // focusgroup if they are keyboard focusable. After checking, we always
+    // skip their subtree since their contents belong to the nested focusgroup.
+    FocusgroupData next_data = next_element->GetFocusgroupData();
+    if (IsActualFocusgroup(next_data)) {
+      if (next_element->IsKeyboardFocusableSlow()) {
+        return next_element;
+      }
+      next_element =
+          traversal_context.NextInDirection(next_element, focus_direction,
+                                            /*skip_subtree=*/true);
+      continue;
+    }
+
+    if (IsFocusgroupItemWithOwner(next_element, owner)) {
+      if (next_element->IsKeyboardFocusableSlow()) {
+        return next_element;
+      }
+    }
+    next_element =
+        traversal_context.NextInDirection(next_element, focus_direction,
+                                          /*skip_subtree=*/false);
+  }
+  return nullptr;
+}
+
+Element* FocusgroupControllerUtils::GetFocusgroupOwnerOfItem(
+    const Element* element) {
+  if (!element || !element->IsFocusable()) {
+    return nullptr;
+  }
+
+  if (IsExcludedFromAncestorFocusgroup(element)) {
+    return nullptr;
+  }
+
+  return focusgroup::FindFocusgroupOwner(element);
+}
+
+bool FocusgroupControllerUtils::IsFocusgroupItemWithOwner(
+    const Element* element,
+    const Element* focusgroup_owner) {
+  return GetFocusgroupOwnerOfItem(element) == focusgroup_owner;
 }
 
 bool FocusgroupControllerUtils::IsGridFocusgroupItem(const Element* element) {
-  DCHECK(element);
-  if (!element->IsFocusable())
+  CHECK(element);
+  CHECK(RuntimeEnabledFeatures::FocusgroupGridEnabled(
+      element->GetExecutionContext()));
+  if (!element->IsFocusable()) {
     return false;
+  }
 
   // TODO(bebeaudr): Add support for manual grids, where the grid focusgroup
   // items aren't necessarily on an table cell layout object.
   return IsA<LayoutTableCell>(element->GetLayoutObject());
 }
 
+bool FocusgroupControllerUtils::IsInDirectionalKeyHandler(
+    const Element* element) {
+  return GetDirectionalKeyHandlerRoot(element) != nullptr;
+}
+
+bool FocusgroupControllerUtils::IsInDirectionalKeyHandler(
+    const Element& element,
+    FocusgroupDirection direction) {
+  if (!RuntimeEnabledFeatures::FocusgroupEnabled(
+          element.GetExecutionContext())) {
+    return false;
+  }
+
+  Element* owner = focusgroup::FindFocusgroupOwner(&element);
+  if (!owner) {
+    return false;
+  }
+
+  FocusgroupData owner_data = owner->GetFocusgroupData();
+  if (!focusgroup::IsActualFocusgroup(owner_data)) {
+    return false;
+  }
+
+  // Determine which axis the navigation direction uses.
+  FocusgroupFlags direction_axis = IsDirectionInline(direction)
+                                       ? FocusgroupFlags::kInline
+                                       : FocusgroupFlags::kBlock;
+
+  // Check if the focusgroup owner enables this axis.
+  FocusgroupFlags flags = owner_data.flags;
+  // If the owner doesn't enable this axis, no conflict is possible.
+  if (!(flags & direction_axis)) {
+    return false;
+  }
+
+  // Walk up to find a directional key handler that uses the navigation axis.
+  const Element* current = &element;
+  while (current && current != owner) {
+    FocusgroupFlags native_axes = current->NativeArrowKeyAxes();
+    if (native_axes & direction_axis) {
+      return true;
+    }
+    current = FlatTreeTraversal::ParentElement(*current);
+  }
+
+  return false;
+}
+
+const Element* FocusgroupControllerUtils::GetDirectionalKeyHandlerRoot(
+    const Element* element) {
+  if (!element) {
+    return nullptr;
+  }
+
+  if (!RuntimeEnabledFeatures::FocusgroupEnabled(
+          element->GetExecutionContext())) {
+    return nullptr;
+  }
+
+  Element* owner = focusgroup::FindFocusgroupOwner(element);
+  if (!owner) {
+    return nullptr;
+  }
+
+  FocusgroupData owner_data = owner->GetFocusgroupData();
+  if (!focusgroup::IsActualFocusgroup(owner_data)) {
+    return nullptr;
+  }
+
+  FocusgroupFlags flags = owner_data.flags;
+  const bool has_axis_flags = static_cast<bool>(
+      flags & (FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  const FocusgroupFlags enabled_axes =
+      has_axis_flags
+          ? (flags & (FocusgroupFlags::kInline | FocusgroupFlags::kBlock))
+          : (FocusgroupFlags::kInline | FocusgroupFlags::kBlock);
+
+  const Element* current = element;
+  while (current && current != owner) {
+    FocusgroupFlags native_axes = current->NativeArrowKeyAxes();
+    if (native_axes & enabled_axes) {
+      return current;
+    }
+    current = FlatTreeTraversal::ParentElement(*current);
+  }
+
+  return nullptr;
+}
+
+// static
+const Element*
+FocusgroupControllerUtils::GetDirectionalKeyHandlerRootForFocusedElement(
+    const Document& document) {
+  const Element* focused = document.FocusedElement();
+  if (!focused) {
+    return nullptr;
+  }
+  return GetDirectionalKeyHandlerRoot(focused);
+}
+
+bool FocusgroupControllerUtils::IsEntryElementForFocusgroupSegment(
+    const Element& item,
+    const Element& owner) {
+  if (!IsFocusgroupItemWithOwner(&item, &owner)) {
+    return false;
+  }
+  return &item == GetEntryElementForFocusgroupSegment(item, owner);
+}
+
+const Element* FocusgroupControllerUtils::GetEntryElementForFocusgroupSegment(
+    const Element& item,
+    const Element& owner) {
+  DCHECK(IsFocusgroupItemWithOwner(&item, &owner));
+
+  // Always start from the beginning of the segment.
+  const Element* first_item_in_segment =
+      FocusgroupItemInSegment(item, FocusgroupItemPosition::kFirst);
+
+  if (!first_item_in_segment) {
+    return nullptr;
+  }
+
+  return GetEntryElementForFocusgroupSegmentFromFirst(*first_item_in_segment,
+                                                      owner);
+}
+
+const Element*
+FocusgroupControllerUtils::GetEntryElementForFocusgroupSegmentFromFirst(
+    const Element& first_item_in_segment,
+    const Element& owner) {
+  DCHECK(IsFocusgroupItemWithOwner(&first_item_in_segment, &owner));
+  // Validate precondition: element must be the first item in its segment.
+  DCHECK_EQ(FocusgroupItemInSegment(first_item_in_segment,
+                                    FocusgroupItemPosition::kFirst),
+            &first_item_in_segment)
+      << "GetEntryElementForFocusgroupSegmentFromFirst called with element "
+         "that is not the first item in its segment.";
+
+  Element* memory_item = owner.GetFocusgroupLastFocused();
+
+  // Walk through all items in the segment to find the best candidate.
+  const Element* item_in_segment = &first_item_in_segment;
+
+  const Element* entry_priority_item = nullptr;
+  const Element* first_item = nullptr;
+  bool memory_item_in_segment = false;
+
+  // Iterate through all items in segment.
+  while (item_in_segment) {
+    DCHECK(IsFocusgroupItemWithOwner(item_in_segment, &owner));
+    if (item_in_segment->IsFocusedElementInDocument()) {
+      // If another item in the segment is already focused, return it, as
+      // only one focusgroup item per segment can be in the sequential focus
+      // order. This applies even to focused arrow key handlers - the focused
+      // element is always the entry point for its segment during Tab
+      // navigation.
+      return item_in_segment;
+    }
+
+    if (memory_item && item_in_segment == memory_item) {
+      // If we found the memory item, we no longer need to look for other
+      // candidates, but do need to continue to ensure that there is no focused
+      // element in the segment.
+      memory_item_in_segment = true;
+      item_in_segment = NextFocusgroupItemInSegmentInDirection(
+          *item_in_segment, owner, mojom::blink::FocusType::kForward);
+      continue;
+    }
+
+    // Check for focusgroupstart attribute.
+    if (!entry_priority_item && IsFocusgroupStart(*item_in_segment)) {
+      entry_priority_item = item_in_segment;
+    }
+
+    // Track the first item in segment.
+    if (!first_item) {
+      first_item = item_in_segment;
+    }
+
+    item_in_segment = NextFocusgroupItemInSegmentInDirection(
+        *item_in_segment, owner, mojom::blink::FocusType::kForward);
+  }
+
+  if (memory_item_in_segment) {
+    return memory_item;
+  }
+
+  // Return in priority order.
+  if (entry_priority_item) {
+    return entry_priority_item;
+  }
+  if (first_item) {
+    return first_item;
+  }
+  return nullptr;
+}
+
+bool FocusgroupControllerUtils::HasExplicitOptOut(const Element* element) {
+  return element &&
+         element->GetFocusgroupData().behavior == FocusgroupBehavior::kOptOut;
+}
+
 GridFocusgroupStructureInfo*
 FocusgroupControllerUtils::CreateGridFocusgroupStructureInfoForGridRoot(
-    Element* root) {
+    const Element* root) {
   if (IsA<LayoutTable>(root->GetLayoutObject()) &&
-      root->GetFocusgroupFlags() & FocusgroupFlags::kGrid) {
+      root->GetFocusgroupData().behavior == FocusgroupBehavior::kGrid) {
     return MakeGarbageCollected<AutomaticGridFocusgroupStructureInfo>(
         root->GetLayoutObject());
   } else {
     // TODO(bebeaudr): Handle manual-grid focusgroups.
     return nullptr;
   }
+}
+
+Element* FocusgroupControllerUtils::WrappedFocusgroupCandidate(
+    const Element* owner,
+    const Element* current,
+    FocusgroupDirection direction) {
+  DCHECK(owner && current);
+  DCHECK(IsFocusgroupItemWithOwner(current, owner));
+
+  Element* wrap_candidate = nullptr;
+  if (IsDirectionForward(direction)) {
+    wrap_candidate =
+        FocusgroupItemWithin(owner, FocusgroupItemPosition::kFirst);
+  } else if (IsDirectionBackward(direction)) {
+    wrap_candidate = FocusgroupItemWithin(owner, FocusgroupItemPosition::kLast);
+  }
+
+  // If the wrap candidate is valid and isn't the current element, return it.
+  if (wrap_candidate && wrap_candidate != current) {
+    return wrap_candidate;
+  }
+  return nullptr;
+}
+
+namespace {
+
+// Finds the first or last focusgroup item within |owner|'s scope.
+Element* FindFocusgroupItemWithin(const Element* owner,
+                                  FocusgroupItemPosition position) {
+  if (!owner || !IsActualFocusgroup(owner->GetFocusgroupData())) {
+    return nullptr;
+  }
+  FocusgroupVisualOrderTraversalContext traversal_context;
+  Element* result = nullptr;
+  Element* el = traversal_context.Next(owner, /*skip_subtree=*/false);
+  while (el && FlatTreeTraversal::IsDescendantOf(*el, *owner)) {
+    bool skip_subtree = false;
+
+    if (FocusgroupControllerUtils::HasExplicitOptOut(el) ||
+        el->IsInTopLayer()) {
+      // Skip opted-out subtree entirely.
+      skip_subtree = true;
+    } else if (IsActualFocusgroup(el->GetFocusgroupData())) {
+      // Nested focusgroup: check if the owner itself is a focusgroup item, but
+      // skip its subtree as its contents belong to the nested focusgroup.
+      if (el->IsKeyboardFocusableSlow()) {
+        if (position == FocusgroupItemPosition::kFirst) {
+          return el;
+        }
+        result = el;
+      }
+      skip_subtree = true;
+    } else if (FocusgroupControllerUtils::IsFocusgroupItemWithOwner(el,
+                                                                    owner) &&
+               el->IsKeyboardFocusableSlow()) {
+      if (position == FocusgroupItemPosition::kFirst) {
+        return el;
+      }
+      result = el;
+    }
+
+    el = traversal_context.Next(el, skip_subtree);
+  }
+  return result;
+}
+
+}  // namespace
+
+Element* FocusgroupControllerUtils::FocusgroupItemWithin(
+    const Element* owner,
+    FocusgroupItemPosition position) {
+  return FindFocusgroupItemWithin(owner, position);
+}
+
+bool FocusgroupControllerUtils::ContainsKeyboardFocusableContent(
+    const Element& element) {
+  // Check if the element itself is keyboard focusable.
+  if (element.IsKeyboardFocusableSlow()) {
+    return true;
+  }
+  // Check if any descendant is keyboard focusable.
+  for (Node& node : FlatTreeTraversal::DescendantsOf(element)) {
+    if (const Element* el = DynamicTo<Element>(node);
+        el && el->IsKeyboardFocusableSlow()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool FocusgroupControllerUtils::ContainsFocusedElement(const Element& element) {
+  const Element* focused = element.GetDocument().FocusedElement();
+  if (!focused) {
+    return false;
+  }
+  return FlatTreeTraversal::IsInclusiveDescendantOf(*focused, element);
+}
+
+const Element*
+FocusgroupControllerUtils::NextFocusgroupItemInSegmentInDirection(
+    const Element& item,
+    const Element& owner,
+    mojom::blink::FocusType direction) {
+  DCHECK(IsFocusgroupItemWithOwner(&item, &owner));
+
+  // Walk in the given direction from the item to find the next item in its
+  // segment. A segment is bounded by barriers (nested focusgroups or opted-out
+  // subtrees) or by the focusgroup scope boundaries.
+  FocusgroupVisualOrderTraversalContext traversal_context;
+  const Element* element =
+      traversal_context.NextInDirection(&item, direction,
+                                        /*skip_subtree=*/false);
+  while (element && FlatTreeTraversal::IsDescendantOf(*element, owner)) {
+    const Element* opted_out_subtree_root = nullptr;
+    const Element* nested_focusgroup_owner = nullptr;
+    if (direction == mojom::blink::FocusType::kBackward) {
+      // When going backwards, we need to check the entire subtree of the
+      // current element to see if it is in an excluded subtree.
+      opted_out_subtree_root = FindExcludedSubtreeRoot(element);
+      // Top-layer elements with their own focusgroup are not caught by
+      // FindExcludedSubtreeRoot (it stops at focusgroup roots). Check the
+      // element itself.
+      if (!opted_out_subtree_root && element->IsInTopLayer()) {
+        opted_out_subtree_root = element;
+      }
+      nested_focusgroup_owner = focusgroup::FindFocusgroupOwner(element);
+      if (nested_focusgroup_owner == &owner) {
+        nested_focusgroup_owner = nullptr;
+      }
+    } else {
+      // When going forward, we only care if the element itself is an
+      // excluded subtree root or a top-layer element.
+      if (IsExcludedSubtreeRoot(element) || element->IsInTopLayer()) {
+        opted_out_subtree_root = element;
+      } else if (IsActualFocusgroup(element->GetFocusgroupData())) {
+        nested_focusgroup_owner = element;
+      }
+    }
+    // Check if this subtree contains focusable content, making it a barrier.
+    if (nested_focusgroup_owner) {
+      if (ContainsKeyboardFocusableContent(*nested_focusgroup_owner)) {
+        return nullptr;
+      }
+      // Since we've determined this nested focusgroup has no focusable content,
+      // we can skip its children.
+      element =
+          traversal_context.NextInDirection(nested_focusgroup_owner, direction,
+                                            /*skip_subtree=*/true);
+      continue;
+    }
+    if (opted_out_subtree_root) {
+      // A focused element always acts as a segment barrier. The user is
+      // currently interacting with this element and Tab must be able to
+      // escape past it. This matters for elements that are focused but not
+      // keyboard-focusable in the sequential sense (e.g., an unchecked radio
+      // button focused via native radio group arrow navigation).
+      // Check whether the focused element is inside this subtree — a focused
+      // element nested in a focusgroup="none" wrapper still creates a barrier.
+      if (ContainsFocusedElement(*opted_out_subtree_root) ||
+          ContainsKeyboardFocusableContent(*opted_out_subtree_root)) {
+        return nullptr;
+      }
+      // Since we've determined this excluded subtree has no focusable content,
+      // we can skip its children.
+      element =
+          traversal_context.NextInDirection(opted_out_subtree_root, direction,
+                                            /*skip_subtree=*/true);
+      continue;
+    }
+    // We already know that the item is a descendant of owner, and is not opted
+    // out nor in a nested focusgroup scope so we don't need to check that
+    // again, all that matters is that it is focusable. If so, return it.
+    // Also yield focused non-keyboard-focusable items (e.g., tabindex=-1
+    // focused via mouse) so that GetEntryElementForFocusgroupSegmentFromFirst
+    // can see them via its IsFocusedElementInDocument() check.
+    if (element->IsKeyboardFocusableSlow() ||
+        element->IsFocusedElementInDocument()) {
+      return element;
+    }
+    element = traversal_context.NextInDirection(element, direction,
+                                                /*skip_subtree=*/false);
+  }
+  return nullptr;
+}
+
+const Element* FocusgroupControllerUtils::FocusgroupItemInSegment(
+    const Element& item,
+    FocusgroupItemPosition position) {
+  const Element* owner = focusgroup::FindFocusgroupOwner(&item);
+  if (!owner || !item.IsKeyboardFocusableSlow()) {
+    return nullptr;
+  }
+
+  mojom::blink::FocusType direction = position == FocusgroupItemPosition::kFirst
+                                          ? mojom::blink::FocusType::kBackward
+                                          : mojom::blink::FocusType::kForward;
+
+  // Walk in the appropriate direction from the item to find the segment
+  // boundary.
+  const Element* result = &item;
+  for (const Element* next =
+           NextFocusgroupItemInSegmentInDirection(item, *owner, direction);
+       next; next = NextFocusgroupItemInSegmentInDirection(*next, *owner,
+                                                           direction)) {
+    result = next;
+  }
+  return result;
+}
+
+const Element* FocusgroupControllerUtils::FindExcludedSubtreeRoot(
+    const Element* element) {
+  // Walk up the ancestor chain looking for an excluded subtree root. Stop when
+  // we reach a focusgroup root or the document root.
+  const Element* current = element;
+  while (current) {
+    if (IsExcludedSubtreeRoot(current)) {
+      return current;
+    }
+    // Stop at the first focusgroup root.
+    if (IsActualFocusgroup(current->GetFocusgroupData())) {
+      return nullptr;
+    }
+    current = FlatTreeTraversal::ParentElement(*current);
+  }
+  return nullptr;
+}
+
+bool FocusgroupControllerUtils::IsExcludedSubtreeRoot(const Element* element) {
+  if (!element) {
+    return false;
+  }
+  // Explicit opt-out via focusgroup="none".
+  if (HasExplicitOptOut(element)) {
+    return true;
+  }
+  // Top-layer elements (popovers, modal dialogs, fullscreen) without their own
+  // focusgroup are excluded from ancestor focusgroups with the same semantics
+  // as focusgroup="none". Top-layer elements WITH their own focusgroup are
+  // handled separately by IsExcludedFromAncestorFocusgroup so that their
+  // descendants can still participate in the inner focusgroup.
+  if (element->IsInTopLayer() &&
+      !IsActualFocusgroup(element->GetFocusgroupData())) {
+    return true;
+  }
+  return false;
+}
+
+bool FocusgroupControllerUtils::IsExcludedFromAncestorFocusgroup(
+    const Element* element) {
+  if (!element) {
+    return false;
+  }
+  // A top-layer element is excluded from any ancestor focusgroup, even if it
+  // defines its own focusgroup internally. IsExcludedSubtreeRoot deliberately
+  // does not cover that case so that descendants of a top-layer focusgroup
+  // owner can still participate in the inner focusgroup; here we want the
+  // broader question, so check it directly.
+  if (element->IsInTopLayer()) {
+    return true;
+  }
+  // Otherwise, the element is excluded if it is itself, or has an ancestor
+  // that is, an excluded subtree root within the nearest focusgroup boundary.
+  return FindExcludedSubtreeRoot(element) != nullptr;
+}
+
+// static
+bool FocusgroupControllerUtils::IsFocusgroupStart(const Element& element) {
+  return element.FastHasAttribute(html_names::kFocusgroupstartAttr);
+}
+
+// static
+bool FocusgroupControllerUtils::IsNonEntryFocusgroupScopeOwner(
+    const Element& element) {
+  Element* owner = GetFocusgroupOwnerOfItem(&element);
+  if (!owner) {
+    return false;
+  }
+  return !IsEntryElementForFocusgroupSegment(element, *owner);
 }
 
 }  // namespace blink

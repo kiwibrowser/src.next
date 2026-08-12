@@ -7,7 +7,10 @@
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/omnibox/browser/shortcuts_backend.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 ShortcutsExtensionsManager::ShortcutsExtensionsManager(Profile* profile)
     : profile_(profile) {
@@ -15,7 +18,7 @@ ShortcutsExtensionsManager::ShortcutsExtensionsManager(Profile* profile)
   registry_observation_.Observe(extensions::ExtensionRegistry::Get(profile_));
 }
 
-ShortcutsExtensionsManager::~ShortcutsExtensionsManager() {}
+ShortcutsExtensionsManager::~ShortcutsExtensionsManager() = default;
 
 void ShortcutsExtensionsManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,

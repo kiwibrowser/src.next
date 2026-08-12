@@ -14,6 +14,7 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/manifest_test.h"
 
 namespace extensions {
@@ -96,7 +97,7 @@ TEST_F(CSPInfoUnitTest, SandboxedPages) {
   EXPECT_EQ(kDefaultSandboxedPageCSP, CSPInfo::GetResourceContentSecurityPolicy(
                                           extension7.get(), "/test"));
 
-  Testcase testcases[] = {
+  const Testcase testcases[] = {
       Testcase("sandboxed_pages_invalid_1.json",
                errors::kInvalidSandboxedPagesList),
       Testcase("sandboxed_pages_invalid_2.json", errors::kInvalidSandboxedPage),
@@ -106,7 +107,7 @@ TEST_F(CSPInfoUnitTest, SandboxedPages) {
                GetInvalidManifestKeyError(keys::kSandboxedPagesCSP)),
       Testcase("sandboxed_pages_invalid_5.json",
                GetInvalidManifestKeyError(keys::kSandboxedPagesCSP))};
-  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, ExpectType::kError);
 }
 
 TEST_F(CSPInfoUnitTest, CSPStringKey) {
@@ -124,11 +125,11 @@ TEST_F(CSPInfoUnitTest, CSPStringKey) {
 
   RunTestcase(Testcase("csp_invalid_1.json", GetInvalidManifestKeyError(
                                                  keys::kContentSecurityPolicy)),
-              EXPECT_TYPE_ERROR);
+              ExpectType::kError);
 }
 
 TEST_F(CSPInfoUnitTest, CSPDictionary_ExtensionPages) {
-  struct {
+  static constexpr struct {
     const char* file_name;
     const char* csp;
   } cases[] = {{"csp_dictionary_valid_1.json", "default-src 'none'"},
@@ -144,7 +145,7 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_ExtensionPages) {
     EXPECT_EQ(test_case.csp, CSPInfo::GetExtensionPagesCSP(extension.get()));
   }
 
-  Testcase testcases[] = {
+  const Testcase testcases[] = {
       Testcase("csp_invalid_2.json",
                GetInvalidManifestKeyError(
                    keys::kContentSecurityPolicy_ExtensionPagesPath)),
@@ -162,7 +163,7 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_ExtensionPages) {
                    keys::kContentSecurityPolicy_ExtensionPagesPath,
                    "'unsafe-eval'", "worker-src")),
   };
-  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, ExpectType::kError);
 }
 
 // Tests the requirements for object-src specifications.
@@ -345,7 +346,7 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_Sandbox) {
                   extension.get(), test_case.resource_path));
   }
 
-  Testcase testcases[] = {
+  const Testcase testcases[] = {
       {"sandbox_both_keys.json", errors::kSandboxPagesCSPKeyNotAllowed},
       {"sandbox_csp_with_dictionary.json",
        errors::kSandboxPagesCSPKeyNotAllowed},
@@ -355,7 +356,7 @@ TEST_F(CSPInfoUnitTest, CSPDictionary_Sandbox) {
       {"unsandboxed_csp.json",
        GetInvalidManifestKeyError(
            keys::kContentSecurityPolicy_SandboxedPagesPath)}};
-  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
+  RunTestcases(testcases, ExpectType::kError);
 }
 
 // Ensures that using a dictionary for the keys::kContentSecurityPolicy manifest
@@ -389,9 +390,9 @@ TEST_F(CSPInfoUnitTest, CSPDictionaryMandatoryForV3) {
     EXPECT_EQ(kDefaultSecureCSP,
               CSPInfo::GetExtensionPagesCSP(extension.get()));
 
-    EXPECT_EQ(
-        CSPHandler::GetMinimumMV3CSPForTesting(),
-        *CSPInfo::GetMinimumCSPToAppend(*extension, "not_sandboxed.html"));
+    EXPECT_EQ(CSPHandler::GetMinimumMV3CSPForTesting(),
+              *CSPInfo::GetMinimumCSPToAppend(*extension, "not_sandboxed.html",
+                                              /*is_service_worker=*/false));
   }
 
   // Repeat the test, loading the extensions as unpacked extensions.
@@ -417,9 +418,9 @@ TEST_F(CSPInfoUnitTest, CSPDictionaryMandatoryForV3) {
     EXPECT_EQ(kDefaultSecureCSP,
               CSPInfo::GetExtensionPagesCSP(extension.get()));
 
-    EXPECT_EQ(
-        CSPHandler::GetMinimumUnpackedMV3CSPForTesting(),
-        *CSPInfo::GetMinimumCSPToAppend(*extension, "not_sandboxed.html"));
+    EXPECT_EQ(CSPHandler::GetMinimumUnpackedMV3CSPForTesting(),
+              *CSPInfo::GetMinimumCSPToAppend(*extension, "not_sandboxed.html",
+                                              /*is_service_worker=*/false));
   }
 }
 
@@ -427,6 +428,187 @@ TEST_F(CSPInfoUnitTest, CSPDictionaryMandatoryForV3) {
 TEST_F(CSPInfoUnitTest, CSPDictionaryDisallowedForV2) {
   LoadAndExpectError("csp_dictionary_mv2.json",
                      GetInvalidManifestKeyError(keys::kContentSecurityPolicy));
+}
+
+// Ensure that service workers ignore the sandbox.pages CSP and instead use the
+// stricter extension CSP.
+TEST_F(CSPInfoUnitTest, ServiceWorkerSandboxIgnored) {
+  scoped_refptr<Extension> extension =
+      LoadAndExpectSuccess("sandboxed_pages_valid_1.json");
+  ASSERT_TRUE(extension);
+
+  static constexpr char kSandboxedPath[] = "/test";
+  ASSERT_TRUE(
+      SandboxedPageInfo::IsSandboxedPage(extension.get(), kSandboxedPath));
+
+  // If not a service worker, the sandboxed page CSP should be returned.
+  EXPECT_EQ(kDefaultSandboxedPageCSP,
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/false));
+
+  // If a service worker, the extension pages CSP should be returned (even if
+  // the path is sandboxed). For MV2, this is the default extension pages CSP.
+  EXPECT_EQ(kDefaultExtensionPagesCSP,
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/true));
+}
+
+// Ensure that MV3 service workers ignore the sandbox.pages CSP even if they are
+// explicitly listed there.
+TEST_F(CSPInfoUnitTest, ServiceWorkerSandboxIgnoredMV3) {
+  scoped_refptr<Extension> extension =
+      LoadAndExpectSuccess("sandboxed_sw_mv3.json");
+  ASSERT_TRUE(extension);
+
+  static constexpr char kSandboxedPath[] = "/sw.js";
+  ASSERT_TRUE(
+      SandboxedPageInfo::IsSandboxedPage(extension.get(), kSandboxedPath));
+
+  // If not a service worker, the sandboxed page CSP should be returned.
+  EXPECT_EQ(kDefaultSandboxedPageCSP,
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/false));
+
+  // If a service worker, the extension pages CSP should be returned (even if
+  // the path is sandboxed).
+  EXPECT_EQ(CSPHandler::GetMinimumMV3CSPForTesting(),
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/true));
+}
+
+// Ensure that even with a custom sandbox CSP (which may be insecure), the
+// service worker still gets the strict MV3 CSP.
+TEST_F(CSPInfoUnitTest, ServiceWorkerSandboxIgnoredWithCustomCSP) {
+  scoped_refptr<Extension> extension =
+      LoadAndExpectSuccess("sandboxed_sw_mv3_with_csp.json");
+  ASSERT_TRUE(extension);
+
+  static constexpr char kSandboxedPath[] = "/sw.js";
+  ASSERT_TRUE(
+      SandboxedPageInfo::IsSandboxedPage(extension.get(), kSandboxedPath));
+
+  // If not a service worker, the sandboxed page CSP should be returned.
+  // Note: kDefaultSandboxedPageCSP is not used here because we provided a
+  // custom one.
+  const std::string& custom_sandbox_csp =
+      CSPInfo::GetSandboxContentSecurityPolicy(extension.get());
+  EXPECT_EQ(custom_sandbox_csp,
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/false));
+
+  // If a service worker, the extension pages CSP should be returned (even if
+  // the path is sandboxed).
+  EXPECT_EQ(CSPHandler::GetMinimumMV3CSPForTesting(),
+            *CSPInfo::GetMinimumCSPToAppend(*extension, kSandboxedPath,
+                                            /*is_service_worker=*/true));
+}
+
+// Tests that extensions of the "user script" type also have CSP enforced for
+// Manifest V3+.
+TEST_F(CSPInfoUnitTest, UserScriptStrictCSP) {
+  ManifestData manifest_data(base::test::ParseJsonDict(R"({
+    "name": "User Script Strict",
+    "manifest_version": 3,
+    "version": "1.0",
+    "converted_from_user_script": true
+  })"));
+  scoped_refptr<const Extension> extension =
+      LoadAndExpectSuccess(manifest_data);
+  ASSERT_TRUE(extension);
+  ASSERT_EQ(Manifest::Type::kUserScript, extension->GetType());
+
+  // Should receive default secure manifest CSP.
+  EXPECT_EQ("script-src 'self';",
+            CSPInfo::GetExtensionPagesCSP(extension.get()));
+  // Like items with Manifest::Type::kExtension, TYPE_USER_SCRIPT items should
+  // also get a "minimum CSP" to append to the list of CSPs. This ensures every
+  // item has at least a minimally-strict CSP that rejects remotely-hosted
+  // code.
+  EXPECT_NE(nullptr,
+            CSPInfo::GetMinimumCSPToAppend(*extension, "page.html", false));
+}
+
+TEST_F(CSPInfoUnitTest, ValidateDefaultMV3ExtensionPagesCSP) {
+  static const char kDefaultMV3CSP[] = "script-src 'self';";
+
+  static constexpr char kManifestV3[] =
+      R"({
+           "name": "Test MV3 Extension",
+           "manifest_version": 3,
+           "version": "0.1"
+         })";
+
+  ManifestData manifest_data_mv3(base::test::ParseJsonDict(kManifestV3));
+  scoped_refptr<const Extension> extension_mv3 =
+      LoadAndExpectSuccess(manifest_data_mv3);
+  EXPECT_EQ(3, extension_mv3.get()->manifest_version());
+  EXPECT_EQ(Manifest::Type::kExtension, extension_mv3.get()->GetType());
+  EXPECT_EQ(kDefaultMV3CSP, CSPInfo::GetResourceContentSecurityPolicy(
+                                extension_mv3.get(), "/test"));
+}
+
+TEST_F(CSPInfoUnitTest, ValidateDefaultMV2ExtensionPagesCSP) {
+  const char kDefaultMV2CSP[] =
+      "script-src 'self' blob: filesystem:; "
+      "object-src 'self' blob: filesystem:;";
+
+  static constexpr char kManifestV2[] =
+      R"({
+           "name": "Test MV2 Extension",
+           "manifest_version": 2,
+           "version": "0.1"
+         })";
+
+  ManifestData manifest_data_mv2(base::test::ParseJsonDict(kManifestV2));
+  scoped_refptr<const Extension> extension_mv2 =
+      LoadAndExpectSuccess(manifest_data_mv2);
+  EXPECT_EQ(2, extension_mv2.get()->manifest_version());
+  EXPECT_EQ(Manifest::Type::kExtension, extension_mv2.get()->GetType());
+  EXPECT_EQ(kDefaultMV2CSP, CSPInfo::GetResourceContentSecurityPolicy(
+                                extension_mv2.get(), "/test"));
+}
+
+TEST_F(CSPInfoUnitTest, ValidateDefaultMV2PlatformAppPagesCSP) {
+#define PLATFORM_APP_LOCAL_CSP_SOURCES "'self' blob: filesystem: data:"
+
+  // clang-format off
+const char kDefaultPlatformAppContentSecurityPolicy[] =
+    "default-src 'self' blob: filesystem:;"
+    " connect-src * data: blob: filesystem:;"
+    " style-src " PLATFORM_APP_LOCAL_CSP_SOURCES " 'unsafe-inline';"
+    " img-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    " frame-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    " font-src " PLATFORM_APP_LOCAL_CSP_SOURCES ";"
+    " media-src * data: blob: filesystem:;"
+    " script-src 'self' blob: filesystem: 'wasm-unsafe-eval';";
+  // clang-format on
+
+#undef PLATFORM_APP_LOCAL_CSP_SOURCES
+
+  static constexpr char kManifestV2PlatformApp[] =
+      R"({
+           "name": "Test MV2 Platform App",
+           "manifest_version": 2,
+           "version": "0.1",
+           "app": {
+             "background": {
+               "scripts": [
+                 "script.js"
+               ]
+             }
+           }
+         })";
+
+  ManifestData manifest_data_mv2_platform_app(
+      base::test::ParseJsonDict(kManifestV2PlatformApp));
+  scoped_refptr<const Extension> extension_mv2_platform_app =
+      LoadAndExpectSuccess(manifest_data_mv2_platform_app);
+  EXPECT_EQ(2, extension_mv2_platform_app.get()->manifest_version());
+  EXPECT_EQ(Manifest::Type::kPlatformApp,
+            extension_mv2_platform_app.get()->GetType());
+  EXPECT_EQ(kDefaultPlatformAppContentSecurityPolicy,
+            CSPInfo::GetResourceContentSecurityPolicy(
+                extension_mv2_platform_app.get(), "/test"));
 }
 
 }  // namespace extensions

@@ -12,7 +12,7 @@
 #include "base/notreached.h"
 #include "components/url_matcher/url_matcher_factory.h"
 #include "extensions/common/mojom/event_dispatcher.mojom.h"
-#include "ipc/ipc_message.h"
+#include "ipc/constants.mojom.h"
 
 using url_matcher::URLMatcher;
 using url_matcher::URLMatcherConditionSet;
@@ -41,18 +41,16 @@ void EventFilter::EventMatcherEntry::DontRemoveConditionSetsInDestructor() {
   condition_set_ids_.clear();
 }
 
-EventFilter::EventFilter()
-    : next_id_(0),
-      next_condition_set_id_(0) {
-}
+EventFilter::EventFilter() : next_id_(0), next_condition_set_id_(0) {}
 
 EventFilter::~EventFilter() {
   // Normally when an event matcher entry is removed from event_matchers_ it
   // will remove its condition sets from url_matcher_, but as url_matcher_ is
   // being destroyed anyway there is no need to do that step here.
   for (auto& matcher_map : event_matchers_) {
-    for (auto& matcher : matcher_map.second)
+    for (auto& matcher : matcher_map.second) {
       matcher.second->DontRemoveConditionSetsInDestructor();
+    }
   }
 }
 
@@ -60,8 +58,9 @@ EventFilter::MatcherID EventFilter::AddEventMatcher(
     const std::string& event_name,
     std::unique_ptr<EventMatcher> matcher) {
   URLMatcherConditionSet::Vector condition_sets;
-  if (!CreateConditionSets(matcher.get(), &condition_sets))
+  if (!CreateConditionSets(matcher.get(), &condition_sets)) {
     return -1;
+  }
 
   MatcherID id = next_id_++;
   for (const scoped_refptr<URLMatcherConditionSet>& condition_set :
@@ -82,7 +81,7 @@ EventMatcher* EventFilter::GetEventMatcher(MatcherID id) {
 
 const std::string& EventFilter::GetEventName(MatcherID id) const {
   auto it = id_to_event_name_.find(id);
-  CHECK(it != id_to_event_name_.end(), base::NotFatalUntil::M130);
+  CHECK(it != id_to_event_name_.end());
   return it->second;
 }
 
@@ -93,29 +92,28 @@ bool EventFilter::CreateConditionSets(
   if (url_filter_count == 0) {
     // If there are no URL filters then we want to match all events, so create a
     // URLFilter from an empty dictionary.
-    base::Value::Dict empty_dict;
+    base::DictValue empty_dict;
     return AddDictionaryAsConditionSet(empty_dict, condition_sets);
   }
   for (int i = 0; i < url_filter_count; i++) {
-    const base::Value::Dict* url_filter = matcher->GetURLFilter(i);
-    if (!url_filter)
+    const base::DictValue* url_filter = matcher->GetURLFilter(i);
+    if (!url_filter) {
       return false;
-    if (!AddDictionaryAsConditionSet(*url_filter, condition_sets))
+    }
+    if (!AddDictionaryAsConditionSet(*url_filter, condition_sets)) {
       return false;
+    }
   }
   return true;
 }
 
 bool EventFilter::AddDictionaryAsConditionSet(
-    const base::Value::Dict& url_filter,
+    const base::DictValue& url_filter,
     URLMatcherConditionSet::Vector* condition_sets) {
   std::string error;
   base::MatcherStringPattern::ID condition_set_id = next_condition_set_id_++;
   condition_sets->push_back(URLMatcherFactory::CreateFromURLFilterDictionary(
-      url_matcher_.condition_factory(),
-      url_filter,
-      condition_set_id,
-      &error));
+      url_matcher_.condition_factory(), url_filter, condition_set_id, &error));
   if (!error.empty()) {
     LOG(ERROR) << "CreateFromURLFilterDictionary failed: " << error;
     url_matcher_.ClearUnusedConditionSets();
@@ -125,18 +123,57 @@ bool EventFilter::AddDictionaryAsConditionSet(
   return true;
 }
 
-std::string EventFilter::RemoveEventMatcher(MatcherID id) {
+std::string EventFilter::RemoveEventMatcher(
+    MatcherID id,
+    std::vector<base::MatcherStringPattern::ID>*
+        condition_sets_for_bulk_removal) {
   auto it = id_to_event_name_.find(id);
   if (it == id_to_event_name_.end()) {
     return "";
   }
 
   std::string event_name = it->second;
+  EventMatcherMap& matcher_map = event_matchers_[event_name];
+  auto matcher_it = matcher_map.find(id);
+  // `id_to_event_name_` and `event_matchers_[event_name]` should be the inverse
+  // of each other.
+  CHECK(matcher_it != matcher_map.end(), base::NotFatalUntil::M149)
+      << event_name;
+
+  const std::vector<base::MatcherStringPattern::ID>& condition_set_ids =
+      matcher_it->second->condition_set_ids();
+  for (base::MatcherStringPattern::ID condition_set_id : condition_set_ids) {
+    condition_set_id_to_event_matcher_id_.erase(condition_set_id);
+  }
+
   // EventMatcherEntry's destructor causes the condition set ids to be removed
-  // from url_matcher_.
-  event_matchers_[event_name].erase(id);
+  // from `url_matcher_`. This triggers
+  // `URLMatcher::UpdateInternalDatastructures();` which causes performance
+  // problems if `RemoveEventMatcher` is called for many `MatcherID`s in a row.
+  // If `condition_sets_for_bulk_removal` is provided, these removals can be
+  // executed in batch with a single call to
+  // `URLMatcher::UpdateInternalDatastructures();` instead of N calls.
+  if (condition_sets_for_bulk_removal) {
+    condition_sets_for_bulk_removal->append_range(condition_set_ids);
+    matcher_it->second->DontRemoveConditionSetsInDestructor();
+  }
+  matcher_map.erase(matcher_it);
+  if (matcher_map.empty()) {
+    event_matchers_.erase(event_name);
+  }
+
   id_to_event_name_.erase(it);
   return event_name;
+}
+
+void EventFilter::RemoveEventMatchers(const std::vector<MatcherID>& ids) {
+  std::vector<base::MatcherStringPattern::ID> condition_sets_for_bulk_removal;
+  for (MatcherID id : ids) {
+    RemoveEventMatcher(id, &condition_sets_for_bulk_removal);
+  }
+  if (!condition_sets_for_bulk_removal.empty()) {
+    url_matcher_.RemoveConditionSets(condition_sets_for_bulk_removal);
+  }
 }
 
 std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
@@ -146,8 +183,9 @@ std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
   std::set<MatcherID> matchers;
 
   auto it = event_matchers_.find(event_name);
-  if (it == event_matchers_.end())
+  if (it == event_matchers_.end()) {
     return matchers;
+  }
 
   const EventMatcherMap& matcher_map = it->second;
   const GURL& url_to_match_against = event_info.url ? *event_info.url : GURL();
@@ -167,7 +205,7 @@ std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
     const EventMatcher* event_matcher = matcher_entry->second->event_matcher();
     // The context that installed the event listener should be the same context
     // as the one where the event listener is called.
-    if (routing_id != MSG_ROUTING_NONE &&
+    if (routing_id != IPC::mojom::kRoutingIdNone &&
         event_matcher->routing_id() != routing_id) {
       continue;
     }

@@ -5,7 +5,9 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_FRAME_HOST_H_
 #define EXTENSIONS_BROWSER_EXTENSION_FRAME_HOST_H_
 
+#include "base/containers/flat_map.h"
 #include "base/memory/raw_ptr.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_frame_host_receiver_set.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/frame.mojom.h"
@@ -14,13 +16,11 @@
 #include "third_party/blink/public/mojom/page/draggable_region.mojom-forward.h"
 
 namespace content {
+class BrowserContext;
 class WebContents;
 }
 
 namespace extensions {
-
-class Extension;
-class ProcessManager;
 
 // Implements the mojo interface of extensions::mojom::LocalFrameHost.
 // ExtensionWebContentsObserver creates and owns this class and it's destroyed
@@ -35,6 +35,8 @@ class ExtensionFrameHost : public mojom::LocalFrameHost {
   void BindLocalFrameHost(
       mojo::PendingAssociatedReceiver<mojom::LocalFrameHost> receiver,
       content::RenderFrameHost* render_frame_host);
+
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host);
 
   content::RenderFrameHostReceiverSet<mojom::LocalFrameHost>&
   receivers_for_testing() {
@@ -92,13 +94,41 @@ class ExtensionFrameHost : public mojom::LocalFrameHost {
           port_host) override;
 
  protected:
-  const Extension* GetExtension(ProcessManager* process_manager,
-                                content::RenderFrameHost* frame);
 
   // This raw pointer is safe to use because ExtensionWebContentsObserver whose
   // lifetime is tied to the WebContents owns this instance.
   raw_ptr<content::WebContents> web_contents_;
   content::RenderFrameHostReceiverSet<mojom::LocalFrameHost> receivers_;
+
+ private:
+  // Data tracked for each active frame that has incremented keepalive count via
+  // IPC. This structure allows `ExtensionFrameHost` to deduplicate multiple IPC
+  // keepalives from the same frame into a single keepalive in `ProcessManager`,
+  // preventing memory bloat and protecting against malicious counter
+  // underflows.
+  struct FrameIpcKeepaliveData {
+    ExtensionId extension_id;
+    // Unique string identifying the frame (e.g. "ipc:<child_id>:<routing_id>")
+    // used to strictly match keepalive decrements in `ProcessManager`.
+    std::string activity_data;
+    // Number of active IPC keepalive requests from this frame.
+    int count = 0;
+  };
+
+  // Decrements the `ProcessManager` keepalive count for the specified data.
+  void ReleaseIpcKeepaliveData(const FrameIpcKeepaliveData& data);
+
+  // Decrements the `ProcessManager` keepalive count if the specified frame has
+  // any remaining IPC keepalive counts, then removes the tracking entry. Called
+  // when a frame is deleted or when `ExtensionFrameHost` is destroyed.
+  void ReleaseIpcKeepaliveForFrame(
+      const content::GlobalRenderFrameHostId& frame_id);
+
+  raw_ptr<content::BrowserContext> browser_context_;
+
+  // Maps global frame IDs to their current keepalive tracking data.
+  base::flat_map<content::GlobalRenderFrameHostId, FrameIpcKeepaliveData>
+      frame_ipc_keepalives_;
 };
 
 }  // namespace extensions

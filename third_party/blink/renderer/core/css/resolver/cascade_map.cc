@@ -2,13 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/css/resolver/cascade_map.h"
 
+#include "base/compiler_specific.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 
 namespace blink {
@@ -20,8 +16,6 @@ static_assert(
 static_assert(
     !VectorTraits<CascadeMap::CascadePriorityList::Node>::kNeedsDestruction,
     "Backing vector should not need destruction");
-
-namespace {}  // namespace
 
 CascadePriority CascadeMap::At(const CSSPropertyName& name) const {
   if (const CascadePriority* find_result = Find(name)) {
@@ -41,7 +35,8 @@ const CascadePriority* CascadeMap::Find(const CSSPropertyName& name) const {
   size_t index = static_cast<size_t>(name.Id());
   DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
   return native_properties_.Bits().Has(name.Id())
-             ? &native_properties_.Buffer()[index].Top(backing_vector_)
+             ? UNSAFE_BUFFERS(&native_properties_.Buffer()[index])
+                   .Top(backing_vector_)
              : nullptr;
 }
 
@@ -72,7 +67,8 @@ const CascadePriority* CascadeMap::Find(const CSSPropertyName& name,
   DCHECK(native_properties_.Bits().Has(name.Id()));
   size_t index = static_cast<size_t>(name.Id());
   DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
-  return find_origin(native_properties_.Buffer()[index], origin);
+  return find_origin(UNSAFE_BUFFERS(native_properties_.Buffer()[index]),
+                     origin);
 }
 
 CascadePriority& CascadeMap::Top(CascadePriorityList& list) {
@@ -102,7 +98,37 @@ const CascadePriority* CascadeMap::FindRevertLayer(const CSSPropertyName& name,
   DCHECK(native_properties_.Bits().Has(name.Id()));
   size_t index = static_cast<size_t>(name.Id());
   DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
-  return find_revert_layer(native_properties_.Buffer()[index], revert_from);
+  return find_revert_layer(UNSAFE_BUFFERS(native_properties_.Buffer()[index]),
+                           revert_from);
+}
+
+const CascadePriority* CascadeMap::FindRevertRule(
+    const CSSPropertyName& name,
+    CascadePriority revert_from) const {
+  auto find_revert_rule =
+      [this](const CascadeMap::CascadePriorityList& list,
+             CascadePriority revert_from) -> const CascadePriority* {
+    for (auto iter = list.Begin(backing_vector_);
+         iter != list.End(backing_vector_); ++iter) {
+      if (*iter < revert_from &&
+          iter->GetRuleIndex() != revert_from.GetRuleIndex()) {
+        return &(*iter);
+      }
+    }
+    return nullptr;
+  };
+
+  if (name.IsCustomProperty()) {
+    DCHECK(custom_properties_.Contains(name.ToAtomicString()));
+    return find_revert_rule(
+        custom_properties_.find(name.ToAtomicString())->value, revert_from);
+  }
+
+  DCHECK(native_properties_.Bits().Has(name.Id()));
+  size_t index = static_cast<size_t>(name.Id());
+  DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
+  return find_revert_rule(UNSAFE_BUFFERS(native_properties_.Buffer()[index]),
+                          revert_from);
 }
 
 void CascadeMap::Add(const AtomicString& custom_property_name,
@@ -117,6 +143,12 @@ void CascadeMap::Add(const AtomicString& custom_property_name,
   Add(list, priority);
 }
 
+static CSSPropertyID UnvisitedID(CSSPropertyID id) {
+  CSSPropertyID unvisited_id =
+      CSSProperty::UnvisitedID(static_cast<unsigned>(id));
+  return unvisited_id == CSSPropertyID::kInvalid ? id : unvisited_id;
+}
+
 void CascadeMap::Add(CSSPropertyID id, CascadePriority priority) {
   DCHECK_NE(id, CSSPropertyID::kInvalid);
   DCHECK_NE(id, CSSPropertyID::kVariable);
@@ -125,9 +157,25 @@ void CascadeMap::Add(CSSPropertyID id, CascadePriority priority) {
   size_t index = static_cast<size_t>(static_cast<unsigned>(id));
   DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
 
-  has_important_ |= priority.IsImportant();
+  if (priority.IsImportant()) {
+    if (!important_set_) {
+      important_set_.reset(new CSSBitset);
+    }
+    // Mark that our winning declaration for this property is going to be
+    // an !important declaration; this declaration may not be the eventual
+    // winner, but it can only lose to other !important declarations,
+    // so we never need to unset the bit. (The winning declaration could
+    // resolve to a revert to a non-!important declaration, but the bitmap
+    // does not attempt to track resolved values, only declarations.)
+    //
+    // We use the unvisited ID because visited/unvisited colors are currently
+    // interpolated together.
+    // TODO(crbug.com/40680035): Interpolate visited colors separately.
+    important_set_->Set(UnvisitedID(id));
+  }
 
-  CascadePriorityList* list = &native_properties_.Buffer()[index];
+  CascadePriorityList* list =
+      UNSAFE_BUFFERS(&native_properties_.Buffer()[index]);
   if (!native_properties_.Bits().Has(id)) {
     native_properties_.Bits().Set(id);
     new (list) CascadeMap::CascadePriorityList(backing_vector_, priority);
@@ -143,6 +191,7 @@ void CascadeMap::Add(CascadePriorityList* list, CascadePriority priority) {
     if (priority.IsInlineStyle()) {
       inline_style_lost_ = true;
     }
+    list->InsertKeepingSorted(backing_vector_, priority);
     return;
   }
   if (top.IsInlineStyle()) {
@@ -154,19 +203,24 @@ void CascadeMap::Add(CascadePriorityList* list, CascadePriority priority) {
     // style computation), false positives are fine.
     inline_style_lost_ = true;
   }
-  if (top.ForLayerComparison() < priority.ForLayerComparison()) {
-    list->Push(backing_vector_, priority);
-  } else {
-    top = priority;
-  }
+  list->Push(backing_vector_, priority);
 }
 
 void CascadeMap::Reset() {
   inline_style_lost_ = false;
-  has_important_ = false;
   native_properties_.Bits().Reset();
   custom_properties_.clear();
   backing_vector_.clear();
+  important_set_.reset();
+#if DCHECK_IS_ON()
+  important_set_released_ = false;
+#endif
+}
+
+void CascadeMap::ClearAppliedFlags() {
+  for (CascadePriorityList::Node& node : backing_vector_) {
+    node.priority = CascadePriority(node.priority, /*already_applied=*/false);
+  }
 }
 
 }  // namespace blink

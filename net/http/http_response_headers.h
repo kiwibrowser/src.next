@@ -11,9 +11,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <vector>
 
+#include "base/byte_count.h"
 #include "base/check.h"
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
@@ -32,7 +32,7 @@ class Pickle;
 class PickleIterator;
 class Time;
 class TimeDelta;
-}
+}  // namespace base
 
 namespace net {
 
@@ -79,7 +79,7 @@ class NET_EXPORT HttpResponseHeaders
     Builder& AddHeader(std::string_view name, std::string_view value) {
       DCHECK(HttpUtil::IsValidHeaderName(name));
       DCHECK(HttpUtil::IsValidHeaderValue(value));
-      headers_.push_back({name, value});
+      headers_.emplace_back(name, value);
       return *this;
     }
 
@@ -99,7 +99,7 @@ class NET_EXPORT HttpResponseHeaders
   // Persist options.
   typedef int PersistOptions;
   static const PersistOptions PERSIST_RAW = -1;  // Raw, unparsed headers.
-  static const PersistOptions PERSIST_ALL = 0;  // Parsed headers.
+  static const PersistOptions PERSIST_ALL = 0;   // Parsed headers.
   static const PersistOptions PERSIST_SANS_COOKIES = 1 << 0;
   static const PersistOptions PERSIST_SANS_CHALLENGES = 1 << 1;
   static const PersistOptions PERSIST_SANS_HOP_BY_HOP = 1 << 2;
@@ -115,9 +115,16 @@ class NET_EXPORT HttpResponseHeaders
     base::TimeDelta staleness;
   };
 
-  static const char kContentRange[];
-  static const char kLastModified[];
-  static const char kVary[];
+  static constexpr char kContentRange[] = "Content-Range";
+  static constexpr char kLastModified[] = "Last-Modified";
+  static constexpr char kVary[] = "Vary";
+
+  static constexpr char kCacheControl[] = "cache-control";
+  static constexpr char kNoStore[] = "no-store";
+  static constexpr char kNoCache[] = "no-cache";
+  static constexpr char kMustRevalidate[] = "must-revalidate";
+  static constexpr char kMaxAge[] = "max-age=";
+  static constexpr char kStaleWhileRevalidate[] = "stale-while-revalidate=";
 
   HttpResponseHeaders() = delete;
 
@@ -129,7 +136,7 @@ class NET_EXPORT HttpResponseHeaders
   //
   // HttpResponseHeaders does not perform any encoding changes on the input.
   //
-  explicit HttpResponseHeaders(const std::string& raw_headers);
+  explicit HttpResponseHeaders(std::string_view raw_headers);
 
   // Initializes from the representation stored in the given pickle.  The data
   // for this object is found relative to the given pickle_iter, which should
@@ -165,6 +172,10 @@ class NET_EXPORT HttpResponseHeaders
   // The options argument can be a combination of PersistOptions.
   void Persist(base::Pickle* pickle, PersistOptions options);
 
+  // Serializes this object to a byte array for Mojo serialization. Any cookie
+  // headers are stripped out of the returned string.
+  std::vector<uint8_t> SerializeForMojoIpc() const;
+
   // Performs header merging as described in 13.5.3 of RFC 2616.
   void Update(const HttpResponseHeaders& new_headers);
 
@@ -172,7 +183,7 @@ class NET_EXPORT HttpResponseHeaders
   void RemoveHeader(std::string_view name);
 
   // Removes all instances of particular headers.
-  void RemoveHeaders(const std::unordered_set<std::string>& header_names);
+  void RemoveHeaders(const std::vector<std::string>& header_names);
 
   // Removes a particular header line. The header name is compared
   // case-insensitively.
@@ -191,7 +202,7 @@ class NET_EXPORT HttpResponseHeaders
 
   // Adds a cookie header. |cookie_string| should be the header value without
   // the header name (Set-Cookie).
-  void AddCookie(const std::string& cookie_string);
+  void AddCookie(std::string_view cookie_string);
 
   // Replaces the current status line with the provided one (|new_status| should
   // not have any EOL).
@@ -230,9 +241,7 @@ class NET_EXPORT HttpResponseHeaders
   std::string GetStatusLine() const;
 
   // Get the HTTP version of the normalized status line.
-  HttpVersion GetHttpVersion() const {
-    return http_version_;
-  }
+  HttpVersion GetHttpVersion() const { return http_version_; }
 
   // Get the HTTP status text of the normalized status line.
   std::string GetStatusText() const;
@@ -341,9 +350,9 @@ class NET_EXPORT HttpResponseHeaders
   // a parameter to support unit testing.  The request_time parameter indicates
   // the time at which the request was made that resulted in this response,
   // which was received at response_time.
-  ValidationType RequiresValidation(const base::Time& request_time,
-                                    const base::Time& response_time,
-                                    const base::Time& current_time) const;
+  ValidationType RequiresValidation(base::Time request_time,
+                                    base::Time response_time,
+                                    base::Time current_time) const;
 
   // Calculates the amount of time the server claims the response is fresh from
   // the time the response was generated.  See section 13.2.4 of RFC 2616.  See
@@ -351,23 +360,27 @@ class NET_EXPORT HttpResponseHeaders
   // the definition of FreshnessLifetimes above for the meaning of the return
   // value.  See RFC 5861 section 3 for the definition of
   // stale-while-revalidate.
-  FreshnessLifetimes GetFreshnessLifetimes(
-      const base::Time& response_time) const;
+  FreshnessLifetimes GetFreshnessLifetimes(base::Time response_time) const;
 
   // Returns the age of the response.  See section 13.2.3 of RFC 2616.
   // See RequiresValidation for a description of this method's parameters.
-  base::TimeDelta GetCurrentAge(const base::Time& request_time,
-                                const base::Time& response_time,
-                                const base::Time& current_time) const;
+  base::TimeDelta GetCurrentAge(base::Time request_time,
+                                base::Time response_time,
+                                base::Time current_time) const;
 
   // The following methods extract values from the response headers.  If a value
   // is not present, or is invalid, then std::nullopt is returned.  Otherwise,
   // the value is returned directly.
+
+  // Note that GetMaxAgeValue method is intended for testing purposes only and
+  // should not be used in production code.
   std::optional<base::TimeDelta> GetMaxAgeValue() const;
   std::optional<base::TimeDelta> GetAgeValue() const;
   std::optional<base::Time> GetDateValue() const;
   std::optional<base::Time> GetLastModifiedValue() const;
   std::optional<base::Time> GetExpiresValue() const;
+  // Note that GetStaleWhileRevalidateValue method is intended for testing
+  // purposes only and should not be used in production code.
   std::optional<base::TimeDelta> GetStaleWhileRevalidateValue() const;
 
   // Extracts the time value of a particular header.  This method looks for the
@@ -386,13 +399,13 @@ class NET_EXPORT HttpResponseHeaders
   // RFC 2616.
   bool HasValidators() const;
 
-  // Extracts the value of the Content-Length header or returns -1 if there is
-  // no such header in the response.
-  int64_t GetContentLength() const;
-
-  // Extracts the value of the specified header or returns -1 if there is no
+  // Returns the value of the Content-Length header or nullopt if there is no
   // such header in the response.
-  int64_t GetInt64HeaderValue(const std::string& header) const;
+  std::optional<base::ByteCount> GetContentLength() const;
+
+  // Returns the value of the specified header or nullopt if there is no such
+  // header in the response.
+  std::optional<int64_t> GetInt64HeaderValue(std::string_view header) const;
 
   // Extracts the values in a Content-Range header and returns true if all three
   // values are present and valid for a 206 response; otherwise returns false.
@@ -409,7 +422,7 @@ class NET_EXPORT HttpResponseHeaders
   bool IsChunkEncoded() const;
 
   // Creates a Value for use with the NetLog containing the response headers.
-  base::Value::Dict NetLogParams(NetLogCaptureMode capture_mode) const;
+  base::DictValue NetLogParams(NetLogCaptureMode capture_mode) const;
 
   // Returns the HTTP response code.  This is 0 if the response code text seems
   // to exist but could not be parsed.  Otherwise, it defaults to 200 if the
@@ -434,7 +447,7 @@ class NET_EXPORT HttpResponseHeaders
  private:
   friend class base::RefCountedThreadSafe<HttpResponseHeaders>;
 
-  using HeaderSet = std::unordered_set<std::string>;
+  class HeaderSet;
 
   // The members of this structure point into raw_headers_.
   struct ParsedHeader;
@@ -448,18 +461,26 @@ class NET_EXPORT HttpResponseHeaders
     kMaybe,  // Unknown whether commas are present. Needs to be parsed.
   };
 
+  struct CacheControlFreshnessDirectives {
+    // Whether the 'must-revalidate' directive is present
+    bool must_revalidate = false;
+    // Value of the 'max-age' directive in seconds, if present
+    std::optional<base::TimeDelta> max_age;
+    // Value of the 'stale-while-revalidate' directive in seconds, if present
+    std::optional<base::TimeDelta> stale_while_revalidate;
+  };
+
   ~HttpResponseHeaders();
 
   // Initializes from the given raw headers.
-  void Parse(const std::string& raw_input);
+  void Parse(std::string_view raw_input);
 
   // Helper function for ParseStatusLine.
   // Tries to extract the "HTTP/X.Y" from a status line formatted like:
   //    HTTP/1.1 200 OK
   // with line_begin and end pointing at the begin and end of this line.  If the
   // status line is malformed, returns HttpVersion(0,0).
-  static HttpVersion ParseVersion(std::string::const_iterator line_begin,
-                                  std::string::const_iterator line_end);
+  static HttpVersion ParseVersion(std::string_view line);
 
   // Tries to extract the status line from a header block, given the first
   // line of said header block.  If the status line is malformed, we'll
@@ -467,9 +488,7 @@ class NET_EXPORT HttpResponseHeaders
   //    HTTP/1.1 200 OK
   // with line_begin and end pointing at the begin and end of this line.
   // Output will be a normalized version of this.
-  void ParseStatusLine(std::string::const_iterator line_begin,
-                       std::string::const_iterator line_end,
-                       bool has_headers);
+  void ParseStatusLine(std::string_view line, bool has_headers);
 
   // Find the header in our list (case-insensitive) starting with |parsed_| at
   // index |from|.  Returns string::npos if not found.
@@ -477,24 +496,27 @@ class NET_EXPORT HttpResponseHeaders
 
   // Search the Cache-Control header for a directive matching |directive|. If
   // present, treat its value as a time offset in seconds.
-  std::optional<base::TimeDelta> GetCacheControlDirective(
-      std::string_view directive) const;
+  // Note that the method is intended for testing purposes only and should not
+  // be used in production code.
+  std::optional<base::TimeDelta> GetCacheControlHeaderValueForTesting(
+      const std::string_view directive) const;
 
   // Add header->value pair(s) to our list. The value will be split into
   // multiple values if it contains unquoted commas. If `contains_commas` is
   // ContainsCommas::kNo then the value will not be parsed as a performance
-  // optimization.
-  void AddHeader(std::string::const_iterator name_begin,
-                 std::string::const_iterator name_end,
-                 std::string::const_iterator value_begin,
-                 std::string::const_iterator value_end,
+  // optimization. Values are all offsets within `raw_headers_`.
+  void AddHeader(size_t name_begin,
+                 size_t name_end,
+                 size_t value_begin,
+                 size_t value_end,
                  ContainsCommas contains_commas);
 
-  // Add to parsed_ given the fields of a ParsedHeader object.
-  void AddToParsed(std::string::const_iterator name_begin,
-                   std::string::const_iterator name_end,
-                   std::string::const_iterator value_begin,
-                   std::string::const_iterator value_end);
+  // Add to parsed_ given the fields of a ParsedHeader object. Values are all
+  // offsets within `raw_headers_`.
+  void AddToParsed(size_t name_begin,
+                   size_t name_end,
+                   size_t value_begin,
+                   size_t value_end);
 
   // Replaces the current headers with the merged version of `raw_headers` and
   // the current headers without the headers in `headers_to_remove`. Note that
@@ -507,6 +529,38 @@ class NET_EXPORT HttpResponseHeaders
 
   // Adds the values from any 'cache-control: no-cache="foo,bar"' headers.
   void AddNonCacheableHeaders(HeaderSet* header_names) const;
+
+  // Checks if the response contains Cache-Control directives that restrict
+  // caching. Specifically checks for the presence of "no-cache" or "no-store"
+  // directives. It true if either "no-cache" or "no-store" directive is present
+  // in any Cache-Control header, false otherwise.
+  bool HasCacheRestriction() const;
+
+  // Parses Cache-Control headers to extract directives related to response
+  // freshness. Processes "must-revalidate", "max-age", and
+  // "stale-while-revalidate" directives, which control how long a cached
+  // response can be considered fresh and whether it can be used while
+  // asynchronously revalidating in the background.
+  CacheControlFreshnessDirectives ParseCacheControlDirectivesForFreshness()
+      const;
+
+  // Parses the numeric value from a Cache-Control directive that expects
+  // a non-negative integer value (e.g., "max-age=600" or
+  // "stale-while-revalidate=300"). parameter directive_size The length of the
+  // directive name including the equals sign. parameter value The complete
+  // directive string (e.g., "max-age=600"). or not a valid sequence of digits.
+  std::optional<base::TimeDelta> ParseSeconds(std::string_view value) const;
+
+  // Shorthand for `std::string_view(raw_headers_).substr(begin, end - begin)`.
+  std::string_view subrange(size_t begin, size_t end) const;
+
+  // Returns a representation of this object.
+  // The options argument can be a combination of PersistOptions.
+  std::vector<uint8_t> Serialize(PersistOptions options) const;
+
+  // Returns the name/value using `raw_headers_` and indices from `parsed`.
+  std::string_view header_name(const ParsedHeader& parsed) const;
+  std::string_view header_value(const ParsedHeader& parsed) const;
 
   // Adds the set of header names that contain cookie values.
   static void AddSensitiveHeaders(HeaderSet* header_names);

@@ -8,18 +8,24 @@ import android.os.Handler;
 
 import androidx.annotation.IntDef;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.NullUnmarked;
+import org.chromium.build.annotations.Nullable;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
 /**
- * A Promise class to be used as a placeholder for a result that will be provided asynchronously.
- * It must only be accessed from a single thread.
+ * A Promise class to be used as a placeholder for a result that will be provided asynchronously. It
+ * must only be accessed from a single thread.
+ *
  * @param <T> The type the Promise will be fulfilled with.
  */
-public class Promise<T> {
+@NullMarked
+public class Promise<T extends @Nullable Object> {
     // TODO(peconn): Implement rejection handlers that can recover from rejection.
 
     @IntDef({PromiseState.UNFULFILLED, PromiseState.FULFILLED, PromiseState.REJECTED})
@@ -32,19 +38,24 @@ public class Promise<T> {
 
     @PromiseState private int mState = PromiseState.UNFULFILLED;
 
-    private T mResult;
-    private final List<Callback<T>> mFulfillCallbacks = new LinkedList<>();
+    private @Nullable T mResult;
+    private final List<Callback<T>> mFulfillCallbacks = new ArrayList<>();
 
-    private Exception mRejectReason;
-    private final List<Callback<Exception>> mRejectCallbacks = new LinkedList<>();
+    private @Nullable Exception mRejectReason;
+    private final List<Callback<@Nullable Exception>> mRejectCallbacks = new ArrayList<>();
 
-    private final Thread mThread = Thread.currentThread();
+    private final ThreadUtils.ThreadChecker mThreadChecker = new ThreadUtils.ThreadChecker();
     private final Handler mHandler = new Handler();
 
-    private boolean mThrowingRejectionHandler;
+    public Promise() {
+        // Guard against creation on Instrumentation thread, since this causes the ThreadChecker
+        // to be associated with it (it should be UI thread).
+        assert !ThreadUtils.runningOnInstrumentationThread();
+    }
 
     /**
      * A function class for use when chaining Promises with {@link Promise#then(AsyncFunction)}.
+     *
      * @param <A> The type of the function input.
      * @param <RT> The type of the function output.
      */
@@ -54,39 +65,19 @@ public class Promise<T> {
      * An exception class for when a rejected Promise is not handled and cannot pass the rejection
      * to a subsequent Promise.
      */
-    public static class UnhandledRejectionException extends RuntimeException {
-        public UnhandledRejectionException(String message, Throwable cause) {
-            super(message, cause);
+    static class UnhandledRejectionException extends RuntimeException {
+        public UnhandledRejectionException(@Nullable Throwable cause) {
+            super(cause);
         }
     }
 
     /**
-     * Convenience method that calls {@link #then(Callback, Callback)} providing a rejection
-     * {@link Callback} that throws a {@link UnhandledRejectionException}. Only use this on
-     * Promises that do not have rejection handlers or dependant Promises.
+     * Convenience method that calls {@link #then(Callback, Callback)} providing a rejection {@link
+     * Callback} that throws a {@link UnhandledRejectionException}. Only use this on Promises that
+     * do not have rejection handlers or dependant Promises.
      */
     public void then(Callback<T> onFulfill) {
-        checkThread();
-
-        // Allow multiple single argument then(Callback)'s, but don't bother adding duplicate
-        // throwing rejection handlers.
-        if (mThrowingRejectionHandler) {
-            thenInner(onFulfill);
-            return;
-        }
-
-        assert mRejectCallbacks.size() == 0
-                : "Do not call the single argument Promise.then(Callback) on a Promise that already"
-                        + " has a rejection handler.";
-
-        Callback<Exception> onReject =
-                reason -> {
-                    throw new UnhandledRejectionException(
-                            "Promise was rejected without a rejection handler.", reason);
-                };
-
-        then(onFulfill, onReject);
-        mThrowingRejectionHandler = true;
+        then(onFulfill, null);
     }
 
     /**
@@ -95,41 +86,56 @@ public class Promise<T> {
      * iteration of the message loop.
      *
      * @param onFulfill The Callback to be called on fulfillment.
-     * @param onReject The Callback to be called on rejection. The argument to onReject will
-     *         may be null if the Promise was rejected manually.
+     * @param onReject The Callback to be called on rejection. The argument to onReject will may be
+     *     null if the Promise was rejected manually.
      */
-    public void then(Callback<T> onFulfill, Callback<Exception> onReject) {
-        checkThread();
+    public void then(Callback<T> onFulfill, @Nullable Callback<@Nullable Exception> onReject) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
+        if (onReject == null) {
+            assert mRejectCallbacks.isEmpty() || isThrowingRejectionException()
+                    : "Do not call the single argument Promise.then(Callback) on a Promise that"
+                            + " already has a non-default rejection handler.";
+        }
+
         thenInner(onFulfill);
         exceptInner(onReject);
     }
 
     /**
      * Adds a rejection handler to the Promise. This handler will be called if this Promise or any
-     * Promises this Promise depends on is rejected or fails. The {@link Callback} will be given
-     * the exception that caused the rejection, or null if the rejection was manual (caused by a
-     * call to {@link #reject()}.
+     * Promises this Promise depends on is rejected or fails. The {@link Callback} will be given the
+     * exception that caused the rejection, or null if the rejection was manual (caused by a call to
+     * {@link #reject()}.
      */
-    public void except(Callback<Exception> onReject) {
-        checkThread();
+    public void except(Callback<@Nullable Exception> onReject) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         exceptInner(onReject);
     }
 
+    private boolean isThrowingRejectionException() {
+        return !mRejectCallbacks.isEmpty() && mRejectCallbacks.get(0) == null;
+    }
+
+    @SuppressWarnings("NullAway") // Cannot specify that mResult is non-null when T is @NonNull.
     private void thenInner(Callback<T> onFulfill) {
         if (mState == PromiseState.FULFILLED) {
-            postCallbackToLooper(onFulfill, mResult);
+            postCallbackToLooperOrCrash(onFulfill, mResult);
         } else if (mState == PromiseState.UNFULFILLED) {
             mFulfillCallbacks.add(onFulfill);
         }
     }
 
-    private void exceptInner(Callback<Exception> onReject) {
-        assert !mThrowingRejectionHandler
+    private void exceptInner(@Nullable Callback<@Nullable Exception> onReject) {
+        // Do not add default rejection handler when one exists already.
+        if (isThrowingRejectionException() && onReject == null) {
+            return;
+        }
+        assert !isThrowingRejectionException()
                 : "Do not add an exception handler to a Promise you have "
                         + "called the single argument Promise.then(Callback) on.";
 
         if (mState == PromiseState.REJECTED) {
-            postCallbackToLooper(onReject, mRejectReason);
+            postCallbackToLooperOrCrash(onReject, mRejectReason);
         } else if (mState == PromiseState.UNFULFILLED) {
             mRejectCallbacks.add(onReject);
         }
@@ -139,8 +145,8 @@ public class Promise<T> {
      * Queues a {@link Function} to be run when the Promise is fulfilled. When this Promise is
      * fulfilled, the function will be run and its result will be place in the returned Promise.
      */
-    public <RT> Promise<RT> then(final Function<T, RT> function) {
-        checkThread();
+    public <RT extends @Nullable Object> Promise<RT> then(Function<T, RT> function) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
 
         // Create a new Promise to store the result of the function.
         final Promise<RT> promise = new Promise<>();
@@ -169,8 +175,8 @@ public class Promise<T> {
      * Promise is fulfilled, the AsyncFunction will be run. When the result of the AsyncFunction is
      * available, it will be placed in the returned Promise.
      */
-    public <RT> Promise<RT> then(final AsyncFunction<T, RT> function) {
-        checkThread();
+    public <RT extends @Nullable Object> Promise<RT> then(AsyncFunction<T, RT> function) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
 
         // Create a new Promise to be returned.
         final Promise<RT> promise = new Promise<>();
@@ -204,9 +210,9 @@ public class Promise<T> {
      */
     @SuppressWarnings("unchecked")
     public Promise<T> andFinally(Runnable runnable) {
-        Callback<?> asCallback = unused -> runnable.run();
+        Callback<?> asCallback = CallbackUtils.fromRunnable(runnable);
         thenInner((Callback<T>) asCallback);
-        exceptInner((Callback<Exception>) asCallback);
+        exceptInner((Callback<@Nullable Exception>) asCallback);
         return this;
     }
 
@@ -214,15 +220,15 @@ public class Promise<T> {
      * Fulfills the Promise with the result and passes it to any {@link Callback}s previously queued
      * on the next iteration of the message loop.
      */
-    public void fulfill(final T result) {
-        checkThread();
+    public void fulfill(T result) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         assert mState == PromiseState.UNFULFILLED;
 
         mState = PromiseState.FULFILLED;
         mResult = result;
 
         for (final Callback<T> callback : mFulfillCallbacks) {
-            postCallbackToLooper(callback, result);
+            postCallbackToLooperOrCrash(callback, result);
         }
 
         mFulfillCallbacks.clear();
@@ -231,19 +237,19 @@ public class Promise<T> {
     /**
      * Rejects the Promise, rejecting all those Promises that rely on it.
      *
-     * This may throw an exception if a dependent Promise fails to handle the rejection, so it is
+     * <p>This may throw an exception if a dependent Promise fails to handle the rejection, so it is
      * important to make it explicit when a Promise may be rejected, so that users of that Promise
      * know to provide rejection handling.
      */
-    public void reject(final Exception reason) {
-        checkThread();
+    public void reject(final @Nullable Exception reason) {
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         assert mState == PromiseState.UNFULFILLED;
 
         mState = PromiseState.REJECTED;
         mRejectReason = reason;
 
-        for (final Callback<Exception> callback : mRejectCallbacks) {
-            postCallbackToLooper(callback, reason);
+        for (final Callback<@Nullable Exception> callback : mRejectCallbacks) {
+            postCallbackToLooperOrCrash(callback, reason);
         }
         mRejectCallbacks.clear();
     }
@@ -255,19 +261,19 @@ public class Promise<T> {
 
     /** Returns whether the promise is fulfilled. */
     public boolean isFulfilled() {
-        checkThread();
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         return mState == PromiseState.FULFILLED;
     }
 
     /** Returns whether the promise is rejected. */
     public boolean isRejected() {
-        checkThread();
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         return mState == PromiseState.REJECTED;
     }
 
     /** Returns whether the promise is in none of the fulfilled nor rejected states. */
     public boolean isPending() {
-        checkThread();
+        mThreadChecker.assertOnValidOrInstrumentationThread();
         return mState == PromiseState.UNFULFILLED;
     }
 
@@ -276,31 +282,35 @@ public class Promise<T> {
      *
      * @return The promised result.
      */
+    @SuppressWarnings("NullAway")
     public T getResult() {
         assert isFulfilled();
+        // SuppressWarnings necessary since mResult is @Nullable, but we cannot check that it's
+        // non-null because T might be @Nullable.
         return mResult;
     }
 
     /** Convenience method to return a Promise fulfilled with the given result. */
-    public static <T> Promise<T> fulfilled(T result) {
+    public static <T extends @Nullable Object> Promise<T> fulfilled(T result) {
         Promise<T> promise = new Promise<>();
         promise.fulfill(result);
         return promise;
     }
 
     /** Convenience method to return a rejected Promise. */
-    public static <T> Promise<T> rejected() {
+    public static <T extends @Nullable Object> Promise<T> rejected() {
         Promise<T> promise = new Promise<>();
         promise.reject();
         return promise;
     }
 
-    private void checkThread() {
-        assert mThread == Thread.currentThread() : "Promise must only be used on a single Thread.";
-    }
-
     // We use a different template parameter here so this can be used for both T and Throwables.
-    private <S> void postCallbackToLooper(final Callback<S> callback, final S result) {
+    @NullUnmarked // https://github.com/uber/NullAway/issues/1075
+    private <S extends @Nullable Object> void postCallbackToLooperOrCrash(
+            @Nullable Callback<S> callback, S result) {
+        if (callback == null) {
+            throw new UnhandledRejectionException((Throwable) result);
+        }
         // Post the callbacks to the Thread looper so we don't get a long chain of callbacks
         // holding up the thread.
         mHandler.post(callback.bind(result));

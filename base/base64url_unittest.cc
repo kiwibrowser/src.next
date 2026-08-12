@@ -4,11 +4,13 @@
 
 #include "base/base64url.h"
 
+#include <algorithm>
 #include <string_view>
 
-#include "base/ranges/algorithm.h"
+#include "base/check_op.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/fuzztest/src/fuzztest/fuzztest.h"
 
 using testing::ElementsAreArray;
 using testing::Optional;
@@ -106,10 +108,22 @@ TEST(Base64UrlTest, EncodeOmitPaddingPolicy) {
   EXPECT_EQ("", output);
 }
 
+TEST(Base64UrlTest, EncodeInPlaceOmitPaddingPolicy) {
+  std::string input = "hello?world";
+  Base64UrlEncode(input, Base64UrlEncodePolicy::OMIT_PADDING, &input);
+  EXPECT_EQ("aGVsbG8_d29ybGQ", input);
+}
+
+TEST(Base64UrlTest, EncodeInPlaceIncludePaddingPolicy) {
+  std::string input = "hello?world";
+  Base64UrlEncode(input, Base64UrlEncodePolicy::INCLUDE_PADDING, &input);
+  EXPECT_EQ("aGVsbG8_d29ybGQ=", input);
+}
+
 TEST(Base64UrlTest, DecodeRequirePaddingPolicy) {
   std::string output;
-  ASSERT_TRUE(Base64UrlDecode("aGVsbG8_d29ybGQ=",
-                              Base64UrlDecodePolicy::REQUIRE_PADDING, &output));
+  ASSERT_TRUE(Base64UrlDecode(
+      "aGVsbG8_d29ybGQ=", Base64UrlDecodePolicy::REQUIRE_PADDING, &output));
 
   EXPECT_EQ("hello?world", output);
 
@@ -134,8 +148,8 @@ TEST(Base64UrlTest, DecodeIgnorePaddingPolicy) {
   EXPECT_EQ("hello?world", output);
 
   // Including the padding is accepted as well.
-  ASSERT_TRUE(Base64UrlDecode("aGVsbG8_d29ybGQ=",
-                              Base64UrlDecodePolicy::IGNORE_PADDING, &output));
+  ASSERT_TRUE(Base64UrlDecode(
+      "aGVsbG8_d29ybGQ=", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
 
   EXPECT_EQ("hello?world", output);
 }
@@ -147,7 +161,7 @@ TEST(Base64UrlTest, DecodeIntoVector) {
   static constexpr uint8_t kExpected[] = {'1', '2', '3', '4'};
   std::optional<std::vector<uint8_t>> result =
       Base64UrlDecode("MTIzNA", Base64UrlDecodePolicy::DISALLOW_PADDING);
-  ASSERT_TRUE(ranges::equal(*result, kExpected));
+  ASSERT_TRUE(std::ranges::equal(*result, kExpected));
 }
 
 TEST(Base64UrlTest, DecodeDisallowPaddingPolicy) {
@@ -174,16 +188,54 @@ TEST(Base64UrlTest, DecodeDisallowsBase64Alphabet) {
 TEST(Base64UrlTest, DecodeDisallowsPaddingOnly) {
   std::string output;
 
-  ASSERT_FALSE(Base64UrlDecode(
-      "=", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
-  ASSERT_FALSE(Base64UrlDecode(
-      "==", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
-  ASSERT_FALSE(Base64UrlDecode(
-      "===", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
-  ASSERT_FALSE(Base64UrlDecode(
-      "====", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
+  ASSERT_FALSE(
+      Base64UrlDecode("=", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
+  ASSERT_FALSE(
+      Base64UrlDecode("==", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
+  ASSERT_FALSE(
+      Base64UrlDecode("===", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
+  ASSERT_FALSE(
+      Base64UrlDecode("====", Base64UrlDecodePolicy::IGNORE_PADDING, &output));
 }
 
+void FuzzBase64UrlEncode(std::string_view input,
+                         Base64UrlEncodePolicy encode_policy) {
+  std::string encoded;
+  Base64UrlEncode(input, encode_policy, &encoded);
+
+  // Check decoding of the above gives the original text.
+  std::string decoded;
+  Base64UrlDecodePolicy decode_policy =
+      encode_policy == Base64UrlEncodePolicy::INCLUDE_PADDING
+          ? Base64UrlDecodePolicy::REQUIRE_PADDING
+          : Base64UrlDecodePolicy::DISALLOW_PADDING;
+  CHECK(Base64UrlDecode(encoded, decode_policy, &decoded));
+  CHECK_EQ(decoded, input);
+  // Same result should be when ignoring padding.
+  decoded.clear();
+  CHECK(Base64UrlDecode(encoded, Base64UrlDecodePolicy::IGNORE_PADDING,
+                        &decoded));
+  CHECK_EQ(decoded, input);
+}
+
+FUZZ_TEST(Base64UrlTest, FuzzBase64UrlEncode)
+    .WithDomains(fuzztest::Arbitrary<std::string>(),
+                 fuzztest::ElementOf<Base64UrlEncodePolicy>(
+                     {Base64UrlEncodePolicy::INCLUDE_PADDING,
+                      Base64UrlEncodePolicy::OMIT_PADDING}));
+
+void FuzzBase64UrlDecode(std::string_view input,
+                         Base64UrlDecodePolicy decode_policy) {
+  std::string decoded;
+  std::ignore = Base64UrlDecode(input, decode_policy, &decoded);
+}
+
+FUZZ_TEST(Base64UrlTest, FuzzBase64UrlDecode)
+    .WithDomains(fuzztest::Arbitrary<std::string>(),
+                 fuzztest::ElementOf<Base64UrlDecodePolicy>(
+                     {Base64UrlDecodePolicy::REQUIRE_PADDING,
+                      Base64UrlDecodePolicy::IGNORE_PADDING,
+                      Base64UrlDecodePolicy::DISALLOW_PADDING}));
 }  // namespace
 
 }  // namespace base

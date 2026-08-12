@@ -4,14 +4,18 @@
 
 #include "third_party/blink/renderer/core/loader/anchor_element_interaction_tracker.h"
 
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 #include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "third_party/blink/public/mojom/preloading/anchor_element_interaction_host.mojom-blink.h"
+#include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom-blink.h"
 #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/web_network_state_notifier.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
@@ -19,54 +23,46 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/screen.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/anchor_element_metrics.h"
 #include "third_party/blink/renderer/core/html/anchor_element_metrics_sender.h"
 #include "third_party/blink/renderer/core/html/anchor_element_viewport_position_tracker.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/pointer_type_names.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
+BASE_FEATURE(kPreloadingNoSamePageFragmentAnchorTracking,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 namespace {
+
 constexpr double eps = 1e-9;
 const base::TimeDelta kMousePosQueueTimeDelta{base::Milliseconds(500)};
 const base::TimeDelta kMouseAccelerationAndVelocityInterval{
     base::Milliseconds(50)};
 
-// Config for viewport heuristic derived from field trial params.
-struct ViewportHeuristicConfig {
-  // Min/max values of distance_from_pointer_down_ratio for an anchor to be
-  // selected by the heuristic.
-  std::pair<float, float> distance_from_ptr_down_ratio_bounds;
-  // The largest anchor should be larger than the next largest anchor by this
-  // threshold to be selected by the heuristic. More specifically, for the
-  // largest anchor a1, and the next largest anchor a2:
-  // (size(a1) - size(a2)) / size(a2) >= `largest_anchor_threshold`.
-  double largest_anchor_threshold;
-  // Time to wait before informing the browser of the largest anchor element
-  // selected by the heuristic.
-  base::TimeDelta delay;
-};
-
-ViewportHeuristicConfig GetViewportHeuristicConfig() {
+ModerateViewportHeuristicConfig
+GetModerateViewportHeuristicConfigFromFeatureParams() {
   // -0.3 is the lower bound of the middle 75% of distance_from_ptr_down_ratio
   // values of clicked anchors (i.e. the P12.5 value).
   const base::FeatureParam<double> kDistanceFromPointerDownLowerBound{
-      &features::kPreloadingViewportHeuristics, "distance_from_ptr_down_low",
-      -0.3};
+      &features::kPreloadingModerateViewportHeuristics,
+      "distance_from_ptr_down_low", -0.3};
   // 0.0 is the upper bound of the middle 75% of distance_from_ptr_down_ratio
   // values of clicked anchors (i.e. the P87.5 value).
   const base::FeatureParam<double> kDistanceFromPointerDownUpperBound{
-      &features::kPreloadingViewportHeuristics, "distance_from_ptr_down_hi",
-      0.0};
+      &features::kPreloadingModerateViewportHeuristics,
+      "distance_from_ptr_down_hi", 0.0};
   // Note: The default value was selected arbitrarily and hasn't been tuned.
   const base::FeatureParam<double> kLargestAnchorThreshold{
-      &features::kPreloadingViewportHeuristics, "largest_anchor_threshold",
-      0.5};
+      &features::kPreloadingModerateViewportHeuristics,
+      "largest_anchor_threshold", 0.25};
   // Note: The default value was selected arbitrarily and hasn't been tuned.
   const base::FeatureParam<base::TimeDelta> kDelay{
-      &features::kPreloadingViewportHeuristics, "delay",
-      base::Milliseconds(1000)};
+      &features::kPreloadingModerateViewportHeuristics, "delay",
+      base::Milliseconds(500)};
 
   double low = std::clamp(kDistanceFromPointerDownLowerBound.Get(), -1.0, 1.0);
   double high = std::clamp(kDistanceFromPointerDownUpperBound.Get(), low, 1.0);
@@ -76,7 +72,29 @@ ViewportHeuristicConfig GetViewportHeuristicConfig() {
       .delay = kDelay.Get()};
 }
 
+ModerateViewportHeuristicConfig* g_config_for_testing = nullptr;
+
+const ModerateViewportHeuristicConfig& GetViewportHeuristicConfig() {
+  static const ModerateViewportHeuristicConfig config_from_feature_params =
+      GetModerateViewportHeuristicConfigFromFeatureParams();
+  return (g_config_for_testing == nullptr) ? config_from_feature_params
+                                           : *g_config_for_testing;
+}
+
 }  // namespace
+
+ModerateViewportHeuristicConfigTestingScope::
+    ModerateViewportHeuristicConfigTestingScope()
+    : config_(
+          GetModerateViewportHeuristicConfigFromFeatureParams()) {  // IN-TEST
+  DCHECK(!g_config_for_testing);
+  g_config_for_testing = &config_;
+}
+
+ModerateViewportHeuristicConfigTestingScope::
+    ~ModerateViewportHeuristicConfigTestingScope() {  // IN-TEST
+  g_config_for_testing = nullptr;
+}
 
 AnchorElementInteractionTracker::MouseMotionEstimator::MouseMotionEstimator(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
@@ -248,16 +266,23 @@ AnchorElementInteractionTracker::AnchorElementInteractionTracker(
                    &AnchorElementInteractionTracker::HoverTimerFired),
       clock_(base::DefaultTickClock::GetInstance()),
       document_(&document),
-      viewport_heuristic_timer_(
+      moderate_viewport_heuristic_timer_(
           document.GetTaskRunner(TaskType::kUserInteraction),
           this,
-          &AnchorElementInteractionTracker::ViewportHeuristicTimerFired) {
+          &AnchorElementInteractionTracker::
+              ModerateViewportHeuristicTimerFired),
+      eager_viewport_heuristic_timer_(
+          document.GetTaskRunner(TaskType::kUserInteraction),
+          this,
+          &AnchorElementInteractionTracker::EagerViewportHeuristicTimerFired) {
   document.GetFrame()->GetBrowserInterfaceBroker().GetInterface(
       interaction_host_.BindNewPipeAndPassReceiver(
           document.GetExecutionContext()->GetTaskRunner(
               TaskType::kInternalDefault)));
   if (base::FeatureList::IsEnabled(
-          blink::features::kPreloadingViewportHeuristics)) {
+          blink::features::kPreloadingModerateViewportHeuristics) ||
+      base::FeatureList::IsEnabled(
+          blink::features::kPreloadingEagerViewportHeuristics)) {
     auto* anchor_metrics_sender =
         AnchorElementMetricsSender::GetForFrame(GetDocument()->GetFrame());
     auto* anchor_viewport_observer =
@@ -281,16 +306,21 @@ void AnchorElementInteractionTracker::Trace(Visitor* visitor) const {
   visitor->Trace(mouse_motion_estimator_);
   visitor->Trace(document_);
   visitor->Trace(largest_anchor_element_in_viewport_);
-  visitor->Trace(viewport_heuristic_timer_);
+  visitor->Trace(moderate_viewport_heuristic_timer_);
+  visitor->Trace(eager_viewport_heuristic_timer_);
   AnchorElementViewportPositionTracker::Observer::Trace(visitor);
 }
 
 // static
-base::TimeDelta AnchorElementInteractionTracker::GetHoverDwellTime() {
-  static base::FeatureParam<base::TimeDelta> hover_dwell_time{
-      &blink::features::kSpeculationRulesPointerHoverHeuristics,
-      "HoverDwellTime", base::Milliseconds(200)};
-  return hover_dwell_time.Get();
+base::TimeDelta AnchorElementInteractionTracker::EagerHoverDwellTime() {
+  static const base::TimeDelta time =
+      blink::features::kPreloadingEagerHoverHeuristicsDwellTime.Get();
+  return time;
+}
+base::TimeDelta AnchorElementInteractionTracker::EagerViewportPresentTime() {
+  static const base::TimeDelta time =
+      blink::features::kPreloadingEagerViewportHeuristicsPresentTime.Get();
+  return time;
 }
 
 void AnchorElementInteractionTracker::OnMouseMoveEvent(
@@ -322,7 +352,7 @@ void AnchorElementInteractionTracker::OnPointerEvent(
 
     // If we already had a timer running, we stop it because the user is likely
     // about to start scrolling again.
-    viewport_heuristic_timer_.Stop();
+    moderate_viewport_heuristic_timer_.Stop();
   }
 
   HTMLAnchorElementBase* anchor =
@@ -348,32 +378,51 @@ void AnchorElementInteractionTracker::OnPointerEvent(
   }
 
   if (event_type == event_type_names::kPointerdown) {
-    // TODO(crbug.com/1297312): Check if user changed the default mouse
-    // settings
-    if (pointer_event.button() !=
-            static_cast<int>(WebPointerProperties::Button::kLeft) &&
-        pointer_event.button() !=
-            static_cast<int>(WebPointerProperties::Button::kMiddle)) {
+    if (!pointer_event.IsLinkClickButton()) {
       return;
     }
     interaction_host_->OnPointerDown(url);
     return;
   }
 
-  if (event_type == event_type_names::kPointerover) {
+  if (event_type == event_type_names::kPointerover && IsPreloadingEligible()) {
+    if (base::FeatureList::IsEnabled(
+            blink::features::kPreloadingEagerHoverHeuristics)) {
+      // TODO(https://crbug.com/40287486): guard this to only be on desktop, and
+      // implement the liberal viewport behavior on mobile. Ideally in a way
+      // that works with DevTools emulation.
+      hover_event_candidates_.insert(
+          std::make_pair(url, blink::mojom::SpeculationEagerness::kEager),
+          HoverEventCandidate{
+              .is_mouse =
+                  pointer_event.pointerType() == pointer_type_names::kMouse,
+              .anchor_id = AnchorElementId(*anchor),
+              .timestamp = clock_->NowTicks() + EagerHoverDwellTime()});
+    }
     hover_event_candidates_.insert(
-        url, HoverEventCandidate{
-                 .is_mouse =
-                     pointer_event.pointerType() == pointer_type_names::kMouse,
-                 .anchor_id = AnchorElementId(*anchor),
-                 .timestamp = clock_->NowTicks() + GetHoverDwellTime()});
+        std::make_pair(url, blink::mojom::SpeculationEagerness::kModerate),
+        HoverEventCandidate{
+            .is_mouse =
+                pointer_event.pointerType() == pointer_type_names::kMouse,
+            .anchor_id = AnchorElementId(*anchor),
+            .timestamp = clock_->NowTicks() + kModerateHoverDwellTime});
     if (!hover_timer_.IsActive()) {
-      hover_timer_.StartOneShot(GetHoverDwellTime(), FROM_HERE);
+      if (base::FeatureList::IsEnabled(
+              blink::features::kPreloadingEagerHoverHeuristics)) {
+        // Start the timer only for the eager timeout, which will be sooner. It
+        // will re-schedule itself for the moderate deadline if necessary.
+        hover_timer_.StartOneShot(EagerHoverDwellTime(), FROM_HERE);
+      } else {
+        hover_timer_.StartOneShot(kModerateHoverDwellTime, FROM_HERE);
+      }
     }
   } else if (event_type == event_type_names::kPointerout) {
     // Since the pointer is no longer hovering on the link, there is no need to
     // check the timer. We should just remove it here.
-    hover_event_candidates_.erase(url);
+    hover_event_candidates_.erase(
+        std::make_pair(url, blink::mojom::SpeculationEagerness::kEager));
+    hover_event_candidates_.erase(
+        std::make_pair(url, blink::mojom::SpeculationEagerness::kModerate));
   }
 }
 
@@ -427,7 +476,7 @@ void AnchorElementInteractionTracker::HoverTimerFired(TimerBase*) {
   }
   const base::TimeTicks now = clock_->NowTicks();
   auto next_fire_time = base::TimeTicks::Max();
-  Vector<KURL> to_be_erased;
+  Vector<std::pair<KURL, blink::mojom::SpeculationEagerness>> to_be_erased;
   for (const auto& hover_event_candidate : hover_event_candidates_) {
     // Check whether pointer hovered long enough on the link to send the
     // PointerHover event to interaction host.
@@ -447,8 +496,21 @@ void AnchorElementInteractionTracker::HoverTimerFired(TimerBase*) {
         }
       }
 
-      interaction_host_->OnPointerHover(
-          /*target=*/hover_event_candidate.key, std::move(pointer_data));
+      if (hover_event_candidate.key.second ==
+          blink::mojom::SpeculationEagerness::kEager) {
+        CHECK(base::FeatureList::IsEnabled(
+            blink::features::kPreloadingEagerHoverHeuristics));
+        interaction_host_->OnPointerHoverEager(hover_event_candidate.key.first,
+                                               std::move(pointer_data));
+      } else if (hover_event_candidate.key.second ==
+                 blink::mojom::SpeculationEagerness::kModerate) {
+        interaction_host_->OnPointerHoverModerate(
+            hover_event_candidate.key.first, std::move(pointer_data));
+      } else {
+        // `hover_event_candidates_` must be registered only for `eager` or
+        // `moderate` eagerness.
+        NOTREACHED();
+      }
       to_be_erased.push_back(hover_event_candidate.key);
 
       continue;
@@ -457,7 +519,7 @@ void AnchorElementInteractionTracker::HoverTimerFired(TimerBase*) {
     next_fire_time =
         std::min(next_fire_time, hover_event_candidate.value.timestamp);
   }
-  WTF::RemoveAll(hover_event_candidates_, to_be_erased);
+  RemoveAll(hover_event_candidates_, to_be_erased);
   if (!next_fire_time.is_max()) {
     hover_timer_.StartOneShot(next_fire_time - now, FROM_HERE);
   }
@@ -484,21 +546,86 @@ AnchorElementInteractionTracker::FirstAnchorElementIncludingSelf(Node* node) {
 KURL AnchorElementInteractionTracker::GetHrefEligibleForPreloading(
     const HTMLAnchorElementBase& anchor) {
   KURL url = anchor.Href();
-  if (url.ProtocolIsInHTTPFamily()) {
-    return url;
+  if (!url.ProtocolIsInHttpFamily()) {
+    return KURL();
   }
-  return KURL();
+  if (base::FeatureList::IsEnabled(
+          kPreloadingNoSamePageFragmentAnchorTracking) &&
+      url.HasFragmentIdentifier()) {
+    const KURL& document_url = anchor.GetDocument().Url();
+    if (EqualIgnoringFragmentIdentifier(url, document_url)) {
+      return KURL();
+    }
+  }
+  return url;
+}
+
+void AnchorElementInteractionTracker::ViewportIntersectionUpdate(
+    const HeapVector<Member<const HTMLAnchorElementBase>>& entered_viewport,
+    const HeapVector<Member<const HTMLAnchorElementBase>>& left_viewport) {
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kPreloadingEagerViewportHeuristics)) {
+    return;
+  }
+  // TODO(https://crbug.com/505056924): The state of IsPreloadingEligible may be
+  // dynamically changed in the future changes, make sure the state is reflected
+  // correctly at the point.
+  if (!IsPreloadingEligible()) {
+    eager_viewport_heuristics_candidates_.clear();
+    eager_viewport_heuristic_timer_.Stop();
+    return;
+  }
+  Vector<KURL> to_be_removed;
+  for (const auto& anchor : left_viewport) {
+    KURL url = GetHrefEligibleForPreloading(*anchor);
+    if (!url.IsEmpty()) {
+      to_be_removed.push_back(std::move(url));
+    }
+  }
+  eager_viewport_heuristics_candidates_.RemoveAll(to_be_removed);
+
+  bool has_added = false;
+  const base::TimeTicks now = clock_->NowTicks();
+  for (const auto& anchor : entered_viewport) {
+    LocalFrame* frame = anchor->GetDocument().GetFrame();
+    if (!frame || !frame->IsMainFrame() || !frame->View()) {
+      continue;
+    }
+    KURL url = GetHrefEligibleForPreloading(*anchor);
+    if (url.IsEmpty()) {
+      continue;
+    }
+    eager_viewport_heuristics_candidates_.insert(
+        url, EagerViewportHeuristicsCandidate{
+                 .anchor_id = AnchorElementId(*anchor),
+                 .timestamp = now + EagerViewportPresentTime()});
+    has_added = true;
+  }
+  if (has_added && !eager_viewport_heuristic_timer_.IsActive()) {
+    eager_viewport_heuristic_timer_.StartOneShot(EagerViewportPresentTime(),
+                                                 FROM_HERE);
+  }
 }
 
 void AnchorElementInteractionTracker::AnchorPositionsUpdated(
     HeapVector<Member<AnchorPositionUpdate>>& position_updates) {
-  CHECK(base::FeatureList::IsEnabled(
-      blink::features::kPreloadingViewportHeuristics));
-  static const ViewportHeuristicConfig config = GetViewportHeuristicConfig();
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kPreloadingModerateViewportHeuristics)) {
+    return;
+  }
+  // TODO(https://crbug.com/505056924): The state of IsPreloadingEligible may be
+  // dynamically changed in the future changes, make sure the state is reflected
+  // correctly at the point.
+  if (!IsPreloadingEligible()) {
+    largest_anchor_element_in_viewport_ = nullptr;
+    moderate_viewport_heuristic_timer_.Stop();
+    return;
+  }
+  const ModerateViewportHeuristicConfig& config = GetViewportHeuristicConfig();
 
   // Reset the delay timer (if active); this could happen if a programmatic
   // scroll happened after the timer started.
-  viewport_heuristic_timer_.Stop();
+  moderate_viewport_heuristic_timer_.Stop();
 
   std::array<AnchorPositionUpdate*, 2> largest_anchors = {nullptr, nullptr};
   for (AnchorPositionUpdate* anchor_position : position_updates) {
@@ -542,13 +669,29 @@ void AnchorElementInteractionTracker::AnchorPositionsUpdated(
   }
 
   largest_anchor_element_in_viewport_ = largest_anchors[0]->anchor_element;
-  viewport_heuristic_timer_.StartOneShot(config.delay, FROM_HERE);
+  moderate_viewport_heuristic_timer_.StartOneShot(config.delay, FROM_HERE);
 }
 
-void AnchorElementInteractionTracker::ViewportHeuristicTimerFired(
+bool AnchorElementInteractionTracker::IsPreloadingEligible() {
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kPreloadingEligibilityCheckOnRenderer)) {
+    return true;
+  }
+
+  bool data_saver = blink::WebNetworkStateNotifier::SaveDataEnabled();
+  bool battery_saver =
+      GetDocument() && GetDocument()->GetPage() &&
+      GetDocument()->GetPage()->GetSettings().GetBatterySaverEnabled();
+  bool preloading_disabled =
+      GetDocument() && GetDocument()->GetPage() &&
+      GetDocument()->GetPage()->GetSettings().GetPreloadingDisabled();
+  return !(data_saver || battery_saver || preloading_disabled);
+}
+
+void AnchorElementInteractionTracker::ModerateViewportHeuristicTimerFired(
     TimerBase* timer) {
   CHECK(base::FeatureList::IsEnabled(
-      blink::features::kPreloadingViewportHeuristics));
+      blink::features::kPreloadingModerateViewportHeuristics));
   if (!largest_anchor_element_in_viewport_ || !GetDocument()->GetFrame()) {
     return;
   }
@@ -560,8 +703,44 @@ void AnchorElementInteractionTracker::ViewportHeuristicTimerFired(
     return;
   }
 
-  interaction_host_->OnViewportHeuristicTriggered(
-      largest_anchor_element_in_viewport_->Url());
+  if (IsPreloadingEligible()) {
+    interaction_host_->OnModerateViewportHeuristicTriggered(
+        largest_anchor_element_in_viewport_->Url());
+  }
+}
+
+void AnchorElementInteractionTracker::EagerViewportHeuristicTimerFired(
+    TimerBase*) {
+  CHECK(base::FeatureList::IsEnabled(
+      blink::features::kPreloadingEagerViewportHeuristics));
+  if (!GetDocument()->GetFrame()) {
+    return;
+  }
+
+  const base::TimeTicks now = clock_->NowTicks();
+  auto next_fire_time = base::TimeTicks::Max();
+  Vector<KURL> fired_candidates;
+  // Trigger and remove every candidate that exceeds the current time stamp.
+  for (const auto& [url, candidate] : eager_viewport_heuristics_candidates_) {
+    if (now >= candidate.timestamp) {
+      fired_candidates.push_back(url);
+    }
+    // Update next fire time.
+    next_fire_time = std::min(next_fire_time, candidate.timestamp);
+  }
+
+  if (!interaction_host_.is_bound()) {
+    return;
+  }
+
+  if (!fired_candidates.empty() && IsPreloadingEligible()) {
+    interaction_host_->OnEagerViewportHeuristicTriggered(fired_candidates);
+  }
+  RemoveAll(eager_viewport_heuristics_candidates_, fired_candidates);
+  if (!next_fire_time.is_max()) {
+    eager_viewport_heuristic_timer_.StartOneShot(next_fire_time - now,
+                                                 FROM_HERE);
+  }
 }
 
 }  // namespace blink

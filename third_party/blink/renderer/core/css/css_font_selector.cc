@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/css/resolver/scoped_style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_rule_font_palette_values.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -48,6 +49,7 @@ namespace {
 
 scoped_refptr<FontPalette> RetrieveFontPaletteFromStyleEngine(
     scoped_refptr<const FontPalette> request_palette,
+    const Document& document,
     StyleEngine& style_engine,
     const AtomicString& family_name) {
   AtomicString requested_palette_values =
@@ -60,9 +62,9 @@ scoped_refptr<FontPalette> RetrieveFontPaletteFromStyleEngine(
         FontPalette::Create(requested_palette_values);
     new_request_palette->SetMatchFamilyName(family_name);
     new_request_palette->SetBasePalette(
-        font_palette_values->GetBasePaletteIndex());
+        font_palette_values->GetBasePaletteIndex(document));
     Vector<FontPalette::FontPaletteOverride> override_colors =
-        font_palette_values->GetOverrideColorsAsVector();
+        font_palette_values->GetOverrideColorsAsVector(document);
     if (override_colors.size()) {
       new_request_palette->SetColorOverrides(std::move(override_colors));
     }
@@ -73,23 +75,24 @@ scoped_refptr<FontPalette> RetrieveFontPaletteFromStyleEngine(
 
 scoped_refptr<const FontPalette> ResolveInterpolableFontPalette(
     scoped_refptr<const FontPalette> font_palette,
+    const Document& document,
     StyleEngine& style_engine,
     const AtomicString& family_name) {
   if (!font_palette->IsInterpolablePalette()) {
     if (font_palette->IsCustomPalette()) {
       scoped_refptr<FontPalette> retrieved_palette =
-          RetrieveFontPaletteFromStyleEngine(font_palette, style_engine,
-                                             family_name);
+          RetrieveFontPaletteFromStyleEngine(font_palette, document,
+                                             style_engine, family_name);
       return retrieved_palette ? retrieved_palette : FontPalette::Create();
     } else {
       return font_palette;
     }
   }
   scoped_refptr<const FontPalette> start_palette =
-      ResolveInterpolableFontPalette(font_palette->GetStart(), style_engine,
-                                     family_name);
+      ResolveInterpolableFontPalette(font_palette->GetStart(), document,
+                                     style_engine, family_name);
   scoped_refptr<const FontPalette> end_palette = ResolveInterpolableFontPalette(
-      font_palette->GetEnd(), style_engine, family_name);
+      font_palette->GetEnd(), document, style_engine, family_name);
 
   // If two endpoints of the interpolation are equal, we can simplify the tree
   if (*start_palette.get() == *end_palette.get()) {
@@ -144,8 +147,6 @@ void CSSFontSelector::UnregisterForInvalidationCallbacks(
 
 void CSSFontSelector::DispatchInvalidationCallbacks(
     FontInvalidationReason reason) {
-  font_face_cache_->IncrementVersion();
-
   HeapVector<Member<FontSelectorClient>> clients(clients_);
   for (auto& client : clients) {
     if (client) {
@@ -174,7 +175,7 @@ const FontData* CSSFontSelector::GetFontData(
   if (request_palette && request_palette->IsCustomPalette()) {
     scoped_refptr<FontPalette> new_request_palette =
         RetrieveFontPaletteFromStyleEngine(
-            request_palette, document.GetStyleEngine(), family_name);
+            request_palette, document, document.GetStyleEngine(), family_name);
     if (new_request_palette) {
       request_description.SetFontPalette(std::move(new_request_palette));
     }
@@ -182,7 +183,7 @@ const FontData* CSSFontSelector::GetFontData(
 
   if (request_palette && request_palette->IsInterpolablePalette()) {
     scoped_refptr<const FontPalette> computed_interpolable_palette =
-        ResolveInterpolableFontPalette(request_palette,
+        ResolveInterpolableFontPalette(request_palette, document,
                                        document.GetStyleEngine(), family_name);
     request_description.SetFontPalette(
         std::move(computed_interpolable_palette));
@@ -250,10 +251,6 @@ const FontData* CSSFontSelector::GetFontData(
     return nullptr;
   }
 
-  ReportFontFamilyLookupByGenericFamily(
-      family_name, request_description.GetScript(),
-      request_description.GenericFamily(), settings_family_name);
-
   const SimpleFontData* font_data =
       FontCache::Get().GetFontData(request_description, settings_family_name);
   if (font_data && request_description.HasSizeAdjust()) {
@@ -268,9 +265,6 @@ const FontData* CSSFontSelector::GetFontData(
     }
   }
 
-  ReportFontLookupByUniqueOrFamilyName(settings_family_name,
-                                       request_description, font_data);
-
   return font_data;
 }
 
@@ -281,10 +275,6 @@ void CSSFontSelector::UpdateGenericFontFamilySettings(Document& document) {
   generic_font_family_settings_ =
       document.GetSettings()->GetGenericFontFamilySettings();
   FontCacheInvalidated();
-}
-
-FontMatchingMetrics* CSSFontSelector::GetFontMatchingMetrics() const {
-  return GetDocument().GetFontMatchingMetrics();
 }
 
 bool CSSFontSelector::IsAlive() const {

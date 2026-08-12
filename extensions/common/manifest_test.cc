@@ -2,18 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "extensions/common/manifest_test.h"
 
 #include <optional>
 #include <string_view>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
@@ -35,13 +29,13 @@ using extensions::mojom::ManifestLocation;
 namespace extensions {
 namespace {
 
-std::string GetNameFromManifest(const base::Value::Dict& manifest) {
+std::string GetNameFromManifest(const base::DictValue& manifest) {
   const std::string* name = manifest.FindString(manifest_keys::kName);
   return name ? *name : std::string();
 }
 
 // |manifest_path| is an absolute path to a manifest file.
-std::optional<base::Value::Dict> LoadManifestFile(
+std::optional<base::DictValue> LoadManifestFile(
     const base::FilePath& manifest_path,
     std::string* error) {
   base::FilePath extension_path = manifest_path.DirName();
@@ -61,7 +55,7 @@ std::optional<base::Value::Dict> LoadManifestFile(
   // localize them, since their manifests don't have a default_locale key.
   // Only localize manifests that indicate they want to be localized.
   // Calling LocalizeExtension at this point mirrors file_util::LoadExtension.
-  if (base::Contains(manifest_path.value(), FILE_PATH_LITERAL("localized"))) {
+  if (manifest_path.value().contains(FILE_PATH_LITERAL("localized"))) {
     extension_l10n_util::LocalizeExtension(
         extension_path, manifest->GetIfDict(),
         extension_l10n_util::GzippedMessagesPermission::kDisallow, error);
@@ -82,17 +76,17 @@ ManifestTest::~ManifestTest() = default;
 // to a manifest or the manifest itself.
 ManifestTest::ManifestData::ManifestData(std::string_view name) : name_(name) {}
 
-ManifestTest::ManifestData::ManifestData(base::Value::Dict manifest,
+ManifestTest::ManifestData::ManifestData(base::DictValue manifest,
                                          std::string_view name)
     : name_(name), manifest_(std::move(manifest)) {}
 
-ManifestTest::ManifestData::ManifestData(base::Value::Dict manifest)
+ManifestTest::ManifestData::ManifestData(base::DictValue manifest)
     : name_(GetNameFromManifest(manifest)), manifest_(std::move(manifest)) {}
 
 ManifestTest::ManifestData::ManifestData(ManifestData&& other) = default;
 ManifestTest::ManifestData::~ManifestData() = default;
 
-const std::optional<base::Value::Dict>& ManifestTest::ManifestData::GetManifest(
+const std::optional<base::DictValue>& ManifestTest::ManifestData::GetManifest(
     const base::FilePath& test_data_dir,
     std::string* error) const {
   if (!manifest_) {
@@ -106,7 +100,7 @@ const std::optional<base::Value::Dict>& ManifestTest::ManifestData::GetManifest(
 ManifestTest::ManifestData ManifestTest::ManifestData::FromJSON(
     std::string_view json) {
   // ParseJsonDict() will ADD_FAILURE() if `json` is not a valid dict.
-  base::Value::Dict manifest_dict = base::test::ParseJsonDict(json);
+  base::DictValue manifest_dict = base::test::ParseJsonDict(json);
   return ManifestData(std::move(manifest_dict));
 }
 
@@ -120,26 +114,32 @@ base::FilePath ManifestTest::GetTestDataDir() {
   return path.AppendASCII("manifest_tests");
 }
 
-std::optional<base::Value::Dict> ManifestTest::LoadManifest(
+std::optional<base::DictValue> ManifestTest::LoadManifest(
     char const* manifest_name,
     std::string* error) {
   base::FilePath manifest_path = GetTestDataDir().AppendASCII(manifest_name);
   return LoadManifestFile(manifest_path, error);
 }
 
+// TODO(crbug.com/41317803): Continue removing std::string error and
+// replacing with std::u16string.
 scoped_refptr<Extension> ManifestTest::LoadExtension(
     const ManifestData& manifest,
     std::string* error,
     ManifestLocation location,
     int flags) {
   base::FilePath test_data_dir = GetTestDataDir();
-  const std::optional<base::Value::Dict>& dict =
+  const std::optional<base::DictValue>& dict =
       manifest.GetManifest(test_data_dir, error);
   if (!dict) {
     return nullptr;
   }
-  return Extension::Create(test_data_dir.DirName(), location, *dict, flags,
-                           GetTestExtensionID(), error);
+  std::u16string utf16_error;
+  scoped_refptr<Extension> extension =
+      Extension::Create(test_data_dir.DirName(), location, *dict, flags,
+                        GetTestExtensionID(), &utf16_error);
+  *error = base::UTF16ToUTF8(utf16_error);
+  return extension;
 }
 
 scoped_refptr<Extension> ManifestTest::LoadAndExpectSuccess(
@@ -327,11 +327,10 @@ ManifestTest::Testcase::Testcase(const std::string& manifest_filename,
       location_(location),
       flags_(flags) {}
 
-void ManifestTest::RunTestcases(const Testcase* testcases,
-                                size_t num_testcases,
+void ManifestTest::RunTestcases(base::span<const Testcase> testcases,
                                 ExpectType type) {
-  for (size_t i = 0; i < num_testcases; ++i) {
-    RunTestcase(testcases[i], type);
+  for (const auto& testcase : testcases) {
+    RunTestcase(testcase, type);
   }
 }
 
@@ -340,19 +339,19 @@ void ManifestTest::RunTestcase(const Testcase& testcase, ExpectType type) {
                                   testcase.manifest_filename_.c_str()));
 
   switch (type) {
-    case EXPECT_TYPE_ERROR:
+    case ExpectType::kError:
       LoadAndExpectError(testcase.manifest_filename_.c_str(),
                          testcase.expected_error_,
                          testcase.location_,
                          testcase.flags_);
       break;
-    case EXPECT_TYPE_WARNING:
+    case ExpectType::kWarning:
       LoadAndExpectWarning(testcase.manifest_filename_.c_str(),
                            testcase.expected_error_,
                            testcase.location_,
                            testcase.flags_);
       break;
-    case EXPECT_TYPE_SUCCESS:
+    case ExpectType::kSuccess:
       LoadAndExpectSuccess(testcase.manifest_filename_.c_str(),
                            testcase.location_,
                            testcase.flags_);

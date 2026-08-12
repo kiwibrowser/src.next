@@ -7,7 +7,7 @@
 
 #include <optional>
 
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -26,7 +26,7 @@ class StyleScope;
 // to a single StyleSheetContents/StyleScope being shared by multiple
 // CSSStyleSheets).
 class StyleScopeData final : public GarbageCollected<StyleScopeData>,
-                             public ElementRareDataField {
+                             public NodeRareDataField {
  public:
   void Trace(Visitor*) const override;
 

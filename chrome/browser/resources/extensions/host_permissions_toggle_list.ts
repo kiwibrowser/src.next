@@ -13,7 +13,7 @@ import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {getCss} from './host_permissions_toggle_list.css.js';
 import {getHtml} from './host_permissions_toggle_list.html.js';
-import {UserAction} from './item_util.js';
+import {UserAction} from './metrics_util.js';
 import type {ExtensionsRestrictedSitesDialogElement} from './restricted_sites_dialog.js';
 import {getMatchingUserSpecifiedSites} from './runtime_hosts_dialog.js';
 import {SiteSettingsMixin} from './site_permissions/site_settings_mixin.js';
@@ -47,8 +47,6 @@ export class ExtensionsHostPermissionsToggleListElement extends
 
   static override get properties() {
     return {
-      ...super.properties,
-
       /**
        * The underlying permissions data.
        */
@@ -70,20 +68,18 @@ export class ExtensionsHostPermissionsToggleListElement extends
     };
   }
 
-  permissions: chrome.developerPrivate.RuntimeHostPermissions = {
+  accessor permissions: chrome.developerPrivate.RuntimeHostPermissions = {
     hasAllHosts: true,
     hostAccess: chrome.developerPrivate.HostAccess.ON_CLICK,
     hosts: [],
   };
-  itemId: string = '';
-  protected matchingRestrictedSites_: string[] = [];
-  protected showMatchingRestrictedSitesDialog_: boolean = false;
-  private selectedHost_: string = '';
+  accessor itemId: string = '';
+  protected accessor matchingRestrictedSites_: string[] = [];
+  protected accessor showMatchingRestrictedSitesDialog_: boolean = false;
+  private accessor selectedHost_: string = '';
 
   getRestrictedSitesDialog(): ExtensionsRestrictedSitesDialogElement|null {
-    return this.shadowRoot!
-        .querySelector<ExtensionsRestrictedSitesDialogElement>(
-            'extensions-restricted-sites-dialog');
+    return this.shadowRoot.querySelector('extensions-restricted-sites-dialog');
   }
 
   /**
@@ -111,7 +107,7 @@ export class ExtensionsHostPermissionsToggleListElement extends
     });
   }
 
-  protected onAllHostsToggleChanged_(e: CustomEvent<boolean>) {
+  protected onAllHostsToggleChange_(e: CustomEvent<boolean>) {
     // TODO(devlin): In the case of going from all sites to specific sites,
     // we'll withhold all sites (i.e., all specific site toggles will move to
     // unchecked, and the user can check them individually). This is slightly
@@ -132,7 +128,7 @@ export class ExtensionsHostPermissionsToggleListElement extends
     }
   }
 
-  protected onHostAccessChanged_(e: CustomEvent<boolean>) {
+  protected onHostAccessChange_(e: CustomEvent<boolean>) {
     const host = (e.target as HTMLElement).dataset['host'] || '';
     const checked = (e.target as ExtensionsToggleRowElement).checked;
 

@@ -6,15 +6,17 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/extension_web_ui.h"
-#include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
+#include "chrome/browser/extensions/extension_url_overrides.h"
+#include "chrome/browser/extensions/extension_url_overrides_registrar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/search_test_utils.h"
 #include "components/search_engines/template_url_service.h"
+#include "extensions/browser/extension_registrar.h"
+#include "extensions/browser/permissions/permissions_updater.h"
+#include "extensions/browser/ui_util.h"
 #include "extensions/common/extension_builder.h"
 
 class SettingsOverriddenParamsProvidersUnitTest
@@ -24,15 +26,15 @@ class SettingsOverriddenParamsProvidersUnitTest
     extensions::ExtensionServiceTestBase::SetUp();
     InitializeEmptyExtensionService();
 
-    // The NtpOverriddenDialogController rellies on ExtensionWebUI; ensure one
-    // exists.
-    extensions::ExtensionWebUIOverrideRegistrar::GetFactoryInstance()
+    // The NtpOverriddenDialogController rellies on ExtensionUrlOverrides;
+    // ensure one exists.
+    extensions::ExtensionUrlOverridesRegistrar::GetFactoryInstance()
         ->SetTestingFactoryAndUse(
             profile(),
             base::BindRepeating([](content::BrowserContext* context)
                                     -> std::unique_ptr<KeyedService> {
               return std::make_unique<
-                  extensions::ExtensionWebUIOverrideRegistrar>(context);
+                  extensions::ExtensionUrlOverridesRegistrar>(context);
             }));
     auto* template_url_service = static_cast<TemplateURLService*>(
         TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -43,9 +45,9 @@ class SettingsOverriddenParamsProvidersUnitTest
 
   // Adds a new extension that overrides the NTP.
   const extensions::Extension* AddExtensionControllingNewTab(
-      const char* name = "ntp override") {
-    base::Value::Dict chrome_url_overrides =
-        base::Value::Dict().Set("newtab", "newtab.html");
+      const std::string& name = "ntp override") {
+    base::DictValue chrome_url_overrides =
+        base::DictValue().Set("newtab", "newtab.html");
     scoped_refptr<const extensions::Extension> extension =
         extensions::ExtensionBuilder(name)
             .SetLocation(extensions::mojom::ManifestLocation::kInternal)
@@ -53,9 +55,11 @@ class SettingsOverriddenParamsProvidersUnitTest
                             std::move(chrome_url_overrides))
             .Build();
 
-    service()->AddExtension(extension.get());
-    EXPECT_EQ(extension, ExtensionWebUI::GetExtensionControllingURL(
-                             GURL(chrome::kChromeUINewTabURL), profile()));
+    extensions::PermissionsUpdater(profile()).GrantActivePermissions(
+        extension.get());
+    registrar()->AddExtension(extension);
+    EXPECT_EQ(extension, ExtensionUrlOverrides::GetExtensionControllingURL(
+                             chrome::ChromeUINewTabURLAsGURL(), profile()));
 
     return extension.get();
   }
@@ -71,7 +75,7 @@ TEST_F(SettingsOverriddenParamsProvidersUnitTest,
   // still be no controlling extension.
   scoped_refptr<const extensions::Extension> regular_extension =
       extensions::ExtensionBuilder("regular").Build();
-  service()->AddExtension(regular_extension.get());
+  registrar()->AddExtension(regular_extension);
   EXPECT_EQ(std::nullopt,
             settings_overridden_params::GetNtpOverriddenParams(profile()));
 
@@ -85,7 +89,35 @@ TEST_F(SettingsOverriddenParamsProvidersUnitTest,
 
   // In this case, disabling the extension would go back to the default NTP, so
   // a specific message should show.
-  EXPECT_EQ("Change back to Google?", base::UTF16ToUTF8(params->dialog_title));
+  EXPECT_EQ("Change back to Google?",
+            base::UTF16ToUTF8(params->content.dialog_title));
+}
+
+// Tests that long extension names are truncated in the dialog message.
+TEST_F(SettingsOverriddenParamsProvidersUnitTest,
+       LongNameExtensionOverridingNewTab) {
+  // With no extensions installed, there should be no controlling extension.
+  EXPECT_EQ(std::nullopt,
+            settings_overridden_params::GetNtpOverriddenParams(profile()));
+
+  // Install an extensions which overrides the NTP and has a long name.
+  const std::u16string extension_name =
+      u"This extension name should be longer than our truncation threshold "
+      "to test that the bubble can handle long names";
+  const std::u16string truncated_name =
+      extensions::ui_util::GetFixupExtensionNameForUIDisplay(extension_name);
+  ASSERT_LT(truncated_name.size(), extension_name.size());
+
+  const extensions::Extension* ntp_extension =
+      AddExtensionControllingNewTab(base::UTF16ToUTF8(extension_name));
+  std::optional<ExtensionSettingsOverriddenDialog::Params> params =
+      settings_overridden_params::GetNtpOverriddenParams(profile());
+  ASSERT_TRUE(params);
+  ASSERT_EQ(ntp_extension->id(), params->controlling_extension_id);
+
+  // The dialog message should contain the truncated name.
+  EXPECT_TRUE(params->content.message.contains(truncated_name));
+  EXPECT_FALSE(params->content.message.contains(extension_name));
 }
 
 TEST_F(SettingsOverriddenParamsProvidersUnitTest,
@@ -104,5 +136,5 @@ TEST_F(SettingsOverriddenParamsProvidersUnitTest,
   ASSERT_TRUE(params);
   EXPECT_EQ(extension2->id(), params->controlling_extension_id);
   EXPECT_EQ("Did you mean to change this page?",
-            base::UTF16ToUTF8(params->dialog_title));
+            base::UTF16ToUTF8(params->content.dialog_title));
 }

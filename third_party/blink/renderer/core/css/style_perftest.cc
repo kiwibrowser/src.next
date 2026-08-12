@@ -1,7 +1,7 @@
 // Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
+
 // A benchmark to verify style performance (and also hooks into layout,
 // but not generally layout itself). This isolates style from paint etc.,
 // for more stable benchmarking and profiling. Note that this test
@@ -9,13 +9,18 @@
 // not yet checked in. The tests will be skipped if you don't have the
 // files available.
 
+#include <algorithm>
+#include <functional>
 #include <string_view>
 
 #include "base/command_line.h"
 #include "base/containers/span.h"
 #include "base/json/json_reader.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_view_util.h"
 #include "testing/perf/perf_result_reporter.h"
 #include "testing/perf/perf_test.h"
+#include "third_party/abseil-cpp/absl/strings/str_format.h"
 #include "third_party/blink/renderer/core/css/container_query_data.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
@@ -25,7 +30,6 @@
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
@@ -39,51 +43,55 @@
 namespace blink {
 
 // The HTML left by the dumper script will contain any <style> tags that were
-// in the DOM, which will be interpreted by setInnerHTML() and converted to
-// style sheets. However, we already have our own canonical list of sheets
-// (from the JSON) that we want to use. Keeping both will make for duplicated
-// rules, enabling rules and sheets that have since been deleted
+// in the DOM, which will be interpreted by SetInnerHTMLWithoutTrustedTypes()
+// and converted to style sheets. However, we already have our own canonical
+// list of sheets (from the JSON) that we want to use. Keeping both will make
+// for duplicated rules, enabling rules and sheets that have since been deleted
 // (occasionally even things like “display: none !important”) and so on.
 // Thus, as a kludge, we strip all <style> tags from the HTML here before
 // parsing.
-static WTF::String StripStyleTags(const WTF::String& html) {
+static String StripStyleTags(const String& html) {
   StringBuilder stripped_html;
   wtf_size_t pos = 0;
   for (;;) {
-    wtf_size_t style_start =
-        html.FindIgnoringCase("<style", pos);  // Allow <style id=" etc.
+    // Allow <style id=" etc.
+    wtf_size_t style_start = html.DeprecatedFindIgnoringCase("<style", pos);
     if (style_start == kNotFound) {
       // No more <style> tags, so append the rest of the string.
-      stripped_html.Append(html.Substring(pos, html.length() - pos));
+      stripped_html.Append(html.subview(pos, html.length() - pos));
       break;
     }
     // Bail out if it's not “<style>” or “<style ”; it's probably
     // a false positive then.
     if (style_start + 6 >= html.length() ||
         (html[style_start + 6] != ' ' && html[style_start + 6] != '>')) {
-      stripped_html.Append(html.Substring(pos, style_start - pos));
+      stripped_html.Append(html.subview(pos, style_start - pos));
       pos = style_start + 6;
       continue;
     }
-    wtf_size_t style_end = html.FindIgnoringCase("</style>", style_start);
+    wtf_size_t style_end =
+        html.DeprecatedFindIgnoringCase("</style>", style_start);
     if (style_end == kNotFound) {
       LOG(FATAL) << "Mismatched <style> tag";
     }
-    stripped_html.Append(html.Substring(pos, style_start - pos));
+    stripped_html.Append(html.subview(pos, style_start - pos));
     pos = style_end + 8;
   }
   return stripped_html.ToString();
 }
 
 static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
-    const base::Value::Dict& dict,
+    const base::DictValue& dict,
     base::TimeDelta& parse_time,
     perf_test::PerfResultReporter* reporter) {
   const std::string parse_iterations_str =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           "style-parse-iterations");
-  int parse_iterations =
-      parse_iterations_str.empty() ? 1 : stoi(parse_iterations_str);
+  int parse_iterations = 1;
+  if (!parse_iterations_str.empty()) {
+    CHECK(base::StringToInt(parse_iterations_str, &parse_iterations))
+        << "Invalid value for --style-parse-iterations";
+  }
 
   const CSSDeferPropertyParsing defer_property_parsing =
       base::CommandLine::ForCurrentProcess()->HasSwitch("style-lazy-parsing")
@@ -98,21 +106,20 @@ static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
 
   Document& document = page->GetDocument();
   StyleEngine& engine = document.GetStyleEngine();
-  document.documentElement()->setInnerHTML(
-      StripStyleTags(WTF::String(*dict.FindString("html"))),
-      ASSERT_NO_EXCEPTION);
+  document.documentElement()->SetInnerHTMLWithoutTrustedTypes(
+      StripStyleTags(String(*dict.FindString("html"))), ASSERT_NO_EXCEPTION);
 
   int num_sheets = 0;
   int num_bytes = 0;
 
   base::ElapsedTimer parse_timer;
   for (const base::Value& sheet_json : *dict.FindList("stylesheets")) {
-    const base::Value::Dict& sheet_dict = sheet_json.GetDict();
+    const base::DictValue& sheet_dict = sheet_json.GetDict();
     auto* sheet = MakeGarbageCollected<StyleSheetContents>(
         MakeGarbageCollected<CSSParserContext>(document));
 
     for (int i = 0; i < parse_iterations; ++i) {
-      sheet->ParseString(WTF::String(*sheet_dict.FindString("text")),
+      sheet->ParseString(String(*sheet_dict.FindString("text")),
                          /*allow_import_rules=*/true, defer_property_parsing);
     }
     if (*sheet_dict.FindString("type") == "user") {
@@ -155,7 +162,7 @@ struct StylePerfResult {
 };
 
 static StylePerfResult MeasureStyleForDumpedPage(
-    const char* filename,
+    std::string_view filename,
     bool parse_only,
     perf_test::PerfResultReporter* reporter) {
   StylePerfResult result;
@@ -165,8 +172,11 @@ static StylePerfResult MeasureStyleForDumpedPage(
   const std::string recalc_iterations_str =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           "style-recalc-iterations");
-  int recalc_iterations =
-      recalc_iterations_str.empty() ? 1 : stoi(recalc_iterations_str);
+  int recalc_iterations = 1;
+  if (!recalc_iterations_str.empty()) {
+    CHECK(base::StringToInt(recalc_iterations_str, &recalc_iterations))
+        << "Invalid value for --style-recalc-iterations";
+  }
 
   const bool measure_computed_style_memory =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -182,13 +192,13 @@ static StylePerfResult MeasureStyleForDumpedPage(
   size_t orig_gc_allocated_bytes =
       blink::ProcessHeap::TotalAllocatedObjectSize();
   size_t orig_partition_allocated_bytes =
-      WTF::Partitions::TotalSizeOfCommittedPages();
+      Partitions::TotalSizeOfCommittedPages();
 
   std::unique_ptr<DummyPageHolder> page;
 
   {
     std::optional<Vector<char>> serialized =
-        test::ReadFromFile(test::StylePerfTestDataPath(filename));
+        test::ReadFromFile(test::StylePerfTestDataPath(String(filename)));
     if (!serialized) {
       // Some test data is very large and needs to be downloaded separately,
       // so it may not always be present. Do not fail, but report the test as
@@ -196,10 +206,11 @@ static StylePerfResult MeasureStyleForDumpedPage(
       result.skipped = true;
       return result;
     }
-    std::optional<base::Value> json =
-        base::JSONReader::Read(base::as_string_view(*serialized));
+    std::optional<base::DictValue> json =
+        base::JSONReader::ReadDict(base::as_string_view(*serialized),
+                                   base::JSON_PARSE_CHROMIUM_EXTENSIONS);
     CHECK(json.has_value());
-    page = LoadDumpedPage(json->GetDict(), result.parse_time, reporter);
+    page = LoadDumpedPage(*json, result.parse_time, reporter);
   }
 
   page->GetDocument()
@@ -236,8 +247,7 @@ static StylePerfResult MeasureStyleForDumpedPage(
   test::RunPendingTasks();
 
   size_t gc_allocated_bytes = blink::ProcessHeap::TotalAllocatedObjectSize();
-  size_t partition_allocated_bytes =
-      WTF::Partitions::TotalSizeOfCommittedPages();
+  size_t partition_allocated_bytes = Partitions::TotalSizeOfCommittedPages();
 
   result.gc_allocated_bytes = gc_allocated_bytes - orig_gc_allocated_bytes;
   result.partition_allocated_bytes =
@@ -252,8 +262,8 @@ static StylePerfResult MeasureStyleForDumpedPage(
   return result;
 }
 
-static void MeasureAndPrintStyleForDumpedPage(const char* filename,
-                                              const char* label) {
+static void MeasureAndPrintStyleForDumpedPage(std::string_view filename,
+                                              std::string_view label) {
   auto reporter = perf_test::PerfResultReporter("BlinkStyle", label);
   const bool parse_only =
       base::CommandLine::ForCurrentProcess()->HasSwitch("parse-style-only");
@@ -261,10 +271,8 @@ static void MeasureAndPrintStyleForDumpedPage(const char* filename,
   StylePerfResult result =
       MeasureStyleForDumpedPage(filename, parse_only, &reporter);
   if (result.skipped) {
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Skipping %s test because %s could not be read",
-             label, filename);
-    GTEST_SKIP_(msg);
+    GTEST_SKIP() << "Skipping " << label << " test because " << filename
+                 << " could not be read";
   }
 
   if (!parse_only) {
@@ -345,10 +353,8 @@ TEST(StyleCalcPerfTest, Alexa1000) {
       base::CommandLine::ForCurrentProcess()->HasSwitch("parse-style-only");
 
   for (int i = 1; i <= 1000; ++i) {
-    char filename[256];
-    snprintf(filename, sizeof(filename), "alexa%04d.json", i);
-    StylePerfResult result =
-        MeasureStyleForDumpedPage(filename, parse_only, /*reporter=*/nullptr);
+    StylePerfResult result = MeasureStyleForDumpedPage(
+        absl::StrFormat("alexa%04d.json", i), parse_only, /*reporter=*/nullptr);
     if (!result.skipped) {
       results.push_back(result);
     }
@@ -363,62 +369,40 @@ TEST(StyleCalcPerfTest, Alexa1000) {
     }
   }
 
+  if (results.empty()) {
+    return;
+  }
+
   auto reporter = perf_test::PerfResultReporter("BlinkStyle", "Alexa1000");
   for (double percentile : {0.5, 0.9, 0.99}) {
-    char label[256];
     size_t pos = std::min<size_t>(lrint(results.size() * percentile),
                                   results.size() - 1);
 
-    std::nth_element(results.begin(), results.begin() + pos, results.end(),
-                     [](const StylePerfResult& a, const StylePerfResult& b) {
-                       return a.parse_time < b.parse_time;
-                     });
-    snprintf(label, sizeof(label), "ParseTime%.0fthPercentile",
-             percentile * 100.0);
-    reporter.RegisterImportantMetric(label, "us");
-    reporter.AddResult(label, results[pos].parse_time);
+    auto add_metric = [&](std::string_view name, std::string_view unit,
+                          auto transform, auto projection) {
+      std::ranges::nth_element(results, results.begin() + pos, {}, projection);
+      std::string label =
+          absl::StrFormat("%s%.0fthPercentile", name, percentile * 100.0);
+      reporter.RegisterImportantMetric(label, unit);
+      reporter.AddResult(label,
+                         transform(std::invoke(projection, results[pos])));
+    };
+    auto to_kb = [](int64_t v) { return static_cast<size_t>(v) / 1024; };
+    auto to_us = [](base::TimeDelta t) { return t; };
+
+    add_metric("ParseTime", "us", to_us, &StylePerfResult::parse_time);
 
     if (!parse_only) {
-      std::nth_element(results.begin(), results.begin() + pos, results.end(),
-                       [](const StylePerfResult& a, const StylePerfResult& b) {
-                         return a.initial_style_time < b.initial_style_time;
-                       });
-      snprintf(label, sizeof(label), "InitialCalcTime%.0fthPercentile",
-               percentile * 100.0);
-      reporter.RegisterImportantMetric(label, "us");
-      reporter.AddResult(label, results[pos].initial_style_time);
-
-      std::nth_element(results.begin(), results.begin() + pos, results.end(),
-                       [](const StylePerfResult& a, const StylePerfResult& b) {
-                         return a.recalc_style_time < b.recalc_style_time;
-                       });
-      snprintf(label, sizeof(label), "RecalcTime%.0fthPercentile",
-               percentile * 100.0);
-      reporter.RegisterImportantMetric(label, "us");
-      reporter.AddResult(label, results[pos].recalc_style_time);
+      add_metric("InitialCalcTime", "us", to_us,
+                 &StylePerfResult::initial_style_time);
+      add_metric("RecalcTime", "us", to_us,
+                 &StylePerfResult::recalc_style_time);
     }
 
-    std::nth_element(results.begin(), results.begin() + pos, results.end(),
-                     [](const StylePerfResult& a, const StylePerfResult& b) {
-                       return a.gc_allocated_bytes < b.gc_allocated_bytes;
-                     });
-    snprintf(label, sizeof(label), "GCAllocated%.0fthPercentile",
-             percentile * 100.0);
-    reporter.RegisterImportantMetric(label, "kB");
-    reporter.AddResult(
-        label, static_cast<size_t>(results[pos].gc_allocated_bytes) / 1024);
-
-    std::nth_element(results.begin(), results.begin() + pos, results.end(),
-                     [](const StylePerfResult& a, const StylePerfResult& b) {
-                       return a.partition_allocated_bytes <
-                              b.partition_allocated_bytes;
-                     });
-    snprintf(label, sizeof(label), "PartitionAllocated%.0fthPercentile",
-             percentile * 100.0);
-    reporter.RegisterImportantMetric(label, "kB");
-    reporter.AddResult(
-        label,
-        static_cast<size_t>(results[pos].partition_allocated_bytes) / 1024);
+    add_metric("GCAllocated", "kB", to_kb,
+               &StylePerfResult::gc_allocated_bytes);
+    add_metric("PartitionAllocated", "kB", to_kb,
+               &StylePerfResult::partition_allocated_bytes);
   }
 }
 

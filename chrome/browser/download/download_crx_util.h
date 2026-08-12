@@ -10,7 +10,7 @@
 #include <memory>
 
 #include "base/auto_reset.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 
 class ExtensionInstallPrompt;
 class Profile;
@@ -34,10 +34,6 @@ void SetMockInstallPromptForTesting(
 scoped_refptr<extensions::CrxInstaller> CreateCrxInstaller(
     Profile* profile,
     const download::DownloadItem& download_item);
-
-// Returns true if this is an extension download. This also considers user
-// scripts to be extension downloads, since we convert those automatically.
-bool IsExtensionDownload(const download::DownloadItem& download_item);
 
 // Checks whether a download is an extension from a whitelisted site in prefs.
 bool IsTrustedExtensionDownload(Profile* profile,

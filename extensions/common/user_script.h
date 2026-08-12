@@ -14,8 +14,8 @@
 #include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/execution_world.mojom-shared.h"
 #include "extensions/common/mojom/host_id.mojom.h"
+#include "extensions/common/mojom/match_origin_as_fallback.mojom-shared.h"
 #include "extensions/common/mojom/run_location.mojom-shared.h"
-#include "extensions/common/script_constants.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "url/gurl.h"
@@ -126,7 +126,7 @@ class UserScript {
     // Serialization support. The content and FilePath members will not be
     // serialized!
     void Pickle(base::Pickle* pickle) const;
-    void Unpickle(const base::Pickle& pickle, base::PickleIterator* iter);
+    void Unpickle(base::PickleIterator* iter);
 
    private:
     Content(Source source,
@@ -204,10 +204,10 @@ class UserScript {
 
   // Whether to match the origin as a fallback if the URL cannot be used
   // directly.
-  MatchOriginAsFallbackBehavior match_origin_as_fallback() const {
+  mojom::MatchOriginAsFallbackBehavior match_origin_as_fallback() const {
     return match_origin_as_fallback_;
   }
-  void set_match_origin_as_fallback(MatchOriginAsFallbackBehavior val) {
+  void set_match_origin_as_fallback(mojom::MatchOriginAsFallbackBehavior val) {
     match_origin_as_fallback_ = val;
   }
 
@@ -285,8 +285,8 @@ class UserScript {
   bool MatchesURL(const GURL& url) const;
 
   // Returns true if the script should be applied to the given
-  // |effective_document_url|. It is the caller's responsibility to calculate
-  // |effective_document_url| based on match_origin_as_fallback().
+  // `effective_document_url`. It is the caller's responsibility to calculate
+  // `effective_document_url` based on match_origin_as_fallback().
   bool MatchesDocument(const GURL& effective_document_url,
                        bool is_subframe) const;
 
@@ -297,7 +297,7 @@ class UserScript {
   // Deserializes the script from a pickle. Note that this always succeeds
   // because presumably we were the one that pickled it, and we did it
   // correctly.
-  void Unpickle(const base::Pickle& pickle, base::PickleIterator* iter);
+  void Unpickle(base::PickleIterator* iter);
 
  private:
   // base::Pickle helper functions used to pickle the individual types of
@@ -310,18 +310,12 @@ class UserScript {
   void PickleScripts(base::Pickle* pickle, const ContentList& scripts) const;
 
   // Unpickle helper functions used to unpickle individual types of components.
-  void UnpickleGlobs(const base::Pickle& pickle,
-                     base::PickleIterator* iter,
+  void UnpickleGlobs(base::PickleIterator* iter,
                      std::vector<std::string>* globs);
-  void UnpickleHostID(const base::Pickle& pickle,
-                      base::PickleIterator* iter,
-                      mojom::HostID* host_id);
-  void UnpickleURLPatternSet(const base::Pickle& pickle,
-                             base::PickleIterator* iter,
+  void UnpickleHostID(base::PickleIterator* iter, mojom::HostID* host_id);
+  void UnpickleURLPatternSet(base::PickleIterator* iter,
                              URLPatternSet* pattern_list);
-  void UnpickleScripts(const base::Pickle& pickle,
-                       base::PickleIterator* iter,
-                       ContentList* scripts);
+  void UnpickleScripts(base::PickleIterator* iter, ContentList* scripts);
 
   // The location to run the script inside the document.
   mojom::RunLocation run_location_ = mojom::RunLocation::kDocumentIdle;
@@ -356,8 +350,8 @@ class UserScript {
   // List of css scripts defined in content_scripts
   ContentList css_scripts_;
 
-  // The ID of the host this script is a part of. The |ID| of the
-  // |host_id| can be empty if the script is a "standlone" user script.
+  // The ID of the host this script is a part of. The `ID` of the
+  // `host_id` can be empty if the script is a "standalone" user script.
   mojom::HostID host_id_;
 
   // The type of the consumer instance that the script will be injected.
@@ -378,8 +372,8 @@ class UserScript {
   // origin matches a match pattern, if an appropriate URL cannot be found for
   // the frame for matching purposes, such as in the case of about:, data:, and
   // other schemes.
-  MatchOriginAsFallbackBehavior match_origin_as_fallback_ =
-      MatchOriginAsFallbackBehavior::kNever;
+  mojom::MatchOriginAsFallbackBehavior match_origin_as_fallback_ =
+      mojom::MatchOriginAsFallbackBehavior::kNever;
 
   // True if the script should be injected into an incognito tab.
   bool incognito_enabled_ = false;

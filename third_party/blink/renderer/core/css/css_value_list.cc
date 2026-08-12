@@ -20,6 +20,7 @@
 
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 
+#include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -42,8 +43,20 @@ CSSValueList::CSSValueList(ValueListSeparator list_separator)
 }
 
 CSSValueList::CSSValueList(ValueListSeparator list_separator,
+                           bool needs_tree_scope_population)
+    : CSSValue(kValueListClass) {
+  value_list_separator_ = list_separator;
+  needs_tree_scope_population_ = needs_tree_scope_population;
+}
+
+CSSValueList::CSSValueList(ValueListSeparator list_separator,
                            HeapVector<Member<const CSSValue>, 4> values)
-    : CSSValue(kValueListClass), values_(std::move(values)) {
+    : CSSValueList(kValueListClass, list_separator, std::move(values)) {}
+
+CSSValueList::CSSValueList(ClassType class_type,
+                           ValueListSeparator list_separator,
+                           HeapVector<Member<const CSSValue>, 4> values)
+    : CSSValue(class_type), values_(std::move(values)) {
   value_list_separator_ = list_separator;
 }
 
@@ -112,23 +125,6 @@ CSSValueList* CSSValueList::Copy() const {
   return new_list;
 }
 
-const CSSValue* CSSValueList::UntaintedCopy() const {
-  bool changed = false;
-  HeapVector<Member<const CSSValue>, 4> untainted_values;
-  for (const CSSValue* value : values_) {
-    untainted_values.push_back(value->UntaintedCopy());
-    if (value != untainted_values.back().Get()) {
-      changed = true;
-    }
-  }
-  if (!changed) {
-    return this;
-  }
-  return MakeGarbageCollected<CSSValueList>(
-      static_cast<ValueListSeparator>(value_list_separator_),
-      std::move(untainted_values));
-}
-
 const CSSValueList& CSSValueList::PopulateWithTreeScope(
     const TreeScope* tree_scope) const {
   // Note: this will be changed if any subclass also involves values that need
@@ -195,7 +191,7 @@ bool CSSValueList::Equals(const CSSValueList& other) const {
 unsigned CSSValueList::CustomHash() const {
   unsigned hash = value_list_separator_;
   for (const CSSValue* value : values_) {
-    WTF::AddIntToHash(hash, value->Hash());
+    AddIntToHash(hash, value->Hash());
   }
   return hash;
 }
@@ -222,6 +218,15 @@ void CSSValueList::ReResolveUrl(const Document& document) const {
   for (const auto& value : values_) {
     value->ReResolveUrl(document);
   }
+}
+
+bool CSSValueList::HasRandomFunctions() const {
+  for (const auto& value : values_) {
+    if (value->HasRandomFunctions()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void CSSValueList::TraceAfterDispatch(blink::Visitor* visitor) const {

@@ -5,7 +5,7 @@
 package org.chromium.chrome.browser.gesturenav;
 
 import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.ACTION;
-import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.ALLOW_NAV;
+import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.ACTIVATION_STATUS;
 import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.BUBBLE_OFFSET;
 import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.CLOSE_INDICATOR;
 import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties.DIRECTION;
@@ -13,11 +13,13 @@ import static org.chromium.chrome.browser.gesturenav.GestureNavigationProperties
 
 import android.view.View;
 
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.gesturenav.NavigationHandler.GestureAction;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** This class responsible for pushing updates to gesture navigation view. */
+@NullMarked
 class GestureNavigationViewBinder {
     /**
      * view binder that associates a view with a model.
@@ -36,7 +38,7 @@ class GestureNavigationViewBinder {
                             model.get(DIRECTION), model.get(EDGE), model.get(CLOSE_INDICATOR));
                     break;
                 case GestureAction.RELEASE_BUBBLE:
-                    topView.releaseBubble(model.get(ALLOW_NAV));
+                    topView.releaseBubble(model.get(ACTIVATION_STATUS));
                     break;
                 case GestureAction.RESET_BUBBLE:
                     topView.resetBubble();

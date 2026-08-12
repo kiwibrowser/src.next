@@ -14,17 +14,17 @@
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/css/try_tactic_transform.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
 const CSSPropertyValueSet* TryValueFlips::FlipSet(
-    const TryTacticList& tactic_list) const {
+    const TryTacticList& tactic_list,
+    WritingMode writing_mode) const {
   if (tactic_list == kNoTryTactics) {
     return nullptr;
   }
 
-  TryTacticTransform transform(tactic_list);
+  TryTacticTransform transform(tactic_list, writing_mode);
   // We don't store the kNoTryTactics/nullptr case explicitly, i.e. the entry
   // at cached_flip_sets_[0] corresponds to CacheIndex()==1.
   unsigned index = transform.CacheIndex() - 1;
@@ -122,9 +122,6 @@ const CSSPropertyValueSet* TryValueFlips::CreateFlipSet(
                                        ? CSSPropertyID::kAlignSelf
                                        : CSSPropertyID::kJustifySelf);
   add(CSSPropertyID::kPositionArea, CSSPropertyID::kPositionArea);
-  if (RuntimeEnabledFeatures::CSSInsetAreaPropertyEnabled()) {
-    add(CSSPropertyID::kInsetArea, CSSPropertyID::kInsetArea);
-  }
 
   if (transform.FlippedStart()) {
     add(CSSPropertyID::kBlockSize, CSSPropertyID::kInlineSize);
@@ -188,10 +185,10 @@ std::optional<LogicalAxis> DetermineValueAxis(
     case CSSValueID::kXEnd:
     case CSSValueID::kSpanXStart:
     case CSSValueID::kSpanXEnd:
-    case CSSValueID::kXSelfStart:
-    case CSSValueID::kXSelfEnd:
-    case CSSValueID::kSpanXSelfStart:
-    case CSSValueID::kSpanXSelfEnd:
+    case CSSValueID::kSelfXStart:
+    case CSSValueID::kSelfXEnd:
+    case CSSValueID::kSpanSelfXStart:
+    case CSSValueID::kSpanSelfXEnd:
       return writing_direction.IsHorizontal() ? LogicalAxis::kInline
                                               : LogicalAxis::kBlock;
     case CSSValueID::kTop:
@@ -202,10 +199,10 @@ std::optional<LogicalAxis> DetermineValueAxis(
     case CSSValueID::kYEnd:
     case CSSValueID::kSpanYStart:
     case CSSValueID::kSpanYEnd:
-    case CSSValueID::kYSelfStart:
-    case CSSValueID::kYSelfEnd:
-    case CSSValueID::kSpanYSelfStart:
-    case CSSValueID::kSpanYSelfEnd:
+    case CSSValueID::kSelfYStart:
+    case CSSValueID::kSelfYEnd:
+    case CSSValueID::kSpanSelfYStart:
+    case CSSValueID::kSpanSelfYEnd:
       return writing_direction.IsHorizontal() ? LogicalAxis::kBlock
                                               : LogicalAxis::kInline;
     case CSSValueID::kBlockStart:
@@ -423,14 +420,14 @@ CSSValueID TransformPositionAreaKeyword(
   };
 
   auto transform_xy_self = [&transform, &writing_direction] {
-    return TransformXY(CSSValueID::kXSelfStart, CSSValueID::kXSelfEnd,
-                       CSSValueID::kYSelfStart, CSSValueID::kYSelfEnd,
+    return TransformXY(CSSValueID::kSelfXStart, CSSValueID::kSelfXEnd,
+                       CSSValueID::kSelfYStart, CSSValueID::kSelfYEnd,
                        transform, writing_direction);
   };
 
   auto transform_xy_span_self = [&transform, &writing_direction] {
-    return TransformXY(CSSValueID::kSpanXSelfStart, CSSValueID::kSpanXSelfEnd,
-                       CSSValueID::kSpanYSelfStart, CSSValueID::kSpanYSelfEnd,
+    return TransformXY(CSSValueID::kSpanSelfXStart, CSSValueID::kSpanSelfXEnd,
+                       CSSValueID::kSpanSelfYStart, CSSValueID::kSpanSelfYEnd,
                        transform, writing_direction);
   };
 
@@ -475,22 +472,22 @@ CSSValueID TransformPositionAreaKeyword(
     case CSSValueID::kSpanYEnd:
       return transform_xy_span().Bottom();
 
-    case CSSValueID::kXSelfStart:
+    case CSSValueID::kSelfXStart:
       return transform_xy_self().Left();
-    case CSSValueID::kXSelfEnd:
+    case CSSValueID::kSelfXEnd:
       return transform_xy_self().Right();
-    case CSSValueID::kYSelfStart:
+    case CSSValueID::kSelfYStart:
       return transform_xy_self().Top();
-    case CSSValueID::kYSelfEnd:
+    case CSSValueID::kSelfYEnd:
       return transform_xy_self().Bottom();
 
-    case CSSValueID::kSpanXSelfStart:
+    case CSSValueID::kSpanSelfXStart:
       return transform_xy_span_self().Left();
-    case CSSValueID::kSpanXSelfEnd:
+    case CSSValueID::kSpanSelfXEnd:
       return transform_xy_span_self().Right();
-    case CSSValueID::kSpanYSelfStart:
+    case CSSValueID::kSpanSelfYStart:
       return transform_xy_span_self().Top();
-    case CSSValueID::kSpanYSelfEnd:
+    case CSSValueID::kSpanSelfYEnd:
       return transform_xy_span_self().Bottom();
 
       // Logical:
@@ -645,8 +642,7 @@ const CSSValue* TransformPositionArea(
   return MakeGarbageCollected<CSSValuePair>(
       CSSIdentifierValue::Create(first_value_transformed),
       CSSIdentifierValue::Create(second_value_transformed),
-      pair->KeepIdenticalValues() ? CSSValuePair::kKeepIdenticalValues
-                                  : CSSValuePair::kDropIdenticalValues);
+      CSSValuePair::kKeepIdenticalValues);
 }
 
 }  // namespace
@@ -669,8 +665,7 @@ const CSSValue* TryValueFlips::FlipValue(
     return TransformSelfAlignment(value, logical_axis, transform,
                                   writing_direction);
   }
-  if (from_property == CSSPropertyID::kPositionArea ||
-      from_property == CSSPropertyID::kInsetArea) {
+  if (from_property == CSSPropertyID::kPositionArea) {
     return TransformPositionArea(value, transform, writing_direction);
   }
   return value;

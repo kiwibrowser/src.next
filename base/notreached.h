@@ -10,26 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/dcheck_is_on.h"
 
-// TODO(crbug.com/41493641): Remove once NOTIMPLEMENTED() call sites include
-// base/notimplemented.h.
-#include "base/notimplemented.h"
-
 namespace logging {
 
-// Migration in progress: For new code use NOTREACHED() or
-// NOTREACHED(base::NotFatalUntil::M*). NOTREACHED_IN_MIGRATION() is equally
-// fatal to NOTREACHED() without parameters but not annotated as [[noreturn]].
-#if CHECK_WILL_STREAM()
-#define NOTREACHED_IN_MIGRATION() \
-  LOGGING_CHECK_FUNCTION_IMPL(::logging::NotReachedError::NotReached(), false)
-#else
-#define NOTREACHED_IN_MIGRATION()                          \
-  (true) ? ::logging::NotReachedError::TriggerNotReached() \
-         : EAT_CHECK_STREAM_PARAMS()
-#endif
-
-// Migration in progress: Use NOTREACHED() directly without parameters instead.
-// TODO(crbug.com/40580068): Merge this with NOTREACHED().
 #if CHECK_WILL_STREAM()
 #define NOTREACHED_INTERNAL_IMPL() ::logging::NotReachedNoreturnError()
 #else
@@ -41,7 +23,7 @@ namespace logging {
 }
 
 #define NOTREACHED_INTERNAL_IMPL() \
-  (true) ? ::logging::NotReachedFailure() : EAT_CHECK_STREAM_PARAMS()
+  DISCARDING_CHECK_FUNCTION_IMPL(::logging::NotReachedFailure(), false)
 #endif
 
 // NOTREACHED() annotates should-be unreachable code. When a base::NotFatalUntil
@@ -57,7 +39,7 @@ namespace logging {
 // non-fatally dump in official builds if ever hit. See DUMP_WILL_BE_CHECK for
 // suggested usage.
 #define DUMP_WILL_BE_NOTREACHED() \
-  ::logging::CheckError::DumpWillBeNotReachedNoreturn()
+  ::logging::NotReachedError::DumpWillBeNotReached()
 
 }  // namespace logging
 

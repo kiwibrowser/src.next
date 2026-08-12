@@ -9,19 +9,22 @@
 #include "base/files/file_util.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/platform_browser_test.h"
 #include "content/public/test/browser_test.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/test/test_extension_dir.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
-class PackExtensionOnStartupBrowserTest : public InProcessBrowserTest {
+class PackExtensionOnStartupBrowserTest : public PlatformBrowserTest {
  public:
   PackExtensionOnStartupBrowserTest() = default;
   ~PackExtensionOnStartupBrowserTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
+    PlatformBrowserTest::SetUpCommandLine(command_line);
 
     test_extension_dir_ = std::make_unique<TestExtensionDir>();
     // Create an extension with some permissions that are guarded by
@@ -51,7 +54,7 @@ class PackExtensionOnStartupBrowserTest : public InProcessBrowserTest {
 
     // Packing extensions has a different exit code.
     set_expected_exit_code(
-        chrome::RESULT_CODE_NORMAL_EXIT_PACK_EXTENSION_SUCCESS);
+        CHROME_RESULT_CODE_NORMAL_EXIT_PACK_EXTENSION_SUCCESS);
   }
 
  protected:
@@ -60,7 +63,7 @@ class PackExtensionOnStartupBrowserTest : public InProcessBrowserTest {
 
 // Tests that appending the --pack-extension switch on startup succeeds with
 // a "real" browser (i.e., outside of unit tests).
-// Regression test for https://crbug.com/1498558.
+// Regression test for https://crbug.com/40287489.
 IN_PROC_BROWSER_TEST_F(PackExtensionOnStartupBrowserTest,
                        PackExtensionOnStartup) {
   // Interesting case: because the --pack-extension switch results in Chrome

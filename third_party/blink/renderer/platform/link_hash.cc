@@ -47,16 +47,15 @@ static bool ResolveRelative(const KURL& base,
   // We use these low-level GURL functions to avoid converting back and forth
   // from UTF-8 unnecessarily.
   url::Parsed parsed;
-  StringUTF8Adaptor base_utf8(base.GetString());
+  StringUtf8Adaptor base_utf8(base.GetString());
   if (relative.Is8Bit()) {
-    StringUTF8Adaptor relative_utf8(relative);
-    return url::ResolveRelative(base_utf8.data(), base_utf8.size(),
-                                base.GetParsed(), relative_utf8.data(),
-                                relative_utf8.size(), nullptr, buffer, &parsed);
+    StringUtf8Adaptor relative_utf8(relative);
+    return url::ResolveRelative(base_utf8.AsStringView(), base.GetParsed(),
+                                relative_utf8.AsStringView(), nullptr, buffer,
+                                &parsed);
   }
-  return url::ResolveRelative(base_utf8.data(), base_utf8.size(),
-                              base.GetParsed(), relative.Characters16(),
-                              relative.length(), nullptr, buffer, &parsed);
+  return url::ResolveRelative(base_utf8.AsStringView(), base.GetParsed(),
+                              relative.View16(), nullptr, buffer, &parsed);
 }
 
 LinkHash VisitedLinkHash(const KURL& base, const AtomicString& relative) {
@@ -66,8 +65,7 @@ LinkHash VisitedLinkHash(const KURL& base, const AtomicString& relative) {
   if (!ResolveRelative(base, relative.GetString(), &buffer))
     return 0;
 
-  return Platform::Current()->VisitedLinkHash(
-      std::string_view(buffer.data(), buffer.length()));
+  return Platform::Current()->VisitedLinkHash(buffer.view());
 }
 
 LinkHash PartitionedVisitedLinkFingerprint(
@@ -86,7 +84,7 @@ LinkHash PartitionedVisitedLinkFingerprint(
   if (!ResolveRelative(base_link_url, relative_link_url.GetString(), &buffer)) {
     return 0;
   }
-  std::string_view link_url = std::string_view(buffer.data(), buffer.length());
+  std::string_view link_url = buffer.view();
 
   return Platform::Current()->PartitionedVisitedLinkFingerprint(
       link_url, top_level_site, WebSecurityOrigin(frame_origin));
