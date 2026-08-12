@@ -79,3 +79,21 @@ cr-toolbar {
   --cr-toolbar-field-width: 100%;
   --cr-toolbar-header-white-space: nowrap;
 }
+
+cr-toolbar[narrow] picture[slot='product-logo'] {
+  display: none;
+}
+
+picture[slot='product-logo'] {
+  display: inline-block;
+  height: 24px;
+  margin-inline-end: 16px;
+  width: 24px;
+}
+
+picture[slot='product-logo'] img {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+

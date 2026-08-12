@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/http/http_content_disposition.h"
 
+#include <array>
+
+#include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
+#include "net/base/features.h"
+#include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -22,71 +23,114 @@ struct FileNameCDCase {
   const wchar_t* expected;
 };
 
-}  // anonymous namespace
+}  // namespace
 
-TEST(HttpContentDispositionTest, Filename) {
+// The parameter indicates whether CreateContentDispositionFromHeaders() should
+// use the constructor that takes a full HttpResponseHeaders or the one that
+// takes the header as a string_view.
+class HttpContentDispositionTest : public testing::TestWithParam<bool> {
+ protected:
+  // Creates an HttpContentDisposition from a single header value.
+  HttpContentDisposition CreateContentDisposition(std::string_view header_value,
+                                                  const std::string& charset) {
+    std::string raw_headers =
+        base::StrCat({"HTTP/1.1 200 OK\r\n",
+                      "Content-Disposition: ", header_value, "\r\n\r\n"});
+    return CreateContentDispositionFromHeaders(raw_headers, charset);
+  }
+
+  // Creates an HttpContentDisposition from a full set of HTTP headers. Allows
+  // there to be no Content-Disposition value, or multiple values, unlike
+  // CreateContentDisposition().
+  HttpContentDisposition CreateContentDispositionFromHeaders(
+      std::string_view raw_headers,
+      const std::string& charset) {
+    auto headers = base::MakeRefCounted<HttpResponseHeaders>(
+        HttpUtil::AssembleRawHeaders(raw_headers));
+    if (GetParam()) {
+      return HttpContentDisposition(*headers, charset);
+    } else {
+      std::optional<std::string> normalized =
+          headers->GetNormalizedHeader("Content-Disposition");
+      return HttpContentDisposition(normalized.value_or(""), charset);
+    }
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(, HttpContentDispositionTest, testing::Bool());
+
+TEST_P(HttpContentDispositionTest, Filename) {
   const FileNameCDCase tests[] = {
-    // Test various forms of C-D header fields emitted by web servers.
-    {"inline; filename=\"abcde.pdf\"", "", L"abcde.pdf"},
-    {"attachment; filename=abcde.pdf", "", L"abcde.pdf"},
-    {"attachment; filename=abc,de.pdf", "", L"abc,de.pdf"},
-    {"filename=abcde.pdf", "", L"abcde.pdf"},
-    {"filename= abcde.pdf", "", L"abcde.pdf"},
-    {"filename =abcde.pdf", "", L"abcde.pdf"},
-    {"filename = abcde.pdf", "", L"abcde.pdf"},
-    {"filename\t=abcde.pdf", "", L"abcde.pdf"},
-    {"filename \t\t  =abcde.pdf", "", L"abcde.pdf"},
-    {"inline; filename=\"abc%20de.pdf\"", "",
-     L"abc de.pdf"},
-    // Name values are no longer synonyms for filename.
-    {"inline; name=\"abcde.pdf\"", "", L""},
-    {"attachment; name=abcde.pdf", "", L""},
-    {"name=abcde.pdf", "", L""},
-    // Unbalanced quotation mark
-    {"filename=\"abcdef.pdf", "", L"abcdef.pdf"},
-    // Whitespaces are converted to a space.
-    {"inline; filename=\"abc  \t\nde.pdf\"", "",
-     L"abc    de.pdf"},
-    // %-escaped UTF-8
-    {"attachment; filename=\"%EC%98%88%EC%88%A0%20"
-     "%EC%98%88%EC%88%A0.jpg\"", "", L"\xc608\xc220 \xc608\xc220.jpg"},
-    {"attachment; filename=\"%F0%90%8C%B0%F0%90%8C%B1"
-     "abc.jpg\"", "", L"\U00010330\U00010331abc.jpg"},
-    {"attachment; filename=\"%EC%98%88%EC%88%A0 \n"
-     "%EC%98%88%EC%88%A0.jpg\"", "", L"\xc608\xc220  \xc608\xc220.jpg"},
-    // Characters that are not supposed to be displayed should still be decoded.
-    {"attachment; filename=%E5%B2%A1%E3%80%80%E5%B2%A1.txt", "",
-     L"\u5ca1\u3000\u5ca1.txt"},
-    // RFC 2047 with various charsets and Q/B encodings
-    {"attachment; filename=\"=?EUC-JP?Q?=B7=DD=BD="
-     "D13=2Epng?=\"", "", L"\x82b8\x8853" L"3.png"},
-    {"attachment; filename==?eUc-Kr?b?v7m8+iAzLnBuZw==?=",
-     "", L"\xc608\xc220 3.png"},
-    {"attachment; filename==?utf-8?Q?=E8=8A=B8=E8"
-     "=A1=93_3=2Epng?=", "", L"\x82b8\x8853 3.png"},
-    {"attachment; filename==?utf-8?Q?=F0=90=8C=B0"
-     "_3=2Epng?=", "", L"\U00010330 3.png"},
-    {"inline; filename=\"=?iso88591?Q?caf=e9_=2epng?=\"",
-     "", L"caf\x00e9 .png"},
-    // Space after an encoded word should be removed.
-    {"inline; filename=\"=?iso88591?Q?caf=E9_?= .png\"",
-     "", L"caf\x00e9 .png"},
-    // Two encoded words with different charsets (not very likely to be emitted
-    // by web servers in the wild). Spaces between them are removed.
-    {"inline; filename=\"=?euc-kr?b?v7m8+iAz?="
-     " =?ksc5601?q?=BF=B9=BC=FA=2Epng?=\"", "",
-     L"\xc608\xc220 3\xc608\xc220.png"},
-    {"attachment; filename=\"=?windows-1252?Q?caf=E9?="
-     "  =?iso-8859-7?b?4eI=?= .png\"", "", L"caf\x00e9\x03b1\x03b2.png"},
-    // Non-ASCII string is passed through and treated as UTF-8 as long as
-    // it's valid as UTF-8 and regardless of |referrer_charset|.
-    {"attachment; filename=caf\xc3\xa9.png",
-     "iso-8859-1", L"caf\x00e9.png"},
-    {"attachment; filename=caf\xc3\xa9.png",
-     "", L"caf\x00e9.png"},
-    // Non-ASCII/Non-UTF-8 string. Fall back to the referrer charset.
-    {"attachment; filename=caf\xe5.png",
-     "windows-1253", L"caf\x03b5.png"},
+      // Test various forms of C-D header fields emitted by web servers.
+      {"inline; filename=\"abcde.pdf\"", "", L"abcde.pdf"},
+      {"inline;filename=\"abcde.pdf\"", "", L"abcde.pdf"},
+      {"  inline   ; filename=\"abcde.pdf\"", "", L"abcde.pdf"},
+      {"\t\tinline\t\t; filename=\"abcde.pdf\"", "", L"abcde.pdf"},
+      {"attachment; filename=abcde.pdf", "", L"abcde.pdf"},
+      {"attachment; filename=abc,de.pdf", "", L"abc"},
+      {"filename=abcde.pdf", "", L"abcde.pdf"},
+      {"filename= abcde.pdf", "", L"abcde.pdf"},
+      {"filename =abcde.pdf", "", L"abcde.pdf"},
+      {"filename = abcde.pdf", "", L"abcde.pdf"},
+      {"filename\t=abcde.pdf", "", L"abcde.pdf"},
+      {"filename \t\t  =abcde.pdf", "", L"abcde.pdf"},
+      {"inline; filename=\"abc%20de.pdf\"", "", L"abc de.pdf"},
+      // Name values are no longer synonyms for filename.
+      {"inline; name=\"abcde.pdf\"", "", L""},
+      {"attachment; name=abcde.pdf", "", L""},
+      {"name=abcde.pdf", "", L""},
+      // Unbalanced quotation mark
+      {"filename=\"abcdef.pdf", "", L"abcdef.pdf"},
+      // Whitespaces are converted to a space.
+      {"inline; filename=\"abc  \tde.pdf\"", "", L"abc   de.pdf"},
+      // %-escaped UTF-8
+      {"attachment; filename=\"%EC%98%88%EC%88%A0%20"
+       "%EC%98%88%EC%88%A0.jpg\"",
+       "", L"\xc608\xc220 \xc608\xc220.jpg"},
+      {"attachment; filename=\"%F0%90%8C%B0%F0%90%8C%B1"
+       "abc.jpg\"",
+       "", L"\U00010330\U00010331abc.jpg"},
+      {"attachment; filename=\"%EC%98%88%EC%88%A0 \t"
+       "%EC%98%88%EC%88%A0.jpg\"",
+       "", L"\xc608\xc220  \xc608\xc220.jpg"},
+      // Characters that are not supposed to be displayed should still be
+      // decoded.
+      {"attachment; filename=%E5%B2%A1%E3%80%80%E5%B2%A1.txt", "",
+       L"\u5ca1\u3000\u5ca1.txt"},
+      // RFC 2047 with various charsets and Q/B encodings
+      {"attachment; filename=\"=?EUC-JP?Q?=B7=DD=BD="
+       "D13=2Epng?=\"",
+       "",
+       L"\x82b8\x8853"
+       L"3.png"},
+      {"attachment; filename==?eUc-Kr?b?v7m8+iAzLnBuZw==?=", "",
+       L"\xc608\xc220 3.png"},
+      {"attachment; filename==?utf-8?Q?=E8=8A=B8=E8"
+       "=A1=93_3=2Epng?=",
+       "", L"\x82b8\x8853 3.png"},
+      {"attachment; filename==?utf-8?Q?=F0=90=8C=B0"
+       "_3=2Epng?=",
+       "", L"\U00010330 3.png"},
+      {"inline; filename=\"=?iso88591?Q?caf=e9_=2epng?=\"", "",
+       L"caf\x00e9 .png"},
+      // Space after an encoded word should be removed.
+      {"inline; filename=\"=?iso88591?Q?caf=E9_?= .png\"", "",
+       L"caf\x00e9 .png"},
+      // Two encoded words with different charsets (not very likely to be
+      // emitted
+      // by web servers in the wild). Spaces between them are removed.
+      {"inline; filename=\"=?euc-kr?b?v7m8+iAz?="
+       " =?ksc5601?q?=BF=B9=BC=FA=2Epng?=\"",
+       "", L"\xc608\xc220 3\xc608\xc220.png"},
+      {"attachment; filename=\"=?windows-1252?Q?caf=E9?="
+       "  =?iso-8859-7?b?4eI=?= .png\"",
+       "", L"caf\x00e9\x03b1\x03b2.png"},
+      // Non-ASCII string is passed through and treated as UTF-8 as long as
+      // it's valid as UTF-8 and regardless of |referrer_charset|.
+      {"attachment; filename=caf\xc3\xa9.png", "iso-8859-1", L"caf\x00e9.png"},
+      {"attachment; filename=caf\xc3\xa9.png", "", L"caf\x00e9.png"},
+      // Non-ASCII/Non-UTF-8 string. Fall back to the referrer charset.
+      {"attachment; filename=caf\xe5.png", "windows-1253", L"caf\x03b5.png"},
 #if 0
     // Non-ASCII/Non-UTF-8 string. Fall back to the native codepage.
     // TODO(jungshik): We need to set the OS default codepage
@@ -95,126 +139,114 @@ TEST(HttpContentDispositionTest, Filename) {
     {"attachment; filename=\xb0\xa1\xb0\xa2.png",
      "", L"\xac00\xac01.png"},
 #endif
-    // Failure cases
-    // Invalid hex-digit "G"
-    {"attachment; filename==?iiso88591?Q?caf=EG?=", "",
-     L""},
-    // Incomplete RFC 2047 encoded-word (missing '='' at the end)
-    {"attachment; filename==?iso88591?Q?caf=E3?", "", L""},
-    // Extra character at the end of an encoded word
-    {"attachment; filename==?iso88591?Q?caf=E3?==",
-     "", L""},
-    // Extra token at the end of an encoded word
-    {"attachment; filename==?iso88591?Q?caf=E3?=?",
-     "", L""},
-    {"attachment; filename==?iso88591?Q?caf=E3?=?=",
-     "",  L""},
-    // Incomplete hex-escaped chars
-    {"attachment; filename==?windows-1252?Q?=63=61=E?=",
-     "", L""},
-    {"attachment; filename=%EC%98%88%EC%88%A", "", L""},
-    // %-escaped non-UTF-8 encoding is an "error"
-    {"attachment; filename=%B7%DD%BD%D1.png", "", L""},
-    // Two RFC 2047 encoded words in a row without a space is an error.
-    {"attachment; filename==?windows-1252?Q?caf=E3?="
-     "=?iso-8859-7?b?4eIucG5nCg==?=", "", L""},
+      // Failure cases
+      // Invalid hex-digit "G"
+      {"attachment; filename==?iiso88591?Q?caf=EG?=", "", L""},
+      // Incomplete RFC 2047 encoded-word (missing '='' at the end)
+      {"attachment; filename==?iso88591?Q?caf=E3?", "", L""},
+      // Extra character at the end of an encoded word
+      {"attachment; filename==?iso88591?Q?caf=E3?==", "", L""},
+      // Extra token at the end of an encoded word
+      {"attachment; filename==?iso88591?Q?caf=E3?=?", "", L""},
+      {"attachment; filename==?iso88591?Q?caf=E3?=?=", "", L""},
+      // Incomplete hex-escaped chars
+      {"attachment; filename==?windows-1252?Q?=63=61=E?=", "", L""},
+      {"attachment; filename=%EC%98%88%EC%88%A", "", L""},
+      // %-escaped non-UTF-8 encoding is an "error"
+      {"attachment; filename=%B7%DD%BD%D1.png", "", L""},
+      // Two RFC 2047 encoded words in a row without a space is an error.
+      {"attachment; filename==?windows-1252?Q?caf=E3?="
+       "=?iso-8859-7?b?4eIucG5nCg==?=",
+       "", L""},
 
-    // RFC 5987 tests with Filename*  : see http://tools.ietf.org/html/rfc5987
-    {"attachment; filename*=foo.html", "", L""},
-    {"attachment; filename*=foo'.html", "", L""},
-    {"attachment; filename*=''foo'.html", "", L""},
-    {"attachment; filename*=''foo.html'", "", L""},
-    {"attachment; filename*=''f\"oo\".html'", "", L""},
-    {"attachment; filename*=bogus_charset''foo.html'",
-     "", L""},
-    {"attachment; filename*='en'foo.html'", "", L""},
-    {"attachment; filename*=iso-8859-1'en'foo.html", "",
-      L"foo.html"},
-    {"attachment; filename*=utf-8'en'foo.html", "",
-      L"foo.html"},
-    {"attachment; filename*=utf-8'en'%E5%B2%A1%E3%80%80%E5%B2%A1.txt", "",
-     L"\u5ca1\u3000\u5ca1.txt"},
-    // charset cannot be omitted.
-    {"attachment; filename*='es'f\xfa.html'", "", L""},
-    // Non-ASCII bytes are not allowed.
-    {"attachment; filename*=iso-8859-1'es'f\xfa.html", "",
-      L""},
-    {"attachment; filename*=utf-8'es'f\xce\xba.html", "",
-      L""},
-    // TODO(jshin): Space should be %-encoded, but currently, we allow
-    // spaces.
-    {"inline; filename*=iso88591''cafe foo.png", "",
-      L"cafe foo.png"},
+      // RFC 5987 tests with Filename*  : see http://tools.ietf.org/html/rfc5987
+      {"attachment; filename*=foo.html", "", L""},
+      {"attachment; filename*=foo'.html", "", L""},
+      {"attachment; filename*=''foo'.html", "", L""},
+      {"attachment; filename*=''foo.html'", "", L""},
+      {"attachment; filename*=''f\"oo\".html'", "", L""},
+      {"attachment; filename*=bogus_charset''foo.html'", "", L""},
+      {"attachment; filename*='en'foo.html'", "", L""},
+      {"attachment; filename*=iso-8859-1'en'foo.html", "", L"foo.html"},
+      {"attachment; filename*=utf-8'en'foo.html", "", L"foo.html"},
+      {"attachment; filename*=utf-8'en'%E5%B2%A1%E3%80%80%E5%B2%A1.txt", "",
+       L"\u5ca1\u3000\u5ca1.txt"},
+      // charset cannot be omitted.
+      {"attachment; filename*='es'f\xfa.html'", "", L""},
+      // Non-ASCII bytes are not allowed.
+      {"attachment; filename*=iso-8859-1'es'f\xfa.html", "", L""},
+      {"attachment; filename*=utf-8'es'f\xce\xba.html", "", L""},
+      // TODO(jshin): Space should be %-encoded, but currently, we allow
+      // spaces.
+      {"inline; filename*=iso88591''cafe foo.png", "", L"cafe foo.png"},
 
-    // Filename* tests converted from Q-encoded tests above.
-    {"attachment; filename*=EUC-JP''%B7%DD%BD%D13%2Epng",
-     "", L"\x82b8\x8853" L"3.png"},
-    {"attachment; filename*=utf-8''"
-      "%E8%8A%B8%E8%A1%93%203%2Epng", "", L"\x82b8\x8853 3.png"},
-    {"attachment; filename*=utf-8''%F0%90%8C%B0 3.png", "",
-      L"\U00010330 3.png"},
-    {"inline; filename*=Euc-Kr'ko'%BF%B9%BC%FA%2Epng", "",
-     L"\xc608\xc220.png"},
-    {"attachment; filename*=windows-1252''caf%E9.png", "",
-      L"caf\x00e9.png"},
+      // Filename* tests converted from Q-encoded tests above.
+      {"attachment; filename*=EUC-JP''%B7%DD%BD%D13%2Epng", "",
+       L"\x82b8\x8853"
+       L"3.png"},
+      {"attachment; filename*=utf-8''"
+       "%E8%8A%B8%E8%A1%93%203%2Epng",
+       "", L"\x82b8\x8853 3.png"},
+      {"attachment; filename*=utf-8''%F0%90%8C%B0 3.png", "",
+       L"\U00010330 3.png"},
+      {"inline; filename*=Euc-Kr'ko'%BF%B9%BC%FA%2Epng", "",
+       L"\xc608\xc220.png"},
+      {"attachment; filename*=windows-1252''caf%E9.png", "", L"caf\x00e9.png"},
 
-    // Multiple filename, filename*, name parameters specified.
-    {"attachment; name=\"foo\"; filename=\"bar\"", "", L"bar"},
-    {"attachment; filename=\"bar\"; name=\"foo\"", "", L"bar"},
-    {"attachment; filename=\"bar\"; filename*=utf-8''baz", "", L"baz"},
+      // Multiple filename, filename*, name parameters specified.
+      {"attachment; name=\"foo\"; filename=\"bar\"", "", L"bar"},
+      {"attachment; filename=\"bar\"; name=\"foo\"", "", L"bar"},
+      {"attachment; filename=\"bar\"; filename*=utf-8''baz", "", L"baz"},
 
-    // http://greenbytes.de/tech/tc2231/ filename* test cases.
-    // attwithisofn2231iso
-    {"attachment; filename*=iso-8859-1''foo-%E4.html", "",
-      L"foo-\xe4.html"},
-    // attwithfn2231utf8
-    {"attachment; filename*="
-      "UTF-8''foo-%c3%a4-%e2%82%ac.html", "", L"foo-\xe4-\x20ac.html"},
-    // attwithfn2231noc : no encoding specified but UTF-8 is used.
-    {"attachment; filename*=''foo-%c3%a4-%e2%82%ac.html",
-      "", L""},
-    // attwithfn2231utf8comp
-    {"attachment; filename*=UTF-8''foo-a%cc%88.html", "",
-      L"foo-\xe4.html"},
+      // http://greenbytes.de/tech/tc2231/ filename* test cases.
+      // attwithisofn2231iso
+      {"attachment; filename*=iso-8859-1''foo-%E4.html", "", L"foo-\xe4.html"},
+      // attwithfn2231utf8
+      {"attachment; filename*="
+       "UTF-8''foo-%c3%a4-%e2%82%ac.html",
+       "", L"foo-\xe4-\x20ac.html"},
+      // attwithfn2231noc : no encoding specified but UTF-8 is used.
+      {"attachment; filename*=''foo-%c3%a4-%e2%82%ac.html", "", L""},
+      // attwithfn2231utf8comp
+      {"attachment; filename*=UTF-8''foo-a%cc%88.html", "", L"foo-\xe4.html"},
 #ifdef ICU_SHOULD_FAIL_CONVERSION_ON_INVALID_CHARACTER
-    // This does not work because we treat ISO-8859-1 synonymous with
-    // Windows-1252 per HTML5. For HTTP, in theory, we're not
-    // supposed to.
-    // attwithfn2231utf8-bad
-    {"attachment; filename*="
-      "iso-8859-1''foo-%c3%a4-%e2%82%ac.html", "", L""},
+      // This does not work because we treat ISO-8859-1 synonymous with
+      // Windows-1252 per HTML5. For HTTP, in theory, we're not
+      // supposed to.
+      // attwithfn2231utf8-bad
+      {"attachment; filename*="
+       "iso-8859-1''foo-%c3%a4-%e2%82%ac.html",
+       "", L""},
 #endif
-    // attwithfn2231ws1
-    {"attachment; filename *=UTF-8''foo-%c3%a4.html", "",
-      L""},
-    // attwithfn2231ws2
-    {"attachment; filename*= UTF-8''foo-%c3%a4.html", "",
-      L"foo-\xe4.html"},
-    // attwithfn2231ws3
-    {"attachment; filename* =UTF-8''foo-%c3%a4.html", "",
-      L"foo-\xe4.html"},
-    // attwithfn2231quot
-    {"attachment; filename*=\"UTF-8''foo-%c3%a4.html\"",
-      "", L""},
-    // attfnboth
-    {"attachment; filename=\"foo-ae.html\"; "
-      "filename*=UTF-8''foo-%c3%a4.html", "", L"foo-\xe4.html"},
-    // attfnboth2
-    {"attachment; filename*=UTF-8''foo-%c3%a4.html; "
-      "filename=\"foo-ae.html\"", "", L"foo-\xe4.html"},
-    // attnewandfn
-    {"attachment; foobar=x; filename=\"foo.html\"", "",
-      L"foo.html"},
+      // attwithfn2231ws1
+      {"attachment; filename *=UTF-8''foo-%c3%a4.html", "", L""},
+      // attwithfn2231ws2
+      {"attachment; filename*= UTF-8''foo-%c3%a4.html", "", L"foo-\xe4.html"},
+      // attwithfn2231ws3
+      {"attachment; filename* =UTF-8''foo-%c3%a4.html", "", L"foo-\xe4.html"},
+      // attwithfn2231quot
+      {"attachment; filename*=\"UTF-8''foo-%c3%a4.html\"", "", L""},
+      // attfnboth
+      {"attachment; filename=\"foo-ae.html\"; "
+       "filename*=UTF-8''foo-%c3%a4.html",
+       "", L"foo-\xe4.html"},
+      // attfnboth2
+      {"attachment; filename*=UTF-8''foo-%c3%a4.html; "
+       "filename=\"foo-ae.html\"",
+       "", L"foo-\xe4.html"},
+      // attnewandfn
+      {"attachment; foobar=x; filename=\"foo.html\"", "", L"foo.html"},
   };
   for (const auto& test : tests) {
-    HttpContentDisposition header(test.header, test.referrer_charset);
+    HttpContentDisposition header =
+        CreateContentDisposition(test.header, test.referrer_charset);
     EXPECT_EQ(test.expected, base::UTF8ToWide(header.filename()))
         << "Failed on input: " << test.header;
   }
 }
 
 // Test cases from http://greenbytes.de/tech/tc2231/
-TEST(HttpContentDispositionTest, tc2231) {
+TEST_P(HttpContentDispositionTest, tc2231) {
   const struct FileNameCDCase {
     const char* header;
     HttpContentDisposition::Type expected_type;
@@ -361,7 +393,7 @@ TEST(HttpContentDispositionTest, tc2231) {
       // http://greenbytes.de/tech/tc2231/#attmissingdisposition4
       // Note: tc2231 says we should fail to parse this header.
       {"filename=foo.html, filename=bar.html", HttpContentDisposition::INLINE,
-       L"foo.html, filename=bar.html"},
+       L"foo.html"},
       // http://greenbytes.de/tech/tc2231/#emptydisposition
       // Note: tc2231 says we should fail to parse this header.
       {"; filename=foo.html", HttpContentDisposition::INLINE, L"foo.html"},
@@ -388,7 +420,7 @@ TEST(HttpContentDispositionTest, tc2231) {
       // http://greenbytes.de/tech/tc2231/#attmultinstances
       // Note: tc2231 says we should fail to parse this header.
       {"attachment; filename=foo.html, attachment; filename=bar.html",
-       HttpContentDisposition::ATTACHMENT, L"foo.html, attachment"},
+       HttpContentDisposition::ATTACHMENT, L"foo.html"},
       // http://greenbytes.de/tech/tc2231/#attmissingdelim
       {"attachment; foo=foo filename=bar", HttpContentDisposition::ATTACHMENT,
        L""},
@@ -419,7 +451,8 @@ TEST(HttpContentDispositionTest, tc2231) {
       // TODO(abarth): http://greenbytes.de/tech/tc2231/#attrfc2047quoted
   };
   for (const auto& test : tests) {
-    HttpContentDisposition header(test.header, std::string());
+    HttpContentDisposition header =
+        CreateContentDisposition(test.header, std::string());
     EXPECT_EQ(test.expected_type, header.type())
         << "Failed on input: " << test.header;
     EXPECT_EQ(test.expected_filename, base::UTF8ToWide(header.filename()))
@@ -427,11 +460,12 @@ TEST(HttpContentDispositionTest, tc2231) {
   }
 }
 
-TEST(HttpContentDispositionTest, ParseResult) {
-  const struct ParseResultTestCase {
+TEST_P(HttpContentDispositionTest, ParseResult) {
+  struct ParseResultTestCase {
     const char* header;
     int expected_flags;
-  } kTestCases[] = {
+  };
+  const auto kTestCases = std::to_array<ParseResultTestCase>({
       // Basic feature tests
       {"", HttpContentDisposition::INVALID},
       {"example=x", HttpContentDisposition::INVALID},
@@ -489,11 +523,12 @@ TEST(HttpContentDispositionTest, ParseResult) {
        HttpContentDisposition::INVALID},
       {"filename=foo\xcc\x88 foo%cc%88 =?utf-8?Q?foo?; name=x",
        HttpContentDisposition::INVALID},
-  };
+  });
 
   for (size_t i = 0; i < std::size(kTestCases); ++i) {
     const ParseResultTestCase& test_case = kTestCases[i];
-    HttpContentDisposition content_disposition(test_case.header, "utf-8");
+    HttpContentDisposition content_disposition =
+        CreateContentDisposition(test_case.header, "utf-8");
     int result = content_disposition.parse_result_flags();
 
     SCOPED_TRACE(testing::Message() << "Test case " << i
@@ -502,7 +537,15 @@ TEST(HttpContentDispositionTest, ParseResult) {
   }
 }
 
-TEST(HttpContentDispositionTest, ContainsNul) {
+// Unclear if this test is still useful, as nulls are not generally allowed in
+// headers, though one constructor can take arbitrary strings.
+TEST_P(HttpContentDispositionTest, ContainsNul) {
+  // Can only pass nulls to the constructor that takes a string, since they're
+  // not allowed in HTTP headers.
+  if (GetParam()) {
+    GTEST_SKIP();
+  }
+
   const char kHeader[] = "filename=ab\0c";
   const char kExpectedFilename[] = "ab\0c";
   // Note: both header and expected_filename include the trailing NUL.
@@ -511,6 +554,64 @@ TEST(HttpContentDispositionTest, ContainsNul) {
 
   HttpContentDisposition content_disposition(header, "utf-8");
   EXPECT_EQ(expected_filename, content_disposition.filename());
+}
+
+TEST_P(HttpContentDispositionTest, NoContentDisposition) {
+  HttpContentDisposition content_disposition =
+      CreateContentDispositionFromHeaders("HTTP/1.1 200 OK\r\n\r\n", "utf-8");
+  EXPECT_EQ(content_disposition.parse_result_flags(),
+            HttpContentDisposition::INVALID);
+  EXPECT_FALSE(content_disposition.is_attachment());
+  EXPECT_EQ(content_disposition.filename(), "");
+}
+
+TEST_P(HttpContentDispositionTest, MultipleContentDisposition) {
+  // Test multiple Content-Disposition headers, only the first should be used.
+  {
+    std::string headers =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Disposition: inline; filename=abc.pdf\r\n"
+        "Content-Disposition: attachment; filename=def.pdf\r\n\r\n";
+    HttpContentDisposition content_disposition =
+        CreateContentDispositionFromHeaders(headers, "utf-8");
+    EXPECT_FALSE(content_disposition.is_attachment());
+    EXPECT_EQ(HttpContentDisposition::INLINE, content_disposition.type());
+    EXPECT_EQ("abc.pdf", content_disposition.filename());
+  }
+
+  // Test single Content-Disposition header with multiple values separated by a
+  // comma, which should be treated just as if there were multiple
+  // content-disposition headers.
+  {
+    std::string headers =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Disposition: inline; filename=abc.pdf, "
+        "attachment; filename=def.pdf\r\n\r\n";
+    HttpContentDisposition content_disposition =
+        CreateContentDispositionFromHeaders(headers, "utf-8");
+    EXPECT_FALSE(content_disposition.is_attachment());
+    EXPECT_EQ(HttpContentDisposition::INLINE, content_disposition.type());
+    EXPECT_EQ("abc.pdf", content_disposition.filename());
+  }
+}
+
+// Tests that disabling `kOnlyParseFirstContentDisposition` correctly
+// reintroduces a bug, in case we have to shut it off temporarily due to
+// breakage.
+TEST_P(HttpContentDispositionTest, OnlyParseFirstContentDispositionDisabled) {
+  std::string content_disposition_string = "attachment, attachment";
+  HttpContentDisposition content_disposition =
+      CreateContentDisposition(content_disposition_string, "utf-8");
+  EXPECT_TRUE(content_disposition.is_attachment());
+  EXPECT_EQ("", content_disposition.filename());
+
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      features::kOnlyParseFirstContentDisposition);
+  HttpContentDisposition content_disposition2 =
+      CreateContentDisposition(content_disposition_string, "utf-8");
+  EXPECT_FALSE(content_disposition2.is_attachment());
+  EXPECT_EQ("", content_disposition2.filename());
 }
 
 }  // namespace net

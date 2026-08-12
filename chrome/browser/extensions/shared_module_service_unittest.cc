@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/shared_module_service.h"
+#include "extensions/browser/shared_module_service.h"
 
 #include <memory>
 #include <string>
@@ -12,15 +12,19 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/pending_extension_manager.h"
+#include "chrome/browser/extensions/shared_module_service_factory.h"
 #include "components/crx_file/id_util.h"
 #include "components/sync/model/string_ordinal.h"
 #include "components/version_info/version_info.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/install_flag.h"
+#include "extensions/browser/pending_extension_manager.h"
 #include "extensions/browser/uninstall_reason.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/features/feature_channel.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -32,14 +36,14 @@ scoped_refptr<const Extension> CreateExtensionImportingModules(
     const std::vector<std::string>& import_ids,
     const std::string& id,
     const std::string& version) {
-  auto builder = base::Value::Dict()
+  auto builder = base::DictValue()
                      .Set("name", "Has Dependent Modules")
                      .Set("version", version)
                      .Set("manifest_version", 2);
   if (!import_ids.empty()) {
-    base::Value::List import_list;
+    base::ListValue import_list;
     for (const std::string& import_id : import_ids)
-      import_list.Append(base::Value::Dict().Set("id", import_id));
+      import_list.Append(base::DictValue().Set("id", import_id));
     builder.Set("import", std::move(import_list));
   }
   return ExtensionBuilder()
@@ -51,14 +55,13 @@ scoped_refptr<const Extension> CreateExtensionImportingModules(
 
 scoped_refptr<const Extension> CreateSharedModule(
     const std::string& module_id) {
-  base::Value::Dict manifest =
-      base::Value::Dict()
+  base::DictValue manifest =
+      base::DictValue()
           .Set("name", "Shared Module")
           .Set("version", "1.0")
           .Set("manifest_version", 2)
-          .Set("export",
-               base::Value::Dict().Set("resources",
-                                       base::Value::List().Append("foo.js")));
+          .Set("export", base::DictValue().Set(
+                             "resources", base::ListValue().Append("foo.js")));
 
   return ExtensionBuilder()
       .SetManifest(std::move(manifest))
@@ -109,8 +112,8 @@ testing::AssertionResult SharedModuleServiceUnitTest::InstallExtension(
 
   // Notify the service that the extension is installed. This adds it to the
   // registry, notifies interested parties, etc.
-  service()->OnExtensionInstalled(
-      extension, syncer::StringOrdinal(), kInstallFlagInstallImmediately);
+  registrar()->OnExtensionInstalled(extension, syncer::StringOrdinal(),
+                                    kInstallFlagInstallImmediately);
 
   // Verify that the extension is now installed.
   if (!registry()->enabled_extensions().Contains(extension->id())) {
@@ -128,14 +131,15 @@ TEST_F(SharedModuleServiceUnitTest, AddDependentSharedModules) {
       std::vector<std::string>(1, import_id), extension_id, "1.0");
 
   PendingExtensionManager* pending_extension_manager =
-      service()->pending_extension_manager();
+      PendingExtensionManager::Get(profile());
 
   // Verify that we don't currently want to install the imported module.
   EXPECT_FALSE(pending_extension_manager->IsIdPending(import_id));
 
   // Try to satisfy imports for the extension. This should queue the imported
   // module's installation.
-  service()->shared_module_service()->SatisfyImports(extension.get());
+  SharedModuleServiceFactory::GetForBrowserContext(profile())->SatisfyImports(
+      extension.get());
   EXPECT_TRUE(pending_extension_manager->IsIdPending(import_id));
 }
 
@@ -156,8 +160,8 @@ TEST_F(SharedModuleServiceUnitTest, PruneSharedModulesOnUninstall) {
 
   // Uninstall the extension that imports our module.
   std::u16string error;
-  service()->UninstallExtension(importing_extension->id(),
-                                UNINSTALL_REASON_FOR_TESTING, &error);
+  registrar()->UninstallExtension(importing_extension->id(),
+                                  UNINSTALL_REASON_FOR_TESTING, &error);
   EXPECT_TRUE(error.empty());
 
   // Since the module was only referenced by that single extension, it should
@@ -173,14 +177,13 @@ TEST_F(SharedModuleServiceUnitTest, PruneSharedModulesOnUpdate) {
       CreateSharedModule("shared_module_1");
   EXPECT_TRUE(InstallExtension(shared_module_1.get(), false));
 
-  base::Value::Dict manifest_2 =
-      base::Value::Dict()
+  base::DictValue manifest_2 =
+      base::DictValue()
           .Set("name", "Shared Module 2")
           .Set("version", "1.0")
           .Set("manifest_version", 2)
-          .Set("export",
-               base::Value::Dict().Set("resources",
-                                       base::Value::List().Append("foo.js")));
+          .Set("export", base::DictValue().Set(
+                             "resources", base::ListValue().Append("foo.js")));
   scoped_refptr<const Extension> shared_module_2 =
       CreateSharedModule("shared_module_2");
   EXPECT_TRUE(InstallExtension(shared_module_2.get(), false));
@@ -202,7 +205,7 @@ TEST_F(SharedModuleServiceUnitTest, PruneSharedModulesOnUpdate) {
           "1.1");
   EXPECT_TRUE(InstallExtension(importing_extension_2.get(), true));
 
-  // Since the extension v1.1 depends the module 2 insteand module 1.
+  // Since the extension v1.1 depends the module 2 instead module 1.
   // So the module 1 should be uninstalled.
   EXPECT_FALSE(registry()->GetExtensionById(shared_module_1->id(),
                                             ExtensionRegistry::EVERYTHING));
@@ -230,15 +233,15 @@ TEST_F(SharedModuleServiceUnitTest, AllowlistedImports) {
   std::string nonallowlisted_id =
       crx_file::id_util::GenerateId("nonallowlisted");
   // Create a module which exports to a restricted allowlist.
-  base::Value::Dict manifest =
-      base::Value::Dict()
+  base::DictValue manifest =
+      base::DictValue()
           .Set("name", "Shared Module")
           .Set("version", "1.0")
           .Set("manifest_version", 2)
           .Set("export",
-               base::Value::Dict()
-                   .Set("allowlist", base::Value::List().Append(allowlisted_id))
-                   .Set("resources", base::Value::List().Append("*")));
+               base::DictValue()
+                   .Set("allowlist", base::ListValue().Append(allowlisted_id))
+                   .Set("resources", base::ListValue().Append("*")));
   scoped_refptr<const Extension> shared_module =
       ExtensionBuilder()
           .SetManifest(std::move(manifest))
@@ -287,8 +290,8 @@ TEST_F(SharedModuleServiceUnitTest, PruneMultipleSharedModules) {
 
   // Uninstall the extension that imports our modules.
   std::u16string error;
-  service()->UninstallExtension(importing_extension->id(),
-                                UNINSTALL_REASON_FOR_TESTING, &error);
+  registrar()->UninstallExtension(importing_extension->id(),
+                                  UNINSTALL_REASON_FOR_TESTING, &error);
   EXPECT_TRUE(error.empty());
 
   // Since the modules were only referenced by that single extension, they

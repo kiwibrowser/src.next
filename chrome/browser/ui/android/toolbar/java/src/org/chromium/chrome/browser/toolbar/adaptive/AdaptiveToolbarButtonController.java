@@ -4,15 +4,20 @@
 
 package org.chromium.chrome.browser.toolbar.adaptive;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.ADAPTIVE_TOOLBAR_CUSTOMIZATION_ENABLED;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.ADAPTIVE_TOOLBAR_CUSTOMIZATION_SETTINGS;
+import static org.chromium.chrome.browser.toolbar.adaptive.settings.AdaptiveToolbarSettingsFragment.ARG_UI_STATE_AUTO_BUTTON_CAPTION;
+import static org.chromium.chrome.browser.toolbar.adaptive.settings.AdaptiveToolbarSettingsFragment.ARG_UI_STATE_CAN_SHOW_UI;
+import static org.chromium.chrome.browser.toolbar.adaptive.settings.AdaptiveToolbarSettingsFragment.ARG_UI_STATE_PREFERENCE_SELECTION;
+import static org.chromium.chrome.browser.toolbar.adaptive.settings.AdaptiveToolbarSettingsFragment.ARG_UI_STATE_RANKED_TOOLBAR_BUTTON_STATES;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.os.Bundle;
 import android.view.View;
 
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
@@ -22,8 +27,13 @@ import org.chromium.base.FeatureList;
 import org.chromium.base.ObserverList;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.base.supplier.OneShotCallback;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.glic.GlicKeyedService;
+import org.chromium.chrome.browser.glic.GlicKeyedServiceFactory;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.ConfigurationChangedObserver;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -31,13 +41,15 @@ import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.tab.CurrentTabObserver;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.toolbar.ButtonData;
-import org.chromium.chrome.browser.toolbar.ButtonData.ButtonSpec;
-import org.chromium.chrome.browser.toolbar.ButtonDataImpl;
-import org.chromium.chrome.browser.toolbar.ButtonDataProvider;
-import org.chromium.chrome.browser.toolbar.ButtonDataProvider.ButtonDataObserver;
 import org.chromium.chrome.browser.toolbar.R;
+import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarStatePredictor.UiState;
 import org.chromium.chrome.browser.toolbar.adaptive.settings.AdaptiveToolbarSettingsFragment;
+import org.chromium.chrome.browser.toolbar.optional_button.BaseButtonDataProvider;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonData;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonData.ButtonSpec;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonDataImpl;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonDataProvider;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonDataProvider.ButtonDataObserver;
 import org.chromium.components.browser_ui.settings.SettingsNavigation;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.ui.permissions.AndroidPermissionDelegate;
@@ -46,20 +58,23 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Meta {@link ButtonDataProvider} which chooses the optional button variant that will be shown. */
+@NullMarked
 public class AdaptiveToolbarButtonController
         implements ButtonDataProvider,
                 ButtonDataObserver,
                 SharedPreferences.OnSharedPreferenceChangeListener,
-                ConfigurationChangedObserver {
+                ConfigurationChangedObserver,
+                GlicKeyedService.AllowedChangedObserver {
 
     private final Context mContext;
-    private ObserverList<ButtonDataObserver> mObservers = new ObserverList<>();
-    @Nullable private ButtonDataProvider mSingleProvider;
+    private final ObserverList<ButtonDataObserver> mObservers = new ObserverList<>();
+    private @Nullable ButtonDataProvider mSingleProvider;
 
     // Maps from {@link AdaptiveToolbarButtonVariant} to {@link ButtonDataProvider}.
-    private Map<Integer, ButtonDataProvider> mButtonDataProviderMap = new HashMap<>();
+    private final Map<Integer, ButtonDataProvider> mButtonDataProviderMap = new HashMap<>();
 
     /**
      * {@link ButtonData} instance returned by {@link AdaptiveToolbarButtonController#get(Tab)}
@@ -68,7 +83,7 @@ public class AdaptiveToolbarButtonController
     private final ButtonDataImpl mButtonData = new ButtonDataImpl();
 
     /** The last received {@link ButtonSpec}. */
-    @Nullable private ButtonSpec mOriginalButtonSpec;
+    private @Nullable ButtonSpec mOriginalButtonSpec;
 
     /** {@code true} if the SessionVariant histogram value was already recorded. */
     private boolean mIsSessionVariantRecorded;
@@ -77,16 +92,21 @@ public class AdaptiveToolbarButtonController
     private final AndroidPermissionDelegate mAndroidPermissionDelegate;
     private final CallbackController mCallbackController;
     private final Callback<AdaptiveToolbarStatePredictor.UiState> mUiStateCallback;
+    private final AdaptiveToolbarBehavior mToolbarBehavior;
 
-    @Nullable private AdaptiveToolbarStatePredictor mAdaptiveToolbarStatePredictor;
-    @Nullable private View.OnLongClickListener mMenuHandler;
+    private @Nullable AdaptiveToolbarStatePredictor mAdaptiveToolbarStatePredictor;
+    private View.@Nullable OnLongClickListener mMenuHandler;
     private final Callback<Integer> mMenuClickListener;
     private final AdaptiveButtonActionMenuCoordinator mMenuCoordinator;
     private int mScreenWidthDp;
+    private final View.OnLayoutChangeListener mLayoutChangeListener;
+    private final View mToolbarContainer;
 
     private @AdaptiveToolbarButtonVariant int mSessionButtonVariant =
             AdaptiveToolbarButtonVariant.UNKNOWN;
-    private CurrentTabObserver mPageLoadMetricsRecorder;
+    private @Nullable CurrentTabObserver mPageLoadMetricsRecorder;
+    private @Nullable NullableObservableSupplier<Tab> mTabSupplier;
+    private @Nullable GlicKeyedService mGlicKeyedService;
 
     /**
      * Constructs the {@link AdaptiveToolbarButtonController}.
@@ -94,6 +114,10 @@ public class AdaptiveToolbarButtonController
      * @param context used in {@link SettingsNavigation}
      * @param lifecycleDispatcher notifies about native initialization
      * @param profileSupplier Allows access to the {@link Profile} for the current session.
+     * @param menuCoordinator Coordinator for the adaptive button action menu.
+     * @param toolbarBehavior The {@link AdaptiveToolbarBehavior} for the adaptive button.
+     * @param androidPermissionDelegate Delegate for checking and requesting permissions.
+     * @param toolbarContainer The {@link View} containing the toolbar.
      */
     // Suppress to observe SharedPreferences, which is discouraged; use another messaging channel
     // instead.
@@ -101,16 +125,20 @@ public class AdaptiveToolbarButtonController
     public AdaptiveToolbarButtonController(
             Context context,
             ActivityLifecycleDispatcher lifecycleDispatcher,
-            ObservableSupplier<Profile> profileSupplier,
+            MonotonicObservableSupplier<Profile> profileSupplier,
             AdaptiveButtonActionMenuCoordinator menuCoordinator,
-            AndroidPermissionDelegate androidPermissionDelegate) {
+            AdaptiveToolbarBehavior toolbarBehavior,
+            AndroidPermissionDelegate androidPermissionDelegate,
+            View toolbarContainer) {
         mContext = context;
+        mToolbarContainer = toolbarContainer;
+
         mMenuClickListener =
                 id -> {
                     if (id == R.id.customize_adaptive_button_menu_id) {
                         RecordUserAction.record("MobileAdaptiveMenuCustomize");
-                        SettingsNavigationFactory.createSettingsNavigation()
-                                .startSettings(context, AdaptiveToolbarSettingsFragment.class);
+                        assumeNonNull(mAdaptiveToolbarStatePredictor);
+                        mAdaptiveToolbarStatePredictor.recomputeUiState(this::startSettings);
                         return;
                     }
                     assert false : "unknown adaptive button menu id: " + id;
@@ -118,21 +146,70 @@ public class AdaptiveToolbarButtonController
         mLifecycleDispatcher = lifecycleDispatcher;
         mLifecycleDispatcher.register(this);
         mMenuCoordinator = menuCoordinator;
+        mToolbarBehavior = toolbarBehavior;
         mScreenWidthDp = context.getResources().getConfiguration().screenWidthDp;
         mAndroidPermissionDelegate = androidPermissionDelegate;
         mCallbackController = new CallbackController();
+
         mUiStateCallback =
                 uiState -> {
+                    assert mAdaptiveToolbarStatePredictor != null;
+                    int topSegmentationResult =
+                            mAdaptiveToolbarStatePredictor.filterSegmentationResults(
+                                    uiState.rankedToolbarButtonStates);
                     mSessionButtonVariant =
                             uiState.canShowUi
-                                    ? uiState.toolbarButtonState
+                                    ? topSegmentationResult
                                     : AdaptiveToolbarButtonVariant.UNKNOWN;
                     setSingleProvider(mSessionButtonVariant);
                     notifyObservers(uiState.canShowUi);
                 };
 
+        // TODO(crbug.com/505096015): Use tablet's width consumer system for tablet toolbar layout.
+        mLayoutChangeListener =
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    int width = right - left;
+                    if (width == 0) return;
+                    int widthDp =
+                            (int) (width / mContext.getResources().getDisplayMetrics().density);
+                    if (mScreenWidthDp == widthDp) return;
+
+                    if (!mLifecycleDispatcher.isNativeInitializationFinished()
+                            || mAdaptiveToolbarStatePredictor == null) {
+                        mScreenWidthDp = widthDp;
+                        return;
+                    }
+
+                    boolean wasOldWideEnough = isScreenWideEnoughForButton();
+                    mScreenWidthDp = widthDp;
+                    if (wasOldWideEnough == isScreenWideEnoughForButton()) {
+                        return;
+                    }
+
+                    notifyObservers(/* canShowHint= */ true);
+                };
+        mToolbarContainer.addOnLayoutChangeListener(mLayoutChangeListener);
+
         new OneShotCallback<>(
                 profileSupplier, mCallbackController.makeCancelable(this::setProfile));
+    }
+
+    @Override
+    public void onFinishNativeInitialization() {
+        for (ButtonDataProvider provider : mButtonDataProviderMap.values()) {
+            provider.onFinishNativeInitialization();
+        }
+    }
+
+    private void startSettings(UiState uiState) {
+        Bundle args = new Bundle();
+        args.putBoolean(ARG_UI_STATE_CAN_SHOW_UI, uiState.canShowUi);
+        args.putIntegerArrayList(
+                ARG_UI_STATE_RANKED_TOOLBAR_BUTTON_STATES, uiState.rankedToolbarButtonStates);
+        args.putInt(ARG_UI_STATE_PREFERENCE_SELECTION, uiState.preferenceSelection);
+        args.putInt(ARG_UI_STATE_AUTO_BUTTON_CAPTION, uiState.autoButtonCaption);
+        SettingsNavigationFactory.createSettingsNavigation()
+                .startSettings(mContext, AdaptiveToolbarSettingsFragment.class, args);
     }
 
     /**
@@ -156,6 +233,20 @@ public class AdaptiveToolbarButtonController
         mButtonDataProviderMap.put(variant, buttonProvider);
     }
 
+    /**
+     * Invoke Price Insights UI. TODO(crbug.com/391931899): Consider making this method generic to
+     * support other button variants.
+     */
+    public void runPriceInsightsAction() {
+        var buttonDataProvider =
+                mButtonDataProviderMap.get(AdaptiveToolbarButtonVariant.PRICE_INSIGHTS);
+        if (buttonDataProvider instanceof BaseButtonDataProvider toolbarButtonProvider) {
+            toolbarButtonProvider.onClick(new View(mContext)); // Param is not used.
+        } else {
+            assert false : "PriceInsightButtonController must inherit BaseButtonDataProvider!";
+        }
+    }
+
     @Override
     // Suppress to observe SharedPreferences, which is discouraged; use another messaging channel
     // instead.
@@ -164,8 +255,19 @@ public class AdaptiveToolbarButtonController
         setSingleProvider(AdaptiveToolbarButtonVariant.UNKNOWN);
         mObservers.clear();
         mCallbackController.destroy();
+        mToolbarBehavior.destroy();
         ContextUtils.getAppSharedPreferences().unregisterOnSharedPreferenceChangeListener(this);
+        mToolbarContainer.removeOnLayoutChangeListener(mLayoutChangeListener);
         mLifecycleDispatcher.unregister(this);
+
+        if (mGlicKeyedService != null) {
+            mGlicKeyedService.removeAllowedChangedObserver(this);
+        }
+
+        if (mPageLoadMetricsRecorder != null) {
+            mPageLoadMetricsRecorder.destroy();
+            mPageLoadMetricsRecorder = null;
+        }
 
         Iterator<Map.Entry<Integer, ButtonDataProvider>> it =
                 mButtonDataProviderMap.entrySet().iterator();
@@ -198,7 +300,7 @@ public class AdaptiveToolbarButtonController
     }
 
     @Override
-    public ButtonData get(@Nullable Tab tab) {
+    public @Nullable ButtonData get(@Nullable Tab tab) {
         final ButtonData receivedButtonData =
                 mSingleProvider == null ? null : mSingleProvider.get(tab);
         if (receivedButtonData == null) {
@@ -214,10 +316,12 @@ public class AdaptiveToolbarButtonController
             RecordHistogram.recordEnumeratedHistogram(
                     "Android.AdaptiveToolbarButton.SessionVariant",
                     receivedButtonData.getButtonSpec().getButtonVariant(),
-                    AdaptiveToolbarButtonVariant.MAX_VALUE + 1);
+                    AdaptiveToolbarButtonVariant.MAX_VALUE);
         }
 
-        mButtonData.setCanShow(receivedButtonData.canShow() && isScreenWideEnoughForButton());
+        mButtonData.setCanShow(
+                receivedButtonData.canShow() && shouldButtonShowBasedOnScreenWidth());
+        mButtonData.setShouldShowTextBubble(mToolbarBehavior.shouldShowTextBubble());
         mButtonData.setEnabled(receivedButtonData.isEnabled());
         final ButtonSpec receivedButtonSpec = receivedButtonData.getButtonSpec();
         // ButtonSpec is immutable, so we keep the previous value when noting changes.
@@ -227,22 +331,21 @@ public class AdaptiveToolbarButtonController
             if (mMenuHandler == null) mMenuHandler = createMenuHandler();
             mOriginalButtonSpec = receivedButtonSpec;
             mButtonData.setButtonSpec(
-                    new ButtonSpec(
-                            receivedButtonSpec.getDrawable(),
-                            wrapClickListener(
-                                    receivedButtonSpec.getOnClickListener(),
-                                    receivedButtonSpec.getButtonVariant()),
+                    new ButtonSpec.Builder(receivedButtonSpec)
+                            .setOnClickListener(
+                                    wrapClickListener(
+                                            assumeNonNull(receivedButtonSpec.getOnClickListener()),
+                                            receivedButtonSpec.getButtonVariant()))
                             // Use menu handler only with static actions.
-                            receivedButtonSpec.isDynamicAction() ? null : mMenuHandler,
-                            receivedButtonSpec.getContentDescription(),
-                            receivedButtonSpec.getSupportsTinting(),
-                            receivedButtonSpec.getIphCommandBuilder(),
-                            receivedButtonSpec.getButtonVariant(),
-                            receivedButtonSpec.getActionChipLabelResId(),
-                            receivedButtonSpec.getHoverTooltipTextId(),
-                            receivedButtonSpec.getShouldShowHoverHighlight()));
+                            .setOnLongClickListener(
+                                    receivedButtonSpec.isDynamicAction() ? null : mMenuHandler)
+                            .build());
         }
         return mButtonData;
+    }
+
+    private boolean shouldButtonShowBasedOnScreenWidth() {
+        return mToolbarBehavior.shouldShowTextBubble() || isScreenWideEnoughForButton();
     }
 
     private static View.OnClickListener wrapClickListener(
@@ -252,13 +355,12 @@ public class AdaptiveToolbarButtonController
             RecordHistogram.recordEnumeratedHistogram(
                     "Android.AdaptiveToolbarButton.Clicked",
                     buttonVariant,
-                    AdaptiveToolbarButtonVariant.MAX_VALUE + 1);
+                    AdaptiveToolbarButtonVariant.MAX_VALUE);
             receivedListener.onClick(view);
         };
     }
 
-    @Nullable
-    private View.OnLongClickListener createMenuHandler() {
+    private View.@Nullable OnLongClickListener createMenuHandler() {
         if (!FeatureList.isInitialized()) return null;
         return mMenuCoordinator.createOnLongClickListener(mMenuClickListener);
     }
@@ -266,15 +368,30 @@ public class AdaptiveToolbarButtonController
     @Override
     public void buttonDataChanged(boolean canShowHint) {
         notifyObservers(canShowHint);
+
+        // If the dynamic button is no longer available, switch to the session button variant.
+        if (!canShowHint
+                && (mButtonData.getButtonSpec() == null
+                        || mButtonData.getButtonSpec().getButtonVariant()
+                                != mSessionButtonVariant)) {
+            setSingleProvider(mSessionButtonVariant);
+            notifyObservers(true);
+        }
     }
 
     @VisibleForTesting
     void setProfile(Profile profile) {
         assert mAdaptiveToolbarStatePredictor == null;
-        profile = profile.getOriginalProfile();
+        Profile originalProfile = profile.getOriginalProfile();
         mAdaptiveToolbarStatePredictor =
-                new AdaptiveToolbarStatePredictor(mContext, profile, mAndroidPermissionDelegate);
+                new AdaptiveToolbarStatePredictor(
+                        mContext, originalProfile, mAndroidPermissionDelegate, mToolbarBehavior);
         ContextUtils.getAppSharedPreferences().registerOnSharedPreferenceChangeListener(this);
+
+        mGlicKeyedService = GlicKeyedServiceFactory.getForProfile(originalProfile);
+        if (mGlicKeyedService != null) {
+            mGlicKeyedService.addAllowedChangedObserver(this);
+        }
 
         if (!AdaptiveToolbarFeatures.isCustomizationEnabled()) return;
         mAdaptiveToolbarStatePredictor.recomputeUiState(mUiStateCallback);
@@ -290,6 +407,13 @@ public class AdaptiveToolbarButtonController
         notifyObservers(mButtonData.canShow());
     }
 
+    @Override
+    public void onAllowedStateChanged() {
+        if (mAdaptiveToolbarStatePredictor != null) {
+            mAdaptiveToolbarStatePredictor.recomputeUiState(mUiStateCallback);
+        }
+    }
+
     private void notifyObservers(boolean canShowHint) {
         for (ButtonDataObserver observer : mObservers) {
             observer.buttonDataChanged(canShowHint);
@@ -301,8 +425,7 @@ public class AdaptiveToolbarButtonController
     }
 
     /** Returns the {@link ButtonDataProvider} used in a single-variant mode. */
-    @Nullable
-    public ButtonDataProvider getSingleProviderForTesting() {
+    public @Nullable ButtonDataProvider getSingleProviderForTesting() {
         return mSingleProvider;
     }
 
@@ -318,12 +441,21 @@ public class AdaptiveToolbarButtonController
 
     /** Called to notify the controller that a dynamic action is available and should be shown. */
     public void showDynamicAction(@AdaptiveToolbarButtonVariant int action) {
+        if (mSingleProvider != null && mTabSupplier != null) {
+            Tab currentTab = mTabSupplier.get();
+            if (currentTab != null) {
+                ButtonData currentData = mSingleProvider.get(currentTab);
+                if (currentData != null && currentData.getButtonSpec().shouldSuppressCpa()) {
+                    return;
+                }
+            }
+        }
         int actionToShow =
                 action != AdaptiveToolbarButtonVariant.UNKNOWN ? action : mSessionButtonVariant;
         RecordHistogram.recordEnumeratedHistogram(
                 "Android.AdaptiveToolbarButton.Variant.OnPageLoad",
                 actionToShow,
-                AdaptiveToolbarButtonVariant.MAX_VALUE + 1);
+                AdaptiveToolbarButtonVariant.MAX_VALUE);
         if (mOriginalButtonSpec != null && mOriginalButtonSpec.getButtonVariant() == actionToShow) {
             return;
         }
@@ -337,7 +469,8 @@ public class AdaptiveToolbarButtonController
      *
      * @param tabSupplier Supplier of current tab.
      */
-    public void initializePageLoadMetricsRecorder(ObservableSupplier<Tab> tabSupplier) {
+    public void initializePageLoadMetricsRecorder(NullableObservableSupplier<Tab> tabSupplier) {
+        mTabSupplier = tabSupplier;
         if (mPageLoadMetricsRecorder != null) return;
         mPageLoadMetricsRecorder =
                 new CurrentTabObserver(
@@ -357,7 +490,7 @@ public class AdaptiveToolbarButtonController
                                 RecordHistogram.recordEnumeratedHistogram(
                                         "Android.AdaptiveToolbarButton.Variant.OnStartNavigation",
                                         currentVariant,
-                                        AdaptiveToolbarButtonVariant.MAX_VALUE + 1);
+                                        AdaptiveToolbarButtonVariant.MAX_VALUE);
                             }
                         },
                         null);
@@ -375,7 +508,18 @@ public class AdaptiveToolbarButtonController
         mScreenWidthDp = newConfig.screenWidthDp;
 
         if (wasOldScreenWideEnoughForButton != isScreenWideEnoughForButton()) {
-            notifyObservers(mButtonData.canShow());
+            notifyObservers(/* canShowHint= */ true);
         }
+    }
+
+    /** Recomputes the UI state of the toolbar button. */
+    public void recomputeUiState() {
+        if (mAdaptiveToolbarStatePredictor != null) {
+            mAdaptiveToolbarStatePredictor.recomputeUiState(mUiStateCallback);
+        }
+    }
+
+    public Set<Integer> getAllSupportedTypesForTesting() {
+        return mButtonDataProviderMap.keySet();
     }
 }

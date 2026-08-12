@@ -16,6 +16,7 @@
 
 namespace net {
 
+class CacheBodyCompressor;
 class HttpResponseInfo;
 class IOBuffer;
 class PartialData;
@@ -148,7 +149,22 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   // Returns if response is only being read from the network.
   bool network_read_only() const { return network_read_only_; }
 
+  // Returns true if the writer is compressing body data for cache storage.
+  // When true, the active writer must read from network (not cache) because
+  // disk bytes are compressed while read_offset_ tracks uncompressed bytes.
+  bool compressing_for_cache() const { return compressing_for_cache_; }
+
+  // Returns true if a new transaction can join this Writers group. Returns
+  // false if compression is active and data has already been processed,
+  // because a late-joiner would receive network data from the current offset
+  // but interpret it as offset 0, causing silent data corruption.
+  bool CanJoin() const;
+
   int GetTransactionsCount() const { return all_writers_.size(); }
+
+  // Returns the current priority of the request. It is always the maximum of
+  // all the writer transactions.
+  RequestPriority priority() const { return priority_; }
 
  private:
   friend class WritersTest;
@@ -160,6 +176,10 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
     NETWORK_READ_COMPLETE,
     CACHE_WRITE_DATA,
     CACHE_WRITE_DATA_COMPLETE,
+    CACHE_WRITE_COMPRESSED_FINALIZE,
+    CACHE_WRITE_COMPRESSED_FINALIZE_COMPLETE,
+    CACHE_WRITE_COMPRESSED_METADATA,
+    CACHE_WRITE_COMPRESSED_METADATA_COMPLETE,
   };
 
   // These transactions are waiting on Read. After the active transaction
@@ -189,6 +209,36 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   int DoNetworkReadComplete(int result);
   int DoCacheWriteData(int num_bytes);
   int DoCacheWriteDataComplete(int result);
+  int DoCacheWriteCompressedFinalize(int result);
+  int DoCacheWriteCompressedFinalizeComplete(int result);
+  int DoCacheWriteCompressedMetadata();
+  int DoCacheWriteCompressedMetadataComplete(int result);
+
+  // Returns true if the current response should be zstd-compressed on disk.
+  bool ShouldCompressForCache() const;
+
+  // Creates and initializes compressor_. On failure, compressing_for_cache_
+  // remains false and the caller falls through to uncompressed write.
+  void InitCompression();
+
+  // Compresses `num_bytes` from `read_buf_` and writes the result to the
+  // cache entry at `current_size`. Returns ERR_IO_PENDING for async disk
+  // writes, 0 if zstd buffered internally (no disk write), the number of
+  // compressed bytes on synchronous success, or a negative error code on
+  // compression or disk write failure.
+  int CompressAndWriteBlock(int num_bytes,
+                            int current_size,
+                            CompletionOnceCallback io_callback);
+
+  // Persists zstd_uncompressed_body_size in the cached response metadata.
+  // Prepares the pickle into metadata_buf_ but does not write to disk;
+  // the CACHE_WRITE_COMPRESSED_METADATA state performs the actual write.
+  void UpdateResponseInfoForCompression();
+
+  // Shared EOF cleanup: erases transactions, notifies waiting readers, and
+  // triggers the cache callback. Used by both the normal and compressed EOF
+  // paths to avoid duplication.
+  void CompleteWritingAndNotifyTransactions();
 
   // Helper functions for callback.
   void OnNetworkReadFailure(int result);
@@ -219,6 +269,11 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   // Enqueues a truncation operation to the entry. Ignores the response.
   void TruncateEntry();
 
+  // Updates the cached response info with the original encoded body size
+  // from the network transaction. This ensures that future reads from cache
+  // can report the correct encodedBodySize for Resource Timing.
+  void UpdateEncodedBodySizeInCacheEntry();
+
   // Remove the transaction.
   void EraseTransaction(Transaction* transaction, int result);
   TransactionMap::iterator EraseTransaction(TransactionMap::iterator it,
@@ -244,6 +299,15 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   int io_buf_len_ = 0;
   int write_len_ = 0;
+
+  // Compression state for zstd cache write path.
+  std::unique_ptr<CacheBodyCompressor> compressor_;
+  bool compressing_for_cache_ = false;
+  int compressed_write_len_ = 0;
+  int finalize_remaining_ = 0;
+  int finalize_rounds_ = 0;
+  scoped_refptr<IOBuffer> metadata_buf_;
+  int metadata_buf_len_ = 0;
 
   // The cache transaction that is the current consumer of network_transaction_
   // ::Read or writing to the entry and is waiting for the operation to be

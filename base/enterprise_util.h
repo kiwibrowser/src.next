@@ -8,6 +8,10 @@
 #include "base/base_export.h"
 #include "build/build_config.h"
 
+#if BUILDFLAG(IS_WIN)
+#include "base/auto_reset.h"
+#endif
+
 namespace base {
 
 // Returns true if an outside entity manages the current machine. To be
@@ -31,6 +35,15 @@ BASE_EXPORT bool IsEnterpriseDevice();
 // recommended to use the PlatformManagementService to obtain this information,
 // if possible.
 BASE_EXPORT bool IsManagedOrEnterpriseDevice();
+
+#if BUILDFLAG(IS_WIN)
+// Note: returning base::AutoReset<bool> is preferred, but including that header
+// here causes libc++ header pollution on Windows due to the low-level nature
+// of this file.
+// Sets the global flag for testing enterprise device status.
+[[nodiscard]] BASE_EXPORT AutoReset<bool> SetIsEnterpriseDeviceForTesting(
+    bool is_enterprise);
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_APPLE)
 

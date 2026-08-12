@@ -13,6 +13,7 @@ namespace blink {
 
 bool EasySelectorChecker::IsEasy(const CSSSelector* selector) {
   bool has_descendant_selector = false;
+  bool has_pseudo_element_selector = false;
   for (; selector != nullptr; selector = selector->NextSimpleSelector()) {
     if (!selector->IsLastInComplexSelector() &&
         selector->Relation() != CSSSelector::kSubSelector &&
@@ -36,20 +37,8 @@ bool EasySelectorChecker::IsEasy(const CSSSelector* selector) {
       continue;
     }
     switch (selector->Match()) {
-      case CSSSelector::kTag: {
-        const QualifiedName& tag_q_name = selector->TagQName();
-        if (tag_q_name == AnyQName() ||
-            tag_q_name.LocalName() == CSSSelector::UniversalSelectorAtom()) {
-          // We don't support the universal selector, to avoid checking
-          // for it when doing tag matching (most selectors are not
-          // the universal selector). Note that in if we are in the
-          // universal bucket, and it's a true universal match
-          // (not just universal local name), we'd most likely hit
-          // IsCoveredByBucketing() above.
-          return false;
-        }
-        break;
-      }
+      case CSSSelector::kTag:
+      case CSSSelector::kUniversalTag:
       case CSSSelector::kId:
       case CSSSelector::kClass:
         break;
@@ -64,6 +53,45 @@ bool EasySelectorChecker::IsEasy(const CSSSelector* selector) {
           return false;
         }
         break;
+      case CSSSelector::kPseudoClass: {
+        // We support exactly :not(tag) and nothing else.
+        if (selector->GetPseudoType() != CSSSelector::kPseudoNot) {
+          return false;
+        }
+        const CSSSelectorList* sublist = selector->SelectorList();
+        if (!sublist || !sublist->IsSingleComplexSelector()) {
+          return false;
+        }
+        const CSSSelector* sub_selector = sublist->First();
+        if (!sub_selector->IsLastInComplexSelector() ||
+            sub_selector->Match() != CSSSelector::kTag) {
+          return false;
+        }
+        break;
+      }
+      case CSSSelector::kPseudoElement: {
+        if (selector->GetPseudoType() != CSSSelector::kPseudoBefore &&
+            selector->GetPseudoType() != CSSSelector::kPseudoAfter &&
+            selector->GetPseudoType() != CSSSelector::kPseudoMarker &&
+            selector->GetPseudoType() != CSSSelector::kPseudoScrollbar &&
+            selector->GetPseudoType() != CSSSelector::kPseudoSelection) {
+          // We can support more pseudo-elements if need be (as long as
+          // they don't have special semantics), but these are the
+          // most critical for us.
+          //
+          // TODO(sesse): Can we do kPseudoScrollbarButton etc.,
+          // despite slightly different dynamic_pseudo semantics?
+          return false;
+        }
+
+        if (has_pseudo_element_selector) {
+          // We don't support chains of pseudo-element selectors
+          // (e.g. ::before::marker).
+          return false;
+        }
+        has_pseudo_element_selector = true;
+        break;
+      }
       default:
         // Unsupported selector.
         return false;
@@ -73,7 +101,10 @@ bool EasySelectorChecker::IsEasy(const CSSSelector* selector) {
 }
 
 bool EasySelectorChecker::Match(const CSSSelector* selector,
-                                const Element* element) {
+                                const Element* element,
+                                const Element* pseudo_element,
+                                PseudoId pseudo_id,
+                                PseudoId& dynamic_pseudo) {
   DCHECK(IsEasy(selector));
 
   // Since we only support subselector, child and descendant combinators
@@ -99,7 +130,9 @@ bool EasySelectorChecker::Match(const CSSSelector* selector,
   const CSSSelector* rewind_on_failure = nullptr;
 
   while (selector != nullptr) {
-    if (selector->IsCoveredByBucketing() || MatchOne(selector, element)) {
+    if (selector->IsCoveredByBucketing() ||
+        MatchOne(selector, element, pseudo_element, pseudo_id,
+                 dynamic_pseudo)) {
       if (selector->Relation() == CSSSelector::kDescendant) {
         // We matched the entire compound, but there are more.
         // Move to the next one.
@@ -142,34 +175,60 @@ bool EasySelectorChecker::Match(const CSSSelector* selector,
   return true;
 }
 
+bool EasySelectorChecker::MatchesTagName(const QualifiedName& tag_q_name,
+                                         const Element* element) {
+  if (element->namespaceURI() != tag_q_name.NamespaceURI() &&
+      tag_q_name.NamespaceURI() != g_star_atom) {
+    // Namespace mismatch.
+    return false;
+  }
+  if (element->localName() == tag_q_name.LocalName()) {
+    return true;
+  }
+  if (!element->IsHTMLElement() && IsA<HTMLDocument>(element->GetDocument())) {
+    // If we have a non-HTML element in a HTML document, we need to
+    // also check case-insensitively (see MatchesTagName()). Ideally,
+    // we'd like to not have to handle this case in easy selector matching,
+    // but it turns out to be hard to reliably check that a tag in a
+    // descendant selector doesn't hit this issue (the subject element
+    // could be checked once, outside EasySelectorChecker).
+    return element->TagQName().LocalNameUpper() == tag_q_name.LocalNameUpper();
+  } else {
+    return false;
+  }
+}
+
 bool EasySelectorChecker::MatchOne(const CSSSelector* selector,
-                                   const Element* element) {
+                                   const Element* element,
+                                   const Element* pseudo_element,
+                                   PseudoId pseudo_id,
+                                   PseudoId& dynamic_pseudo) {
   switch (selector->Match()) {
     case CSSSelector::kTag: {
+      return MatchesTagName(selector->TagQName(), element);
+    }
+    case CSSSelector::kPseudoClass: {  // not(tag).
+      DCHECK_EQ(selector->GetPseudoType(), CSSSelector::kPseudoNot);
+      const CSSSelector* sub_selector = selector->SelectorList()->First();
+      DCHECK_EQ(sub_selector->Match(), CSSSelector::kTag);
+      return !MatchesTagName(sub_selector->TagQName(), element);
+    }
+    case CSSSelector::kUniversalTag: {
       const QualifiedName& tag_q_name = selector->TagQName();
-      if (element->namespaceURI() != tag_q_name.NamespaceURI() &&
-          tag_q_name.NamespaceURI() != g_star_atom) {
-        // Namespace mismatch.
-        return false;
-      }
-      if (element->localName() == tag_q_name.LocalName()) {
-        return true;
-      }
-      if (!element->IsHTMLElement() &&
-          IsA<HTMLDocument>(element->GetDocument())) {
-        // If we have a non-HTML element in a HTML document, we need to
-        // also check case-insensitively (see MatchesTagName()). Ideally,
-        // we'd like to not have to handle this case in easy selector matching,
-        // but it turns out to be hard to reliably check that a tag in a
-        // descendant selector doesn't hit this issue (the subject element
-        // could be checked once, outside EasySelectorChecker).
-        return element->TagQName().LocalNameUpper() ==
-               tag_q_name.LocalNameUpper();
-      } else {
-        return false;
-      }
+      return element->namespaceURI() == tag_q_name.NamespaceURI() ||
+             tag_q_name.NamespaceURI() == g_star_atom;
     }
     case CSSSelector::kClass:
+      if (!element->CouldHaveClass(selector->Value())) {
+#if DCHECK_IS_ON()
+        DCHECK(!element->HasClass() ||
+               !element->ClassNames().Contains(selector->Value()))
+            << element << " should have matched class " << selector->Value()
+            << ", Bloom bits on element are "
+            << element->AttributeOrClassBloomFilter();
+#endif
+        return false;
+      }
       return element->HasClass() &&
              element->ClassNames().Contains(selector->Value());
     case CSSSelector::kId:
@@ -185,6 +244,24 @@ bool EasySelectorChecker::MatchOne(const CSSSelector* selector,
            IsA<HTMLDocument>(element->GetDocument()));
       return AttributeMatches(*element, selector->Attribute(),
                               selector->Value(), case_insensitive);
+    }
+    case CSSSelector::kPseudoElement: {
+      PseudoId selector_pseudo_id =
+          CSSSelector::GetPseudoId(selector->GetPseudoType());
+
+      if (pseudo_element) {
+        if (pseudo_element->parentElement()->IsPseudoElement()) {
+          // We only support selectors with a single pseudo-element selector,
+          // which can never match nested pseudo-elements.
+          return false;
+        }
+        return pseudo_element->GetPseudoIdForStyling() == selector_pseudo_id;
+      } else if (pseudo_id != kPseudoIdNone) {
+        return pseudo_id == selector_pseudo_id;
+      } else {
+        dynamic_pseudo = selector_pseudo_id;
+        return true;
+      }
     }
     default:
       NOTREACHED();
@@ -208,12 +285,31 @@ bool EasySelectorChecker::AttributeMatches(const Element& element,
                                            const AtomicString& value,
                                            bool case_insensitive) {
   element.SynchronizeAttribute(attr.LocalName());
+
+#if !DCHECK_IS_ON()
+  // In non-debug builds, we test the Bloom filter here and exit early
+  // if the attribute could not exist on the element. For non-debug builds,
+  // we go through the entire normal operation but verify that the Bloom
+  // filter would not erroneously reject a match.
+  if (!element.CouldHaveAttribute(attr)) {
+    return false;
+  }
+#endif
+
   AttributeCollection attributes = element.AttributesWithoutUpdate();
   for (const auto& attribute_item : attributes) {
     if (AttributeItemHasName(attribute_item, element, attr)) {
+#if DCHECK_IS_ON()
+      // NOTE: Even if the value doesn't match, we want to check that the
+      // attribute name was properly found.
+      DCHECK(element.CouldHaveAttribute(attr))
+          << element << " should have contained attribute " << attr
+          << ", Bloom bits on element are "
+          << element.AttributeOrClassBloomFilter();
+#endif
       return attribute_item.Value() == value ||
              (case_insensitive &&
-              EqualIgnoringASCIICase(attribute_item.Value(), value));
+              EqualIgnoringAsciiCase(attribute_item.Value(), value));
     }
   }
   return false;

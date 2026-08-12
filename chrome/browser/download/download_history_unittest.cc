@@ -37,7 +37,7 @@
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "chrome/browser/extensions/api/downloads/downloads_api.h"
 #endif
 
@@ -187,7 +187,7 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
   void ExpectNoDownloadsRemoved() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     content::RunAllPendingInMessageLoop(content::BrowserThread::UI);
-    EXPECT_EQ(0, static_cast<int>(remove_downloads_.size()));
+    EXPECT_EQ(0u, remove_downloads_.size());
   }
 
   void ExpectDownloadsRemoved(const IdSet& ids) {
@@ -226,7 +226,11 @@ class DownloadHistoryTest : public testing::Test {
   DownloadHistoryTest& operator=(const DownloadHistoryTest&) = delete;
 
  protected:
-  void TearDown() override { download_history_.reset(); }
+  void TearDown() override {
+    history_ = nullptr;
+    manager_observer_ = nullptr;
+    download_history_.reset();
+  }
 
   NiceMock<content::MockDownloadManager>& manager() { return *manager_.get(); }
   download::MockDownloadItem& item(size_t index) { return *items_[index]; }
@@ -469,7 +473,7 @@ class DownloadHistoryTest : public testing::Test {
     EXPECT_CALL(manager(), GetDownload(row->id))
         .WillRepeatedly(Return(&item(index)));
     EXPECT_CALL(item(index), IsTemporary()).WillRepeatedly(Return(false));
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
     new extensions::DownloadedByExtension(&item(index), row->by_ext_id,
                                           row->by_ext_name);
 #endif
@@ -501,10 +505,9 @@ class DownloadHistoryTest : public testing::Test {
   content::BrowserTaskEnvironment task_environment_;
   std::vector<std::unique_ptr<StrictMockDownloadItem>> items_;
   std::unique_ptr<NiceMock<content::MockDownloadManager>> manager_;
-  raw_ptr<FakeHistoryAdapter, DanglingUntriaged> history_ = nullptr;
+  raw_ptr<FakeHistoryAdapter> history_ = nullptr;
   std::unique_ptr<DownloadHistory> download_history_;
-  raw_ptr<content::DownloadManager::Observer, DanglingUntriaged>
-      manager_observer_ = nullptr;
+  raw_ptr<content::DownloadManager::Observer> manager_observer_ = nullptr;
   size_t download_created_index_ = 0;
   base::test::ScopedFeatureList feature_list_;
   TestingProfile profile_;
@@ -859,6 +862,31 @@ TEST_F(DownloadHistoryTest, CreateInProgressDownload) {
   CallOnDownloadCreated(0);
   ExpectNoDownloadCreated();
   EXPECT_FALSE(DownloadHistory::IsPersisted(&item(0)));
+}
+
+// Test that in-progress save package updates are only persisted when fields
+// actually change.
+TEST_F(DownloadHistoryTest, InProgressSavePackageNoopSecondUpdate) {
+  CreateDownloadHistory({});
+
+  history::DownloadRow row;
+  InitBasicItem(FILE_PATH_LITERAL("/foo/bar.pdf"), "http://example.com/bar.pdf",
+                "http://example.com/referrer.html",
+                download::DownloadItem::IN_PROGRESS, &row);
+  EXPECT_CALL(item(0), IsSavePackageDownload()).WillRepeatedly(Return(true));
+
+  // Save package downloads are persisted even while in progress.
+  CallOnDownloadCreated(0);
+  ExpectDownloadCreated(row);
+
+  EXPECT_CALL(item(0), GetReceivedBytes()).WillRepeatedly(Return(200));
+  item(0).NotifyObserversDownloadUpdated();
+  row.received_bytes = 200;
+  ExpectDownloadUpdated(row, false);
+
+  // No additional update should be issued if the state is unchanged.
+  item(0).NotifyObserversDownloadUpdated();
+  ExpectNoDownloadUpdated();
 }
 
 // Test that in-progress download already in history will be updated once it

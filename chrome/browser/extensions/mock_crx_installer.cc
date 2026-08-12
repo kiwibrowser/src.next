@@ -4,10 +4,14 @@
 
 #include "chrome/browser/extensions/mock_crx_installer.h"
 
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
 namespace extensions {
 
-MockCrxInstaller::MockCrxInstaller(ExtensionService* frontend)
-    : CrxInstaller(frontend->AsExtensionServiceWeakPtr(), nullptr, nullptr) {}
+MockCrxInstaller::MockCrxInstaller(content::BrowserContext* context)
+    : CrxInstaller(context, nullptr, nullptr) {}
 
 MockCrxInstaller::~MockCrxInstaller() = default;
 

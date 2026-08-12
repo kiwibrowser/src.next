@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/paint/line_relative_rect.h"
 #include "third_party/blink/renderer/core/paint/text_decoration_info.h"
 #include "third_party/blink/renderer/core/paint/text_paint_style.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
 #include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
@@ -36,7 +37,6 @@ class TextDecorationPainter;
 class TextPainter;
 struct LayoutSelectionStatus;
 struct PaintInfo;
-struct PhysicalOffset;
 struct TextFragmentPaintInfo;
 
 using HighlightLayer = HighlightOverlay::HighlightLayer;
@@ -92,6 +92,7 @@ class CORE_EXPORT HighlightPainter {
         Node* node,
         const Document& document,
         const ComputedStyle& style,
+        const PaintInfo& paint_info,
         const std::optional<AffineTransform>& rotation);
 
     void PaintSelectedText(TextPainter& text_painter,
@@ -189,7 +190,6 @@ class CORE_EXPORT HighlightPainter {
   // PaintCase() == kFastSpellingGrammar only
   void FastPaintSpellingGrammarDecorations();
 
-  // PaintCase() == kOverlay only
   void PaintOriginatingShadow(const TextPaintStyle&, DOMNodeId);
   void PaintHighlightOverlays(const TextPaintStyle&,
                               DOMNodeId,
@@ -210,6 +210,12 @@ class CORE_EXPORT HighlightPainter {
 
   SelectionPaintState* Selection() { return selection_; }
 
+  // Sets the decoration rect for the originating content, pre-trimmed by
+  // text-decoration-skip-spaces.
+  void SetOriginatingDecorationRect(const LineRelativeRect& rect) {
+    originating_decoration_rect_ = rect;
+  }
+
  private:
   struct HighlightEdgeInfo {
     unsigned offset;
@@ -223,7 +229,6 @@ class CORE_EXPORT HighlightPainter {
                                            unsigned end_offset);
   const PhysicalRect ComputeBackgroundRectForSelection(unsigned start_offset,
                                                        unsigned end_offset);
-  Vector<LayoutSelectionStatus> GetHighlights(const HighlightLayer& layer);
   void FastPaintSpellingGrammarDecorations(const Text& text_node,
                                            const StringView& text,
                                            const DocumentMarkerVector& markers);
@@ -259,6 +264,11 @@ class CORE_EXPORT HighlightPainter {
                                      unsigned paint_start_offset,
                                      unsigned paint_end_offset);
 
+  void PaintBackgroundForGlicMarker(const DocumentMarker* marker,
+                                    const StringView& text,
+                                    unsigned paint_start_offset,
+                                    unsigned paint_end_offset);
+
   const TextFragmentPaintInfo& fragment_paint_info_;
 
   // Offsets of the fragment in DOM space, or nullopt if |node_| is not Text or
@@ -291,6 +301,7 @@ class CORE_EXPORT HighlightPainter {
   HeapVector<HighlightPart> parts_;
   Vector<HighlightEdgeInfo> edges_info_;
   Case paint_case_;
+  std::optional<LineRelativeRect> originating_decoration_rect_;
 };
 
 }  // namespace blink

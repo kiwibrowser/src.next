@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_LOCAL_FRAME_MOJO_HANDLER_H_
 
 #include "build/build_config.h"
-#include "cc/input/browser_controls_offset_tags_info.h"
+#include "cc/input/browser_controls_offset_tag_modifications.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/confidence_level.mojom-blink.h"
 #include "third_party/blink/public/mojom/device_posture/device_posture_provider.mojom-blink.h"
@@ -28,6 +28,10 @@
 #if BUILDFLAG(IS_MAC)
 #include "third_party/blink/public/mojom/input/text_input_host.mojom-blink.h"
 #endif
+
+namespace base {
+class UnguessableToken;
+}
 
 namespace blink {
 
@@ -75,16 +79,7 @@ class LocalFrameMojoHandler
   mojom::blink::BackForwardCacheControllerHost&
   BackForwardCacheControllerHostRemote();
 
-#if BUILDFLAG(IS_MAC)
-  mojom::blink::TextInputHost& TextInputHost();
-  void ResetTextInputHostForTesting();
-  void RebindTextInputHostForTesting();
-#endif
-
   mojom::blink::DevicePostureType GetDevicePosture();
-  void OverrideDevicePostureForEmulation(
-      mojom::blink::DevicePostureType device_posture_param);
-  void DisableDevicePostureOverrideForEmulation();
 
  private:
   Page* GetPage() const;
@@ -103,14 +98,18 @@ class LocalFrameMojoHandler
   void GetTextSurroundingSelection(
       uint32_t max_length,
       GetTextSurroundingSelectionCallback callback) final;
-  void SendInterventionReport(const String& id, const String& message) final;
+  void SendInterventionReport(
+      const String& id,
+      const String& message,
+      const std::optional<FrameToken>& child_frame_token) final;
   void SetFrameOwnerProperties(
       mojom::blink::FrameOwnerPropertiesPtr properties) final;
   void NotifyUserActivation(
       mojom::blink::UserActivationNotificationType notification_type) final;
   void NotifyVirtualKeyboardOverlayRect(const gfx::Rect& keyboard_rect) final;
+  void ShowInterestInElement(int) final;
   void AddMessageToConsole(mojom::blink::ConsoleMessageLevel level,
-                           const WTF::String& message,
+                           const String& message,
                            bool discard_duplicates) final;
   void SwapInImmediately() final;
   void CheckCompleted() final;
@@ -123,7 +122,9 @@ class LocalFrameMojoHandler
   void SaveImageAt(const gfx::Point& window_point) final;
   void ReportBlinkFeatureUsage(const Vector<mojom::blink::WebFeature>&) final;
   void RenderFallbackContent() final;
-  void BeforeUnload(bool is_reload, BeforeUnloadCallback callback) final;
+  void BeforeUnload(bool is_reload,
+                    bool force_to_proceed,
+                    BeforeUnloadCallback callback) final;
   void MediaPlayerActionAt(const gfx::Point& window_point,
                            mojom::blink::MediaPlayerActionPtr action) final;
   void RequestVideoFrameAtWithBoundsHint(
@@ -146,13 +147,13 @@ class LocalFrameMojoHandler
   void OnFrameVisibilityChanged(mojom::blink::FrameVisibility visibility) final;
   void PostMessageEvent(
       const std::optional<RemoteFrameToken>& source_frame_token,
-      const String& source_origin,
-      const String& target_origin,
+      const scoped_refptr<const SecurityOrigin>& source_origin,
+      const scoped_refptr<const SecurityOrigin>& target_origin,
       BlinkTransferableMessage message) final;
   void JavaScriptMethodExecuteRequest(
       const String& object_name,
       const String& method_name,
-      base::Value::List arguments,
+      base::ListValue arguments,
       bool wants_result,
       JavaScriptMethodExecuteRequestCallback callback) final;
   void JavaScriptExecuteRequest(
@@ -171,9 +172,18 @@ class LocalFrameMojoHandler
       bool wants_result,
       int32_t world_id,
       JavaScriptExecuteRequestInIsolatedWorldCallback callback) final;
+  void InvokeScriptToolForInspector(
+      const base::UnguessableToken& invocation_id,
+      const String& tool_name,
+      const String& input_arguments,
+      InvokeScriptToolForInspectorCallback callback) final;
+  void NotifyInspectorOfCrossDocumentScriptToolResult(
+      const base::UnguessableToken& invocation_id) final;
 #if BUILDFLAG(IS_MAC)
-  void GetCharacterIndexAtPoint(const gfx::Point& point) final;
-  void GetFirstRectForRange(const gfx::Range& range) final;
+  void GetCharacterIndexAtPoint(const base::UnguessableToken& request_token,
+                                const gfx::Point& point) final;
+  void GetFirstRectForRange(const base::UnguessableToken& request_token,
+                            const gfx::Range& range) final;
   void GetStringForRange(const gfx::Range& range,
                          GetStringForRangeCallback callback) final;
 #endif
@@ -208,8 +218,7 @@ class LocalFrameMojoHandler
       mojom::blink::NavigationApiEntryRestoreReason) final;
   void UpdatePrerenderURL(const KURL& matched_url,
                           UpdatePrerenderURLCallback callback) final;
-  void NotifyNavigationApiOfDisposedEntries(
-      const WTF::Vector<WTF::String>&) final;
+  void NotifyNavigationApiOfDisposedEntries(const Vector<String>&) final;
   void TraverseCancelled(const String& navigation_api_key,
                          mojom::blink::TraverseCancelledReason reason) final;
   void DispatchNavigateEventForCrossDocumentTraversal(
@@ -230,15 +239,17 @@ class LocalFrameMojoHandler
       base::TimeTicks redirect_time,
       base::TimeTicks request_start,
       base::TimeTicks response_start,
+      base::TimeTicks completion_time,
       uint32_t response_code,
-      const WTF::String& mime_type,
+      const String& mime_type,
       network::mojom::blink::LoadTimingInfoPtr load_timing_info,
       net::HttpConnectionInfo connection_info,
-      const WTF::String& alpn_negotiated_protocol,
+      const String& alpn_negotiated_protocol,
       bool is_secure_transport,
       bool is_validated,
-      const WTF::String& normalized_server_timing,
-      const ::network::URLLoaderCompletionStatus& completion_status) final;
+      const String& normalized_server_timing,
+      mojom::blink::SubframeResourceLengthsPtr resource_lengths) final;
+  void GetScrollPosition(GetScrollPositionCallback callback) final;
 
   // blink::mojom::LocalMainFrame overrides:
   void AnimateDoubleTapZoom(const gfx::Point& point,
@@ -256,25 +267,30 @@ class LocalFrameMojoHandler
   void InstallCoopAccessMonitor(
       const FrameToken& accessed_window,
       network::mojom::blink::CrossOriginOpenerPolicyReporterParamsPtr
-          coop_reporter_params,
-      bool is_in_same_virtual_coop_related_group) final;
+          coop_reporter_params) final;
   void UpdateBrowserControlsState(
       cc::BrowserControlsState constraints,
       cc::BrowserControlsState current,
       bool animate,
-      const std::optional<cc::BrowserControlsOffsetTagsInfo>& offset_tags_info)
-      override;
-  void Discard() final;
+      const std::optional<cc::BrowserControlsOffsetTagModifications>&
+          offset_tag_modifications) override;
+  void Discard(
+      mojom::blink::LocalMainFrame::DiscardCallback completion_callback) final;
   void FinalizeNavigationConfidence(
       double randomized_trigger_rate,
       mojom::blink::ConfidenceLevel confidence) final;
   void SetV8CompileHints(base::ReadOnlySharedMemoryRegion data) override;
+  void NotifyRelatedPagesFinalized(bool has_other_related_pages) final;
 
   // mojom::FullscreenVideoElementHandler implementation:
   void RequestFullscreenVideoElement() final;
 
   // DevicePostureClient implementation:
   void OnPostureChanged(mojom::blink::DevicePostureType posture) final;
+
+#if BUILDFLAG(IS_ANDROID)
+  void PerformFullContentSpellCheck() final;
+#endif
 
   Member<blink::LocalFrame> frame_;
 

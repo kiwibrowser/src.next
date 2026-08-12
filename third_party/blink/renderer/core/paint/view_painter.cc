@@ -26,7 +26,6 @@
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -90,13 +89,15 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   bool painting_background_in_contents_space =
       paint_info.IsPaintingBackgroundInContentsSpace();
   bool paints_hit_test_data =
-      (RuntimeEnabledFeatures::HitTestOpaquenessEnabled() &&
-       painting_background_in_contents_space) ||
+      painting_background_in_contents_space ||
       ObjectPainter(layout_view).ShouldRecordSpecialHitTestData(paint_info);
 
   Element* element = DynamicTo<Element>(layout_view.GetNode());
-  bool paints_region_capture_data =
-      element && element->GetRegionCaptureCropId() &&
+
+  bool paints_element_tracking_id_or_region_capture_data =
+      element &&
+      (element->GetRegionCaptureCropId() ||
+       element->GetTrackedElementSubRects()) &&
       // TODO(wangxianzhu): This is to avoid the side-effect of
       // HitTestOpaqueness on region capture data. Verify if the side-effect
       // really matters.
@@ -113,7 +114,8 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
     return false;
   }();
   if (!layout_view.HasBoxDecorationBackground() && !paints_hit_test_data &&
-      !paints_scroll_hit_test && !paints_region_capture_data &&
+      !paints_scroll_hit_test &&
+      !paints_element_tracking_id_or_region_capture_data &&
       !is_represented_via_pseudo_elements) {
     return;
   }
@@ -155,7 +157,7 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   bool painted_separate_effect = false;
 
   bool should_apply_root_background_behavior =
-      document.IsHTMLDocument() || document.IsXHTMLDocument();
+      ShouldApplyRootBackgroundBehavior(document);
 
   bool should_paint_background = !paint_info.ShouldSkipBackground() &&
                                  (layout_view.HasBoxDecorationBackground() ||
@@ -221,11 +223,11 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
                            *background_client);
   }
 
-  if (paints_region_capture_data) {
+  if (paints_element_tracking_id_or_region_capture_data) {
     BoxPainter(layout_view)
-        .RecordRegionCaptureData(paint_info,
-                                 PhysicalRect(pixel_snapped_background_rect),
-                                 *background_client);
+        .RecordTrackedElementAndRegionCaptureData(
+            paint_info, PhysicalRect(pixel_snapped_background_rect),
+            *background_client);
   }
 
   // Record the scroll hit test after the non-scrolling background so
@@ -328,11 +330,11 @@ void ViewPainter::PaintRootElementGroup(
   if (!root_object || !root_object->IsBox()) {
     background_renderable = false;
   } else {
-    const auto& view_contents_state =
-        layout_view.FirstFragment().ContentsProperties();
-    if (view_contents_state != background_paint_state) {
+    const auto& view_contents_transform =
+        layout_view.FirstFragment().ContentsTransform();
+    if (&view_contents_transform != &background_paint_state.Transform()) {
       GeometryMapper::SourceToDestinationRect(
-          view_contents_state.Transform(), background_paint_state.Transform(),
+          view_contents_transform, background_paint_state.Transform(),
           paint_rect);
       if (paint_rect.IsEmpty())
         background_renderable = false;
@@ -342,6 +344,7 @@ void ViewPainter::PaintRootElementGroup(
       background_image_offset = PhysicalOffset(paint_rect.origin());
     } else {
       background_image_offset = -root_object->FirstFragment().PaintOffset();
+      background_image_offset += PhysicalOffset(paint_rect.origin());
     }
 
     if (box_fragment_.GetBoxType() == PhysicalFragment::kPageContainer) {
@@ -374,12 +377,10 @@ void ViewPainter::PaintRootElementGroup(
 
   recorder.UniteVisualRect(paint_rect);
 
-  BoxPainterBase::FillLayerOcclusionOutputList reversed_paint_list;
-  bool should_draw_background_in_separate_buffer =
+  const FillLayer& background_layers = style.BackgroundLayers();
+  auto [should_draw_background_in_separate_buffer, last_background_layer] =
       BoxModelObjectPainter(layout_view)
-          .CalculateFillLayerOcclusionCulling(reversed_paint_list,
-                                              style.BackgroundLayers());
-  DCHECK(reversed_paint_list.size());
+          .AnalyzeFillLayersForPainting(background_layers);
 
   if (painted_separate_effect) {
     should_draw_background_in_separate_buffer = true;
@@ -433,11 +434,14 @@ void ViewPainter::PaintRootElementGroup(
   BoxBackgroundPaintContext bg_paint_context(layout_view, &box_fragment_,
                                              background_image_offset);
   BoxModelObjectPainter box_model_painter(layout_view);
-  for (const auto* fill_layer : base::Reversed(reversed_paint_list)) {
-    box_model_painter.PaintFillLayer(paint_info, Color(), *fill_layer,
-                                     PhysicalRect(paint_rect),
-                                     kBackgroundBleedNone, bg_paint_context);
-  }
+  FillLayer::IterateFillLayersInReverseOrder(
+      &background_layers, last_background_layer,
+      [&box_model_painter, paint_info, paint_rect,
+       bg_paint_context](const FillLayer& fill_layer) {
+        box_model_painter.PaintFillLayer(
+            paint_info, Color(), fill_layer, PhysicalRect(paint_rect),
+            kBackgroundBleedNone, bg_paint_context);
+      });
 
   if (should_draw_background_in_separate_buffer && !painted_separate_effect)
     context.EndLayer();
@@ -452,6 +456,10 @@ PhysicalRect ViewPainter::BackgroundRect() const {
     return box_fragment_.LocalRect();
   }
   return GetLayoutView().BackgroundRect();
+}
+
+bool ViewPainter::ShouldApplyRootBackgroundBehavior(const Document& document) {
+  return document.IsHTMLDocument() || document.IsXHTMLDocument();
 }
 
 }  // namespace blink

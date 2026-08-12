@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <string_view>
 
-#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -57,7 +57,7 @@ class OmniboxFocusInteractiveTest : public ExtensionBrowserTest {
 
     // Prevent a focus-stealing focus bubble that warns the user that "An
     // extension has changed what page is shown when you open a new tab."
-    ExtensionPrefs* prefs = ExtensionPrefs::Get(browser()->profile());
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
     prefs->UpdateExtensionPref(extension->id(),
                                kNtpOverridingExtensionAcknowledged,
                                base::Value(true));
@@ -66,9 +66,8 @@ class OmniboxFocusInteractiveTest : public ExtensionBrowserTest {
   }
 
   void OpenNewTab() {
-    chrome::NewTab(browser());
-    content::WebContents* web_contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
+    chrome::NewTab(browser(), NewTabTypes::kNoUserAction);
+    content::WebContents* web_contents = GetActiveWebContents();
 
     // Wait until chrome://newtab navigation finished.
     content::TestNavigationObserver nav_observer(web_contents);
@@ -81,7 +80,7 @@ class OmniboxFocusInteractiveTest : public ExtensionBrowserTest {
 
 // Verify that setting window.location in an NTP-replacement extension results
 // in the NTP web contents being focused - this is a regression test for
-// https://crbug.com/1027719.  We expect the tab contents to be focused when
+// https://crbug.com/40660393.  We expect the tab contents to be focused when
 // navigating away from the NTP - this is what happens in the location
 // assignment case.
 IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
@@ -107,8 +106,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
   // Open the new tab, because of the NTP extension behavior, the focus should
   // move to the tab contents.
   OpenNewTab();
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   EXPECT_EQ(final_ntp_url, web_contents->GetLastCommittedURL());
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
@@ -138,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
 }
 
 // Verify that navigating via chrome.tabs.update does not steal the focus from
-// the omnibox.  This is a regression test for https://crbug.com/1085779.
+// the omnibox.  This is a regression test for https://crbug.com/40693812.
 IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
                        NtpReplacementExtension_TabsUpdate) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -159,8 +157,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
 
   // Verify that ext_ntp.html is loaded in place of the NTP and that the omnibox
   // is focused.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   EXPECT_EQ("NTP replacement extension",
             content::EvalJs(web_contents, "document.body.innerText"));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
@@ -191,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
 
 // Verify that calling window.location.replace in an NTP-replacement extension
 // results in the NTP web contents being focused.  See also
-// https://crbug.com/1027719 (which talks about a similar, but a slightly
+// https://crbug.com/40660393 (which talks about a similar, but a slightly
 // different scenario of assigning to window.location).  We expect the tab
 // contents to be focused when navigating away from the NTP - this is what
 // happens in the location replacement case.
@@ -218,8 +215,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
   // Open the new tab, because of the NTP extension behavior, the focus should
   // move to the tab contents.
   OpenNewTab();
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   EXPECT_EQ(final_ntp_url, web_contents->GetLastCommittedURL());
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
@@ -250,8 +246,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
 
   // Verify that ext_ntp.html is loaded in place of the NTP and that the omnibox
   // is focused.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   EXPECT_EQ("NTP replacement extension",
             content::EvalJs(web_contents, "document.body.innerText"));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
@@ -264,7 +259,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
                               "history.pushState({}, '', '/push-state')");
   nav_observer.Wait();
   EXPECT_EQ(2, web_contents->GetController().GetEntryCount());
-  EXPECT_EQ(extension->GetResourceURL("/push-state"),
+  EXPECT_EQ(extension->GetResourceURL("push-state"),
             web_contents->GetController().GetLastCommittedEntry()->GetURL());
 
   // Verify that pushState didn't make the focus move away from the omnibox.
@@ -295,8 +290,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
 
   // Verify that ext_ntp.html is loaded in place of the NTP and that the omnibox
   // is focused.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   EXPECT_EQ("NTP replacement extension",
             content::EvalJs(web_contents, "document.body.innerText"));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
@@ -336,7 +330,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, OmniboxFocusStealing) {
 
   // Navigate to an extension resource.
   GURL ext_url = extension->GetResourceURL("ext.html");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), ext_url));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), ext_url));
 
   // Focus the location bar / omnibox.
   chrome::FocusLocationBar(browser());
@@ -348,8 +342,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, OmniboxFocusStealing) {
   // ShouldFork/OpenURL code path and might have stolen the focus from the
   // location bar / omnibox.
   GURL web_url = embedded_test_server()->GetURL("/title1.html");
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   content::TestFrameNavigationObserver nav_observer(
       web_contents->GetPrimaryMainFrame());
   ASSERT_TRUE(content::ExecJs(
@@ -362,7 +355,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, OmniboxFocusStealing) {
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 }
 
-// Tab focus should not be stolen by the omnibox - https://crbug.com/1127220.
+// Tab focus should not be stolen by the omnibox - https://crbug.com/40718931.
 IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, TabFocusStealingFromOopif) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -378,8 +371,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, TabFocusStealingFromOopif) {
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // Focus the tab contents.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   web_contents->Focus();
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
@@ -406,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, TabFocusStealingFromOopif) {
                                                subframe_url)));
   const auto frames =
       CollectAllRenderFrameHosts(web_contents->GetPrimaryPage());
-  const auto it = base::ranges::find(
+  const auto it = std::ranges::find(
       frames, subframe_url, &content::RenderFrameHost::GetLastCommittedURL);
   ASSERT_NE(it, frames.cend());
   content::RenderFrameHost* subframe = *it;
@@ -416,9 +408,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, TabFocusStealingFromOopif) {
   // will not be triggered by the regular BeginNavigation path, but instead
   // will go through content::RenderFrameProxyHost::OpenURL.
   content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
-  EXPECT_NE(subframe->GetLastCommittedURL().scheme(),
-            main_frame->GetLastCommittedURL().scheme());
-  EXPECT_NE(subframe->GetProcess()->GetID(), main_frame->GetProcess()->GetID());
+  EXPECT_NE(subframe->GetLastCommittedURL().GetScheme(),
+            main_frame->GetLastCommittedURL().GetScheme());
+  EXPECT_NE(subframe->GetProcess()->GetDeprecatedID(),
+            main_frame->GetProcess()->GetDeprecatedID());
 
   // Trigger a subframe-initiated navigation of the main frame.
   const char kLinkClickingScriptTemplate[] = R"(
@@ -455,7 +448,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest, TabFocusStealingFromOopif) {
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 }
 
-// Tab focus should not be stolen by the omnibox - https://crbug.com/1127220.
+// Tab focus should not be stolen by the omnibox - https://crbug.com/40718931.
 IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
                        TabFocusStealingFromMainFrame) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -466,8 +459,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveTest,
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // Focus the tab contents.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   web_contents->Focus();
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
@@ -542,14 +534,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxFocusInteractiveFencedFrameTest,
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // Focus the tab contents.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   web_contents->Focus();
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // FencedFrameTestHelper uses eval() function that is blocked by the
-  // document's CSP on this page. So need to maually create a fenced frame for
+  // document's CSP on this page. So need to manually create a fenced frame for
   // avoiding the CSP policy.
   constexpr char kAddFencedFrameScript[] = R"({
       const fenced_frame = document.createElement('fencedframe');

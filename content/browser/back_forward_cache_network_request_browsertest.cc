@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "content/browser/back_forward_cache_browsertest.h"
 
+#include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
+#include "net/test/embedded_test_server/expectation_handler.h"
 #include "third_party/blink/public/common/features.h"
 
 // This file contains back-/forward-cache tests for fetching from the network.
@@ -29,8 +31,8 @@ using NotRestoredReason = BackForwardCacheMetrics::NotRestoredReason;
 // kLoadingTaskUnfreezable, a page will keep processing the in-flight network
 // requests while the page is frozen in BackForwardCache.
 IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, FetchWhileStoring) {
-  net::test_server::ControllableHttpResponse fetch_response(
-      embedded_test_server(), "/fetch");
+  net::test_server::ExpectationHandler handler(embedded_test_server());
+  handler.OnRequest("/fetch").RespondWith("text/html", "TheResponse");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url_a(embedded_test_server()->GetURL("a.com", "/title1.html"));
@@ -50,10 +52,6 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, FetchWhileStoring) {
 
   // 2) Navigate to B.
   EXPECT_TRUE(NavigateToURL(shell(), url_b));
-
-  fetch_response.WaitForRequest();
-  fetch_response.Send(net::HTTP_OK, "text/html", "TheResponse");
-  fetch_response.Done();
   EXPECT_TRUE(rfh_a->IsInBackForwardCache());
   EXPECT_FALSE(delete_observer_rfh_a.deleted());
 
@@ -113,13 +111,31 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
                     {}, FROM_HERE);
 }
 
-// Eviction is triggered when a keepalive fetch request gets redirected while
-// the page is in back-forward cache.
-// TODO(crbug.com/40724916): We should not trigger eviction on redirects
-// of keepalive fetches.
-// TODO(crbug.com/40874525): Disabled for flakiness.
-IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
-                       DISABLED_KeepAliveFetchRedirectedWhileStoring) {
+class BackForwardCacheKeepAliveBrowserMigrationTest
+    : public BackForwardCacheBrowserTest,
+      public testing::WithParamInterface<bool> {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    if (IsKeepAliveInBrowserMigrationEnabled()) {
+      EnableFeatureAndSetParams(blink::features::kKeepAliveInBrowserMigration,
+                                "", "");
+    } else {
+      DisableFeature(blink::features::kKeepAliveInBrowserMigration);
+    }
+    BackForwardCacheBrowserTest::SetUpCommandLine(command_line);
+  }
+  bool IsKeepAliveInBrowserMigrationEnabled() const { return GetParam(); }
+};
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         BackForwardCacheKeepAliveBrowserMigrationTest,
+                         testing::Bool());
+
+// When a keepalive fetch request gets redirected while the page is in
+// back-forward cache, we no longer evict the page if keepalive browser
+// migration flag is on.
+IN_PROC_BROWSER_TEST_P(BackForwardCacheKeepAliveBrowserMigrationTest,
+                       KeepAliveFetchRedirectedWhileStoring) {
   net::test_server::ControllableHttpResponse fetch_response(
       embedded_test_server(), "/fetch");
   net::test_server::ControllableHttpResponse fetch2_response(
@@ -139,7 +155,10 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
                      "my_fetch = fetch('/fetch', { keepalive: true });");
 
   // 2) Navigate to B.
+  PageLifecycleStateManagerTestDelegate delegate(
+      rfh_a->render_view_host()->GetPageLifecycleStateManager());
   EXPECT_TRUE(NavigateToURL(shell(), url_b));
+  ASSERT_TRUE(delegate.WaitForInBackForwardCacheAck());
 
   // Page A is initially stored in the back-forward cache.
   EXPECT_TRUE(rfh_a->IsInBackForwardCache());
@@ -151,23 +170,31 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
       "Location: /fetch2");
   fetch_response.Done();
 
-  // Ensure that the request to /fetch2 was never sent (because the page is
-  // immediately evicted) by checking after 3 seconds.
-  // TODO(crbug.com/40724916): We should not trigger eviction on
-  // redirects of keepalive fetches and the redirect request should be sent.
-  base::RunLoop loop;
-  base::OneShotTimer timer;
-  timer.Start(FROM_HERE, base::Seconds(3), loop.QuitClosure());
-  loop.Run();
-  EXPECT_EQ(nullptr, fetch2_response.http_request());
-
-  // Page A should be evicted from the back-forward cache.
-  delete_observer_rfh_a.WaitUntilDeleted();
-
-  // 3) Go back to A.
-  ASSERT_TRUE(HistoryGoBack(web_contents()));
-  ExpectNotRestored({NotRestoredReason::kNetworkRequestRedirected}, {}, {}, {},
-                    {}, FROM_HERE);
+  if (IsKeepAliveInBrowserMigrationEnabled()) {
+    // The browser-side loader immediately follows the redirect.
+    fetch2_response.WaitForRequest();
+    fetch2_response.Send("HTTP/1.1 200 OK\r\n\r\n");
+    fetch2_response.Done();
+    // Page A should remain in the back-forward cache.
+    EXPECT_TRUE(rfh_a->IsInBackForwardCache());
+    // 3) Go back to A, expecting it to be restored successfully.
+    ASSERT_TRUE(HistoryGoBack(web_contents()));
+    ExpectRestored(FROM_HERE);
+  } else {
+    // Ensure that the request to /fetch2 was never sent (because the page is
+    // immediately evicted) by checking after 3 seconds.
+    base::RunLoop loop;
+    base::OneShotTimer timer;
+    timer.Start(FROM_HERE, base::Seconds(3), loop.QuitClosure());
+    loop.Run();
+    EXPECT_EQ(nullptr, fetch2_response.http_request());
+    // The redirect cannot be followed while frozen, so the page is evicted.
+    delete_observer_rfh_a.WaitUntilDeleted();
+    // 3) Go back to A, expecting it not to be restored due to eviction.
+    ASSERT_TRUE(HistoryGoBack(web_contents()));
+    ExpectNotRestored({NotRestoredReason::kNetworkRequestRedirected}, {}, {},
+                      {}, {}, FROM_HERE);
+  }
 }
 
 class BackForwardCacheDrainedAsBytesConsumerTest
@@ -381,9 +408,17 @@ INSTANTIATE_TEST_SUITE_P(
       }
     });
 
+// TODO(crbug.com/448737648): Flaky on MacOS.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch \
+  DISABLED_PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch
+#else
+#define MAYBE_PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch \
+  PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch
+#endif
 IN_PROC_BROWSER_TEST_P(
     BackForwardCacheNetworkLimitBrowserTest,
-    PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch) {
+    MAYBE_PageWithDrainedDatapipeRequestsForScriptStreamerShouldBeEvictedIfStreamedTooMuch) {
   net::test_server::ControllableHttpResponse response(embedded_test_server(),
                                                       "/small_script.js");
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -1125,21 +1160,8 @@ IN_PROC_BROWSER_TEST_F(
                     FROM_HERE);
 }
 
-class BackForwardCacheWithKeepaliveSupportBrowserTest
-    : public BackForwardCacheBrowserTest {
- public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    EnableFeatureAndSetParams(
-        blink::features::kBackForwardCacheWithKeepaliveRequest, "", "");
-
-    BackForwardCacheBrowserTest::SetUpCommandLine(command_line);
-  }
-};
-
-// With the feature, keepalive doesn't prevent the page from entering into the
-// bfcache.
-IN_PROC_BROWSER_TEST_F(BackForwardCacheWithKeepaliveSupportBrowserTest,
-                       KeepAliveFetch) {
+// Keepalive doesn't prevent the page from entering into the bfcache.
+IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, KeepAliveFetch) {
   net::test_server::ControllableHttpResponse fetch_response(
       embedded_test_server(), "/fetch");
   ASSERT_TRUE(embedded_test_server()->Start());

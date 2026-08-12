@@ -50,8 +50,6 @@ class MockExtensionSystem : public ExtensionSystem {
   const base::OneShotEvent& ready() const override;
   bool is_ready() const override;
   ContentVerifier* content_verifier() override;
-  std::unique_ptr<ExtensionSet> GetDependentExtensions(
-      const Extension* extension) override;
   void InstallUpdate(const ExtensionId& extension_id,
                      const std::string& public_key,
                      const base::FilePath& temp_dir,
@@ -59,9 +57,7 @@ class MockExtensionSystem : public ExtensionSystem {
                      InstallUpdateCallback install_update_callback) override;
   void PerformActionBasedOnOmahaAttributes(
       const ExtensionId& extension_id,
-      const base::Value::Dict& attributes) override;
-  bool FinishDelayedInstallationIfReady(const ExtensionId& extension_id,
-                                        bool install_immediately) override;
+      const base::DictValue& attributes) override;
 
  private:
   raw_ptr<content::BrowserContext> browser_context_;

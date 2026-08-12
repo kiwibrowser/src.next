@@ -4,14 +4,13 @@
 
 #include "net/base/mime_util.h"
 
+#include <algorithm>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -48,15 +47,19 @@ TEST(MimeUtilTest, GetWellKnownMimeTypeFromExtension) {
       {FILE_PATH_LITERAL("ics"), "text/calendar"},
       {FILE_PATH_LITERAL("m3u8"), "application/x-mpegurl"},
       {FILE_PATH_LITERAL("csv"), "text/csv"},
+      {FILE_PATH_LITERAL("mkv"), "video/matroska"},
+      {FILE_PATH_LITERAL("mka"), "audio/matroska"},
+      {FILE_PATH_LITERAL("md"), "text/markdown"},
       {FILE_PATH_LITERAL("not an extension / for sure"), nullptr},
       {containsNullByte, nullptr}};
 
   for (const auto& test : tests) {
     std::string mime_type;
-    if (GetWellKnownMimeTypeFromExtension(test.extension, &mime_type))
+    if (GetWellKnownMimeTypeFromExtension(test.extension, &mime_type)) {
       EXPECT_EQ(test.mime_type, mime_type);
-    else
+    } else {
       EXPECT_EQ(test.mime_type, nullptr);
+    }
   }
 }
 
@@ -71,51 +74,60 @@ TEST(MimeUtilTest, ExtensionTest) {
     const base::FilePath::StringType extension;
     const std::vector<std::string> mime_types;
   } tests[] = {
-    {FILE_PATH_LITERAL("png"), {"image/png"}},
-    {FILE_PATH_LITERAL("PNG"), {"image/png"}},
-    {FILE_PATH_LITERAL("css"), {"text/css"}},
-    {FILE_PATH_LITERAL("pjp"), {"image/jpeg"}},
-    {FILE_PATH_LITERAL("pjpeg"), {"image/jpeg"}},
-    {FILE_PATH_LITERAL("json"), {"application/json"}},
-    {FILE_PATH_LITERAL("js"), {"text/javascript"}},
-    {FILE_PATH_LITERAL("webm"), {"video/webm"}},
-    {FILE_PATH_LITERAL("weba"), {"audio/webm"}},
-    {FILE_PATH_LITERAL("avif"), {"image/avif"}},
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    // These are test cases for testing platform mime types on ChromeOS.
-    {FILE_PATH_LITERAL("epub"), {"application/epub+zip"}},
-    {FILE_PATH_LITERAL("apk"), {"application/vnd.android.package-archive"}},
-    {FILE_PATH_LITERAL("cer"),
-     {
-         "application/x-x509-ca-cert",
-         "application/pkix-cert",  // System override for ChromeOS.
-     }},
-    {FILE_PATH_LITERAL("crt"),
-     {
-         "application/x-x509-ca-cert",
-         "application/pkix-cert",  // System override for ChromeOS.
-     }},
-    {FILE_PATH_LITERAL("zip"), {"application/zip"}},
-    {FILE_PATH_LITERAL("ics"), {"text/calendar"}},
+      {FILE_PATH_LITERAL("png"), {"image/png"}},
+      {FILE_PATH_LITERAL("PNG"), {"image/png"}},
+      {FILE_PATH_LITERAL("css"), {"text/css"}},
+      {FILE_PATH_LITERAL("pjp"), {"image/jpeg"}},
+      {FILE_PATH_LITERAL("pjpeg"), {"image/jpeg"}},
+      {FILE_PATH_LITERAL("json"), {"application/json"}},
+      {FILE_PATH_LITERAL("js"), {"text/javascript"}},
+      {FILE_PATH_LITERAL("webm"), {"video/webm"}},
+      {FILE_PATH_LITERAL("weba"), {"audio/webm"}},
+      {FILE_PATH_LITERAL("avif"), {"image/avif"}},
+#if BUILDFLAG(IS_CHROMEOS)
+      // These are test cases for testing platform mime types on ChromeOS.
+      {FILE_PATH_LITERAL("epub"), {"application/epub+zip"}},
+      {FILE_PATH_LITERAL("apk"), {"application/vnd.android.package-archive"}},
+      {FILE_PATH_LITERAL("cer"),
+       {
+           "application/x-x509-ca-cert",
+           "application/pkix-cert",  // System override for ChromeOS.
+       }},
+      {FILE_PATH_LITERAL("crt"),
+       {
+           "application/x-x509-ca-cert",
+           "application/pkix-cert",  // System override for ChromeOS.
+       }},
+      {FILE_PATH_LITERAL("zip"), {"application/zip"}},
+      {FILE_PATH_LITERAL("ics"), {"text/calendar"}},
 #endif
-    {FILE_PATH_LITERAL("m3u8"),
-     {
-         "application/x-mpegurl",  // Chrome's secondary mapping.
-         "audio/x-mpegurl",  // https://crbug.com/1273061, system override for
-                             // android-arm[64]-test and Linux. Possibly more.
-         "audio/mpegurl",                  // System override for mac.
-     }},
-    {FILE_PATH_LITERAL("csv"), {"text/csv"}},
-    {FILE_PATH_LITERAL("not an extension / for sure"), {}},
-    {containsNullByte, {}}
-  };
+      {FILE_PATH_LITERAL("m3u8"),
+       {
+           "application/x-mpegurl",  // Chrome's secondary mapping.
+           "audio/x-mpegurl",  // https://crbug.com/1273061, system override for
+                               // android-arm[64]-test and Linux. Possibly more.
+           "audio/mpegurl",    // System override for mac.
+       }},
+      {FILE_PATH_LITERAL("csv"), {"text/csv"}},
+      {FILE_PATH_LITERAL("mkv"), {"video/matroska"}},
+      {FILE_PATH_LITERAL("mka"), {"audio/matroska"}},
+      {FILE_PATH_LITERAL("md"),
+       {
+           "text/markdown",
+#if BUILDFLAG(IS_IOS)
+           "text/x-markdown",  // System override for iOS.
+#endif
+       }},
+      {FILE_PATH_LITERAL("not an extension / for sure"), {}},
+      {containsNullByte, {}}};
 
   for (const auto& test : tests) {
     std::string mime_type;
-    if (GetMimeTypeFromExtension(test.extension, &mime_type))
+    if (GetMimeTypeFromExtension(test.extension, &mime_type)) {
       EXPECT_THAT(test.mime_types, Contains(mime_type));
-    else
+    } else {
       EXPECT_TRUE(test.mime_types.empty());
+    }
   }
 }
 
@@ -164,88 +176,155 @@ TEST(MimeUtilTest, FileTest) {
   for (const auto& test : tests) {
     rv = GetMimeTypeFromFile(base::FilePath(test.file_path), &mime_type);
     EXPECT_EQ(test.valid, rv);
-    if (rv)
+    if (rv) {
       EXPECT_EQ(test.mime_type, mime_type);
+    }
+
+    rv = GetWellKnownMimeTypeFromFile(base::FilePath(test.file_path),
+                                      &mime_type);
+    EXPECT_EQ(test.valid, rv);
+    if (rv) {
+      EXPECT_EQ(test.mime_type, mime_type);
+    }
   }
 }
 
 TEST(MimeUtilTest, MatchesMimeType) {
-  // MIME types are case insensitive.
-  EXPECT_TRUE(MatchesMimeType("VIDEO/*", "video/x-mpeg"));
-  EXPECT_TRUE(MatchesMimeType("video/*", "VIDEO/X-MPEG"));
+  const struct {
+    const char* pattern;
+    const char* mime_type;
+    bool expected_without_validation;
+    bool expected_with_validation;
+    bool expected_with_strict_validation;
+  } kTestCases[] = {
+      // MIME types are case insensitive.
+      {"VIDEO/*", "video/x-mpeg", true, true, true},
+      {"video/*", "VIDEO/X-MPEG", true, true, true},
 
-  EXPECT_TRUE(MatchesMimeType("*", "video/x-mpeg"));
-  EXPECT_TRUE(MatchesMimeType("video/*", "video/x-mpeg"));
-  EXPECT_TRUE(MatchesMimeType("video/*", "video/*"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg", "video/x-mpeg"));
-  EXPECT_TRUE(MatchesMimeType("application/*+xml",
-                                   "application/html+xml"));
-  EXPECT_TRUE(MatchesMimeType("application/*+xml", "application/+xml"));
-  EXPECT_TRUE(MatchesMimeType("application/*+json",
-                                   "application/x-myformat+json"));
-  EXPECT_TRUE(MatchesMimeType("aaa*aaa", "aaaaaa"));
-  EXPECT_TRUE(MatchesMimeType("*", std::string()));
-  EXPECT_FALSE(MatchesMimeType("video/", "video/x-mpeg"));
-  EXPECT_FALSE(MatchesMimeType("VIDEO/", "Video/X-MPEG"));
-  EXPECT_FALSE(MatchesMimeType(std::string(), "video/x-mpeg"));
-  EXPECT_FALSE(MatchesMimeType(std::string(), std::string()));
-  EXPECT_FALSE(MatchesMimeType("video/x-mpeg", std::string()));
-  EXPECT_FALSE(MatchesMimeType("application/*+xml", "application/xml"));
-  EXPECT_FALSE(MatchesMimeType("application/*+xml",
-                                    "application/html+xmlz"));
-  EXPECT_FALSE(MatchesMimeType("application/*+xml",
-                                    "applcation/html+xml"));
-  EXPECT_FALSE(MatchesMimeType("aaa*aaa", "aaaaa"));
+      {"*", "video/x-mpeg", true, true, true},
+      {"video/*", "video/x-mpeg", true, true, true},
+      {"video/*", "video/*", true, true, true},
+      {"video/x-mpeg", "video/x-mpeg", true, true, true},
 
-  EXPECT_TRUE(MatchesMimeType("*", "video/x-mpeg;param=val"));
-  EXPECT_TRUE(MatchesMimeType("*", "Video/X-MPEG;PARAM=VAL"));
-  EXPECT_TRUE(MatchesMimeType("video/*", "video/x-mpeg;param=val"));
-  EXPECT_FALSE(MatchesMimeType("video/*;param=val", "video/mpeg"));
-  EXPECT_FALSE(MatchesMimeType("Video/*;PARAM=VAL", "VIDEO/Mpeg"));
-  EXPECT_FALSE(MatchesMimeType("video/*;param=val", "video/mpeg;param=other"));
-  EXPECT_TRUE(MatchesMimeType("video/*;param=val", "video/mpeg;param=val"));
-  EXPECT_TRUE(MatchesMimeType("Video/*;PARAM=Val", "VIDEO/Mpeg;Param=Val"));
-  EXPECT_FALSE(MatchesMimeType("Video/*;PARAM=VAL", "VIDEO/Mpeg;Param=Val"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg", "video/x-mpeg;param=val"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg;param=val",
-                              "video/x-mpeg;param=val"));
-  EXPECT_FALSE(MatchesMimeType("video/x-mpeg;param2=val2",
-                               "video/x-mpeg;param=val"));
-  EXPECT_FALSE(MatchesMimeType("video/x-mpeg;param2=val2",
-                               "video/x-mpeg;param2=val"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg;param=val",
-                              "video/x-mpeg;param=val;param2=val2"));
-  EXPECT_TRUE(MatchesMimeType("Video/X-Mpeg;Param=Val",
-                              "VIDEO/X-MPEG;PARAM=Val;PARAM2=val2"));
-  EXPECT_TRUE(MatchesMimeType("Video/X-Mpeg;Param=VAL",
-                              "VIDEO/X-MPEG;PARAM=VAL;PARAM2=val2"));
-  EXPECT_FALSE(MatchesMimeType("Video/X-Mpeg;Param=val",
-                               "VIDEO/X-MPEG;PARAM=VAL;PARAM2=val2"));
-  EXPECT_FALSE(MatchesMimeType("video/x-mpeg;param=VAL;param2=val2",
-                               "video/x-mpeg;param=val;param2=val2"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg;param2=val2;param=val",
-                              "video/x-mpeg;param=val;param2=val2"));
-  EXPECT_FALSE(MatchesMimeType("video/x-mpeg;param3=val3;param=val",
-                               "video/x-mpeg;param=val;param2=val2"));
-  EXPECT_TRUE(MatchesMimeType("video/x-mpeg;param=val ;param2=val2 ",
-                              "video/x-mpeg;param=val;param2=val2"));
+      {"application/*+xml", "application/html+xml", true, true, true},
+      {"application/*+xml", "application/+xml", true, true, true},
+      {"application/*+json", "application/x-myformat+json", true, true, true},
 
-  EXPECT_TRUE(MatchesMimeType("*/*;param=val", "video/x-mpeg;param=val"));
-  EXPECT_FALSE(MatchesMimeType("*/*;param=val", "video/x-mpeg;param=val2"));
+      {"aaa*aaa", "aaaaaa", true, false, false},
 
-  EXPECT_TRUE(MatchesMimeType("*", "*"));
-  EXPECT_TRUE(MatchesMimeType("*", "*/*"));
-  EXPECT_TRUE(MatchesMimeType("*/*", "*/*"));
-  EXPECT_TRUE(MatchesMimeType("*/*", "*"));
-  EXPECT_TRUE(MatchesMimeType("video/*", "video/*"));
-  EXPECT_FALSE(MatchesMimeType("video/*", "*/*"));
-  EXPECT_FALSE(MatchesMimeType("video/*;param=val", "video/*"));
-  EXPECT_TRUE(MatchesMimeType("video/*;param=val", "video/*;param=val"));
-  EXPECT_FALSE(MatchesMimeType("video/*;param=val", "video/*;param=val2"));
+      {"*", "", true, false, false},
+      {"video/", "video/x-mpeg", false, false, false},
+      {"VIDEO/", "Video/X-MPEG", false, false, false},
+      {"", "video/x-mpeg", false, false, false},
+      {"", "", false, false, false},
+      {"video/x-mpeg", "", false, false, false},
 
-  EXPECT_TRUE(MatchesMimeType("ab*cd", "abxxxcd"));
-  EXPECT_TRUE(MatchesMimeType("ab*cd", "abx/xcd"));
-  EXPECT_TRUE(MatchesMimeType("ab/*cd", "ab/xxxcd"));
+      {"application/*+xml", "application/xml", false, false, false},
+      {"application/*+xml", "application/html+xmlz", false, false, false},
+      {"application/*+xml", "applcation/html+xml", false, false, false},
+      {"aaa*aaa", "aaaaa", false, false, false},
+
+      {"*", "video/x-mpeg;param=val", true, true, true},
+      {"*", "Video/X-MPEG;PARAM=VAL", true, true, true},
+      {"video/*", "video/x-mpeg;param=val", true, true, true},
+      {"video/*;param=val", "video/mpeg", false, false, false},
+      {"Video/*;PARAM=VAL", "VIDEO/Mpeg", false, false, false},
+      {"video/*;param=val", "video/mpeg;param=other", false, false, false},
+      {"video/*;param=val", "video/mpeg;param=val", true, true, true},
+      {"Video/*;PARAM=Val", "VIDEO/Mpeg;Param=Val", true, true, true},
+      {"Video/*;PARAM=VAL", "VIDEO/Mpeg;Param=Val", false, false, false},
+      {"video/x-mpeg", "video/x-mpeg;param=val", true, true, true},
+      {"video/x-mpeg;param=val", "video/x-mpeg;param=val", true, true, true},
+      {"video/x-mpeg;param2=val2", "video/x-mpeg;param=val", false, false,
+       false},
+      {"video/x-mpeg;param2=val2", "video/x-mpeg;param2=val", false, false,
+       false},
+      {"video/x-mpeg;param=val", "video/x-mpeg;param=val;param2=val2", true,
+       true, true},
+      {"Video/X-Mpeg;Param=Val", "VIDEO/X-MPEG;PARAM=Val;PARAM2=val2", true,
+       true, true},
+      {"Video/X-Mpeg;Param=VAL", "VIDEO/X-MPEG;PARAM=VAL;PARAM2=val2", true,
+       true, true},
+      {"Video/X-Mpeg;Param=val", "VIDEO/X-MPEG;PARAM=VAL;PARAM2=val2", false,
+       false, false},
+      {"video/x-mpeg;param=VAL;param2=val2",
+       "video/x-mpeg;param=val;param2=val2", false, false, false},
+      {"video/x-mpeg;param2=val2;param=val",
+       "video/x-mpeg;param=val;param2=val2", true, true, true},
+      {"video/x-mpeg;param3=val3;param=val",
+       "video/x-mpeg;param=val;param2=val2", false, false, false},
+      {"video/x-mpeg;param=val ;param2=val2 ",
+       "video/x-mpeg;param=val;param2=val2", true, true, true},
+
+      {"*/*;param=val", "video/x-mpeg;param=val", true, true, true},
+      {"*/*;param=val", "video/x-mpeg;param=val2", false, false, false},
+
+      {"*", "*", true, false, false},
+      {"*", "*/*", true, true, true},
+      {"*/*", "*/*", true, true, true},
+      {"*/*", "*", true, false, false},
+      {"video/*", "video/*", true, true, true},
+      {"video/*", "*/*", false, false, false},
+      {"video/*;param=val", "video/*", false, false, false},
+      {"video/*;param=val", "video/*;param=val", true, true, true},
+      {"video/*;param=val", "video/*;param=val2", false, false, false},
+
+      {"ab*cd", "abxxxcd", true, false, false},
+      {"ab*cd", "abx/xcd", true, true, true},
+      {"ab/*cd", "ab/xxxcd", true, true, true},
+
+      {"*+json", "application/hal+json", true, true, true},
+      {"*+json", "application/vnd.collection+json", true, true, true},
+      {"*+json", "invalidmimetype+json", true, false, false},
+      {"*+json", "applic\x09ation/vnd.api+json", true, true, false},
+      {"*+json", "application/vnd\x09.api+json", true, true, false},
+      {"*+json", "applic<ation/vnd.api+json", true, true, false},
+      {"*+json", "application/vnd<api+json", true, true, false},
+      {"*+json", "applic ation/vnd api+json", true, true, false},
+      {"*+json", "\"application/vnd.api+json", true, true, false},
+      {"*+json", "application/vnd.api +json", true, true, false},
+      {"*+json", "\"application\"/\"vnd.api\"+json", true, true, false},
+
+      {"*", "invalid", true, false, false},
+      {"*/*", "invalid", true, false, false},
+      {"*", "valid/mime", true, true, true},
+      {"*/*", "valid/mime", true, true, true},
+
+      {"text", "text/plain/extra", false, false, false},
+      {"text/*", "text/plain/extra", true, false, false},
+      {"text/plain/extra", "text/plain/extra", true, true, true},
+
+      {"text/*", "text;charset=utf-8/plain", false, false, false},
+      {"text/*;charset=utf-8/extra", "text/plain;charset=utf-8/extra", true,
+       true, true},
+
+      {"image*jpeg", "image/jpeg", true, true, true},
+      {"image*jpeg", "image/jpeg/extra", false, false, false},
+  };
+
+  for (const auto& test : kTestCases) {
+    SCOPED_TRACE(testing::Message()
+                 << "Pattern: '" << test.pattern << "', MIME type: '"
+                 << test.mime_type << "'");
+
+    // Test with explicit validation disabled
+    EXPECT_EQ(test.expected_without_validation,
+              MatchesMimeType(test.pattern, test.mime_type,
+                              MimeTypeValidationLevel::kNone))
+        << "With validation explicitly disabled";
+
+    // Test with validation enabled
+    EXPECT_EQ(test.expected_with_validation,
+              MatchesMimeType(test.pattern, test.mime_type,
+                              MimeTypeValidationLevel::kWildcardSlashOnly))
+        << "With validation enabled";
+
+    // Test with strict validation enabled
+    EXPECT_EQ(test.expected_with_strict_validation,
+              MatchesMimeType(test.pattern, test.mime_type,
+                              MimeTypeValidationLevel::kWildcardSlashAndTokens))
+        << "With strict validation enabled";
+  }
 }
 
 TEST(MimeUtilTest, TestParseMimeType) {
@@ -330,8 +409,8 @@ TEST(MimeUtilTest, TestParseMimeTypeWithoutParameter) {
 
   std::string top_level_type;
   std::string subtype;
-  EXPECT_TRUE(ParseMimeTypeWithoutParameter(
-      "application/mime", &top_level_type, &subtype));
+  EXPECT_TRUE(ParseMimeTypeWithoutParameter("application/mime", &top_level_type,
+                                            &subtype));
   EXPECT_EQ("application", top_level_type);
   EXPECT_EQ("mime", subtype);
 
@@ -498,6 +577,8 @@ TEST(MimeUtilTest, TestGetExtensionsForMimeType) {
       {"message/", 0, nullptr, true},
       {"image/avif", 1, "avif"},
       {"image/bmp", 1, "bmp"},
+      {"video/matroska", 1, "mkv"},
+      {"audio/matroska", 1, "mka"},
       {"video/*", 6, "mp4"},
       {"video/*", 6, "mpeg"},
       {"audio/*", 6, "oga"},
@@ -509,11 +590,12 @@ TEST(MimeUtilTest, TestGetExtensionsForMimeType) {
     GetExtensionsForMimeType(test.mime_type, &extensions);
     ASSERT_LE(test.min_expected_size, extensions.size());
 
-    if (test.no_matches)
+    if (test.no_matches) {
       ASSERT_EQ(0u, extensions.size());
+    }
 
     if (test.contained_result) {
-      bool found = base::Contains(
+      bool found = std::ranges::contains(
           extensions, base::FilePath::FromASCII(test.contained_result).value());
 
       ASSERT_TRUE(found) << "Must find at least the contained result within "
@@ -560,10 +642,9 @@ TEST(MimeUtilTest, TestAddMultipartValueForUpload) {
       " name=\"value name\"\r\n\r\nvalue\r\n"
       "--boundary--\r\n";
   std::string post_data;
-  AddMultipartValueForUpload("value name", "value", "boundary",
-                             "content type", &post_data);
-  AddMultipartValueForUpload("value name", "value", "boundary",
-                             "", &post_data);
+  AddMultipartValueForUpload("value name", "value", "boundary", "content type",
+                             &post_data);
+  AddMultipartValueForUpload("value name", "value", "boundary", "", &post_data);
   AddMultipartFinalDelimiterForUpload("boundary", &post_data);
   EXPECT_STREQ(ref_output, post_data.c_str());
 }
@@ -586,4 +667,44 @@ TEST(MimeUtilTest, TestAddMultipartValueForUploadWithFileName) {
   AddMultipartFinalDelimiterForUpload("boundary", &post_data);
   EXPECT_STREQ(ref_output, post_data.c_str());
 }
+
+TEST(MimeUtilTest, ScopedOverrideGetMimeTypeForTesting) {
+  // Checks the behavior for a png file.
+  auto verify_expectations = [](const std::string& expected_mime_type) {
+    std::string mime_type;
+    EXPECT_TRUE(GetWellKnownMimeTypeFromExtension(FILE_PATH_LITERAL("png"),
+                                                  &mime_type));
+    EXPECT_EQ(mime_type, expected_mime_type);
+    EXPECT_TRUE(GetWellKnownMimeTypeFromFile(
+        base::FilePath(FILE_PATH_LITERAL("c:\\foo\\bar.png")), &mime_type));
+    EXPECT_EQ(mime_type, expected_mime_type);
+    EXPECT_TRUE(GetMimeTypeFromExtension(FILE_PATH_LITERAL("png"), &mime_type));
+    EXPECT_EQ(mime_type, expected_mime_type);
+    EXPECT_TRUE(GetMimeTypeFromFile(
+        base::FilePath(FILE_PATH_LITERAL("c:\\foo\\bar.png")), &mime_type));
+    EXPECT_EQ(mime_type, expected_mime_type);
+
+    // Behavior other than "get a mime type" should be unaffected by the
+    // override.
+    base::FilePath::StringType extension;
+    EXPECT_TRUE(
+        GetPreferredExtensionForMimeType("text/javascript", &extension));
+    EXPECT_EQ(extension, FILE_PATH_LITERAL("js"));
+
+    EXPECT_EQ("text/html", ExtractMimeTypeFromMediaType("text/html", true));
+  };
+
+  // Normal state, without override.
+  verify_expectations("image/png");
+
+  {
+    std::string overriding_mime_type = "text/not-a-real-mime-type";
+    ScopedOverrideGetMimeTypeForTesting override(overriding_mime_type);
+    verify_expectations(overriding_mime_type);
+  }
+
+  // Reset after override is destroyed.
+  verify_expectations("image/png");
+}
+
 }  // namespace net

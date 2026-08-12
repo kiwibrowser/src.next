@@ -13,29 +13,43 @@ class ScrollMarkerGroupPseudoElement;
 
 class ScrollMarkerPseudoElement : public PseudoElement {
  public:
-  explicit ScrollMarkerPseudoElement(Element* originating_element)
-      : PseudoElement(originating_element, kPseudoIdScrollMarker) {
-    SetTabIndexExplicitly();
-  }
+  explicit ScrollMarkerPseudoElement(Element* originating_element);
 
   bool IsScrollMarkerPseudoElement() const final { return true; }
 
-  void SetSelected(bool value);
+  void SetSelected(bool value, bool apply_snap_alignment = true);
   bool IsSelected() const { return is_selected_; }
   int DefaultTabIndex() const override { return 0; }
-  FocusableState SupportsFocus(UpdateBehavior) const final;
   void DefaultEventHandler(Event&) override;
   bool HasActivationBehavior() const final { return true; }
   bool WillRespondToMouseClickEvents() override { return true; }
-  Node* InnerNodeForHitTesting() final { return this; }
   void SetScrollMarkerGroup(
       ScrollMarkerGroupPseudoElement* scroll_marker_group);
   ScrollMarkerGroupPseudoElement* ScrollMarkerGroup() const {
     return scroll_marker_group_;
   }
 
+  void AttachLayoutTree(AttachContext&) final;
   void Dispose() final;
+  void RemovedFrom(ContainerNode&) override;
   void Trace(Visitor* v) const final;
+
+  void SetHovered(bool hovered) final;
+  void SetActive(bool active) final;
+
+  const ComputedStyle* AdjustedLayoutStyle(
+      const ComputedStyle& style,
+      const ComputedStyle& layout_parent_style) final;
+
+  // Focused ::scroll-marker should set :focus-within on its
+  // ::scroll-marker-group, its scroll container and all ancestors, but since
+  // ::scroll-marker-group is not ancestor of ::scroll-marker in the flat tree,
+  // we need to start from ::scroll-marker-group.
+  void SetHasFocusWithinUpToAncestor(bool has_focus_within,
+                                     Element* ancestor,
+                                     bool need_snap_container_search) final;
+
+  void ScrollIntoView(bool apply_snap_alignment);
 
  private:
   bool is_selected_ = false;

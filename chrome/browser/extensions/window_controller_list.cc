@@ -4,16 +4,19 @@
 
 #include "chrome/browser/extensions/window_controller_list.h"
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
+#include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "base/ranges/algorithm.h"
 #include "chrome/browser/extensions/api/tabs/windows_util.h"
-#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/window_controller_list_observer.h"
 #include "chrome/common/extensions/api/windows.h"
 #include "components/sessions/core/session_id.h"
 #include "extensions/browser/extension_function.h"
+#include "extensions/buildflags/buildflags.h"
 #include "ui/base/base_window.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -25,11 +28,9 @@ WindowControllerList* WindowControllerList::GetInstance() {
   return base::Singleton<WindowControllerList>::get();
 }
 
-WindowControllerList::WindowControllerList() {
-}
+WindowControllerList::WindowControllerList() = default;
 
-WindowControllerList::~WindowControllerList() {
-}
+WindowControllerList::~WindowControllerList() = default;
 
 void WindowControllerList::AddExtensionWindow(WindowController* window) {
   windows_.push_back(window);
@@ -38,7 +39,7 @@ void WindowControllerList::AddExtensionWindow(WindowController* window) {
 }
 
 void WindowControllerList::RemoveExtensionWindow(WindowController* window) {
-  auto iter = base::ranges::find(windows_, window);
+  auto iter = std::ranges::find(windows_, window);
   if (iter != windows_.end()) {
     windows_.erase(iter);
     for (auto& observer : observers_)
@@ -47,9 +48,18 @@ void WindowControllerList::RemoveExtensionWindow(WindowController* window) {
 }
 
 void WindowControllerList::NotifyWindowBoundsChanged(WindowController* window) {
-  if (base::Contains(windows_, window)) {
+  if (std::ranges::contains(windows_, window)) {
     for (auto& observer : observers_)
       observer.OnWindowBoundsChanged(window);
+  }
+}
+
+void WindowControllerList::NotifyWindowFocusChanged(WindowController* window,
+                                                    bool has_focus) {
+  if (std::ranges::contains(windows_, window)) {
+    for (auto& observer : observers_) {
+      observer.OnWindowFocusChanged(window, has_focus);
+    }
   }
 }
 

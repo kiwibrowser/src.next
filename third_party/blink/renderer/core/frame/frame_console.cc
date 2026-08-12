@@ -82,7 +82,7 @@ void FrameConsole::ReportMessageToClient(
     if (frame_->GetChromeClient()
             .ShouldReportDetailedMessageForSourceAndSeverity(*frame_, level,
                                                              url)) {
-      std::unique_ptr<SourceLocation> full_location =
+      SourceLocation* full_location =
           SourceLocation::CaptureWithFullStackTrace();
       if (!full_location->IsUnknown())
         stack_trace = full_location->ToString();
@@ -108,9 +108,9 @@ void FrameConsole::ReportResourceResponseReceived(
   if (response.HttpStatusCode() < 400)
     return;
   String message =
-      "Failed to load resource: the server responded with a status of " +
-      String::Number(response.HttpStatusCode()) + " (" +
-      response.HttpStatusText() + ')';
+      StrCat({"Failed to load resource: the server responded with a status of ",
+              String::Number(response.HttpStatusCode()), " (",
+              response.HttpStatusText(), ")"});
   auto* console_message = MakeGarbageCollected<ConsoleMessage>(
       mojom::blink::ConsoleMessageSource::kNetwork,
       mojom::blink::ConsoleMessageLevel::kError, message,

@@ -72,7 +72,7 @@ LayoutResult::LayoutResult(BoxFragmentBuilderPassKey passkey,
         builder->block_end_annotation_space_;
   }
 
-  if (builder->has_block_fragmentation_) {
+  if (builder->GetConstraintSpace().HasBlockFragmentation()) {
     RareData* rare_data = EnsureRareData();
 
     rare_data->block_size_for_fragmentation =
@@ -95,20 +95,17 @@ LayoutResult::LayoutResult(BoxFragmentBuilderPassKey passkey,
   }
 
   if (builder->table_column_count_) {
-    EnsureRareData()->EnsureTableData()->table_column_count =
-        *builder->table_column_count_;
+    EnsureRareData()->table_column_count_ = *builder->table_column_count_;
   }
   if (builder->math_italic_correction_) {
-    EnsureRareData()->EnsureMathData()->italic_correction =
+    EnsureRareData()->math_italic_correction_ =
         builder->math_italic_correction_;
   }
   if (builder->grid_layout_data_) {
-    EnsureRareData()->EnsureGridData()->grid_layout_data =
-        std::move(builder->grid_layout_data_);
+    EnsureRareData()->grid_layout_data = builder->grid_layout_data_;
   }
   if (builder->flex_layout_data_) {
-    EnsureRareData()->EnsureFlexData()->flex_layout_data =
-        std::move(builder->flex_layout_data_);
+    EnsureRareData()->flex_layout_data_ = builder->flex_layout_data_;
   }
 }
 
@@ -124,19 +121,15 @@ LayoutResult::LayoutResult(LineBoxFragmentBuilderPassKey passkey,
         *builder->line_box_bfc_block_offset_);
   }
 
-  // `EnsureLineData()` must be done before `EnsureLineSmallData()`.
-  DCHECK(!rare_data_ || !rare_data_->HasData(RareData::kLineSmallData));
   if (builder->annotation_block_offset_adjustment_) {
-    EnsureRareData()->EnsureLineData()->annotation_block_offset_adjustment =
+    EnsureRareData()->annotation_block_offset_adjustment_ =
         builder->annotation_block_offset_adjustment_;
   }
   if (builder->clearance_after_line_) {
-    EnsureRareData()->EnsureLineSmallData()->clearance_after_line =
-        *builder->clearance_after_line_;
+    EnsureRareData()->clearance_after_line_ = *builder->clearance_after_line_;
   }
   if (builder->trim_block_end_by_) {
-    EnsureRareData()->EnsureLineSmallData()->trim_block_end_by =
-        *builder->trim_block_end_by_;
+    EnsureRareData()->trim_block_end_by_ = *builder->trim_block_end_by_;
   }
 }
 
@@ -251,14 +244,20 @@ LayoutResult::LayoutResult(const PhysicalFragment* physical_fragment,
   if (builder->is_block_end_trimmable_line_) {
     EnsureRareData()->set_is_block_end_trimmable_line();
   }
+  if (builder->would_be_last_line_if_not_for_ellipsis_) {
+    EnsureRareData()->set_would_be_last_line_if_not_for_ellipsis();
+  }
+  if (builder->line_clamp_after_layout_object_) {
+    EnsureRareData()->line_clamp_after_layout_object =
+        builder->line_clamp_after_layout_object_;
+  }
 
+  // For column balancing only one of `tallest_unbreakable_block_size_` or
+  // `minimal_space_shortage_` are calculated. The former for the initial pass,
+  // and the latter for all subsequent (column-stretch-) passes.
   if (builder->tallest_unbreakable_block_size_ >= LayoutUnit()) {
     EnsureRareData()->tallest_unbreakable_block_size =
         builder->tallest_unbreakable_block_size_;
-
-    // This field shares storage with "minimal space shortage", so both cannot
-    // be set at the same time.
-    DCHECK_EQ(builder->minimal_space_shortage_, kIndefiniteSize);
   } else if (builder->minimal_space_shortage_ != kIndefiniteSize) {
     EnsureRareData()->minimal_space_shortage = builder->minimal_space_shortage_;
   }
@@ -331,22 +330,29 @@ void LayoutResult::MutableForOutOfFlow::SetAccessibilityAnchor(
 }
 
 void LayoutResult::MutableForOutOfFlow::SetDisplayLocksAffectedByAnchors(
-    HeapHashSet<Member<Element>>* display_locks) {
+    GCedHeapHashSet<Member<Element>>* display_locks) {
   if (layout_result_->rare_data_ || display_locks) {
     layout_result_->EnsureRareData()->display_locks_affected_by_anchors =
         display_locks;
   }
 }
 
+void LayoutResult::MutableForLayoutBoxCachedResults::
+    SetFragmentChildrenInvalid() {
+  if (const auto* box_fragment = DynamicTo<PhysicalBoxFragment>(
+          layout_result_->physical_fragment_.Get())) {
+    box_fragment->SetChildrenInvalid();
+  }
+}
+
 #if DCHECK_IS_ON()
 void LayoutResult::CheckSameForSimplifiedLayout(
     const LayoutResult& other,
-    bool check_same_block_size,
     bool check_no_fragmentation) const {
   To<PhysicalBoxFragment>(*physical_fragment_)
       .CheckSameForSimplifiedLayout(
           To<PhysicalBoxFragment>(*other.physical_fragment_),
-          check_same_block_size, check_no_fragmentation);
+          check_no_fragmentation);
 
   DCHECK(LinesUntilClamp() == other.LinesUntilClamp());
   GetExclusionSpace().CheckSameForSimplifiedLayout(other.GetExclusionSpace());
@@ -393,6 +399,7 @@ void LayoutResult::AssertSoleBoxFragment() const {
 #endif
 
 void LayoutResult::Trace(Visitor* visitor) const {
+  visitor->Trace(space_);
   visitor->Trace(physical_fragment_);
   visitor->Trace(rare_data_);
 }
@@ -401,8 +408,12 @@ void LayoutResult::RareData::Trace(Visitor* visitor) const {
   visitor->Trace(early_break);
   visitor->Trace(non_overflowing_scroll_ranges);
   visitor->Trace(column_spanner_path);
+  visitor->Trace(grid_layout_data);
+  visitor->Trace(exclusion_space);
+  visitor->Trace(line_clamp_after_layout_object);
   visitor->Trace(accessibility_anchor);
   visitor->Trace(display_locks_affected_by_anchors);
+  visitor->Trace(flex_layout_data_);
 }
 
 }  // namespace blink

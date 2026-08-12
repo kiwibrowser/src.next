@@ -6,10 +6,13 @@
 
 #include <memory>
 
+#include "base/byte_size.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/task/task_runner.h"
+#include "base/types/expected.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -30,7 +33,7 @@ UploadFileElementReader::UploadFileElementReader(
     const base::FilePath& path,
     uint64_t range_offset,
     uint64_t range_length,
-    const base::Time& expected_modification_time)
+    base::Time expected_modification_time)
     : task_runner_(task_runner),
       path_(path),
       range_offset_(range_offset),
@@ -46,7 +49,7 @@ UploadFileElementReader::UploadFileElementReader(
     const base::FilePath& path,
     uint64_t range_offset,
     uint64_t range_length,
-    const base::Time& expected_modification_time)
+    base::Time expected_modification_time)
     : task_runner_(task_runner),
       path_(path),
       range_offset_(range_offset),
@@ -56,10 +59,6 @@ UploadFileElementReader::UploadFileElementReader(
 }
 
 UploadFileElementReader::~UploadFileElementReader() = default;
-
-const UploadFileElementReader* UploadFileElementReader::AsFileReader() const {
-  return this;
-}
 
 int UploadFileElementReader::Init(CompletionOnceCallback callback) {
   DCHECK(!callback.is_null());
@@ -122,11 +121,23 @@ int UploadFileElementReader::Read(IOBuffer* buf,
     return 0;
 
   next_state_ = State::READ_COMPLETE;
-  int result = file_stream_->Read(
+  auto read_result = file_stream_->Read(
       buf, num_bytes_to_read,
-      base::BindOnce(base::IgnoreResult(&UploadFileElementReader::OnIOComplete),
-                     weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(
+          [](base::WeakPtr<UploadFileElementReader> weak_this,
+             base::expected<base::ByteSize, net::Error> result) {
+            if (!weak_this) {
+              return;
+            }
+            weak_this->OnIOComplete(
+                result.has_value() ? base::checked_cast<int>(result->InBytes())
+                                   : result.error());
+          },
+          weak_ptr_factory_.GetWeakPtr()));
 
+  int result = read_result.has_value()
+                   ? base::checked_cast<int>(read_result->InBytes())
+                   : read_result.error();
   if (result != ERR_IO_PENDING)
     result = DoLoop(result);
 
@@ -191,8 +202,14 @@ int UploadFileElementReader::DoOpen() {
   int result = file_stream_->Open(
       path_,
       base::File::FLAG_OPEN | base::File::FLAG_READ | base::File::FLAG_ASYNC,
-      base::BindOnce(&UploadFileElementReader::OnIOComplete,
-                     weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(
+          [](base::WeakPtr<UploadFileElementReader> weak_this,
+             net::Error error) {
+            if (weak_this) {
+              weak_this->OnIOComplete(error);
+            }
+          },
+          weak_ptr_factory_.GetWeakPtr()));
   DCHECK_GT(0, result);
   return result;
 }
@@ -216,15 +233,15 @@ int UploadFileElementReader::DoOpenComplete(int result) {
 int UploadFileElementReader::DoSeek() {
   next_state_ = State::GET_FILE_INFO;
   return file_stream_->Seek(
-      range_offset_,
-      base::BindOnce(
-          [](base::WeakPtr<UploadFileElementReader> weak_this, int64_t result) {
-            if (!weak_this)
-              return;
-            weak_this->OnIOComplete(result >= 0 ? OK
-                                                : static_cast<int>(result));
-          },
-          weak_ptr_factory_.GetWeakPtr()));
+      range_offset_, base::BindOnce(
+                         [](base::WeakPtr<UploadFileElementReader> weak_this,
+                            base::expected<int64_t, net::Error> result) {
+                           if (!weak_this) {
+                             return;
+                           }
+                           weak_this->OnIOComplete(result.error_or(OK));
+                         },
+                         weak_ptr_factory_.GetWeakPtr()));
 }
 
 int UploadFileElementReader::DoGetFileInfo(int result) {
@@ -242,11 +259,11 @@ int UploadFileElementReader::DoGetFileInfo(int result) {
       file_info_ptr,
       base::BindOnce(
           [](base::WeakPtr<UploadFileElementReader> weak_this,
-             std::unique_ptr<base::File::Info> file_info, int result) {
+             std::unique_ptr<base::File::Info> file_info, net::Error error) {
             if (!weak_this)
               return;
             weak_this->file_info_ = *file_info;
-            weak_this->OnIOComplete(result);
+            weak_this->OnIOComplete(error);
           },
           weak_ptr_factory_.GetWeakPtr(), std::move(file_info)));
   // GetFileInfo() can't succeed synchronously.

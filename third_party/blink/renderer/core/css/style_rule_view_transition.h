@@ -12,26 +12,31 @@ namespace blink {
 
 class CORE_EXPORT StyleRuleViewTransition : public StyleRuleBase {
  public:
+  enum class NavigationType {
+    kAuto,
+    kNone,
+    kPreview,
+    kUnspecified,
+  };
   explicit StyleRuleViewTransition(CSSPropertyValueSet&);
   StyleRuleViewTransition(const StyleRuleViewTransition&);
   ~StyleRuleViewTransition();
 
-  const CSSValue* GetNavigation() const;
+  NavigationType GetNavigation() const;
+  const CSSValue* GetNavigationValue() const { return navigation_.Get(); }
 
   const Vector<String>& GetTypes() const { return types_; }
+  const CSSValue* GetTypesValue() const { return types_value_.Get(); }
 
   StyleRuleViewTransition* Copy() const {
     return MakeGarbageCollected<StyleRuleViewTransition>(*this);
   }
 
-  void SetCascadeLayer(const CascadeLayer* layer) { layer_ = layer; }
-  const CascadeLayer* GetCascadeLayer() const { return layer_.Get(); }
-
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
-  Member<const CascadeLayer> layer_;
   Member<const CSSValue> navigation_;
+  Member<const CSSValue> types_value_;
   Vector<String> types_;
 };
 

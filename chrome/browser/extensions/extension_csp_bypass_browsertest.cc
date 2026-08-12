@@ -3,19 +3,20 @@
 // found in the LICENSE file.
 
 #include "base/strings/pattern.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -32,7 +33,7 @@ bool WasFrameWithScriptLoaded(content::RenderFrameHost* render_frame_host) {
 
 class ExtensionCSPBypassTest : public ExtensionBrowserTest {
  public:
-  ExtensionCSPBypassTest() {}
+  ExtensionCSPBypassTest() = default;
 
   ExtensionCSPBypassTest(const ExtensionCSPBypassTest&) = delete;
   ExtensionCSPBypassTest& operator=(const ExtensionCSPBypassTest&) = delete;
@@ -45,24 +46,24 @@ class ExtensionCSPBypassTest : public ExtensionBrowserTest {
   }
 
  protected:
-  content::WebContents* web_contents() const {
-    return browser()->tab_strip_model()->GetActiveWebContents();
-  }
-
   const Extension* AddExtension(bool is_component, bool all_urls_permission) {
     TestExtensionDir dir;
 
     std::string unique_name = base::StringPrintf(
         "component=%d, all_urls=%d", is_component, all_urls_permission);
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set("name", unique_name)
             .Set("version", "1")
-            .Set("manifest_version", 2)
-            .Set("web_accessible_resources", base::Value::List().Append("*"));
+            .Set("manifest_version", 3)
+            .Set("web_accessible_resources",
+                 base::ListValue().Append(
+                     base::DictValue()
+                         .Set("resources", base::ListValue().Append("*"))
+                         .Set("matches", base::ListValue().Append("*://*/*"))));
 
     if (all_urls_permission) {
-      manifest.Set("permissions", base::Value::List().Append("<all_urls>"));
+      manifest.Set("host_permissions", base::ListValue().Append("<all_urls>"));
     }
     if (is_component) {
       // LoadExtensionAsComponent requires the manifest to contain a key.
@@ -87,7 +88,7 @@ class ExtensionCSPBypassTest : public ExtensionBrowserTest {
 
   bool CanLoadScript(const Extension* extension) {
     content::RenderFrameHost* render_frame_host =
-        web_contents()->GetPrimaryMainFrame();
+        GetActiveWebContents()->GetPrimaryMainFrame();
     std::string code = base::StringPrintf(
         R"(
         function canLoadScript() {
@@ -111,7 +112,7 @@ class ExtensionCSPBypassTest : public ExtensionBrowserTest {
 
   content::RenderFrameHost* GetFrameByName(const std::string& name) {
     return content::FrameMatchingPredicate(
-        web_contents()->GetPrimaryPage(),
+        GetActiveWebContents()->GetPrimaryPage(),
         base::BindRepeating(&content::FrameMatchesName, name));
   }
 
@@ -129,7 +130,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, LoadWebAccessibleScript) {
 
   // chrome-extension:-URLs can always bypass CSP in normal pages.
   GURL non_webui_url(embedded_test_server()->GetURL("/empty.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), non_webui_url));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), non_webui_url));
 
   EXPECT_TRUE(CanLoadScript(component_ext_with_permission));
   EXPECT_TRUE(CanLoadScript(component_ext_without_permission));
@@ -137,8 +138,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, LoadWebAccessibleScript) {
   EXPECT_TRUE(CanLoadScript(ext_without_permission));
 
   // chrome-extension:-URLs can never bypass CSP in WebUI.
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), GURL(chrome::kChromeUIExtensionsURL)));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(),
+                            GURL(chrome::kChromeUIExtensionsURL)));
 
   EXPECT_FALSE(CanLoadScript(component_ext_with_permission));
   EXPECT_FALSE(CanLoadScript(component_ext_without_permission));
@@ -147,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, LoadWebAccessibleScript) {
 }
 
 // Tests that an extension can add a cross-origin iframe to a page
-// whose CSP disallows iframes. Regression test for https://crbug.com/408932.
+// whose CSP disallows iframes. Regression test for https://crbug.com/41129074.
 IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, InjectIframe) {
   // Install an extension that can add a cross-origin iframe to a document.
   const Extension* extension =
@@ -159,12 +160,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, InjectIframe) {
   // "cross-origin.com" to make clear they are cross-origin.
   GURL test_url = embedded_test_server()->GetURL(
       "same-origin.com", "/extensions/csp/page_with_frame_csp.html");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), test_url));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), test_url));
 
   // First, verify that adding an iframe to the page from the main world will
   // fail. Add the frame. Its onload event fires even if it's blocked
-  // (see https://crbug.com/365457), and reports back.
-  EXPECT_EQ(true, content::EvalJs(web_contents(), "addIframe();"));
+  // (see https://crbug.com/40361841), and reports back.
+  EXPECT_EQ(true, content::EvalJs(GetActiveWebContents(), "addIframe();"));
 
   // Use WasFrameWithScriptLoaded() to check whether the target frame really
   // loaded.
@@ -177,7 +178,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, InjectIframe) {
   // which bypasses CSP, and adds the iframe.
   content::DOMMessageQueue message_queue;
   EXPECT_TRUE(
-      content::ExecJs(browser()->tab_strip_model()->GetActiveWebContents(),
+      content::ExecJs(GetActiveWebContents(),
                       "document.querySelector('#addIframeButton').click();"));
   std::string ack;
   EXPECT_TRUE(message_queue.WaitForMessage(&ack));
@@ -192,9 +193,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, FrameAncestors) {
   std::string manifest = R"(
     {
       "name": "CSP frame-ancestors",
-      "manifest_version": 2,
+      "manifest_version": 3,
       "version": "0.1",
-      "browser_action": {
+      "action": {
        "default_popup": "popup.html"
       }
     }
@@ -218,16 +219,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, FrameAncestors) {
   const Extension* extension = LoadExtension(test_dir.UnpackedPath());
   ASSERT_TRUE(extension);
 
-  content::WebContentsConsoleObserver console_observer(web_contents());
-  console_observer.SetPattern(
-      "Refused to frame * because an ancestor violates *");
+  content::WebContentsConsoleObserver console_observer(GetActiveWebContents());
+  console_observer.SetPattern("Framing '*' violates the following*");
 
   GURL popup_url = extension->GetResourceURL("popup.html");
-  ASSERT_TRUE(content::NavigateToURL(web_contents(), popup_url));
+  ASSERT_TRUE(content::NavigateToURL(GetActiveWebContents(), popup_url));
 
   // The iframe must be blocked because of CSP.
   ASSERT_TRUE(console_observer.Wait());
-  content::RenderFrameHost* main_frame = web_contents()->GetPrimaryMainFrame();
+  content::RenderFrameHost* main_frame =
+      GetActiveWebContents()->GetPrimaryMainFrame();
   content::RenderFrameHost* child_frame = ChildFrameAt(main_frame, 0);
   EXPECT_EQ(popup_url, main_frame->GetLastCommittedURL());
   EXPECT_EQ(iframe_url, child_frame->GetLastCommittedURL());

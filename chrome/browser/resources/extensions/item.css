@@ -183,12 +183,20 @@ cr-tooltip {
   --paper-tooltip-min-width: 0;
 }
 
-#errors-button {
-  color: var(--error-color);
+#errors-button.error {
+  --cr-button-text-color: var(--error-color);
 }
 
-#dev-reload-button {
-  margin-inline-end: 12px;
+#errors-button.warning {
+  --cr-button-text-color: var(--warning-text-color);
+}
+
+#account-upload-button {
+  color: var(--cr-fallback-color-on-surface-subtle);
+}
+
+#enableToggle {
+  margin-inline-start: 12px;
 }
 
 #blocklisted-warning:empty {

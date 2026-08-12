@@ -8,10 +8,12 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/trace_event/trace_event.h"
 #include "components/paint_preview/common/paint_preview_tracker.h"
 #include "printing/buildflags/buildflags.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -21,6 +23,7 @@
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -38,8 +41,7 @@
 namespace blink {
 
 BASE_FEATURE(kSkipUnnecessaryRemoteFrameGeometryPropagation,
-             "SkipUnnecessaryRemoteFrameGeometryPropagation",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 RemoteFrameView::RemoteFrameView(RemoteFrame* remote_frame)
     : FrameView(gfx::Rect()), remote_frame_(remote_frame) {
@@ -103,11 +105,10 @@ void RemoteFrameView::DetachFromLayout() {
   SetAttached(false);
 }
 
-bool RemoteFrameView::UpdateViewportIntersectionsForSubtree(
+void RemoteFrameView::UpdateViewportIntersectionsForSubtree(
     unsigned parent_flags,
     ComputeIntersectionsContext&) {
   UpdateViewportIntersection(parent_flags, needs_occlusion_tracking_);
-  return needs_occlusion_tracking_;
 }
 
 void RemoteFrameView::SetViewportIntersection(
@@ -160,16 +161,16 @@ void RemoteFrameView::SetViewportIntersection(
   }
 }
 
-void RemoteFrameView::SetNeedsOcclusionTracking(bool needs_tracking) {
-  if (needs_occlusion_tracking_ == needs_tracking)
-    return;
-  needs_occlusion_tracking_ = needs_tracking;
-  if (needs_tracking) {
-    if (LocalFrameView* parent_view = ParentLocalRootFrameView()) {
-      parent_view->SetIntersectionObservationState(LocalFrameView::kRequired);
-      parent_view->ScheduleAnimation();
-    }
-  }
+void RemoteFrameView::UpdateIntersectionObserverStatus() {}
+
+bool RemoteFrameView::HasActiveIntersectionObservations() const {
+  // TODO(paint-dev): We don't propagate this information from the remote frame,
+  // so we err on the side of caution and assume 'true'.
+  return true;
+}
+
+bool RemoteFrameView::NeedsOcclusionTracking() const {
+  return needs_occlusion_tracking_;
 }
 
 gfx::Rect RemoteFrameView::ComputeCompositingRect() const {
@@ -353,12 +354,13 @@ void RemoteFrameView::PropagateFrameRects() {
   remote_frame_->FrameRectsChanged(frame_size, rect_in_local_root);
 }
 
-void RemoteFrameView::Paint(GraphicsContext& context,
-                            PaintFlags flags,
+void RemoteFrameView::Paint(const PaintInfo& paint_info,
                             const CullRect& rect,
                             const gfx::Vector2d& paint_offset) const {
   if (!rect.Intersects(FrameRect()))
     return;
+
+  GraphicsContext& context = paint_info.context;
 
   const auto& owner_layout_object = *GetFrame().OwnerLayoutObject();
   if (owner_layout_object.GetDocument().IsPrintingOrPaintingPreview()) {
@@ -383,7 +385,7 @@ void RemoteFrameView::Paint(GraphicsContext& context,
     context.Restore();
   }
 
-  if (GetFrame().GetCcLayer()) {
+  if (GetFrame().GetCcLayer() && !paint_info.IsPrivacyPreserving()) {
     RecordForeignLayer(
         context, owner_layout_object, DisplayItem::kForeignLayerRemoteFrame,
         GetFrame().GetCcLayer(), FrameRect().origin() + paint_offset);
@@ -405,6 +407,19 @@ void RemoteFrameView::Show() {
   SetSelfVisible(true);
   UpdateFrameVisibility(
       !last_intersection_state_.viewport_intersection.IsEmpty());
+}
+
+void RemoteFrameView::SetNeedsOcclusionTracking(bool needs_tracking) {
+  if (needs_occlusion_tracking_ == needs_tracking) {
+    return;
+  }
+  needs_occlusion_tracking_ = needs_tracking;
+  if (needs_tracking) {
+    if (LocalFrameView* parent_view = ParentLocalRootFrameView()) {
+      parent_view->SetIntersectionObservationState(LocalFrameView::kRequired);
+      parent_view->ScheduleAnimation();
+    }
+  }
 }
 
 void RemoteFrameView::ParentVisibleChanged() {
@@ -431,23 +446,16 @@ bool RemoteFrameView::CanThrottleRendering() const {
   return IsHiddenForThrottling() || IsSubtreeThrottled() || IsDisplayLocked();
 }
 
-void RemoteFrameView::SetIntrinsicSizeInfo(
-    const IntrinsicSizingInfo& size_info) {
-  intrinsic_sizing_info_ = size_info;
-  has_intrinsic_sizing_info_ = true;
+std::optional<NaturalSizingInfo> RemoteFrameView::GetNaturalDimensions() const {
+  return natural_sizing_info_;
 }
 
-bool RemoteFrameView::GetIntrinsicSizingInfo(
-    IntrinsicSizingInfo& sizing_info) const {
-  if (!has_intrinsic_sizing_info_)
-    return false;
-
-  sizing_info = intrinsic_sizing_info_;
-  return true;
+void RemoteFrameView::SetNaturalDimensions(const NaturalSizingInfo& size_info) {
+  natural_sizing_info_ = size_info;
 }
 
-bool RemoteFrameView::HasIntrinsicSizingInfo() const {
-  return has_intrinsic_sizing_info_;
+void RemoteFrameView::ClearNaturalDimensions() {
+  natural_sizing_info_ = std::nullopt;
 }
 
 uint32_t RemoteFrameView::Print(const gfx::Rect& rect,
@@ -499,6 +507,10 @@ uint32_t RemoteFrameView::CapturePaintPreview(const gfx::Rect& rect,
 
 void RemoteFrameView::Trace(Visitor* visitor) const {
   visitor->Trace(remote_frame_);
+}
+
+mojom::blink::WebFeature RemoteFrameView::SvgFilterPaintedCounter() const {
+  return mojom::blink::WebFeature::kSvgFilterPaintedOnRemoteFrame;
 }
 
 }  // namespace blink

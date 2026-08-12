@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/android/build_info.h"
+#include "base/android/android_info.h"
 #include "base/check.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -37,7 +37,7 @@ SandboxStatusExtension::SandboxStatusExtension(content::RenderFrame* frame)
           base::RetainedRef(this)));
 }
 
-SandboxStatusExtension::~SandboxStatusExtension() {}
+SandboxStatusExtension::~SandboxStatusExtension() = default;
 
 // static
 void SandboxStatusExtension::Create(content::RenderFrame* frame) {
@@ -124,7 +124,7 @@ void SandboxStatusExtension::GetSandboxStatus(gin::Arguments* args) {
                      std::move(global_callback)));
 }
 
-base::Value::Dict SandboxStatusExtension::ReadSandboxStatus() {
+base::DictValue SandboxStatusExtension::ReadSandboxStatus() {
   std::string secontext;
   base::FilePath path(FILE_PATH_LITERAL("/proc/self/attr/current"));
   base::ReadFileToString(path, &secontext);
@@ -133,21 +133,20 @@ base::Value::Dict SandboxStatusExtension::ReadSandboxStatus() {
   path = base::FilePath(FILE_PATH_LITERAL("/proc/self/status"));
   base::ReadFileToString(path, &proc_status);
 
-  base::Value::Dict status;
+  base::DictValue status;
   status.Set("uid", static_cast<int>(getuid()));
   status.Set("pid", getpid());
   status.Set("secontext", secontext);
   status.Set("seccompStatus",
              static_cast<int>(content::GetSeccompSandboxStatus()));
   status.Set("procStatus", proc_status);
-  status.Set("androidBuildId",
-             base::android::BuildInfo::GetInstance()->android_build_id());
+  status.Set("androidBuildId", base::android::android_info::android_build_id());
   return status;
 }
 
 void SandboxStatusExtension::RunCallback(
     std::unique_ptr<v8::Global<v8::Function>> callback,
-    base::Value::Dict status) {
+    base::DictValue status) {
   if (!render_frame())
     return;
 

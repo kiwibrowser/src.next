@@ -35,6 +35,7 @@
 namespace blink {
 
 class FillLayer;
+class CSSLengthResolver;
 class CSSValue;
 class StyleResolverState;
 class NinePieceImage;
@@ -68,7 +69,6 @@ class CSSToStyleMap {
 
   static Timing::Delay MapAnimationDelayStart(StyleResolverState&,
                                               const CSSValue&);
-  static Timing::Delay MapAnimationDelayEnd(const CSSValue&);
   static Timing::Delay MapAnimationDelayEnd(StyleResolverState&,
                                             const CSSValue&);
   static Timing::PlaybackDirection MapAnimationDirection(StyleResolverState&,
@@ -79,7 +79,8 @@ class CSSToStyleMap {
                                                const CSSValue&);
   static double MapAnimationIterationCount(StyleResolverState&,
                                            const CSSValue&);
-  static AtomicString MapAnimationName(StyleResolverState&, const CSSValue&);
+  static const ScopedCSSName* MapAnimationName(StyleResolverState&,
+                                               const CSSValue&);
   static CSSTransitionData::TransitionBehavior MapAnimationBehavior(
       StyleResolverState&,
       const CSSValue&);
@@ -99,6 +100,7 @@ class CSSToStyleMap {
       StyleResolverState&,
       const CSSValue&);
   static scoped_refptr<TimingFunction> MapAnimationTimingFunction(
+      const CSSLengthResolver&,
       const CSSValue&);
   static scoped_refptr<TimingFunction> MapAnimationTimingFunction(
       StyleResolverState&,
@@ -116,6 +118,35 @@ class CSSToStyleMap {
   static void MapNinePieceImageRepeat(StyleResolverState&,
                                       const CSSValue&,
                                       NinePieceImage&);
+  static EAnimationTriggerBehavior MapAnimationTriggerBehavior(
+      StyleResolverState&,
+      const CSSValue&);
+  static const ScopedCSSName* MapAnimationTimelineTriggerName(
+      StyleResolverState&,
+      const CSSValue&);
+  static EAnimationTriggerBehavior MapAnimationTimelineTriggerBehavior(
+      StyleResolverState&,
+      const CSSValue&);
+  static std::optional<TimelineOffset>
+  MapAnimationTimelineTriggerActivationRangeStart(StyleResolverState&,
+                                                  const CSSValue&);
+  static std::optional<TimelineOffset>
+  MapAnimationTimelineTriggerActivationRangeEnd(StyleResolverState&,
+                                                const CSSValue&);
+  static TimelineOffsetOrAuto MapAnimationTimelineTriggerActiveRangeStart(
+      StyleResolverState&,
+      const CSSValue&);
+  static TimelineOffsetOrAuto MapAnimationTimelineTriggerActiveRangeEnd(
+      StyleResolverState&,
+      const CSSValue&);
+  static StyleTimeline MapAnimationTimelineTriggerSource(StyleResolverState&,
+                                                         const CSSValue&);
+  static std::optional<Vector<AtomicString>> MapAnimationTriggerNames(
+      StyleResolverState&,
+      const CSSValue&);
+  static Member<StyleTriggerAttachmentVector> MapAnimationTriggerAttachments(
+      StyleResolverState&,
+      const CSSValue&);
 };
 
 }  // namespace blink

@@ -22,7 +22,6 @@
 #include "chrome/browser/extensions/chrome_zipfile_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/load_error_reporter.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
@@ -33,6 +32,8 @@
 #include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/load_error_reporter.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -42,6 +43,8 @@
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
 #endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -200,7 +203,7 @@ class ZipFileInstallerLocationTest : public ZipFileInstallerTest,
   void SetUp() override {
     ZipFileInstallerTest::SetUp();
     expected_extension_install_directory_ =
-        service()->unpacked_install_directory();
+        registrar()->unpacked_install_directory();
   }
 
   // Install the .zip in the test directory with `zip_name` and `expect_error`
@@ -225,14 +228,14 @@ void ZipFileInstallerLocationTest::RunInstaller(const std::string& zip_name,
   ASSERT_TRUE(base::PathExists(original_zip_path)) << original_zip_path.value();
   zipfile_installer_ = ZipFileInstaller::Create(
       GetExtensionFileTaskRunner(),
-      MakeRegisterInExtensionServiceCallback(service()));
+      MakeRegisterInExtensionServiceCallback(profile()));
 
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&ZipFileInstaller::InstallZipFileToUnpackedExtensionsDir,
                      zipfile_installer_, original_zip_path,
                      unzip_dir_root.empty()
-                         ? service()->unpacked_install_directory()
+                         ? registrar()->unpacked_install_directory()
                          : unzip_dir_root));
   observer_.WaitForInstall(expect_error);
   task_environment()->RunUntilIdle();
@@ -247,7 +250,7 @@ TEST_F(ZipFileInstallerLocationTest, GoodZip) {
   // temp install directory. E.g. /a/b/c/d == /a/b/c + /d.
   //
   // Make sure we're comparing absolute paths to avoid failures like
-  // https://crbug.com/1453669 on macOS 14.
+  // https://crbug.com/40916554 on macOS 14.
   base::FilePath absolute_last_extension_installed_path =
       base::MakeAbsoluteFilePath(observer_.last_extension_installed_path);
   base::FilePath absolute_expected_extension_install_directory =
@@ -276,7 +279,7 @@ TEST_F(ZipFileInstallerLocationTest, MultipleSameZipInstallSeparately) {
   // unpacked install directory. E.g. /a/b/c/d == /a/b/c + /d.
   //
   // Make sure we're comparing absolute paths to avoid failures like
-  // https://crbug.com/1453669 on macOS 14.
+  // https://crbug.com/40916554 on macOS 14.
   base::FilePath absolute_last_extension_installed_path =
       base::MakeAbsoluteFilePath(observer_.last_extension_installed_path);
   base::FilePath absolute_expected_extension_install_directory =
@@ -333,7 +336,7 @@ TEST_F(ZipFileInstallerLocationTest, ZipWithPublicKey) {
   EXPECT_EQ(observer_.last_extension_installed, kIdForPublicKey);
 
   // Make sure we compare absolute paths to avoid failures like
-  // https://crbug.com/1453669 on macOS 14.
+  // https://crbug.com/40916554 on macOS 14.
   base::FilePath absolute_last_extension_installed_path =
       base::MakeAbsoluteFilePath(observer_.last_extension_installed_path);
   base::FilePath absolute_expected_extension_install_directory =

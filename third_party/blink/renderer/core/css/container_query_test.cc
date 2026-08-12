@@ -8,8 +8,10 @@
 
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
+#include "third_party/blink/renderer/core/css/container_selector.h"
 #include "third_party/blink/renderer/core/css/css_container_rule.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/post_style_update_scope.h"
 #include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
@@ -17,7 +19,6 @@
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -31,7 +32,13 @@ namespace blink {
 class ContainerQueryTest : public PageTestBase {
  public:
   bool HasUnknown(StyleRuleContainer* rule) {
-    return rule && rule->GetContainerQuery().Query().HasUnknown();
+    if (!rule) {
+      return false;
+    }
+    const ConditionalExpNode* query =
+        rule->GetContainerQuerySet().SingleQuery()->Query();
+    return query && (ContainerSelector::CollectFeatureFlags(*query) &
+                     ContainerSelector::kFeatureUnknown);
   }
 
   enum class UnknownHandling {
@@ -52,7 +59,7 @@ class ContainerQueryTest : public PageTestBase {
     return rule;
   }
 
-  ContainerQuery* ParseContainerQuery(
+  const ContainerQuery* ParseContainerQuery(
       String query,
       UnknownHandling unknown_handling = UnknownHandling::kError) {
     String rule = "@container " + query + " {}";
@@ -60,37 +67,38 @@ class ContainerQueryTest : public PageTestBase {
     if (!container) {
       return nullptr;
     }
-    return &container->GetContainerQuery();
+    return container->GetContainerQuerySet().SingleQuery();
   }
 
-  std::optional<MediaQueryExpNode::FeatureFlags> FeatureFlagsFrom(
+  std::optional<ContainerSelector::FeatureFlags> FeatureFlagsFrom(
       String query_string) {
-    ContainerQuery* query =
+    const ContainerQuery* query =
         ParseContainerQuery(query_string, UnknownHandling::kAllow);
     if (!query) {
       return std::nullopt;
     }
-    return GetInnerQuery(*query).CollectFeatureFlags();
+    return ContainerSelector::CollectFeatureFlags(GetInnerQuery(*query));
   }
 
   ContainerSelector ContainerSelectorFrom(String query_string) {
-    ContainerQuery* query =
+    const ContainerQuery* query =
         ParseContainerQuery(query_string, UnknownHandling::kAllow);
     if (!query) {
       return ContainerSelector();
     }
-    return ContainerSelector(g_null_atom, GetInnerQuery(*query));
+    return ContainerSelector(g_null_atom, &GetInnerQuery(*query));
   }
 
   String SerializeCondition(StyleRuleContainer* container) {
     if (!container) {
       return "";
     }
-    return container->GetContainerQuery().ToString();
+    return container->GetContainerQuerySet().ToString();
   }
 
-  const MediaQueryExpNode& GetInnerQuery(ContainerQuery& container_query) {
-    return container_query.Query();
+  const ConditionalExpNode& GetInnerQuery(
+      const ContainerQuery& container_query) {
+    return *container_query.Query();
   }
 
   const CSSValue* ComputedValue(Element* element, String property_name) {
@@ -174,8 +182,10 @@ TEST_F(ContainerQueryTest, PreludeParsing) {
                 ParseAtContainer("@container test_name ((max-width: 500px) "
                                  "or (max-height: 500px)) {}")));
 
+  EXPECT_EQ("test_name",
+            SerializeCondition(ParseAtContainer("@container test_name {}")));
+
   // Invalid:
-  EXPECT_FALSE(ParseAtContainer("@container test_name {}"));
   EXPECT_FALSE(ParseAtContainer("@container 100px {}"));
   EXPECT_FALSE(ParseAtContainer("@container calc(1) {}"));
   EXPECT_FALSE(ParseAtContainer("@container {}"));
@@ -210,34 +220,34 @@ TEST_F(ContainerQueryTest, ValidFeatures) {
 }
 
 TEST_F(ContainerQueryTest, FeatureFlags) {
-  EXPECT_EQ(MediaQueryExpNode::kFeatureUnknown,
+  EXPECT_EQ(ContainerSelector::kFeatureUnknown,
             FeatureFlagsFrom("(width: 100gil)"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
+  EXPECT_EQ(ContainerSelector::kFeatureWidth,
             FeatureFlagsFrom("(width: 100px)"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
+  EXPECT_EQ(ContainerSelector::kFeatureWidth,
             FeatureFlagsFrom("test_name (width: 100px)"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureHeight,
+  EXPECT_EQ(ContainerSelector::kFeatureHeight,
             FeatureFlagsFrom("(height < 100px)"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureInlineSize,
+  EXPECT_EQ(ContainerSelector::kFeatureInlineSize,
             FeatureFlagsFrom("(100px >= inline-size)"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureBlockSize,
+  EXPECT_EQ(ContainerSelector::kFeatureBlockSize,
             FeatureFlagsFrom("(100px = block-size)"));
-  EXPECT_EQ(static_cast<MediaQueryExpNode::FeatureFlags>(
-                MediaQueryExpNode::kFeatureWidth |
-                MediaQueryExpNode::kFeatureBlockSize),
+  EXPECT_EQ(static_cast<ContainerSelector::FeatureFlags>(
+                ContainerSelector::kFeatureWidth |
+                ContainerSelector::kFeatureBlockSize),
             FeatureFlagsFrom("((width) and (100px = block-size))"));
-  EXPECT_EQ(static_cast<MediaQueryExpNode::FeatureFlags>(
-                MediaQueryExpNode::kFeatureUnknown |
-                MediaQueryExpNode::kFeatureBlockSize),
+  EXPECT_EQ(static_cast<ContainerSelector::FeatureFlags>(
+                ContainerSelector::kFeatureUnknown |
+                ContainerSelector::kFeatureBlockSize),
             FeatureFlagsFrom("((unknown) and (100px = block-size))"));
   EXPECT_EQ(
-      static_cast<MediaQueryExpNode::FeatureFlags>(
-          MediaQueryExpNode::kFeatureWidth | MediaQueryExpNode::kFeatureHeight |
-          MediaQueryExpNode::kFeatureInlineSize),
+      static_cast<ContainerSelector::FeatureFlags>(
+          ContainerSelector::kFeatureWidth | ContainerSelector::kFeatureHeight |
+          ContainerSelector::kFeatureInlineSize),
       FeatureFlagsFrom("((width) or (height) or (inline-size))"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
+  EXPECT_EQ(ContainerSelector::kFeatureWidth,
             FeatureFlagsFrom("((width: 100px))"));
-  EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
+  EXPECT_EQ(ContainerSelector::kFeatureWidth,
             FeatureFlagsFrom("(not (width: 100px))"));
 }
 
@@ -319,7 +329,8 @@ TEST_F(ContainerQueryTest, RuleParsing) {
     }
   )CSS");
   ASSERT_TRUE(container);
-  ASSERT_EQ("test_name", container->GetContainerQuery().Selector().Name());
+  ASSERT_EQ("test_name",
+            container->GetContainerQuerySet().SingleQuery()->Selector().Name());
 
   CSSStyleSheet* sheet = css_test_helpers::CreateStyleSheet(GetDocument());
   auto* rule = DynamicTo<CSSContainerRule>(
@@ -345,7 +356,8 @@ TEST_F(ContainerQueryTest, RuleCopy) {
   ASSERT_TRUE(container);
 
   // Copy via StyleRuleBase to test switch dispatch.
-  auto* copy_base = static_cast<StyleRuleBase*>(container)->Copy();
+  auto* copy_base =
+      static_cast<StyleRuleBase*>(container)->Clone(nullptr, nullptr);
   auto* copy = DynamicTo<StyleRuleContainer>(copy_base);
   ASSERT_TRUE(copy);
 
@@ -360,11 +372,11 @@ TEST_F(ContainerQueryTest, RuleCopy) {
   EXPECT_NE(rules[0], rules_copy[0]);
 
   // The ContainerQuery should be copied.
-  EXPECT_NE(&container->GetContainerQuery(), &copy->GetContainerQuery());
+  EXPECT_NE(&container->GetContainerQuerySet(), &copy->GetContainerQuerySet());
 
-  // The inner MediaQueryExpNode is immutable, and does not need to be copied.
-  EXPECT_EQ(&GetInnerQuery(container->GetContainerQuery()),
-            &GetInnerQuery(copy->GetContainerQuery()));
+  // The inner ConditionalExpNode is immutable, and does not need to be copied.
+  EXPECT_EQ(&GetInnerQuery(*container->GetContainerQuerySet().SingleQuery()),
+            &GetInnerQuery(*copy->GetContainerQuerySet().SingleQuery()));
 }
 
 TEST_F(ContainerQueryTest, ContainerQueryEvaluation) {
@@ -641,13 +653,13 @@ TEST_F(ContainerQueryTest, OldStyleForTransitions) {
     PostStyleUpdateScope post_style_update_scope(GetDocument());
 
     // Should transition between [10px, 20px]. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("15px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Should transition between [10px, 30px]. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
@@ -712,13 +724,13 @@ TEST_F(ContainerQueryTest, TransitionAppearingInFinalPass) {
     PostStyleUpdateScope post_style_update_scope(GetDocument());
 
     // No transition property present. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Still no transition property present. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("30px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
@@ -783,13 +795,13 @@ TEST_F(ContainerQueryTest, TransitionTemporarilyAppearing) {
     PostStyleUpdateScope post_style_update_scope(GetDocument());
 
     // No transition property present yet. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Transition between [10px, 90px]. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("50px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
@@ -854,13 +866,13 @@ TEST_F(ContainerQueryTest, RedefiningAnimations) {
     PostStyleUpdateScope post_style_update_scope(GetDocument());
 
     // Animation at 20%. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Animation at 30%. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("30px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
@@ -923,7 +935,7 @@ TEST_F(ContainerQueryTest, UnsetAnimation) {
     PostStyleUpdateScope post_style_update_scope(GetDocument());
 
     // Animation should appear to be canceled. (Intermediate round).
-    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
+    GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForSizeContainer(
         *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("auto", ComputedValueString(target, "height"));
     EXPECT_EQ(1u, GetAnimationsCount(target));
@@ -1164,7 +1176,7 @@ TEST_F(ContainerQueryTest, CQDependentContentVisibilityHidden) {
 
   Element* locker = GetDocument().getElementById(AtomicString("locker"));
   locker->setAttribute(html_names::kClassAttr, AtomicString("locked"));
-  locker->setInnerHTML("<span>Visible?</span>");
+  locker->SetInnerHTMLWithoutTrustedTypes("<span>Visible?</span>");
 
   UpdateAllLifecyclePhasesForTest();
 
@@ -1249,7 +1261,7 @@ TEST_F(ContainerQueryTest, TreeScopedReferenceUserOrigin) {
   GetStyleEngine().InjectSheet(user_sheet_key, parsed_user_sheet,
                                WebCssOrigin::kUser);
 
-  GetDocument().body()->setHTMLUnsafe(R"HTML(
+  GetDocument().body()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
     <style>
       @container user-container (width >= 0) {
         div > span {

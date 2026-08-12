@@ -8,7 +8,6 @@
 #include <string_view>
 
 #include "base/gtest_prod_util.h"
-#include "base/strings/string_util.h"
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
@@ -97,15 +96,17 @@ class CONTENT_EXPORT IsolatedOriginUtil {
   // allowed.
   static bool IsValidIsolatedOrigin(const url::Origin& origin);
 
-  // Check if |origin| is a valid origin for opt-in origin isolation. Invalid
-  // origins for this purpose include opaque origins, origins that don't have a
-  // HTTP or HTTPS scheme, and origins that are not secure contexts.
-  static bool IsValidOriginForOptInIsolation(const url::Origin& origin);
+  // Check if |origin| is a valid origin for Origin-Agent-Cluster opt-in.
+  // Invalid origins for this purpose include opaque origins, origins that don't
+  // have a HTTP or HTTPS scheme, and origins that are not secure contexts.
+  static bool IsValidOriginForOriginAgentClusterOptIn(
+      const url::Origin& origin);
 
-  // Check if |origin| is a valid origin for opting out of origin isolation.
+  // Check if |origin| is a valid origin for Origin-Agent-Cluster opt-out.
   // Invalid origins for this purpose include opaque origins, and origins that
   // don't have a HTTP or HTTPS scheme.
-  static bool IsValidOriginForOptOutIsolation(const url::Origin& origin);
+  static bool IsValidOriginForOriginAgentClusterOptOut(
+      const url::Origin& origin);
 
  private:
   // Used to implement both IsValidIsolatedOrigin and

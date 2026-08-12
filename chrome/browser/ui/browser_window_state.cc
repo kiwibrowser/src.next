@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
 
 #include "chrome/browser/ui/browser_window_state.h"
 
@@ -16,7 +12,6 @@
 
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/buildflags.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/sessions/session_service_base.h"
@@ -51,9 +46,6 @@ bool ParseCommaSeparatedIntegers(const std::string& str,
 std::string GetWindowName(const Browser* browser) {
   switch (browser->type()) {
     case Browser::TYPE_NORMAL:
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    case Browser::TYPE_CUSTOM_TAB:
-#endif
       return prefs::kBrowserWindowPlacement;
     case Browser::TYPE_POPUP:
     case Browser::TYPE_PICTURE_IN_PICTURE:
@@ -66,7 +58,7 @@ std::string GetWindowName(const Browser* browser) {
   }
 }
 
-base::Value::Dict& GetWindowPlacementDictionaryReadWrite(
+base::DictValue& GetWindowPlacementDictionaryReadWrite(
     const std::string& window_name,
     PrefService* prefs,
     std::unique_ptr<ScopedDictPrefUpdate>& scoped_update) {
@@ -85,23 +77,25 @@ base::Value::Dict& GetWindowPlacementDictionaryReadWrite(
   // on window name.
   scoped_update =
       std::make_unique<ScopedDictPrefUpdate>(prefs, prefs::kAppWindowPlacement);
-  base::Value::Dict* this_app_dict =
+  base::DictValue* this_app_dict =
       (*scoped_update)->FindDictByDottedPath(window_name);
-  if (this_app_dict)
+  if (this_app_dict) {
     return *this_app_dict;
+  }
   return (*scoped_update)
-      ->SetByDottedPath(window_name, base::Value::Dict())
+      ->SetByDottedPath(window_name, base::DictValue())
       ->GetDict();
 }
 
-const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(
+const base::DictValue* GetWindowPlacementDictionaryReadOnly(
     const std::string& window_name,
     PrefService* prefs) {
   DCHECK(!window_name.empty());
-  if (prefs->FindPreference(window_name))
+  if (prefs->FindPreference(window_name)) {
     return &prefs->GetDict(window_name);
+  }
 
-  const base::Value::Dict& app_windows =
+  const base::DictValue& app_windows =
       prefs->GetDict(prefs::kAppWindowPlacement);
   return app_windows.FindDict(window_name);
 }
@@ -111,7 +105,7 @@ bool ShouldSaveWindowPlacement(const Browser* browser) {
   // spawned by an app).  See similar code in
   // SessionServiceBase::ShouldTrackBrowser().
   return !(browser->is_type_app() || browser->is_type_app_popup()) ||
-         browser->is_trusted_source();
+         WindowFeatureController::From(browser)->IsTrustedSource();
 }
 
 bool SavedBoundsAreContentBounds(const Browser* browser) {
@@ -119,10 +113,10 @@ bool SavedBoundsAreContentBounds(const Browser* browser) {
   // Web apps, on the other hand, have the same behavior as popups, and save
   // their content bounds.
   return !browser->is_type_normal() && !browser->is_type_devtools() &&
-         !browser->is_trusted_source();
+         !WindowFeatureController::From(browser)->IsTrustedSource();
 }
 
-void SaveWindowPlacement(const Browser* browser,
+void SaveWindowPlacement(Browser* browser,
                          const gfx::Rect& bounds,
                          ui::mojom::WindowShowState show_state) {
   // Save to the session storage service, used when reloading a past session.
@@ -130,17 +124,19 @@ void SaveWindowPlacement(const Browser* browser,
   // the session service. This function gets called during initial window
   // showing, and we don't want to bring in the session service this early.
   SessionServiceBase* service = GetAppropriateSessionServiceIfExisting(browser);
-  if (service)
+  if (service) {
     service->SetWindowBounds(browser->session_id(), bounds, show_state);
+  }
 }
 
-void SaveWindowWorkspace(const Browser* browser, const std::string& workspace) {
+void SaveWindowWorkspace(Browser* browser, const std::string& workspace) {
   SessionServiceBase* service = GetAppropriateSessionServiceIfExisting(browser);
-  if (service)
+  if (service) {
     service->SetWindowWorkspace(browser->session_id(), workspace);
+  }
 }
 
-void SaveWindowVisibleOnAllWorkspaces(const Browser* browser,
+void SaveWindowVisibleOnAllWorkspaces(Browser* browser,
                                       bool visible_on_all_workspaces) {
   SessionServiceBase* service = GetAppropriateSessionServiceIfExisting(browser);
   if (service) {

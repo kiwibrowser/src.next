@@ -5,11 +5,12 @@
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/test_blocklist.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/safe_browsing/buildflags.h"
 #include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/blocklist_state.h"
+#include "extensions/browser/extension_registrar.h"
+#include "extensions/browser/test_blocklist.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/test/extension_state_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,6 +46,12 @@ class BlocklistStatesInteractionUnitTest : public ExtensionServiceTestBase {
     extension_prefs_ = ExtensionPrefs::Get(profile());
   }
 
+  void TearDown() override {
+    extension_prefs_ = nullptr;
+    test_blocklist_.Detach();
+    ExtensionServiceTestBase::TearDown();
+  }
+
  protected:
   void SetSafeBrowsingBlocklistStateForExtension(
       const ExtensionId& extension_id,
@@ -59,7 +66,7 @@ class BlocklistStatesInteractionUnitTest : public ExtensionServiceTestBase {
   void SetOmahaBlocklistStateForExtension(const ExtensionId& extension_id,
                                           const std::string& omaha_attribute,
                                           bool value) {
-    auto attributes = base::Value::Dict().Set(omaha_attribute, value);
+    auto attributes = base::DictValue().Set(omaha_attribute, value);
     service()->PerformActionBasedOnOmahaAttributes(extension_id, attributes);
   }
 
@@ -67,7 +74,7 @@ class BlocklistStatesInteractionUnitTest : public ExtensionServiceTestBase {
 
  private:
   TestBlocklist test_blocklist_;
-  raw_ptr<ExtensionPrefs> extension_prefs_;
+  raw_ptr<ExtensionPrefs> extension_prefs_ = nullptr;
 };
 
 // 1. The extension is added to the Safe Browsing blocklist with
@@ -348,7 +355,7 @@ TEST_F(
       extension_prefs()));
 
   // The extension is manually re-enabled.
-  service()->EnableExtension(kTestExtensionId);
+  registrar()->EnableExtension(kTestExtensionId);
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
   SetOmahaBlocklistStateForExtension(kTestExtensionId, "_policy_violation",

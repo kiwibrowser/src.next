@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_EMBEDDED_CONTENT_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_EMBEDDED_CONTENT_VIEW_H_
 
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -16,7 +17,7 @@ namespace blink {
 class CullRect;
 class LayoutEmbeddedContent;
 class LocalFrameView;
-class GraphicsContext;
+struct PaintInfo;
 
 // EmbeddedContentView is a pure virtual class which is implemented by
 // LocalFrameView, RemoteFrameView, and WebPluginContainerImpl.
@@ -36,8 +37,7 @@ class CORE_EXPORT EmbeddedContentView : public GarbageCollectedMixin {
   // |cull_rect| is in the same coordinate space as Location() and FrameRect().
   // |paint_offset| is Location() mapped into the current coordinates space of
   // the current paint context.
-  virtual void Paint(GraphicsContext&,
-                     PaintFlags,
+  virtual void Paint(const PaintInfo&,
                      const CullRect& cull_rect,
                      const gfx::Vector2d& paint_offset) const = 0;
   // Called when the size of the view changes.  Implementations of
@@ -75,6 +75,7 @@ class CORE_EXPORT EmbeddedContentView : public GarbageCollectedMixin {
   bool IsParentVisible() const { return parent_visible_; }
   void SetParentVisible(bool);
   bool IsVisible() const { return self_visible_ && parent_visible_; }
+  virtual mojom::blink::WebFeature SvgFilterPaintedCounter() const = 0;
 
  protected:
   // Called when our frame rect changes (or the rect/scroll offset of an

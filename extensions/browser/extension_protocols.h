@@ -5,8 +5,15 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_PROTOCOLS_H_
 #define EXTENSIONS_BROWSER_EXTENSION_PROTOCOLS_H_
 
+#include <optional>
+
 #include "base/functional/callback.h"
+#include "content/public/common/child_process_id.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+
+namespace url {
+class Origin;
+}
 
 namespace base {
 class FilePath;
@@ -43,7 +50,8 @@ CreateExtensionNavigationURLLoaderFactory(
 // browser process to extension URLs.
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
 CreateExtensionWorkerMainResourceURLLoaderFactory(
-    content::BrowserContext* browser_context);
+    content::BrowserContext* browser_context,
+    const std::optional<url::Origin>& request_initiator);
 
 // Creates a new network::mojom::URLLoaderFactory implementation suitable for
 // handling service worker main/imported script requests initiated by the
@@ -55,13 +63,14 @@ CreateExtensionServiceWorkerScriptURLLoaderFactory(
 
 // Creates a network::mojom::URLLoaderFactory implementation suitable for
 // handling subresource requests for extension URLs for the frame identified by
-// |render_process_id| and |render_frame_id|.
+// `render_process_id` and `render_frame_id`.
 // This function can also be used to make a factory for other non-subresource
 // requests to extension URLs, such as for the service worker script when
 // starting a service worker. In that case, render_frame_id will be
-// MSG_ROUTING_NONE.
+// IPC::mojom::kRoutingIdNone.
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
-CreateExtensionURLLoaderFactory(int render_process_id, int render_frame_id);
+CreateExtensionURLLoaderFactory(content::ChildProcessId render_process_id,
+                                int render_frame_id);
 
 void EnsureExtensionURLLoaderFactoryShutdownNotifierFactoryBuilt();
 

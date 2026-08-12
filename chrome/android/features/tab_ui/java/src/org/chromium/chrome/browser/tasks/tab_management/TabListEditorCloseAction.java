@@ -7,20 +7,21 @@ package org.chromium.chrome.browser.tasks.tab_management;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 
-import androidx.annotation.Nullable;
 import androidx.appcompat.content.res.AppCompatResources;
 
-import org.chromium.base.Callback;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabUtils;
 import org.chromium.chrome.browser.tabmodel.TabClosureParams;
+import org.chromium.chrome.browser.tabmodel.TabClosureParamsUtils;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiMetricsHelper.TabListEditorActionMetricGroups;
 import org.chromium.chrome.tab_ui.R;
-import org.chromium.components.browser_ui.widget.ActionConfirmationResult;
+import org.chromium.components.browser_ui.util.motion.MotionEventInfo;
 
 import java.util.List;
 
 /** Close action for the {@link TabListEditorMenu}. */
+@NullMarked
 public class TabListEditorCloseAction extends TabListEditorAction {
     /**
      * Create an action for closing tabs.
@@ -29,27 +30,21 @@ public class TabListEditorCloseAction extends TabListEditorAction {
      * @param showMode whether to show an action view.
      * @param buttonType the type of the action view.
      * @param iconPosition the position of the icon in the action view.
-     * @param actionConfirmationManager used for showing confirmation dialogs.
      */
     public static TabListEditorAction createAction(
             Context context,
             @ShowMode int showMode,
             @ButtonType int buttonType,
-            @IconPosition int iconPosition,
-            @Nullable ActionConfirmationManager actionConfirmationManager) {
+            @IconPosition int iconPosition) {
         Drawable drawable = AppCompatResources.getDrawable(context, R.drawable.ic_close_tabs_24dp);
-        return new TabListEditorCloseAction(
-                showMode, buttonType, iconPosition, drawable, actionConfirmationManager);
+        return new TabListEditorCloseAction(showMode, buttonType, iconPosition, drawable);
     }
-
-    private @Nullable final ActionConfirmationManager mActionConfirmationManager;
 
     private TabListEditorCloseAction(
             @ShowMode int showMode,
             @ButtonType int buttonType,
             @IconPosition int iconPosition,
-            Drawable drawable,
-            @Nullable ActionConfirmationManager actionConfirmationManager) {
+            Drawable drawable) {
         super(
                 R.id.tab_list_editor_close_menu_item,
                 showMode,
@@ -58,48 +53,36 @@ public class TabListEditorCloseAction extends TabListEditorAction {
                 R.plurals.tab_selection_editor_close_tabs,
                 R.plurals.accessibility_tab_selection_editor_close_tabs,
                 drawable);
-        mActionConfirmationManager = actionConfirmationManager;
     }
 
     @Override
-    public void onSelectionStateChange(List<Integer> tabIds) {
+    public void onSelectionStateChange(List<TabListEditorItemSelectionId> itemIds) {
         int size =
                 editorSupportsActionOnRelatedTabs()
-                        ? getTabCountIncludingRelatedTabs(getTabGroupModelFilter(), tabIds)
-                        : tabIds.size();
-        setEnabledAndItemCount(!tabIds.isEmpty(), size);
+                        ? getTabCountIncludingRelatedTabs(getTabModel(), itemIds)
+                        : itemIds.size();
+        setEnabledAndItemCount(!itemIds.isEmpty(), size);
     }
 
     @Override
-    public boolean performAction(List<Tab> tabs) {
+    public boolean performAction(
+            List<Tab> tabs,
+            List<String> tabGroupSyncIds,
+            @Nullable MotionEventInfo triggeringMotion) {
         assert !tabs.isEmpty() : "Close action should not be enabled for no tabs.";
-
-        if (getTabGroupModelFilter().isIncognito() || mActionConfirmationManager == null) {
-            doRemoveTabs(tabs, /* allowUndo= */ true);
-            return true;
-        }
-
-        Callback<Integer> onResult =
-                (@ActionConfirmationResult Integer result) -> {
-                    if (result != ActionConfirmationResult.CONFIRMATION_NEGATIVE) {
-                        doRemoveTabs(tabs, result == ActionConfirmationResult.IMMEDIATE_CONTINUE);
-                    }
-                };
-
-        mActionConfirmationManager.processCloseTabAttempt(TabUtils.getTabIds(tabs), onResult);
-
-        return true;
-    }
-
-    private void doRemoveTabs(List<Tab> tabs, boolean allowUndo) {
-        getTabGroupModelFilter()
+        // We only allow undo for non peripherals.
+        getTabModel()
+                .getTabRemover()
                 .closeTabs(
                         TabClosureParams.closeTabs(tabs)
-                                .allowUndo(allowUndo)
+                                .allowUndo(TabClosureParamsUtils.shouldAllowUndo(triggeringMotion))
                                 .hideTabGroups(editorSupportsActionOnRelatedTabs())
-                                .build());
+                                .build(),
+                        /* allowDialog= */ true);
         TabUiMetricsHelper.recordSelectionEditorActionMetrics(
                 TabListEditorActionMetricGroups.CLOSE);
+
+        return true;
     }
 
     @Override

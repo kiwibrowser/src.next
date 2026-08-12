@@ -34,15 +34,20 @@
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
+#include "third_party/blink/renderer/core/html/parser/fragment_parser.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_parser_options.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
 
 class Document;
 class ExceptionState;
+class SetHTMLOptions;
+class SetHTMLUnsafeOptions;
 class SlotAssignment;
 class ReferenceTargetIdObserver;
 class V8ShadowRootMode;
@@ -53,7 +58,7 @@ enum class ShadowRootMode { kOpen, kClosed, kUserAgent };
 
 class CORE_EXPORT ShadowRoot final : public DocumentFragment,
                                      public TreeScope,
-                                     public ElementRareDataField {
+                                     public NodeRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -89,6 +94,12 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
   bool clonable() const { return clonable_; }
   void setClonable(bool clonable) { clonable_ = clonable; }
 
+  void ProcessAdoptedStylesheetAttribute(AtomicString value);
+
+  const AtomicString& AdoptedStylesheetsAttributeValue() const {
+    return adopted_stylesheets_attr_value_;
+  }
+
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
 
@@ -118,15 +129,25 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
 
   void DistributeIfNeeded();
 
+  String GetInnerHTMLString() const;
+  void SetInnerHTMLWithoutTrustedTypes(const String&,
+                                       ExceptionState& = ASSERT_NO_EXCEPTION);
   String innerHTML() const;
-  void setInnerHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
-  void setHTMLUnsafe(const String& html, ExceptionState&);
-  void setHTMLUnsafe(const String& html, SetHTMLOptions*, ExceptionState&);
+  void setInnerHTML(const V8UnionStringLegacyNullToEmptyStringOrTrustedHTML*,
+                    ExceptionState&);
+  void setHTMLUnsafe(const V8UnionStringOrTrustedHTML* html, ExceptionState&);
+  void setHTMLUnsafe(const V8UnionStringOrTrustedHTML* html,
+                     SetHTMLUnsafeOptions*,
+                     ExceptionState&);
+  void setHTMLUnsafe(const V8UnionStringOrTrustedHTML* html,
+                     TrustedParserOptions*,
+                     ExceptionState&);
   void setHTML(const String& html, SetHTMLOptions*, ExceptionState&);
 
   Node* Clone(Document& factory,
               NodeCloningData& data,
               ContainerNode* append_to,
+              CustomElementRegistry* fallback_registry,
               ExceptionState& append_exception_state) const override;
 
   void SetDelegatesFocus(bool flag) { delegates_focus_ = flag; }
@@ -172,8 +193,19 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
     return has_focusgroup_attribute_on_descendant_;
   }
 
-  void SetRegistry(CustomElementRegistry*);
-  CustomElementRegistry* registry() const { return registry_.Get(); }
+  // https://dom.spec.whatwg.org/#shadowroot-keep-custom-element-registry-null
+  // Keep custom element registry null variable ensures that the null registry
+  // shadowroot does not get a custom element registry during adoption, but
+  // only when it's explicitly initialized with a registry.
+  void SetKeepCustomElementRegistryNull(bool flag) {
+    // When this is set to true, the custom element registry should be null.
+    DCHECK(!flag || !customElementRegistry());
+    keep_custom_element_registry_null_ = flag;
+  }
+
+  bool ShouldKeepCustomElementRegistryNull() const {
+    return keep_custom_element_registry_null_;
+  }
 
   bool ContainsShadowRoots() const { return child_shadow_root_count_; }
 
@@ -181,6 +213,9 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
 
  private:
   friend class ReferenceTargetIdObserver;
+
+  HeapVector<Member<CSSStyleSheet>> ResolveAdoptedStyleSheets(
+      const AtomicString& shadowrootadoptedstylesheets_attribute_value);
 
   void ChildrenChanged(const ChildrenChange&) override;
 
@@ -193,10 +228,26 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
   }
 
   void ReferenceTargetChanged();
+  void SetInnerHTMLInternal(const String& html,
+                            FragmentParserOptions,
+                            Sanitizer::Mode,
+                            FragmentParserConfig::ParseDeclarativeShadowRoots,
+                            FragmentParserConfig::ForceHtml,
+                            const AtomicString& property_name,
+                            ExceptionState&);
+
+  template <class T>
+  String CheckHTML(const T* html,
+                   const AtomicString& property_name,
+                   ExceptionState& exception_state) const {
+    return TrustedTypesCheckForHTML(html, GetExecutionContext(),
+                                    trusted_types_names::kShadowRoot,
+                                    property_name, exception_state);
+  }
 
   Member<SlotAssignment> slot_assignment_;
-  Member<CustomElementRegistry> registry_;
   Member<ReferenceTargetIdObserver> reference_target_id_observer_;
+  AtomicString adopted_stylesheets_attr_value_;
   unsigned child_shadow_root_count_ : 16;
   unsigned mode_ : 2;
   unsigned registered_with_parent_shadow_root_ : 1;
@@ -207,6 +258,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment,
   unsigned has_focusgroup_attribute_on_descendant_ : 1;
   unsigned serializable_ : 1;
   unsigned clonable_ : 1;
+  unsigned keep_custom_element_registry_null_ : 1;
 };
 
 inline bool Node::IsInUserAgentShadowRoot() const {
@@ -214,10 +266,31 @@ inline bool Node::IsInUserAgentShadowRoot() const {
 }
 
 inline ShadowRoot* Node::GetShadowRoot() const {
-  auto* this_element = DynamicTo<Element>(this);
-  if (!this_element)
-    return nullptr;
-  return this_element->GetShadowRoot();
+  return HasShadowRoot() ? To<Element>(this)->GetShadowRoot() : nullptr;
+}
+
+inline bool IsShadowHost(const Node* node) {
+  return node && node->GetShadowRoot();
+}
+
+inline bool IsShadowHost(const Node& node) {
+  return node.GetShadowRoot();
+}
+
+inline bool IsShadowHost(const Element* element) {
+  return element && element->GetShadowRoot();
+}
+
+inline bool IsShadowHost(const Element& element) {
+  return element.GetShadowRoot();
+}
+
+inline bool IsAtShadowBoundary(const Element* element) {
+  if (!element) {
+    return false;
+  }
+  ContainerNode* parent_node = element->parentNode();
+  return parent_node && parent_node->IsShadowRoot();
 }
 
 template <>

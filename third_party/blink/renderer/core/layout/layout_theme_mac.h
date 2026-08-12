@@ -57,11 +57,6 @@ class LayoutThemeMac final : public LayoutThemeDefault {
   Color SystemHighlightFromColorProvider(
       mojom::blink::ColorScheme color_scheme,
       const ui::ColorProvider* color_provider) const override;
-
- protected:
-  // Controls color values returned from FocusRingColor().
-  bool UsesTestModeFocusRingColor() const;
-  Color GetCustomFocusRingColor(mojom::blink::ColorScheme color_scheme) const;
 };
 
 }  // namespace blink

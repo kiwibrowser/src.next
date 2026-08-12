@@ -3,23 +3,23 @@
 // found in the LICENSE file.
 
 #include "base/android/meminfo_dump_provider.h"
+
 #include <jni.h>
+
 #include "base/android/jni_android.h"
 #include "base/logging.h"
-#include "base/time/time.h"
-#include "base/trace_event/base_tracing.h"
-
-#if BUILDFLAG(ENABLE_BASE_TRACING)
 #include "base/memory_jni/MemoryInfoBridge_jni.h"
-#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
+#include "base/system_jni/Debug__MemoryInfo_jni.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/trace_event.h"
 
 namespace base::android {
 
 MeminfoDumpProvider::MeminfoDumpProvider() {
-#if BUILDFLAG(ENABLE_BASE_TRACING)
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, kDumpProviderName, nullptr);
-#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 }
 
 // static
@@ -31,7 +31,6 @@ MeminfoDumpProvider& MeminfoDumpProvider::Initialize() {
 bool MeminfoDumpProvider::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* pmd) {
-#if BUILDFLAG(ENABLE_BASE_TRACING)
   // This is best-effort, and will be wrong if there are other callers of
   // ActivityManager#getProcessMemoryInfo(), either in this process or from
   // another process which is allowed to do so (typically, adb).
@@ -65,8 +64,8 @@ bool MeminfoDumpProvider::OnMemoryDump(
 
   last_collection_time_ = now;
   JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> memory_info =
-      Java_MemoryInfoBridge_getActivityManagerMemoryInfoForSelf(env);
+  ScopedJavaLocalRef<JDebug_MemoryInfo> memory_info =
+      MemoryInfoBridgeJni::getActivityManagerMemoryInfoForSelf(env);
   // Tell the manager that collection failed. Since this is likely not a
   // transient failure, don't return an empty dump, and let the manager exclude
   // this provider from the next dump.
@@ -75,15 +74,8 @@ bool MeminfoDumpProvider::OnMemoryDump(
     return false;
   }
 
-  ScopedJavaLocalRef<jclass> clazz{env, env->GetObjectClass(memory_info.obj())};
-
-  jfieldID other_private_dirty_id =
-      env->GetFieldID(clazz.obj(), "otherPrivateDirty", "I");
-  jfieldID other_pss_id = env->GetFieldID(clazz.obj(), "otherPss", "I");
-
-  int other_private_dirty_kb =
-      env->GetIntField(memory_info.obj(), other_private_dirty_id);
-  int other_pss_kb = env->GetIntField(memory_info.obj(), other_pss_id);
+  int other_private_dirty_kb = memory_info->Get_otherPrivateDirty(env);
+  int other_pss_kb = memory_info->Get_otherPss(env);
 
   // What "other" covers is not documented in Debug#MemoryInfo, nor in
   // ActivityManager#getProcessMemoryInfo. However, it calls
@@ -97,9 +89,8 @@ bool MeminfoDumpProvider::OnMemoryDump(
                   static_cast<uint64_t>(other_pss_kb) * 1024);
 
   return true;
-#else   // BUILDFLAG(ENABLE_BASE_TRACING)
-  return false;
-#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 }
 
 }  // namespace base::android
+
+DEFINE_JNI(MemoryInfoBridge)

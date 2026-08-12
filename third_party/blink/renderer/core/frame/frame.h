@@ -35,14 +35,12 @@
 #include "base/i18n/rtl.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
-#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/blink/public/common/fenced_frame/redacted_fenced_frame_config.h"
 #include "third_party/blink/public/common/frame/frame_ad_evidence.h"
 #include "third_party/blink/public/common/frame/user_activation_state.h"
 #include "third_party/blink/public/common/frame/user_activation_update_source.h"
 #include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
-#include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_policy.mojom-blink-forward.h"
@@ -73,7 +71,6 @@ namespace blink {
 class ChromeClient;
 class DOMWindow;
 class DOMWrapperWorld;
-class Document;
 class FrameClient;
 class FrameOwner;
 class FrameScheduler;
@@ -82,7 +79,6 @@ class HTMLFrameOwnerElement;
 class LayoutEmbeddedContent;
 class LocalFrame;
 class Page;
-class Resource;
 class SecurityContext;
 class Settings;
 class WindowProxy;
@@ -93,7 +89,7 @@ class WebFrame;
 class WebLocalFrame;
 class WebRemoteFrame;
 
-enum class FrameDetachType { kRemove, kSwap };
+enum class FrameDetachType { kRemove, kSwapForLocal, kSwapForRemote };
 
 // kInsertLater will create a provisional frame, i.e. it will have a parent
 // frame but not be inserted into the frame tree.
@@ -418,7 +414,8 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
             mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
                 remote_frame_host,
             mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
-                remote_frame_receiver);
+                remote_frame_receiver,
+            const std::optional<base::UnguessableToken>& devtools_frame_token);
 
   // Removes the given child from this frame.
   void RemoveChild(Frame* child);
@@ -434,15 +431,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   // Returns false if fenced frames are disabled. Returns true if the
   // feature is enabled and if `this` or any of its ancestor nodes is a
-  // fenced frame. For MPArch based fenced frames returns the value of
-  // Page::IsMainFrameFencedFrameRoot and for shadowDOM based fenced frames
-  // returns true, if the FrameTree that this frame is in is not the outermost
-  // FrameTree.
+  // fenced frame. Returns the value of Page::IsMainFrameFencedFrameRoot.
   bool IsInFencedFrameTree() const;
 
   // Returns false if fenced frames are disabled. Otherwise, returns true if
-  // this frame is the main frame of a fenced frame tree. Works for both MPArch
-  // and ShadowDOM based fenced frames.
+  // this frame is the main frame of a fenced frame tree.
   bool IsFencedFrameRoot() const;
 
   // Returns the mode set on the fenced frame if the frame is inside a fenced
@@ -451,8 +444,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
   GetDeprecatedFencedFrameMode() const;
 
-  // Returns all the resources under the frame tree of this node.
-  HeapVector<Member<Resource>> AllResourcesUnderFrame();
+  // Iterates through the frame owner's ancestor nodes and adjusts the offset.
+  void AdjustOffsetByAncestorFrames(gfx::Point* origin_point);
+
+  // Checks whether this frame is a descendant of other.
+  bool IsDescendantOf(const Frame* other) const;
 
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
@@ -520,11 +516,13 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   void CancelFormSubmissionWithVersion(uint64_t version);
 
-  bool SwapImpl(WebFrame*,
-                mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
-                    remote_frame_host,
-                mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
-                    remote_frame_receiver);
+  bool SwapImpl(
+      WebFrame*,
+      mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+          remote_frame_host,
+      mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
+          remote_frame_receiver,
+      const std::optional<base::UnguessableToken>& devtools_frame_token);
 
   // Notifies a specific frame that it now has user activation. Used to prevent
   // duplicated logic in `NotifyUserActivationInFrameTree()`, which notifies

@@ -31,12 +31,19 @@ constexpr std::string_view kValuePortKey = "port";
 }  // namespace
 
 HostPortPair::HostPortPair() : port_(0) {}
+
 HostPortPair::HostPortPair(std::string_view in_host, uint16_t in_port)
-    : host_(in_host), port_(in_port) {}
+    : port_(in_port), host_(in_host) {}
+
+HostPortPair::HostPortPair(const char* in_host, uint16_t in_port)
+    : HostPortPair(std::string_view(in_host), in_port) {}
+
+HostPortPair::HostPortPair(std::string&& in_host, uint16_t in_port)
+    : port_(in_port), host_(std::move(in_host)) {}
 
 // static
 HostPortPair HostPortPair::FromURL(const GURL& url) {
-  return HostPortPair(url.HostNoBrackets(),
+  return HostPortPair(url.HostNoBracketsPiece(),
                       static_cast<uint16_t>(url.EffectiveIntPort()));
 }
 
@@ -89,7 +96,7 @@ HostPortPair HostPortPair::FromString(std::string_view str) {
 
 // static
 std::optional<HostPortPair> HostPortPair::FromValue(const base::Value& value) {
-  const base::Value::Dict* dict = value.GetIfDict();
+  const base::DictValue* dict = value.GetIfDict();
   if (!dict)
     return std::nullopt;
 
@@ -131,7 +138,7 @@ std::string HostPortPair::HostForURL() const {
 }
 
 base::Value HostPortPair::ToValue() const {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(kValueHostKey, host_);
   dict.Set(kValuePortKey, port_);
 

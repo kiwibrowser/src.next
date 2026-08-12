@@ -1,0 +1,726 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+package org.chromium.chrome.browser.toolbar;
+
+import android.content.Context;
+import android.os.Handler;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.View.MeasureSpec;
+import android.view.View.OnLayoutChangeListener;
+import android.view.ViewGroup;
+import android.view.ViewGroup.LayoutParams;
+import android.widget.FrameLayout;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
+import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.core.view.WindowInsetsAnimationCompat;
+import androidx.core.view.WindowInsetsAnimationCompat.BoundsCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import org.chromium.base.Callback;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsSizer;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.Observer;
+import org.chromium.chrome.browser.omnibox.LocationBar;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.StateChangeReason;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
+import org.chromium.components.browser_ui.bottomsheet.EmptyBottomSheetObserver;
+import org.chromium.components.browser_ui.widget.TouchEventObserver;
+import org.chromium.ui.KeyboardVisibilityDelegate;
+import org.chromium.ui.KeyboardVisibilityDelegate.KeyboardVisibilityListener;
+import org.chromium.ui.base.LocalizationUtils;
+import org.chromium.ui.base.ViewUtils;
+import org.chromium.ui.insets.InsetObserver;
+import org.chromium.ui.insets.InsetObserver.WindowInsetsAnimationListener;
+import org.chromium.ui.util.CommonOnLayoutChangeListeners;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.util.List;
+import java.util.function.BooleanSupplier;
+
+/**
+ * Controller responsible for toggling the "mini origin" presentation of the browsing mode toolbar.
+ * This state, which is not always active, has a reduced height and shows only the url bar with its
+ * text at a reduced size.
+ */
+@NullMarked
+public class MiniOriginBarController implements Observer {
+
+    // Quantity to divide progress % by when deciding the final scale factor. We want our final
+    // scale to be 0.75, so we divide progress by 4 and subtract that quantity from 1.0.
+    static final float LOCATION_BAR_SCALE_DENOMINATOR = 4;
+    static final float LOCATION_BAR_FINAL_SCALE = 0.75f;
+
+    @IntDef({
+        MiniOriginState.NOT_READY,
+        MiniOriginState.READY,
+        MiniOriginState.ANIMATING,
+        MiniOriginState.SHOWING,
+        MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET,
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    @interface MiniOriginState {
+        // The mini origin bar isn't showing and can't show even if a form field is focused.
+        int NOT_READY = 0;
+        // The mini origin bar isn't showing but can show if the soft keyboard shows.
+        int READY = 1;
+        // The mini origin bar is animating to either show or hide itself.
+        int ANIMATING = 2;
+        // The mini origin bar is showing at its fully minimized size.
+        int SHOWING = 3;
+        // The mini origin bar is showing at its fully minimized size and is stacked on top of a
+        // keyboard accessory sheet.
+        int SHOWING_WITH_ACCESSORY_SHEET = 4;
+    }
+
+    @IntDef({
+        MiniOriginEvent.KEYBOARD_APPEARED,
+        MiniOriginEvent.KEYBOARD_DISAPPEARED,
+        MiniOriginEvent.KEYBOARD_ANIMATION_PREPARED,
+        MiniOriginEvent.KEYBOARD_ANIMATION_ENDED,
+        MiniOriginEvent.KEYBOARD_ANIMATION_CANCELLED_BY_USER,
+        MiniOriginEvent.FORM_FIELD_GAINED_FOCUS,
+        MiniOriginEvent.FORM_FIELD_LOST_FOCUS,
+        MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP,
+        MiniOriginEvent.CONTROLS_POSITION_BECAME_BOTTOM,
+        MiniOriginEvent.ACCESSORY_SHEET_APPEARED,
+        MiniOriginEvent.ACCESSORY_SHEET_DISAPPEARED,
+        MiniOriginEvent.COBROWSE_SHEET_OPEN_CHANGED
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    @interface MiniOriginEvent {
+        int KEYBOARD_APPEARED = 0;
+        int KEYBOARD_DISAPPEARED = 1;
+        int KEYBOARD_ANIMATION_PREPARED = 2;
+        int KEYBOARD_ANIMATION_ENDED = 3;
+        int KEYBOARD_ANIMATION_CANCELLED_BY_USER = 4;
+        int FORM_FIELD_GAINED_FOCUS = 5;
+        int FORM_FIELD_LOST_FOCUS = 6;
+        int CONTROLS_POSITION_BECAME_TOP = 7;
+        int CONTROLS_POSITION_BECAME_BOTTOM = 8;
+        int ACCESSORY_SHEET_APPEARED = 9;
+        int ACCESSORY_SHEET_DISAPPEARED = 10;
+        int COBROWSE_SHEET_OPEN_CHANGED = 11;
+    }
+
+    private final LocationBar mLocationBar;
+    private final FormFieldFocusedSupplier mIsFormFieldFocusedSupplier;
+    private final BottomSheetController mBottomSheetController;
+    private final KeyboardVisibilityDelegate mKeyboardVisibilityDelegate;
+    private final Callback<Boolean> mIsFormFieldFocusedObserver;
+    private final KeyboardVisibilityListener mKeyboardVisibilityObserver;
+    private final Context mContext;
+    private final ControlContainer mControlContainer;
+    private final SettableNonNullObservableSupplier<Boolean> mSuppressToolbarSceneLayerSupplier;
+    private final BrowserControlsSizer mBrowserControlsSizer;
+    private final NonNullObservableSupplier<Boolean> mIsKeyboardAccessorySheetShowing;
+    private final MiniOriginWindowInsetsAnimationListener mWindowInsetsAnimationListener;
+    private final Callback<Boolean> mAccessorySheetShowingObserver;
+    private @MiniOriginState int mMiniOriginBarState = MiniOriginState.NOT_READY;
+    private FrameLayout.LayoutParams mDefaultLocationBarLayoutParams;
+    private final TouchEventObserver mTouchEventObserver;
+    private final InsetObserver mInsetObserver;
+    private final BooleanSupplier mIsOmniboxFocusedSupplier;
+    private final @Px int mDefaultLocationBarRightPadding;
+    private final @Px int mMiniOriginBarHeight;
+    // The starting horizontal position of the location bar when the mini origin bar is in its
+    // least-minimized state.
+    private float mStartingLocationBarX;
+    // The final horizontal position of the location bar when the mini origin bar is in its
+    // fully-minimized state.
+    private float mFinalLocationBarTranslationX;
+    private boolean mShowingMiniOriginBar;
+    private boolean mIsCobrowseSheetOpen;
+    private final BottomSheetObserver mBottomSheetObserver;
+    private final OnLayoutChangeListener mLayoutChangeListener;
+    private float mMinimizationProgress;
+
+    /**
+     * @param locationBar LocationBar instance used to change the presentation of e.g. the UrlBar
+     *     and StatusView
+     * @param isFormFieldFocusedSupplier Supplier to tell us if a form field is focused on the
+     *     currently active WebContents.
+     * @param keyboardVisibilityDelegate Delegate that tells us if a soft keyboard is visible
+     * @param context Current context.
+     * @param controlContainer Control container where the toolbar we're controlling the
+     *     presentation of is hosted.
+     */
+    public MiniOriginBarController(
+            LocationBar locationBar,
+            FormFieldFocusedSupplier isFormFieldFocusedSupplier,
+            BottomSheetController bottomSheetController,
+            KeyboardVisibilityDelegate keyboardVisibilityDelegate,
+            Context context,
+            ControlContainer controlContainer,
+            SettableNonNullObservableSupplier<Boolean> suppressToolbarSceneLayerSupplier,
+            BrowserControlsSizer browserControlsSizer,
+            InsetObserver insetObserver,
+            SettableNonNullObservableSupplier<Integer> controlContainerTranslationSupplier,
+            NonNullObservableSupplier<Boolean> isKeyboardAccessorySheetShowing,
+            BooleanSupplier isOmniboxFocusedSupplier) {
+        mLocationBar = locationBar;
+        mIsFormFieldFocusedSupplier = isFormFieldFocusedSupplier;
+        mKeyboardVisibilityDelegate = keyboardVisibilityDelegate;
+        mContext = context;
+        mControlContainer = controlContainer;
+        mSuppressToolbarSceneLayerSupplier = suppressToolbarSceneLayerSupplier;
+        mBrowserControlsSizer = browserControlsSizer;
+        mIsKeyboardAccessorySheetShowing = isKeyboardAccessorySheetShowing;
+        mInsetObserver = insetObserver;
+        mIsOmniboxFocusedSupplier = isOmniboxFocusedSupplier;
+        mBottomSheetController = bottomSheetController;
+
+        mMiniOriginBarHeight =
+                mContext.getResources().getDimensionPixelSize(R.dimen.mini_origin_bar_height);
+        mDefaultLocationBarRightPadding = mLocationBar.getContainerView().getPaddingRight();
+        mDefaultLocationBarLayoutParams =
+                (FrameLayout.LayoutParams) mLocationBar.getContainerView().getLayoutParams();
+        mBrowserControlsSizer.addObserver(this);
+        mWindowInsetsAnimationListener =
+                new MiniOriginWindowInsetsAnimationListener(
+                        keyboardVisibilityDelegate,
+                        (ViewGroup) mLocationBar.getContainerView(),
+                        controlContainerTranslationSupplier,
+                        suppressToolbarSceneLayerSupplier,
+                        () -> mShowingMiniOriginBar,
+                        () -> updateMiniOriginBarState(MiniOriginEvent.KEYBOARD_ANIMATION_PREPARED),
+                        (isCancellation) ->
+                                updateMiniOriginBarState(
+                                        isCancellation
+                                                ? MiniOriginEvent
+                                                        .KEYBOARD_ANIMATION_CANCELLED_BY_USER
+                                                : MiniOriginEvent.KEYBOARD_ANIMATION_ENDED),
+                        this::updateAnimationProgress,
+                        this::waitingForImeAnimationToStart,
+                        new Handler(),
+                        controlContainer.getToolbarHeight() - mMiniOriginBarHeight);
+        mInsetObserver.addWindowInsetsAnimationListener(mWindowInsetsAnimationListener);
+
+        mIsFormFieldFocusedObserver =
+                (focused) -> {
+                    if (mIsOmniboxFocusedSupplier.getAsBoolean()) return;
+                    updateMiniOriginBarState(
+                            focused
+                                    ? MiniOriginEvent.FORM_FIELD_GAINED_FOCUS
+                                    : MiniOriginEvent.FORM_FIELD_LOST_FOCUS);
+                };
+        mKeyboardVisibilityObserver =
+                (showing) -> {
+                    if (mIsOmniboxFocusedSupplier.getAsBoolean()) return;
+                    updateMiniOriginBarState(
+                            showing
+                                    ? MiniOriginEvent.KEYBOARD_APPEARED
+                                    : MiniOriginEvent.KEYBOARD_DISAPPEARED);
+                };
+
+        mIsFormFieldFocusedSupplier
+                .getObservable()
+                .addSyncObserverAndPostIfNonNull(mIsFormFieldFocusedObserver);
+        mKeyboardVisibilityDelegate.addKeyboardVisibilityListener(mKeyboardVisibilityObserver);
+
+        mTouchEventObserver =
+                e -> {
+                    if (mMiniOriginBarState != MiniOriginState.SHOWING
+                            && mMiniOriginBarState != MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET
+                            && mMiniOriginBarState != MiniOriginState.ANIMATING) return false;
+                    // Suppress all clicks during animation as they are 1) unlikely to be
+                    // intentional and 2) difficult to cleanly handle.
+                    if (mMiniOriginBarState == MiniOriginState.ANIMATING) return true;
+                    boolean isDownEvent = e.getActionMasked() == MotionEvent.ACTION_DOWN;
+                    if (!isDownEvent) return false;
+                    mIsFormFieldFocusedSupplier.resetAndHideKeyboard();
+                    return true;
+                };
+        controlContainer.addTouchEventObserver(mTouchEventObserver);
+
+        mAccessorySheetShowingObserver =
+                (showing) ->
+                        updateMiniOriginBarState(
+                                showing
+                                        ? MiniOriginEvent.ACCESSORY_SHEET_APPEARED
+                                        : MiniOriginEvent.ACCESSORY_SHEET_DISAPPEARED);
+        mIsKeyboardAccessorySheetShowing.addSyncObserverAndPostIfNonNull(
+                mAccessorySheetShowingObserver);
+
+        mIsCobrowseSheetOpen = isCobrowseSheetOpen();
+        mBottomSheetObserver =
+                new EmptyBottomSheetObserver() {
+                    @Override
+                    public void onSheetContentChanged(@Nullable BottomSheetContent newContent) {
+                        updateCobrowseSheetOpen();
+                    }
+
+                    @Override
+                    public void onSheetStateChanged(
+                            @SheetState int newState, @StateChangeReason int reason) {
+                        updateCobrowseSheetOpen();
+                    }
+
+                    private void updateCobrowseSheetOpen() {
+                        boolean isOpen = isCobrowseSheetOpen();
+                        if (isOpen != mIsCobrowseSheetOpen) {
+                            mIsCobrowseSheetOpen = isOpen;
+                            updateMiniOriginBarState(MiniOriginEvent.COBROWSE_SHEET_OPEN_CHANGED);
+                        }
+                    }
+                };
+        mBottomSheetController.addObserver(mBottomSheetObserver);
+
+        mLayoutChangeListener =
+                CommonOnLayoutChangeListeners.createBoundsChangedListener(this::recomputeLayouts);
+        mControlContainer.getView().addOnLayoutChangeListener(mLayoutChangeListener);
+    }
+
+    private void updateMiniOriginBarState(@MiniOriginEvent int event) {
+        @MiniOriginState int newMiniOriginState = getNewMiniOriginState(event);
+        if (newMiniOriginState == mMiniOriginBarState) return;
+
+        transitionToNewState(newMiniOriginState);
+    }
+
+    private void transitionToNewState(@MiniOriginState int newMiniOriginState) {
+        boolean isChangingVisibility =
+                isMiniOriginBarVisibleForState(newMiniOriginState)
+                        != isMiniOriginBarVisibleForState(mMiniOriginBarState);
+        boolean finishedShowing = newMiniOriginState == MiniOriginState.SHOWING;
+        mMiniOriginBarState = newMiniOriginState;
+
+        if (!isChangingVisibility) {
+            if (finishedShowing) setMinimizationProgress(1.0f);
+            return;
+        }
+
+        if (isMiniOriginBarVisibleForState(newMiniOriginState)) {
+            // Cache the location bar's layout params now, since we are about to mutate them.
+            mDefaultLocationBarLayoutParams =
+                    (FrameLayout.LayoutParams) mLocationBar.getContainerView().getLayoutParams();
+            showMiniOriginBar();
+            if (finishedShowing) {
+                setMinimizationProgress(1.0f);
+            }
+        } else {
+            hideMiniOriginBar();
+        }
+    }
+
+    private boolean isMiniOriginBarVisibleForState(@MiniOriginState int miniOriginBarState) {
+        return switch (miniOriginBarState) {
+            case MiniOriginState.NOT_READY, MiniOriginState.READY -> false;
+            case MiniOriginState.ANIMATING,
+                    MiniOriginState.SHOWING,
+                    MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET -> true;
+            default -> throw new IllegalStateException(
+                    "Unexpected mini origin state: " + miniOriginBarState);
+        };
+    }
+
+    private void showMiniOriginBar() {
+        mShowingMiniOriginBar = true;
+        mLocationBar.setShowOriginOnly(true);
+        mLocationBar.setUrlBarUsesSmallText(true);
+        mLocationBar.setShowStatusIconForSecureOrigins(false);
+        mLocationBar.setMiniOriginMode(true);
+        mSuppressToolbarSceneLayerSupplier.set(true);
+        mControlContainer.toggleLocationBarOnlyMode(true);
+
+        mControlContainer.mutateLayoutParams().height =
+                mMiniOriginBarHeight
+                        + mContext.getResources()
+                                .getDimensionPixelSize(R.dimen.toolbar_hairline_height);
+        var minifiedLayoutParams =
+                new CoordinatorLayout.LayoutParams(LayoutParams.WRAP_CONTENT, mMiniOriginBarHeight);
+        minifiedLayoutParams.gravity = Gravity.CENTER_VERTICAL;
+
+        var locationBarView = mLocationBar.getContainerView();
+        locationBarView.setLayoutParams(minifiedLayoutParams);
+        int locationBarRightPadding = 0;
+        locationBarView.setPadding(
+                locationBarView.getPaddingLeft(),
+                locationBarView.getPaddingTop(),
+                locationBarRightPadding,
+                locationBarView.getPaddingBottom());
+
+        recomputeLayouts();
+    }
+
+    private void recomputeLayouts() {
+        if (!mShowingMiniOriginBar) return;
+
+        var locationBarView = mLocationBar.getContainerView();
+        var controlContainerWidth = mControlContainer.getView().getWidth();
+        locationBarView.measure(
+                MeasureSpec.makeMeasureSpec(controlContainerWidth, MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(mMiniOriginBarHeight, MeasureSpec.AT_MOST));
+
+        boolean isRtl = LocalizationUtils.isLayoutRtl();
+        int viewWidth = locationBarView.getMeasuredWidth();
+        // The "resting position" of the left edge of the location bar assuming no translation.
+        float baseLayoutLeftX = isRtl ? controlContainerWidth - viewWidth : 0;
+
+        mStartingLocationBarX = mDefaultLocationBarLayoutParams.leftMargin - baseLayoutLeftX;
+        float finalLocationBarWidth = locationBarView.getMeasuredWidth() * LOCATION_BAR_FINAL_SCALE;
+        // The final x coordinate of the left edge that centers it horizontally.
+        float targetAbsoluteLeftX = (controlContainerWidth - finalLocationBarWidth) / 2f;
+        mFinalLocationBarTranslationX = targetAbsoluteLeftX - baseLayoutLeftX;
+
+        applyCurrentMinimizationProgress();
+    }
+
+    private void hideMiniOriginBar() {
+        mShowingMiniOriginBar = false;
+        setMinimizationProgress(0.0f);
+        mLocationBar.setShowOriginOnly(false);
+        mLocationBar.setShowStatusIconForSecureOrigins(true);
+        mLocationBar.setMiniOriginMode(false);
+        mSuppressToolbarSceneLayerSupplier.set(false);
+        mControlContainer.toggleLocationBarOnlyMode(false);
+
+        mControlContainer.mutateLayoutParams().height = LayoutParams.WRAP_CONTENT;
+        mControlContainer.doSynchronousLayout(/* forceCaptureAfterLayout= */ false);
+
+        var locationBarView = mLocationBar.getContainerView();
+        locationBarView.setLayoutParams(mDefaultLocationBarLayoutParams);
+        locationBarView.setPadding(
+                locationBarView.getPaddingLeft(),
+                locationBarView.getPaddingTop(),
+                mDefaultLocationBarRightPadding,
+                locationBarView.getPaddingBottom());
+        mLocationBar.setUrlBarUsesSmallText(false);
+    }
+
+    public void destroy() {
+        mKeyboardVisibilityDelegate.removeKeyboardVisibilityListener(mKeyboardVisibilityObserver);
+        mIsFormFieldFocusedSupplier.getObservable().removeObserver(mIsFormFieldFocusedObserver);
+        mIsKeyboardAccessorySheetShowing.removeObserver(mAccessorySheetShowingObserver);
+        mBrowserControlsSizer.removeObserver(this);
+        mInsetObserver.removeWindowInsetsAnimationListener(mWindowInsetsAnimationListener);
+        mWindowInsetsAnimationListener.destroy();
+        mBottomSheetController.removeObserver(mBottomSheetObserver);
+        mControlContainer.getView().removeOnLayoutChangeListener(mLayoutChangeListener);
+    }
+
+    @Override
+    public void onControlsPositionChanged(int controlsPosition) {
+        updateMiniOriginBarState(
+                controlsPosition == ControlsPosition.BOTTOM
+                        ? MiniOriginEvent.CONTROLS_POSITION_BECAME_BOTTOM
+                        : MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP);
+    }
+
+    private boolean waitingForImeAnimationToStart() {
+        return !mIsOmniboxFocusedSupplier.getAsBoolean()
+                && (mMiniOriginBarState == MiniOriginState.READY
+                        || mMiniOriginBarState == MiniOriginState.SHOWING);
+    }
+
+    private boolean isCobrowseSheetOpen() {
+        BottomSheetContent content = mBottomSheetController.getCurrentSheetContent();
+        if (content == null
+                || content.getPriority() != BottomSheetContent.ContentPriority.COBROWSE) {
+            return false;
+        }
+        int state = mBottomSheetController.getSheetState();
+        return state == BottomSheetController.SheetState.HALF
+                || state == BottomSheetController.SheetState.FULL;
+    }
+
+    /**
+     * Gets the next state of the mini origin bar considering current state and an event. This logic
+     * assumes that: 1. Form field focus changes precede the associated keyboard visibility change
+     * 2. Keyboard animation prepare events precede the associated keyboard visibility change 3.
+     * Multiple keyboard visibility change events can fire in the course of a single animation
+     */
+    private @MiniOriginState int getNewMiniOriginState(@MiniOriginEvent int miniOriginEvent) {
+        switch (mMiniOriginBarState) {
+            case MiniOriginState.NOT_READY -> {
+                if ((mIsFormFieldFocusedSupplier.get() || mIsCobrowseSheetOpen)
+                        && mBrowserControlsSizer.getControlsPosition() == ControlsPosition.BOTTOM
+                        && !mIsOmniboxFocusedSupplier.getAsBoolean()) {
+                    return isKeyboardShowing() ? MiniOriginState.SHOWING : MiniOriginState.READY;
+                }
+                return MiniOriginState.NOT_READY;
+            }
+            case MiniOriginState.READY -> {
+                return switch (miniOriginEvent) {
+                    case MiniOriginEvent.FORM_FIELD_LOST_FOCUS,
+                            MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP ->
+                            MiniOriginState.NOT_READY;
+                    case MiniOriginEvent.KEYBOARD_ANIMATION_PREPARED -> MiniOriginState.ANIMATING;
+                    case MiniOriginEvent.KEYBOARD_APPEARED ->
+                            // Skip our animation if we get a keyboard appearance event before the
+                            // animation prepare signal.
+                            MiniOriginState.SHOWING;
+                    default -> MiniOriginState.READY;
+                };
+            }
+            case MiniOriginState.ANIMATING -> {
+                return switch (miniOriginEvent) {
+                    case MiniOriginEvent.FORM_FIELD_LOST_FOCUS,
+                            MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP ->
+                            MiniOriginState.NOT_READY;
+                    // A predictive back hide animation for the keyboard can be cancelled,
+                    // ending in a transient state where the keyboard insets are not applied but
+                    // it remains visible. To avoid visual glitches from hiding and reshowing,
+                    // we stay in the showing state.
+                    case MiniOriginEvent.KEYBOARD_ANIMATION_CANCELLED_BY_USER ->
+                            MiniOriginState.SHOWING;
+                    case MiniOriginEvent.KEYBOARD_ANIMATION_ENDED ->
+                            isKeyboardShowing() && !mIsOmniboxFocusedSupplier.getAsBoolean()
+                                    ? MiniOriginState.SHOWING
+                                    : MiniOriginState.READY;
+                    case MiniOriginEvent.ACCESSORY_SHEET_APPEARED ->
+                            MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET;
+                    default -> MiniOriginState.ANIMATING;
+                };
+            }
+            case MiniOriginState.SHOWING -> {
+                return switch (miniOriginEvent) {
+                    case MiniOriginEvent.ACCESSORY_SHEET_APPEARED ->
+                            MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET;
+                    case MiniOriginEvent.FORM_FIELD_LOST_FOCUS,
+                            MiniOriginEvent.COBROWSE_SHEET_OPEN_CHANGED ->
+                            isKeyboardShowing()
+                                    ? MiniOriginState.SHOWING
+                                    : MiniOriginState.NOT_READY;
+                    case MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP -> MiniOriginState.NOT_READY;
+                    case MiniOriginEvent.KEYBOARD_ANIMATION_PREPARED -> MiniOriginState.ANIMATING;
+                    case MiniOriginEvent.KEYBOARD_DISAPPEARED ->
+                            // Skip our animation if we get a keyboard disappearance event before
+                            // the animation prepare signal.
+                            mIsFormFieldFocusedSupplier.get()
+                                    ? MiniOriginState.READY
+                                    : MiniOriginState.NOT_READY;
+                    default -> MiniOriginState.SHOWING;
+                };
+            }
+            case MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET -> {
+                return switch (miniOriginEvent) {
+                    case MiniOriginEvent.CONTROLS_POSITION_BECAME_TOP,
+                            MiniOriginEvent.FORM_FIELD_LOST_FOCUS -> MiniOriginState.NOT_READY;
+                    case MiniOriginEvent.ACCESSORY_SHEET_DISAPPEARED -> MiniOriginState.SHOWING;
+                        // We don't animate from this state because the accessory sheet is in the
+                        // way.
+                    default -> MiniOriginState.SHOWING_WITH_ACCESSORY_SHEET;
+                };
+            }
+        }
+        assert false : "Unrecognized initial mini origin state";
+        return mMiniOriginBarState;
+    }
+
+    @MiniOriginState
+    int getCurrentStateForTesting() {
+        return mMiniOriginBarState;
+    }
+
+    MiniOriginWindowInsetsAnimationListener getAnimationListenerForTesting() {
+        return mWindowInsetsAnimationListener;
+    }
+
+    private boolean isKeyboardShowing() {
+        return mKeyboardVisibilityDelegate.isKeyboardShowing(mControlContainer.getView());
+    }
+
+    private void updateAnimationProgress(float minimizationProgress) {
+        if (mMiniOriginBarState != MiniOriginState.ANIMATING) return;
+        setMinimizationProgress(minimizationProgress);
+    }
+
+    private void setMinimizationProgress(float minimizationProgress) {
+        mMinimizationProgress = minimizationProgress;
+        applyCurrentMinimizationProgress();
+    }
+
+    private void applyCurrentMinimizationProgress() {
+        float translationX =
+                mStartingLocationBarX
+                        + mMinimizationProgress
+                                * (mFinalLocationBarTranslationX - mStartingLocationBarX);
+        mLocationBar.getContainerView().setTranslationX(translationX);
+
+        float scale = 1.0f - mMinimizationProgress / LOCATION_BAR_SCALE_DENOMINATOR;
+        mLocationBar.getContainerView().setScaleX(scale);
+        mLocationBar.getContainerView().setScaleY(scale);
+        mLocationBar.getContainerView().setPivotY(mLocationBar.getUrlBarHeight() / 2);
+        mLocationBar.getContainerView().setPivotX(0.0f);
+    }
+
+    @VisibleForTesting
+    static class MiniOriginWindowInsetsAnimationListener implements WindowInsetsAnimationListener {
+
+        private static final int FALLBACK_ANIMATION_TIMEOUT = 600;
+        private int mFinalKeyboardHeight;
+        private int mMaxKeyboardHeight;
+        private final KeyboardVisibilityDelegate mKeyboardVisibilityDelegate;
+        private final ViewGroup mContainerView;
+        private final SettableNonNullObservableSupplier<Integer> mTranslationSupplier;
+        private final SettableNonNullObservableSupplier<Boolean> mSuppressToolbarSceneLayerSupplier;
+        private final BooleanSupplier mShowingMiniOriginBar;
+        private final Runnable mOnAnimationPreparedSignal;
+        private final Callback<Boolean> mAnimationEndedSignal;
+        private final Callback<Float> mAnimationProgressSignal;
+        private final BooleanSupplier mWaitingForAnimation;
+        private @Nullable WindowInsetsAnimationCompat mAnimation;
+        private boolean mIsCancelledPredictiveBack;
+
+        private final Handler mHandler;
+        // The height of the keyboard that should trigger an early end to a hide animation.
+        private final int mEarlyEndingHeight;
+        private final Runnable mCancelRunnable;
+
+        MiniOriginWindowInsetsAnimationListener(
+                KeyboardVisibilityDelegate keyboardVisibilityDelegate,
+                ViewGroup containerView,
+                SettableNonNullObservableSupplier<Integer> translationSupplier,
+                SettableNonNullObservableSupplier<Boolean> suppressToolbarSceneLayerSupplier,
+                BooleanSupplier showingMiniOriginBar,
+                Runnable animationPreparedSignal,
+                Callback<Boolean> animationEndedSignal,
+                Callback<Float> animationProgressSignal,
+                BooleanSupplier waitingForAnimation,
+                Handler handler,
+                int earlyEndingHeight) {
+            mKeyboardVisibilityDelegate = keyboardVisibilityDelegate;
+            mContainerView = containerView;
+            mTranslationSupplier = translationSupplier;
+            mSuppressToolbarSceneLayerSupplier = suppressToolbarSceneLayerSupplier;
+            mShowingMiniOriginBar = showingMiniOriginBar;
+            mOnAnimationPreparedSignal = animationPreparedSignal;
+            mAnimationEndedSignal = animationEndedSignal;
+            mAnimationProgressSignal = animationProgressSignal;
+            mWaitingForAnimation = waitingForAnimation;
+            mHandler = handler;
+            mEarlyEndingHeight = earlyEndingHeight;
+            mCancelRunnable = this::cancel;
+        }
+
+        void destroy() {
+            mHandler.removeCallbacksAndMessages(null);
+        }
+
+        @Override
+        public void onPrepare(WindowInsetsAnimationCompat animation) {
+            if (!mWaitingForAnimation.getAsBoolean()
+                    || ((animation.getTypeMask() & WindowInsetsCompat.Type.ime()) == 0)) {
+                return;
+            }
+
+            mAnimation = animation;
+            mOnAnimationPreparedSignal.run();
+            mHandler.postDelayed(mCancelRunnable, getCancellationInterval(mAnimation));
+        }
+
+        @Override
+        public void onStart(WindowInsetsAnimationCompat animation, BoundsCompat bounds) {
+            if (animation != mAnimation) {
+                if ((animation.getTypeMask() & WindowInsetsCompat.Type.ime()) == 0) {
+                    return;
+                }
+                mAnimation = animation;
+            }
+
+            // Restart the clock on cancellation once we get a start signal. This avoids prematurely
+            // cancelling mid-animation in cases where start took a long time but the animation
+            // proceeds normally thereafter, e.g. if the IME takes a long time to warm up.
+            mHandler.removeCallbacks(mCancelRunnable);
+            mHandler.postDelayed(mCancelRunnable, getCancellationInterval(mAnimation));
+            mMaxKeyboardHeight = bounds.getUpperBound().bottom;
+            // In some cases, e.g. a floating keyboard, we get a notification of an inset animation
+            // even though IME inset bottom will start and end at 0. There is a not a clean way to
+            // handle this, so we just bail out of the animation early.
+            if (mMaxKeyboardHeight == 0) {
+                onEnd(animation);
+                return;
+            }
+            // Prevent clipping so that the mini origin bar can draw in bounds allocated for the
+            // keyboard; we will prevent overlap by syncing our translation to its movement in
+            // onProgress.
+            ViewUtils.setAncestorsShouldClipChildren(mContainerView, false, View.NO_ID);
+            ViewUtils.setAncestorsShouldClipToPadding(mContainerView, false, View.NO_ID);
+            mFinalKeyboardHeight =
+                    mKeyboardVisibilityDelegate.isKeyboardShowing(mContainerView)
+                            ? bounds.getUpperBound().bottom
+                            : 0;
+        }
+
+        @Override
+        public void onProgress(
+                WindowInsetsCompat windowInsetsCompat, List<WindowInsetsAnimationCompat> list) {
+            if (mAnimation == null) return;
+            int currentKeyboardHeight =
+                    windowInsetsCompat.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            int translation = mFinalKeyboardHeight - currentKeyboardHeight;
+
+            // Compensate for the system bars height only when hiding the keyboard.
+            boolean hidingKeyboard = mFinalKeyboardHeight == 0;
+            if (hidingKeyboard) {
+                int systemBarsHeight =
+                        windowInsetsCompat.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+                translation += systemBarsHeight;
+            }
+
+            mTranslationSupplier.set(translation);
+            mSuppressToolbarSceneLayerSupplier.set(
+                    translation != 0 || mShowingMiniOriginBar.getAsBoolean());
+
+            float interpolatedFraction = mAnimation.getInterpolatedFraction();
+            mIsCancelledPredictiveBack =
+                    mFinalKeyboardHeight == 0
+                            && currentKeyboardHeight == mMaxKeyboardHeight
+                            && interpolatedFraction == 1.0f;
+            float minimizationFraction =
+                    getMinimizationFractionForInterpolatedFraction(
+                            mAnimation.getInterpolatedFraction());
+            mAnimationProgressSignal.onResult(minimizationFraction);
+            if (hidingKeyboard && Math.abs(translation) <= mEarlyEndingHeight) {
+                onEnd(mAnimation);
+            }
+        }
+
+        @Override
+        public void onEnd(WindowInsetsAnimationCompat animation) {
+            if (mAnimation != animation) return;
+            mHandler.removeCallbacks(mCancelRunnable);
+            ViewUtils.setAncestorsShouldClipChildren(mContainerView, true, ViewGroup.NO_ID);
+            ViewUtils.setAncestorsShouldClipToPadding(mContainerView, true, ViewGroup.NO_ID);
+            mTranslationSupplier.set(0);
+            mSuppressToolbarSceneLayerSupplier.set(mShowingMiniOriginBar.getAsBoolean());
+
+            mAnimationEndedSignal.onResult(mIsCancelledPredictiveBack);
+            mIsCancelledPredictiveBack = false;
+            mAnimation = null;
+        }
+
+        void cancel() {
+            if (mAnimation == null) return;
+            onEnd(mAnimation);
+        }
+
+        private long getCancellationInterval(WindowInsetsAnimationCompat animationCompat) {
+            return Math.max(animationCompat.getDurationMillis() * 2, FALLBACK_ANIMATION_TIMEOUT);
+        }
+
+        private float getMinimizationFractionForInterpolatedFraction(float interpolatedFraction) {
+            if (mIsCancelledPredictiveBack) {
+                return 1.0f;
+            } else {
+                return mFinalKeyboardHeight == 0
+                        ? 1.0f - interpolatedFraction
+                        : interpolatedFraction;
+            }
+        }
+    }
+}

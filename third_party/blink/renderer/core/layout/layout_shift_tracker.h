@@ -5,11 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_SHIFT_TRACKER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_SHIFT_TRACKER_H_
 
+#include <array>
+#include <vector>
+
 #include "base/check_op.h"
 #include "base/time/time.h"
 #include "cc/base/region.h"
-#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/layout_shift_region.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
@@ -187,6 +190,9 @@ class CORE_EXPORT LayoutShiftTracker final
   void UpdateInputTimestamps(base::TimeTicks timestamp);
   bool HasRecentInput();
 
+  // Creates the list of attributions for a layout shift entry, sorted by
+  // per-source impact area in descending order (largest impact first).
+  // Impact area is the union of the previous and current visual rectangles.
   LayoutShift::AttributionList CreateAttributionList() const;
   void SubmitPerformanceEntry(double score_delta, bool input_detected) const;
   void NotifyPrePaintFinishedInternal();
@@ -255,8 +261,8 @@ class CORE_EXPORT LayoutShiftTracker final
 
   struct Attribution {
     DOMNodeId node_id = kInvalidDOMNodeId;
-    gfx::Rect old_visual_rect;
-    gfx::Rect new_visual_rect;
+    gfx::RectF old_visual_rect;
+    gfx::RectF new_visual_rect;
 
     explicit operator bool() const;
     bool Encloses(const Attribution&) const;

@@ -10,6 +10,7 @@
 
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "content/public/common/child_process_id.h"
 
 class Profile;
 
@@ -54,7 +55,7 @@ class FontPrewarmerTabHelper
   void ReadyToCommitNavigation(
       content::NavigationHandle* navigation_handle) override;
 
-  std::optional<int> expected_render_process_host_id_;
+  content::ChildProcessId expected_render_process_host_id_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

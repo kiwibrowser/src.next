@@ -79,14 +79,13 @@ class CORE_EXPORT CharacterData : public Node {
   }
 
   CharacterData(TreeScope& tree_scope, String&& text, ConstructionType type)
-      : Node(&tree_scope, type), data_(std::move(text)), is_parkable_(false) {
+      : Node(&tree_scope, type),
+        data_(!text.IsNull() ? std::move(text) : g_empty_string),
+        is_parkable_(false) {
     DCHECK(type == kCreateComment || type == kCreateText ||
            type == kCreateCdataSection ||
            type == kCreateProcessingInstruction || type == kCreateEditingText);
     DCHECK(!is_parkable_);
-    if (data_.IsNull()) {
-      data_ = g_empty_string;
-    }
   }
 
   ~CharacterData() noexcept override {
@@ -111,8 +110,10 @@ class CORE_EXPORT CharacterData : public Node {
   enum UpdateSource {
     kUpdateFromParser,
     kUpdateFromNonParser,
+    kUpdateFromAttributeChange,
   };
   void DidModifyData(const String& old_value, UpdateSource);
+  void SetDataFromAttributeChange(const String&);
 
   union {
     ParkableString parkable_data_;
@@ -130,6 +131,7 @@ class CORE_EXPORT CharacterData : public Node {
   Node* Clone(Document& factory,
               NodeCloningData& data,
               ContainerNode* append_to,
+              CustomElementRegistry* fallback_registry,
               ExceptionState& append_exception_state) const override;
   virtual CharacterData* CloneWithData(Document&, const String&) const = 0;
 

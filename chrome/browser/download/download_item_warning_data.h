@@ -147,8 +147,8 @@ class DownloadItemWarningData : public base::SupportsUserData::Data {
       const download::DownloadItem* download);
 
   // Adds an `action` triggered on `surface` for `download`. It may not be
-  // added if `download` is null or the length of events associated with this
-  // `download` exceeds the limit.
+  // added if `download` is not dangerous, null or the length of events
+  // associated with this `download` exceeds the limit.
   static void AddWarningActionEvent(download::DownloadItem* download,
                                     WarningSurface surface,
                                     WarningAction action);
@@ -211,7 +211,7 @@ class DownloadItemWarningData : public base::SupportsUserData::Data {
   static const char kKey[];
 
   base::Time warning_first_shown_time_;
-  std::optional<WarningSurface> warning_first_shown_surface_ = std::nullopt;
+  std::optional<WarningSurface> warning_first_shown_surface_;
   std::vector<WarningActionEvent> action_events_;
   bool is_top_level_encrypted_archive_ = false;
   bool has_incorrect_password_ = false;

@@ -4,6 +4,7 @@
 
 import {html} from '//resources/lit/v3_0/lit.rollup.js';
 
+import type {ServiceInterface} from './service.js';
 import type {ToolbarElement} from './toolbar.js';
 
 export function getHtml(this: ToolbarElement) {
@@ -25,9 +26,16 @@ export function getHtml(this: ToolbarElement) {
         aria-labelledby="devModeLabel">
     </cr-toggle>
   </div>
+  <if expr="is_android">
+    <picture slot="product-logo">
+      <source media="(prefers-color-scheme: dark)"
+          srcset="//resources/images/chrome_logo_dark.svg">
+      <img srcset="images/product_logo.png" role="presentation">
+    </picture>
+  </if>
 </cr-toolbar>
 ${this.showPackDialog_ ? html`
-  <extensions-pack-dialog .delegate="${this.delegate}"
+  <extensions-pack-dialog .delegate="${this.delegate as ServiceInterface}"
       @close="${this.onPackDialogClose_}">
   </extensions-pack-dialog>` : ''}
 <div id="devDrawer" ?expanded="${this.expanded_}">

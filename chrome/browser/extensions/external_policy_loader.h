@@ -10,6 +10,9 @@
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/external_loader.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 class Profile;
 
@@ -40,7 +43,7 @@ class ExternalPolicyLoader : public ExternalLoader,
   void OnExtensionManagementSettingsChanged() override;
 
   // Adds an extension to be updated to the pref dictionary.
-  static void AddExtension(base::Value::Dict& dict,
+  static void AddExtension(base::DictValue& dict,
                            const std::string& extension_id,
                            const std::string& update_url);
 

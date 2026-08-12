@@ -36,20 +36,39 @@ namespace blink {
 
 class ShareableElementData;
 
-class ElementDataCache final : public GarbageCollected<ElementDataCache> {
+class CORE_EXPORT ElementDataCache final
+    : public GarbageCollected<ElementDataCache> {
  public:
   ElementDataCache();
 
+  // NOTE: Since the presentation attribute depends on the tag name,
+  // and that is part of ShareableElementData, we need to include
+  // tag_name in the cache key.
   ShareableElementData* CachedShareableElementDataWithAttributes(
+      const StringImpl* tag_name,
       const Vector<Attribute, kAttributePrealloc>&);
+
+  // This is the same as CachedShareableElementDataWithoutAttributes, but uses
+  // the provided hash instead of generating one from the arguments.
+  ShareableElementData* CachedElementDataWithHashForTesting(
+      const StringImpl* tag_name,
+      const Vector<Attribute, kAttributePrealloc>& attributes,
+      unsigned hash) {
+    return CachedElementData(tag_name, attributes, hash);
+  }
 
   void Trace(Visitor*) const;
 
  private:
-  typedef HeapHashMap<unsigned,
-                      Member<ShareableElementData>,
-                      AlreadyHashedTraits>
-      ShareableElementDataCache;
+  ShareableElementData* CachedElementData(
+      const StringImpl* tag_name,
+      const Vector<Attribute, kAttributePrealloc>&,
+      unsigned hash);
+
+  using ShareableElementDataCache =
+      HeapHashMap<unsigned,
+                  std::pair<const StringImpl*, Member<ShareableElementData>>,
+                  AlreadyHashedTraits>;
   ShareableElementDataCache shareable_element_data_cache_;
 };
 

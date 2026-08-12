@@ -10,8 +10,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -27,7 +30,8 @@ ChromeAppIconLoader::ChromeAppIconLoader(Profile* profile,
                                          int icon_size_in_dip,
                                          const ResizeFunction& resize_function,
                                          AppIconLoaderDelegate* delegate)
-    : AppIconLoader(profile, icon_size_in_dip, delegate),
+    : AppIconLoader(icon_size_in_dip, delegate),
+      profile_(profile),
       resize_function_(resize_function) {}
 
 ChromeAppIconLoader::ChromeAppIconLoader(Profile* profile,
@@ -38,7 +42,7 @@ ChromeAppIconLoader::ChromeAppIconLoader(Profile* profile,
                           ResizeFunction(),
                           delegate) {}
 
-ChromeAppIconLoader::~ChromeAppIconLoader() {}
+ChromeAppIconLoader::~ChromeAppIconLoader() = default;
 
 bool ChromeAppIconLoader::CanLoadImageForApp(const std::string& id) {
   if (map_.find(id) != map_.end())
@@ -68,7 +72,7 @@ void ChromeAppIconLoader::FetchImage(const std::string& id) {
           this, id, icon_size_in_dip(), resize_function_);
   // Triggers image loading now instead of depending on paint message. This
   // makes the temp blank image be shown for shorter time and improves user
-  // experience. See http://crbug.com/146114.
+  // experience. See http://crbug.com/40274591.
   icon->image_skia().EnsureRepsForSupportedScales();
   map_[id] = std::move(icon);
 }

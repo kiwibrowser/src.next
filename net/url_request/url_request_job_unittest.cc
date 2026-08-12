@@ -749,9 +749,7 @@ TEST(URLRequestJobComputeReferrer, DoesntTruncateReferrerWithLongRef) {
 
 TEST(URLRequestJobComputeReferrer, InvalidSchemeReferrer) {
   const GURL kOriginalReferrer("about:blank");
-  ASSERT_FALSE(url::IsReferrerScheme(
-      kOriginalReferrer.spec().data(),
-      kOriginalReferrer.parsed_for_possibly_invalid_spec().scheme));
+  ASSERT_FALSE(url::IsReferrerScheme(kOriginalReferrer.scheme()));
 
   EXPECT_EQ(URLRequestJob::ComputeReferrerForPolicy(ReferrerPolicy::NEVER_CLEAR,
                                                     kOriginalReferrer,
@@ -762,47 +760,6 @@ TEST(URLRequestJobComputeReferrer, InvalidSchemeReferrer) {
                                                     kOriginalReferrer,
                                                     GURL("https://google.com")),
             GURL());
-}
-
-TEST(URLRequestJobComputeReferrer, CapReferrerOnCrossOrigin) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kCapReferrerToOriginOnCrossOrigin);
-
-  const GURL kOriginalReferrer("https://boggle.com/path");
-
-  EXPECT_EQ(URLRequestJob::ComputeReferrerForPolicy(ReferrerPolicy::NEVER_CLEAR,
-                                                    kOriginalReferrer,
-                                                    GURL("https://google.com")),
-            GURL("https://boggle.com/"));
-}
-
-TEST(URLRequestJobComputeReferrer,
-     CapReferrerOnCrossOriginRespectsStricterPolicy) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kCapReferrerToOriginOnCrossOrigin);
-
-  const GURL kOriginalReferrer("https://boggle.com/path");
-
-  EXPECT_EQ(URLRequestJob::ComputeReferrerForPolicy(ReferrerPolicy::NO_REFERRER,
-                                                    kOriginalReferrer,
-                                                    GURL("https://google.com")),
-            GURL());
-}
-
-TEST(URLRequestJobComputeReferrer,
-     CapReferrerOnCrossOriginDoesntCapOnSameOrigin) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kCapReferrerToOriginOnCrossOrigin);
-
-  const GURL kOriginalReferrer("https://boggle.com/path");
-
-  EXPECT_EQ(URLRequestJob::ComputeReferrerForPolicy(ReferrerPolicy::NEVER_CLEAR,
-                                                    kOriginalReferrer,
-                                                    GURL("https://boggle.com")),
-            kOriginalReferrer);
 }
 
 }  // namespace net

@@ -10,7 +10,6 @@
 
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/not_fatal_until.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -94,7 +93,7 @@ void EmbedderUserScriptLoader::LoadScripts(
     }
 
     auto iter = script_render_info_map_.find(script->id());
-    CHECK(iter != script_render_info_map_.end(), base::NotFatalUntil::M130);
+    CHECK(iter != script_render_info_map_.end());
     int render_process_id = iter->second.render_process_id;
     int render_frame_id = iter->second.render_frame_id;
 
@@ -161,13 +160,13 @@ void EmbedderUserScriptLoader::CreateEmbedderURLFetchers(
 void EmbedderUserScriptLoader::OnSingleEmbedderURLFetchComplete(
     extensions::UserScript::Content* content,
     bool success,
-    std::unique_ptr<std::string> data) {
+    std::string data) {
   if (success) {
     // Remove BOM from |data|.
-    if (base::StartsWith(*data, base::kUtf8ByteOrderMark)) {
-      data->erase(0, strlen(base::kUtf8ByteOrderMark));
+    if (base::StartsWith(data, base::kUtf8ByteOrderMark)) {
+      data.erase(0, strlen(base::kUtf8ByteOrderMark));
     }
-    content->set_content(std::move(*data));
+    content->set_content(std::move(data));
   }
 
   ++complete_fetchers_;

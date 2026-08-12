@@ -27,6 +27,12 @@ extern const char kDisableAppContentVerification[];
 // into file URLs (ie, always allow it). This is used during automated testing.
 extern const char kDisableExtensionsFileAccessCheck[];
 
+// Disables extensions.
+inline constexpr char kDisableExtensions[] = "disable-extensions";
+
+// Disable extensions except those specified in a comma-separated list.
+inline constexpr char kDisableExtensionsExcept[] = "disable-extensions-except";
+
 // Disable the net::URLRequestThrottlerManager functionality for
 // requests originating from extensions.
 extern const char kDisableExtensionsHttpThrottling[];
@@ -49,6 +55,11 @@ extern const char kExtensionProcess[];
 // manifest.
 extern const char kExtensionsOnChromeURLs[];
 
+// Enables extensions running scripts on chrome-extension:// URLs.
+// Extensions still need to explicitly request access to chrome-extension://
+// URLs in the manifest.
+extern const char kExtensionsOnExtensionURLs[];
+
 // Comma-separated list of paths to apps to load at startup. The first app in
 // the list will be launched.
 extern const char kLoadApps[];
@@ -68,6 +79,10 @@ extern const char kLoadGuestModeTestExtension[];
 
 // Allows the use of the `testing` reason in offscreen documents.
 extern const char kOffscreenDocumentTesting[];
+
+// Forces component extensions' service workers to be re-registered on every
+// load, instead of reusing the registration persisted in the profile.
+extern const char kRefreshComponentExtensionServiceWorkers[];
 
 // Set the parameters for ExtensionURLLoaderThrottleBrowserTest.
 extern const char kSetExtensionThrottleTestParams[];
@@ -90,6 +105,63 @@ extern const char kAllowFutureManifestVersion[];
 // copied from the browser to the renderer in ChromeContentBrowserClient to
 // actually use it in browser tests.
 extern const char kExtensionTestApiOnWebPages[];
+
+// Forces the `chrome.test` API to use standardized behavior matching the
+// `browser.test` proposal.
+extern const char kExtensionTestApiStandardizedBehavior[];
+
+// The feature parameter name that controls the variant of IPH shown when the
+// user has no extensions installed.
+extern const char kZeroStatePromoIphVariantParamName[];
+
+// When the user has no extensions installed, display a custom action IPH
+// that upon triggering, opens a new tab to the Chrome Web Store.
+extern const char kZeroStatePromoCustomActionIph[];
+
+// When the user has no extensions installed, display a custom UI IPH that
+// presents the user with different collections of extensions to explore,
+// each in a cr-chip button.
+extern const char kZeroStatePromoCustomUiChipIphV1[];
+
+// When the user has no extensions installed, display a custom UI IPH that
+// presents the user with different collections of extensions to explore,
+// each in a cr-chip button. This variation has a different color scheme
+// to highlight the chips.
+extern const char kZeroStatePromoCustomUiChipIphV2[];
+
+// When the user has no extensions installed, display a custom UI IPH that
+// presents the user with different collections of extensions to explore,
+// each in a cr-chip button. This variation has a different color scheme
+// to highlight the chips. The ordering and selection of the chips are
+// slightly different than variation 2.
+extern const char kZeroStatePromoCustomUiChipIphV3[];
+
+// When the user has no extensions installed, display a custom UI IPH that
+// presents the user with different collections of extensions to explore,
+// each in a plain text link.
+extern const char kZeroStatePromoCustomUiPlainLinkIph[];
+
+// Turns on extension install verification if it would not otherwise have been
+// turned on.
+extern const char kExtensionsInstallVerification[];
+
+// Specifies a comma-separated list of extension ids that should be forced to
+// be treated as not from the webstore when doing install verification.
+extern const char kExtensionsNotWebstore[];
+
+// Overrides the url that the browser treats as the webstore, granting it the
+// webstore APIs and giving it some special protections.
+extern const char kAppsGalleryURL[];
+
+// Overrides the URL that the webstore APIs download extensions from.
+// Note: the URL must contain one '%s' for the extension ID.
+extern const char kAppsGalleryDownloadURL[];
+
+// Checks if extensions are allowed to run on chrome:// URLs.
+bool AreExtensionsOnChromeURLsAllowed();
+
+// Checks if extensions are allowed to run on chrome-extension:// URLs.
+bool AreExtensionsOnExtensionURLsAllowed();
 
 }  // namespace extensions::switches
 

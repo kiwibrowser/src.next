@@ -5,8 +5,8 @@
 #ifndef BASE_SUPPORTS_USER_DATA_H_
 #define BASE_SUPPORTS_USER_DATA_H_
 
-#include <map>
 #include <memory>
+#include <utility>
 
 #include "base/base_export.h"
 #include "base/memory/scoped_refptr.h"
@@ -62,6 +62,9 @@ class BASE_EXPORT SupportsUserData {
   // needs to provide reset functionality.
   void ClearAllUserData();
 
+  // Returns the number of Data objects attached to this object.
+  size_t UserDataCount() const;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
@@ -77,16 +80,15 @@ class UserDataAdapter : public SupportsUserData::Data {
  public:
   static T* Get(const SupportsUserData* supports_user_data, const void* key) {
     UserDataAdapter* data =
-      static_cast<UserDataAdapter*>(supports_user_data->GetUserData(key));
+        static_cast<UserDataAdapter*>(supports_user_data->GetUserData(key));
     return data ? static_cast<T*>(data->object_.get()) : nullptr;
   }
 
-  explicit UserDataAdapter(T* object) : object_(object) {}
+  explicit UserDataAdapter(scoped_refptr<T> object)
+      : object_(std::move(object)) {}
   UserDataAdapter(const UserDataAdapter&) = delete;
   UserDataAdapter& operator=(const UserDataAdapter&) = delete;
   ~UserDataAdapter() override = default;
-
-  T* release() { return object_.release(); }
 
  private:
   scoped_refptr<T> const object_;

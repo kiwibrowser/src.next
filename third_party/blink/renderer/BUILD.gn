@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
-import("//build/config/chromeos/ui_mode.gni")
 import("config.gni")
 if (is_clang) {
   import("//build/config/clang/clang.gni")
@@ -44,6 +43,19 @@ config("inside_blink") {
       "-Wno-sign-conversion",
       "-Wno-implicit-float-conversion",
       "-Wno-implicit-int-conversion",
+    ]
+  }
+}
+
+# narrowing --------------------------------------------------------------------
+
+# crbug.com/514751964: This should be replaced with
+# //build/config/compiler:prevent_unsafe_narrowing
+config("narrowing") {
+  if (is_clang) {
+    cflags = [
+      "-Wshorten-64-to-32",
+      "-Wtautological-unsigned-zero-compare",
     ]
   }
 }

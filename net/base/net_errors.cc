@@ -10,6 +10,7 @@
 #include "base/files/file.h"
 #include "base/logging.h"
 #include "base/notreached.h"
+#include "base/strings/strcat.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_error_codes.h"
 
 namespace net {
@@ -26,9 +27,9 @@ std::string ErrorToString(int error) {
 
 std::string ExtendedErrorToString(int error, int extended_error_code) {
   if (error == ERR_QUIC_PROTOCOL_ERROR && extended_error_code != 0) {
-    return std::string("net::ERR_QUIC_PROTOCOL_ERROR.") +
-           QuicErrorCodeToString(
-               static_cast<quic::QuicErrorCode>(extended_error_code));
+    return base::StrCat({"net::ERR_QUIC_PROTOCOL_ERROR.",
+                         QuicErrorCodeToString(static_cast<quic::QuicErrorCode>(
+                             extended_error_code))});
   }
   return ErrorToString(error);
 }
@@ -51,7 +52,7 @@ std::string ErrorToShortString(int error) {
     DUMP_WILL_BE_NOTREACHED() << error;
     error_string = "<unknown>";
   }
-  return std::string("ERR_") + error_string;
+  return base::StrCat({"ERR_", error_string});
 }
 
 bool IsCertificateError(int error) {
@@ -86,10 +87,22 @@ bool IsRequestBlockedError(int error) {
     case ERR_BLOCKED_BY_CLIENT:
     case ERR_BLOCKED_BY_ADMINISTRATOR:
     case ERR_BLOCKED_BY_CSP:
+    case ERR_BLOCKED_IN_INCOGNITO_BY_ADMINISTRATOR:
       return true;
     default:
       return false;
   }
+}
+
+bool IsOkOrDefinedError(int error) {
+  switch (error) {
+    case OK:
+#define NET_ERROR(label, value) case value:
+#include "net/base/net_error_list.h"
+#undef NET_ERROR
+      return true;
+  }
+  return false;
 }
 
 Error FileErrorToNetError(base::File::Error file_error) {

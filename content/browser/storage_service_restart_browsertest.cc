@@ -64,7 +64,7 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
 
   mojo::Remote<storage::mojom::TestApi>& GetTestApi() {
     if (!test_api_) {
-      StoragePartitionImpl::GetStorageServiceForTesting()->BindTestApi(
+      StoragePartitionImpl::GetStorageService()->BindTestApi(
           test_api_.BindNewPipeAndPassReceiver().PassPipe());
     }
     return test_api_;
@@ -72,7 +72,7 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
 
   void CrashStorageServiceAndWaitForRestart() {
     mojo::Remote<storage::mojom::StorageService>& service =
-        StoragePartitionImpl::GetStorageServiceForTesting();
+        StoragePartitionImpl::GetStorageService();
     base::RunLoop loop;
     service.set_disconnect_handler(base::BindLambdaForTesting([&] {
       loop.Quit();
@@ -87,7 +87,13 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
   mojo::Remote<storage::mojom::TestApi> test_api_;
 };
 
-IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest, BasicReconnect) {
+// TODO(crbug.com/440535492): Flaky on Win dbg. Re-enable this test.
+#if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
+#define MAYBE_BasicReconnect DISABLED_BasicReconnect
+#else
+#define MAYBE_BasicReconnect BasicReconnect
+#endif
+IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest, MAYBE_BasicReconnect) {
   // Basic smoke test to ensure that we can force-crash the service and
   // StoragePartitionImpl will internally re-establish a working connection to
   // a new process.
@@ -116,7 +122,14 @@ IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest,
                          R"(getSessionStorageValue("foo"))"));
 }
 
-IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest, LocalStorageRecovery) {
+// TODO(crbug.com/40678245): Flaky on Mac.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_LocalStorageRecovery DISABLED_LocalStorageRecovery
+#else
+#define MAYBE_LocalStorageRecovery LocalStorageRecovery
+#endif
+IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest,
+                       MAYBE_LocalStorageRecovery) {
   // Tests that the Local Storage API can recover and continue normal operation
   // after a Storage Service crash.
   EXPECT_TRUE(
@@ -134,9 +147,8 @@ IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest, LocalStorageRecovery) {
   // unpredictable.
   EvalJsResult result =
       EvalJs(shell()->web_contents(), R"(getLocalStorageValue("foo"))");
-  ASSERT_THAT(result, content::EvalJsResult::IsOk());
-  EXPECT_TRUE(result.value.GetString().empty() ||
-              result.value.GetString() == "42");
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_THAT(result, testing::AnyOf(testing::Eq(""), testing::Eq("42")));
 
   // Local Storage should resume working as expected after the service is
   // restarted.

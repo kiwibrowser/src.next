@@ -29,11 +29,19 @@
 #import "third_party/blink/renderer/core/style/computed_style.h"
 #import "third_party/blink/renderer/platform/web_test_support.h"
 #import "ui/base/ui_base_features.h"
+#import "ui/color/color_provider.h"
 #import "ui/native_theme/native_theme.h"
 
 namespace blink {
 
 namespace {
+
+// The focus ring colors used in web tests for light and dark mode.
+constexpr Color kDefaultFocusRingColorForTestsLight =
+    Color::FromRGBA(0x10, 0x10, 0x10, 0xFF);
+constexpr Color kDefaultFocusRingColorForTestsDark =
+    Color::FromRGBA(0x99, 0xC8, 0xFF, 0xFF);
+
 Color GetSystemColor(MacSystemColorID color_id,
                      mojom::blink::ColorScheme color_scheme) {
   // TODO(almaher): Consider using the mac light and dark high-contrast themes
@@ -116,50 +124,33 @@ Color LayoutThemeMac::SystemHighlightFromColorProvider(
   return color.BlendWithWhite();
 }
 
-Color LayoutThemeMac::GetCustomFocusRingColor(
-    mojom::blink::ColorScheme color_scheme) const {
-  return color_scheme == mojom::blink::ColorScheme::kDark
-             ? Color::FromRGB(0x99, 0xC8, 0xFF)
-             : LayoutTheme::GetCustomFocusRingColor();
-}
-
 Color LayoutThemeMac::FocusRingColor(
     mojom::blink::ColorScheme color_scheme) const {
-  const Color kDefaultFocusRingColorLight =
-      Color::FromRGBA(0x10, 0x10, 0x10, 0xFF);
-  const Color kDefaultFocusRingColorDark =
-      Color::FromRGBA(0x99, 0xC8, 0xFF, 0xFF);
-  if (UsesTestModeFocusRingColor()) {
-    return HasCustomFocusRingColor()
-               ? GetCustomFocusRingColor(color_scheme)
-               : color_scheme == mojom::blink::ColorScheme::kDark
-                     ? kDefaultFocusRingColorDark
-                     : kDefaultFocusRingColorLight;
+  if (WebTestSupport::IsRunningWebTest()) {
+    return CustomFocusRingColor().value_or(
+        color_scheme == mojom::blink::ColorScheme::kDark
+            ? kDefaultFocusRingColorForTestsDark
+            : kDefaultFocusRingColorForTestsLight);
   }
 
-  if (ui::NativeTheme::GetInstanceForWeb()->UserHasContrastPreference()) {
+  if (ui::NativeTheme::GetInstanceForWeb()->preferred_contrast() ==
+      ui::NativeTheme::PreferredContrast::kMore) {
     // When high contrast is enabled, #101010 should be used.
     return Color::FromRGBA(0x10, 0x10, 0x10, 0xFF);
   }
 
-  SkColor4f keyboard_focus_indicator =
-      GetSystemColor(MacSystemColorID::kKeyboardFocusIndicator, color_scheme)
-          .toSkColor4f();
-  Color focus_ring = Color::FromSkColor4f(
-      ui::NativeTheme::GetInstanceForWeb()->FocusRingColorForBaseColor(
-          keyboard_focus_indicator));
+  if (std::optional<Color> custom_color = CustomFocusRingColor()) {
+    return color_scheme == mojom::blink::ColorScheme::kDark
+               ? Color::FromRGB(0x99, 0xC8, 0xFF)
+               : *custom_color;
+  }
 
-  if (!HasCustomFocusRingColor())
-    return focus_ring;
-  // Use the custom focus ring color when the system accent color wasn't
-  // changed.
-  if (!IsAccentColorCustomized(color_scheme))
-    return GetCustomFocusRingColor(color_scheme);
+  Color focus_ring =
+      Color::FromSkColor(color_scheme == mojom::blink::ColorScheme::kDark
+                             ? SkColorSetRGB(0x1A, 0xA9, 0xFF)
+                             : SkColorSetRGB(0x00, 0x67, 0xF4));
+  focus_ring.SetAlpha(166 / 255.0f);
   return focus_ring;
-}
-
-bool LayoutThemeMac::UsesTestModeFocusRingColor() const {
-  return WebTestSupport::IsRunningWebTest();
 }
 
 LayoutTheme& LayoutTheme::NativeTheme() {

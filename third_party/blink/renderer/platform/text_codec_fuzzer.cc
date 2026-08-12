@@ -14,17 +14,18 @@
 // so it must live in the latter directory. Once wtf/ moves into platform/wtf
 // this should move there as well.
 
-WTF::FlushBehavior kFlushBehavior[] = {WTF::FlushBehavior::kDoNotFlush,
-                                       WTF::FlushBehavior::kFetchEOF,
-                                       WTF::FlushBehavior::kDataEOF};
+constexpr blink::FlushBehavior kFlushBehavior[] = {
+    blink::FlushBehavior::kDoNotFlush, blink::FlushBehavior::kFetchEof,
+    blink::FlushBehavior::kDataEof};
 
-WTF::UnencodableHandling kUnencodableHandlingOptions[] = {
-    WTF::kEntitiesForUnencodables, WTF::kURLEncodedEntitiesForUnencodables,
-    WTF::kCSSEncodedEntitiesForUnencodables};
+constexpr blink::UnencodableHandling kUnencodableHandlingOptions[] = {
+    blink::UnencodableHandling::kXmlCharRef,
+    blink::UnencodableHandling::kUrlEncodedCharRef,
+    blink::UnencodableHandling::kCssEscape};
 
 class TextCodecFuzzHarness {};
 
-// Fuzzer for WTF::TextCodec.
+// Fuzzer for blink::TextCodec.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   static blink::BlinkFuzzerTestSupport test_support;
   blink::test::TaskEnvironment task_environment;
@@ -37,7 +38,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // text codecs.
 
   // Initializes the codec map.
-  static const WTF::TextEncoding encoding = WTF::TextEncoding(
+  static const blink::TextEncoding encoding = blink::TextEncoding(
 #if defined(UTF_8)
       "UTF-8"
 #elif defined(WINDOWS_1252)
@@ -50,37 +51,37 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   // Initialize metadata using the fuzzed data.
   bool stop_on_error = fuzzed_data.ConsumeBool();
-  WTF::UnencodableHandling unencodable_handling =
+  blink::UnencodableHandling unencodable_handling =
       fuzzed_data.PickValueInArray(kUnencodableHandlingOptions);
-  WTF::FlushBehavior flush_behavior =
+  blink::FlushBehavior flush_behavior =
       fuzzed_data.PickValueInArray(kFlushBehavior);
 
   // Now, use the rest of the fuzzy data to stress test decoding and encoding.
-  const std::string byte_string = fuzzed_data.ConsumeRemainingBytes();
-  auto byte_span = base::as_byte_span(byte_string);
-  std::unique_ptr<TextCodec> codec = NewTextCodec(encoding);
+  const std::vector<uint8_t> bytes =
+      fuzzed_data.ConsumeRemainingBytesAs<uint8_t>();
+  base::span<const uint8_t> byte_span = base::as_byte_span(bytes);
+  std::unique_ptr<blink::TextCodec> codec = NewTextCodec(encoding);
 
   // Treat as bytes-off-the-wire.
   bool saw_error;
-  const String decoded =
+  const blink::String decoded =
       codec->Decode(byte_span, flush_behavior, stop_on_error, saw_error);
 
   // Treat as blink 8-bit string (latin1).
-  if (size % sizeof(LChar) == 0) {
-    std::unique_ptr<TextCodec> lchar_codec = NewTextCodec(encoding);
-    lchar_codec->Encode(byte_span, unencodable_handling);
-  }
+  static_assert(sizeof(uint8_t) == sizeof(blink::LChar));
+  std::unique_ptr<blink::TextCodec> lchar_codec = NewTextCodec(encoding);
+  lchar_codec->Encode(byte_span, unencodable_handling);
 
-  // Treat as blink 16-bit string (utf-16) if there are an even number of bytes.
-  if (size % sizeof(UChar) == 0) {
-    // SAFETY: We have no way to convert a byte span to a UChar span.
-    // `byte_span` contains at least byte_span.size() / sizeof(UChar) UChars.
-    auto uchar_span = UNSAFE_BUFFERS(
-        base::span(reinterpret_cast<const UChar*>(byte_span.data()),
-                   byte_span.size() / sizeof(UChar)));
-    std::unique_ptr<TextCodec> uchar_codec = NewTextCodec(encoding);
-    uchar_codec->Encode(uchar_span, unencodable_handling);
-  }
+  // Treat as blink 16-bit string (utf-16).
+  //
+  // Use a round number of bytes to mint a span of `UChar` (required
+  // to call `reinterpret_span()`).
+  const size_t round_number_of_bytes =
+      (byte_span.size() / sizeof(UChar)) * sizeof(UChar);
+  base::span<const UChar> uchars = base::subtle::reinterpret_span<const UChar>(
+      byte_span.first(round_number_of_bytes));
+  std::unique_ptr<blink::TextCodec> uchar_codec = NewTextCodec(encoding);
+  uchar_codec->Encode(uchars, unencodable_handling);
 
   if (decoded.IsNull())
     return 0;

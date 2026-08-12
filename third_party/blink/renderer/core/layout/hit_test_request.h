@@ -26,6 +26,7 @@
 #include <optional>
 
 #include "base/functional/callback.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -68,7 +69,6 @@ class HitTestRequest {
   };
 
   typedef unsigned HitTestRequestType;
-
   using HitNodeCb =
       base::RepeatingCallback<ListBasedHitTestBehavior(const Node& node)>;
 

@@ -84,7 +84,7 @@ SourceIdType GetSourceIdType(SourceId source_id) {
   return ukm::SourceIdObj::FromInt64(source_id).GetType();
 }
 
-std::string GetSourceIdTypeDebugString(SourceId source_id) {
+std::string_view GetSourceIdTypeDebugString(SourceId source_id) {
   const auto source_type = GetSourceIdType(source_id);
   switch (source_type) {
     case SourceIdObj::Type::DEFAULT:
@@ -115,6 +115,8 @@ std::string GetSourceIdTypeDebugString(SourceId source_id) {
       return "EXTENSION_ID";
     case SourceIdObj::Type::NOTIFICATION_ID:
       return "NOTIFICATION_ID";
+    case SourceIdObj::Type::CDM_ID:
+      return "CDM_ID";
   }
 }
 

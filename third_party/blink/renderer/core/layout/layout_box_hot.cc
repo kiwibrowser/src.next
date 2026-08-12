@@ -16,10 +16,10 @@
 #include "third_party/blink/renderer/core/layout/layout_utils.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
-
 namespace blink {
 
 bool LayoutBox::HasHitTestableOverflow() const {
+  NOT_DESTROYED();
   // See MayIntersect() for the reason of using HasVisualOverflow here.
   if (!HasVisualOverflow()) {
     return false;
@@ -155,7 +155,7 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
     }
 
     // If we've shifted our children we can't rely on their position.
-    if (physical_fragment.HasMovedChildrenInBlockDirection()) {
+    if (physical_fragment.HasMovedChildren()) {
       return nullptr;
     }
 
@@ -211,6 +211,16 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
     // either.
     if (!use_layout_cache_slot && !GetCachedLayoutResult(break_token))
       return nullptr;
+  }
+
+  // Break appeal may have been reduced because the fragment crosses the
+  // fragmentation line, to send a strong signal to break before it instead. If
+  // we actually ended up breaking before it, this break appeal may no longer be
+  // valid, since there could be more room in the next fragmentainer. Miss the
+  // cache.
+  if (break_token && break_token->IsBreakBefore() &&
+      cached_layout_result->GetBreakAppeal() < kBreakAppealPerfect) {
+    return nullptr;
   }
 
   LayoutUnit bfc_line_offset = new_space.GetBfcOffset().line_offset;
@@ -310,51 +320,14 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
         return nullptr;
       }
 
-      // Break appeal may have been reduced because the fragment crosses the
-      // fragmentation line, to send a strong signal to break before it
-      // instead. If we actually ended up breaking before it, this break appeal
-      // may no longer be valid, since there could be more room in the next
-      // fragmentainer. Miss the cache.
-      //
-      // TODO(mstensho): Maybe this shouldn't be necessary. Look into how
-      // FinishFragmentation() clamps break appeal down to
-      // kBreakAppealLastResort. Maybe there are better ways.
-      if (break_token && break_token->IsBreakBefore() &&
-          cached_layout_result->GetBreakAppeal() < kBreakAppealPerfect) {
-        return nullptr;
-      }
-
       // If the node didn't break into multiple fragments, we might be able to
       // re-use the result. If the fragmentainer block-size has changed, or if
       // the fragment's block-offset within the fragmentainer has changed, we
       // need to check if the node will still fit as one fragment. If we cannot
       // be sure that this is the case, we need to miss the cache.
-      if (new_space.IsInitialColumnBalancingPass()) {
-        if (!old_space.IsInitialColumnBalancingPass()) {
-          // If the previous result was generated with a known fragmentainer
-          // size (i.e. not in the initial column balancing pass),
-          // TallestUnbreakableBlockSize() won't be stored in the layout result,
-          // because we currently only calculate this in the initial column
-          // balancing pass. Since we're now in an initial column balancing pass
-          // again, we cannot re-use the result, because not propagating the
-          // tallest unbreakable block-size might cause incorrect layout.
-          //
-          // Another problem is OOF descendants. In the initial column balancing
-          // pass, they affect FragmentainerBlockSize() (because OOFs are
-          // supposed to affect column balancing), while in actual layout
-          // passes, OOFs will escape their actual containing block and become
-          // direct children of some fragmentainer. In other words, any relevant
-          // information about OOFs and how they might affect balancing has been
-          // lost.
-          return nullptr;
-        }
-        // (On the other hand, if the previous result was also generated in the
-        // initial column balancing pass, we don't need to perform any
-        // additional checks.)
-      } else if (new_space.FragmentainerBlockSize() !=
-                     old_space.FragmentainerBlockSize() ||
-                 new_space.FragmentainerOffset() !=
-                     old_space.FragmentainerOffset()) {
+      if (new_space.FragmentainerBlockSize() !=
+              old_space.FragmentainerBlockSize() ||
+          new_space.FragmentainerOffset() != old_space.FragmentainerOffset()) {
         // The fragment block-offset will either change, or the fragmentainer
         // block-size has changed. If the node is fragmented, we're going to
         // have to refragment, since the fragmentation line has moved,
@@ -387,20 +360,6 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
         // the fragment.
         if (cached_layout_result->IsTruncatedByFragmentationLine())
           return nullptr;
-
-        // TODO(layout-dev): This likely shouldn't be scoped to just OOFs, but
-        // scoping it more widely results in several perf regressions[1].
-        //
-        // [1] https://bugs.chromium.org/p/chromium/issues/detail?id=1362550
-        if (node.IsOutOfFlowPositioned()) {
-          // If the fragmentainer size has changed, and there previously was
-          // space shortage reported, we should re-run layout to avoid reporting
-          // the same space shortage again.
-          std::optional<LayoutUnit> space_shortage =
-              cached_layout_result->MinimalSpaceShortage();
-          if (space_shortage && *space_shortage > LayoutUnit())
-            return nullptr;
-        }
 
         // Returns true if there are any floats added by |cached_layout_result|
         // which will end up crossing the fragmentation line.
@@ -521,7 +480,7 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
     // We haven't actually performed simplified layout. Skip the checks for no
     // fragmentation, since it's okay to be fragmented in this case.
     cloned_cached_layout_result->CheckSameForSimplifiedLayout(
-        *cached_layout_result, /* check_same_block_size */ true,
+        *cached_layout_result,
         /* check_no_fragmentation*/ false);
 #endif
   }
@@ -529,30 +488,16 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
   // Optimization: TableConstraintSpaceData can be large, and it is shared
   // between all the rows in a table. Make constraint space table data for
   // reused row fragment be identical to the one used by other row fragments.
-  if (IsTableRow() && IsLayoutNGObject()) {
+  if (IsTableRow()) {
     const_cast<ConstraintSpace&>(
         cached_layout_result->GetConstraintSpaceForCaching())
         .ReplaceTableRowData(*new_space.TableData(), new_space.TableRowIndex());
   }
 
-  // OOF-positioned nodes have to two-tier cache. The additional cache check
-  // runs before the OOF-positioned sizing, and positioning calculations.
-  //
-  // This additional check compares the percentage resolution size.
-  //
-  // As a result, the cached layout result always needs to contain the previous
-  // percentage resolution size in order for the first-tier cache to work.
-  // See |BlockNode::CachedLayoutResultForOutOfFlowPositioned|.
-  bool needs_cached_result_update =
-      node.IsOutOfFlowPositioned() &&
-      new_space.PercentageResolutionSize() !=
-          cached_layout_result->GetConstraintSpaceForCaching()
-              .PercentageResolutionSize();
-
   // We can safely reuse this result if our BFC and "input" exclusion spaces
   // were equal.
   if (are_bfc_offsets_equal && is_exclusion_space_equal &&
-      is_margin_strut_equal && !needs_cached_result_update) {
+      is_margin_strut_equal) {
     // In order not to rebuild the internal derived-geometry "cache" of float
     // data, we need to move this to the new "output" exclusion space.
     cached_layout_result->GetExclusionSpace().MoveAndUpdateDerivedGeometry(
@@ -560,16 +505,9 @@ const LayoutResult* LayoutBox::CachedLayoutResult(
     return cached_layout_result;
   }
 
-  const auto* new_result = MakeGarbageCollected<LayoutResult>(
+  return MakeGarbageCollected<LayoutResult>(
       *cached_layout_result, new_space, end_margin_strut, bfc_line_offset,
       bfc_block_offset, block_offset_delta);
-
-  if (needs_cached_result_update &&
-      !DisableLayoutSideEffectsScope::IsDisabled()) {
-    SetCachedLayoutResult(new_result, FragmentIndex(break_token));
-  }
-
-  return new_result;
 }
 
 const PhysicalBoxFragment* LayoutBox::GetPhysicalFragment(wtf_size_t i) const {

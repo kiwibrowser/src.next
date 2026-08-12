@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/byte_size.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
@@ -31,6 +32,10 @@
 #include "net/socket/connection_attempts.h"
 #include "net/url_request/url_request_job.h"
 
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+#include "net/device_bound_sessions/session_service.h"
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+
 namespace net {
 
 class HttpRequestHeaders;
@@ -40,6 +45,7 @@ class HttpTransaction;
 class HttpUserAgentSettings;
 class SSLPrivateKey;
 struct TransportInfo;
+struct LoadTimingInternalInfo;
 class UploadDataStream;
 
 // A URLRequestJob subclass that is built on top of HttpTransaction. It
@@ -90,19 +96,14 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void CloseConnectionOnDestruction() override;
   std::unique_ptr<SourceStream> SetUpSourceStream() override;
 
-  RequestPriority priority() const {
-    return priority_;
-  }
+  RequestPriority priority() const { return priority_; }
 
  private:
   // For CookieRequestScheme histogram enum.
   FRIEND_TEST_ALL_PREFIXES(URLRequestHttpJobTest,
                            CookieSchemeRequestSchemeHistogram);
 
-  enum CompletionCause {
-    ABORTED,
-    FINISHED
-  };
+  enum CompletionCause { ABORTED, FINISHED };
 
   // Used to indicate which kind of cookies are sent on which kind of requests,
   // for use in histograms. A (non)secure set cookie means that the cookie was
@@ -162,7 +163,12 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
                               CompletionOnceCallback callback);
 
   void RestartTransaction();
-  void RestartTransactionForRefresh();
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  void RestartTransactionForRefresh(
+      const device_bound_sessions::SessionService::DeferralParams&
+          deferral_params,
+      device_bound_sessions::RefreshResult result);
+#endif
   void RestartTransactionWithAuth(const AuthCredentials& credentials);
 
   // Overridden from URLRequestJob:
@@ -171,8 +177,12 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   LoadState GetLoadState() const override;
   bool GetMimeType(std::string* mime_type) const override;
   bool GetCharset(std::string* charset) override;
+  void GetClientSideContentDecodingTypes(
+      std::vector<net::SourceStreamType>* types) const override;
   void GetResponseInfo(HttpResponseInfo* info) override;
   void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
+  void PopulateLoadTimingInternalInfo(
+      LoadTimingInternalInfo* load_timing_internal_info) const override;
   bool GetTransactionRemoteEndpoint(IPEndPoint* endpoint) const override;
   int GetResponseCode() const override;
   void PopulateNetErrorDetails(NetErrorDetails* details) const override;
@@ -185,11 +195,13 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void ContinueWithCertificate(
       scoped_refptr<X509Certificate> client_cert,
       scoped_refptr<SSLPrivateKey> client_private_key) override;
+  void SetPlatformLocalNetworkAccessGranted() override;
+  void CancelPlatformLocalNetworkAccessRequest() override;
   void ContinueDespiteLastError() override;
   int ReadRawData(IOBuffer* buf, int buf_size) override;
-  int64_t GetTotalReceivedBytes() const override;
-  int64_t GetTotalSentBytes() const override;
-  int64_t GetReceivedBodyBytes() const override;
+  base::ByteSize GetTotalReceivedBytes() const override;
+  base::ByteSize GetTotalSentBytes() const override;
+  base::ByteSize GetReceivedBodyBytes() const override;
   void DoneReading() override;
   void DoneReadingRedirectResponse() override;
   void DoneReadingRetryResponse() override;
@@ -238,11 +250,6 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   // overridden by `override_response_headers_` or
   // `override_response_info_::headers`.
   HttpResponseHeaders* GetResponseHeaders() const;
-
-  // Called after getting the FirstPartySetMetadata during Start for this job.
-  void OnGotFirstPartySetMetadata(
-      FirstPartySetMetadata first_party_set_metadata,
-      FirstPartySetsCacheFilter::MatchInfo match_info);
 
   // Returns true iff this request leg should include the Cookie header. Note
   // that cookies may still be eventually blocked by the CookieAccessDelegate
@@ -314,10 +321,10 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
 
   // Keeps track of total received bytes over the network from transactions used
   // by this job that have already been destroyed.
-  int64_t total_received_bytes_from_previous_transactions_ = 0;
+  base::ByteSize total_received_bytes_from_previous_transactions_;
   // Keeps track of total sent bytes over the network from transactions used by
   // this job that have already been destroyed.
-  int64_t total_sent_bytes_from_previous_transactions_ = 0;
+  base::ByteSize total_sent_bytes_from_previous_transactions_;
 
   RequestHeadersCallback request_headers_callback_;
   ResponseHeadersCallback early_response_headers_callback_;
@@ -328,6 +335,18 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   // The First-Party Set metadata associated with this job. Set when the job is
   // started.
   FirstPartySetMetadata first_party_set_metadata_;
+
+  // The number of times this request was deferred due to a Device Bound
+  // Session.
+  size_t device_bound_session_deferral_count_ = 0;
+
+  // The time of the first deferral due to Device Bound Sessions. This
+  // is used to measure the total delay of Device Bound Session
+  // Deferral.
+  base::TimeTicks device_bound_session_first_deferral_;
+
+  // The content encoding types that need to be handled in the client side.
+  std::vector<net::SourceStreamType> client_side_content_decoding_types_;
 
   base::WeakPtrFactory<URLRequestHttpJob> weak_factory_{this};
 };

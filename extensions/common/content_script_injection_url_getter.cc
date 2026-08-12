@@ -4,10 +4,12 @@
 
 #include "extensions/common/content_script_injection_url_getter.h"
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
 #include "base/containers/flat_set.h"
 #include "base/notreached.h"
 #include "base/trace_event/typed_macros.h"
+#include "extensions/common/mojom/match_origin_as_fallback.mojom-shared.h"
 #include "url/scheme_host_port.h"
 
 namespace extensions {
@@ -16,7 +18,7 @@ namespace extensions {
 GURL ContentScriptInjectionUrlGetter::Get(
     const FrameContextData& context_data,
     const GURL& document_url,
-    MatchOriginAsFallbackBehavior match_origin_as_fallback,
+    mojom::MatchOriginAsFallbackBehavior match_origin_as_fallback,
     bool allow_inaccessible_parents) {
   // The following schemes are considered for opaque origins if the
   // `match_origin_as_fallback` behavior is to always match.
@@ -40,26 +42,27 @@ GURL ContentScriptInjectionUrlGetter::Get(
   auto should_consider_origin = [&document_url, match_origin_as_fallback]() {
     bool result = false;
     switch (match_origin_as_fallback) {
-      case MatchOriginAsFallbackBehavior::kNever: {
+      case mojom::MatchOriginAsFallbackBehavior::kNever: {
         TRACE_EVENT_INSTANT("extensions",
                             "ContentScriptInjectionUrlGetter::Get/"
                             "should_consider_origin: origin-never");
         result = false;
         break;
       }
-      case MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree: {
+      case mojom::MatchOriginAsFallbackBehavior::
+          kMatchForAboutSchemeAndClimbTree: {
         TRACE_EVENT_INSTANT("extensions",
                             "ContentScriptInjectionUrlGetter::Get/"
                             "should_consider_origin: origin-climb");
         result = document_url.SchemeIs(url::kAboutScheme);
         break;
       }
-      case MatchOriginAsFallbackBehavior::kAlways: {
+      case mojom::MatchOriginAsFallbackBehavior::kAlways: {
         TRACE_EVENT_INSTANT("extensions",
                             "ContentScriptInjectionUrlGetter::Get/"
                             "should_consider_origin: origin-always");
-        result = base::Contains(kAllowedSchemesToMatchOriginAsFallback,
-                                document_url.scheme());
+        result = std::ranges::contains(kAllowedSchemesToMatchOriginAsFallback,
+                                       document_url.GetScheme());
         break;
       }
     }
@@ -120,7 +123,8 @@ GURL ContentScriptInjectionUrlGetter::Get(
 
   // Looks like the initiator origin is an appropriate fallback!
 
-  if (match_origin_as_fallback == MatchOriginAsFallbackBehavior::kAlways) {
+  if (match_origin_as_fallback ==
+      mojom::MatchOriginAsFallbackBehavior::kAlways) {
     // The easy case! We use the origin directly. We're done.
     TRACE_EVENT_INSTANT(
         "extensions",
@@ -128,8 +132,9 @@ GURL ContentScriptInjectionUrlGetter::Get(
     return origin_or_precursor_origin.GetURL();
   }
 
-  DCHECK_EQ(MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree,
-            match_origin_as_fallback);
+  DCHECK_EQ(
+      mojom::MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree,
+      match_origin_as_fallback);
 
   // Unfortunately, in this case, we have to climb the frame tree. This is for
   // match patterns that are associated with paths as well, not just origins.
@@ -159,10 +164,9 @@ GURL ContentScriptInjectionUrlGetter::Get(
       return document_url;
     }
 
-    // Avoid an infinite loop - see https://crbug.com/568432 and
-    // https://crbug.com/883526.
-    if (base::Contains(already_visited_frame_ids,
-                       parent_context_data->GetId())) {
+    // Avoid an infinite loop - see https://crbug.com/41228062 and
+    // https://crbug.com/40593463.
+    if (already_visited_frame_ids.contains(parent_context_data->GetId())) {
       TRACE_EVENT_INSTANT("extensions",
                           "ContentScriptInjectionUrlGetter::Get/infinite-loop");
       return document_url;

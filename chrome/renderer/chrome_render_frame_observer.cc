@@ -9,14 +9,15 @@
 
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/functional/bind.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
@@ -27,19 +28,28 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/open_search_description_document_handler.mojom.h"
 #include "chrome/common/webui_url_constants.h"
+#include "chrome/renderer/actor/journal.h"
+#include "chrome/renderer/actor/page_stability_monitor_delegate.h"
+#include "chrome/renderer/actor/tool_executor.h"
 #include "chrome/renderer/chrome_content_settings_agent_delegate.h"
 #include "chrome/renderer/media/media_feeds.h"
+#include "chrome/renderer/process_state.h"
 #include "components/crash/core/common/crash_key.h"
+#include "components/guest_view/buildflags/buildflags.h"
+#include "components/guest_view/renderer/slim_web_view/slim_web_view_bindings.h"
 #include "components/lens/lens_metadata.mojom.h"
 #include "components/no_state_prefetch/renderer/no_state_prefetch_helper.h"
 #include "components/no_state_prefetch/renderer/no_state_prefetch_utils.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/optimization_guide/content/renderer/page_text_agent.h"
+#include "components/page_content_annotations/content/renderer/page_stability_monitor.h"
 #include "components/translate/content/renderer/translate_agent.h"
 #include "components/translate/core/common/translate_util.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/buildflags.h"
 #include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_visitor.h"
 #include "content/public/renderer/render_thread.h"
@@ -56,6 +66,7 @@
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_frame_content_dumper.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_node.h"
 #include "third_party/blink/public/web/web_security_policy.h"
 #include "third_party/blink/public/web/web_view.h"
@@ -108,10 +119,10 @@ static const bool kDiscardTransparencyForContextMenu = false;
 
 namespace {
 
-const char kGifExtension[] = ".gif";
-const char kPngExtension[] = ".png";
-const char kJpgExtension[] = ".jpg";
-const char kWebpExtension[] = ".webp";
+const char kImageGif[] = "image/gif";
+const char kImageJpeg[] = "image/jpeg";
+const char kImagePng[] = "image/png";
+const char kImageWebp[] = "image/webp";
 
 #if BUILDFLAG(IS_ANDROID)
 base::Lock& GetFrameHeaderMapLock() {
@@ -133,7 +144,7 @@ FrameHeaderMap& GetFrameHeaderMap() {
 // origins for OOM crashes. Keys are recorded here and not via
 // ChromeContentClient::SetActiveURL() because that method is only invoked in
 // response to IPC messages and most OOMs do not occur in response to an IPC.
-// https://crbug.com/1310046
+// https://crbug.com/40830140
 void UpdateLoadedOriginCrashKeys() {
   // Capture the origin for each RenderFrame.
   struct Visitor : public content::RenderFrameVisitor {
@@ -182,6 +193,7 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
     : content::RenderFrameObserver(render_frame),
       translate_agent_(nullptr),
       page_text_agent_(new optimization_guide::PageTextAgent(render_frame)),
+      actor_journal_(std::make_unique<actor::Journal>()),
       web_cache_impl_(web_cache_impl) {
   render_frame->GetAssociatedInterfaceRegistry()
       ->AddInterface<chrome::mojom::ChromeRenderFrame>(base::BindRepeating(
@@ -196,8 +208,15 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
   SetClientSidePhishingDetection();
 #endif
 
-  translate_agent_ =
-      new translate::TranslateAgent(render_frame, ISOLATED_WORLD_ID_TRANSLATE);
+  bool skip_translate = base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+                        features::kInitialWebUIWithoutTranslate.Get() &&
+                        base::CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kTopChromeWebUI);
+
+  if (!skip_translate) {
+    translate_agent_ = new translate::TranslateAgent(
+        render_frame, ISOLATED_WORLD_ID_TRANSLATE);
+  }
 }
 
 ChromeRenderFrameObserver::~ChromeRenderFrameObserver() = default;
@@ -231,18 +250,27 @@ void ChromeRenderFrameObserver::ReadyToCommitNavigation(
   if (render_frame()->IsMainFrame() && web_cache_impl_)
     web_cache_impl_->ExecutePendingClearCache();
 
-  // Let translate_agent do any preparatory work for loading a URL.
-  if (!translate_agent_)
-    return;
-
-  translate_agent_->PrepareForUrl(
-      render_frame()->GetWebFrame()->GetDocument().Url());
+  // Let translate_agent do any preparatory work before the new document loads.
+  if (translate_agent_) {
+    translate_agent_->PrepareForNewDocument();
+  }
 }
 
 void ChromeRenderFrameObserver::DidSetPageLifecycleState(
-    bool restoring_from_bfcache) {
-  if (restoring_from_bfcache && translate_agent_) {
+    blink::BFCacheStateChange bfcache_change) {
+  if (bfcache_change == blink::BFCacheStateChange::kRestoredFromBFCache &&
+      translate_agent_) {
     translate_agent_->RenewPageRegistration();
+  }
+  if (bfcache_change == blink::BFCacheStateChange::kStoredToBFCache) {
+    // Reset actor state if entering the BFCache
+    page_stability_monitor_.reset();
+    tool_executor_.reset();
+
+    // Flush any remaining log entries which may have been added in the
+    // destructors above. Don't reset the actor journal since it is only created
+    // from the constructor.
+    actor_journal_->SendLogBuffer();
   }
 }
 
@@ -317,10 +345,9 @@ void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
 
 void ChromeRenderFrameObserver::DidClearWindowObject() {
 #if !BUILDFLAG(IS_ANDROID)
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kInstantProcess))
+  if (process_state::IsInstantProcess()) {
     SearchBoxExtension::Install(render_frame()->GetWebFrame());
+  }
 
   // Install ReadAnythingAppController on render frames with the Read Anything
   // url, which is chrome-untrusted. ReadAnythingAppController installs v8
@@ -331,6 +358,9 @@ void ChromeRenderFrameObserver::DidClearWindowObject() {
     ReadAnythingAppController::Install(render_frame());
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(ENABLE_GUEST_VIEW) && !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+  guest_view::SlimWebViewBindings::MaybeInstall(*render_frame());
+#endif  // BUILDFLAG(ENABLE_GUEST_VIEW) && !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 }
 
 void ChromeRenderFrameObserver::DidMeaningfulLayout(
@@ -372,7 +402,7 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
   WebNode context_node = render_frame()->GetWebFrame()->ContextMenuImageNode();
   std::vector<uint8_t> image_data;
   gfx::Size original_size;
-  std::string image_extension;
+  std::string mime_type;
   std::vector<lens::mojom::LatencyLogPtr> latency_logs;
 
   // Map for converting between multiple mojom ImageFormat structures to
@@ -391,24 +421,24 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
     // The downscaled size is the original size, since no downscaling was
     // required.
     std::move(callback).Run(image_data, original_size,
-                            /*downscaled_size=*/original_size, image_extension,
+                            /*downscaled_size=*/original_size, mime_type,
                             std::move(latency_logs));
     return;
   }
 
   WebElement web_element = context_node.To<WebElement>();
   original_size = web_element.GetImageSize();
-  image_extension = "." + web_element.ImageExtension();
+  mime_type = web_element.ImageMimeType().Utf8();
   bool needs_downscale = NeedsDownscale(
       original_size, thumbnail_min_area_pixels, thumbnail_max_size_pixels);
-  bool needs_encode = NeedsEncodeImage(image_extension, image_format) ||
+  bool needs_encode = NeedsEncodeImage(mime_type, image_format) ||
                       IsAnimatedWebp(web_element.CopyOfImageData());
   if (!needs_encode && !needs_downscale) {
     image_data = web_element.CopyOfImageData();
     // The downscaled size is the original size, since no downscaling was
     // required.
     std::move(callback).Run(std::move(image_data), original_size,
-                            /*downscaled_size=*/original_size, image_extension,
+                            /*downscaled_size=*/original_size, mime_type,
                             std::move(latency_logs));
     return;
   }
@@ -442,9 +472,9 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
   if (image_format == chrome::mojom::ImageFormat::ORIGINAL) {
     // ORIGINAL will only fall back to here if the image needs to downscale.
     // Let's PNG downscale to PNG and JEPG downscale to JPEG.
-    if (image_extension == kPngExtension) {
+    if (mime_type == kImagePng) {
       image_format = chrome::mojom::ImageFormat::PNG;
-    } else if (image_extension == kJpgExtension) {
+    } else if (mime_type == kImageJpeg) {
       image_format = chrome::mojom::ImageFormat::JPEG;
     }
   }
@@ -462,14 +492,14 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
           bitmap, kDiscardTransparencyForContextMenu);
       if (data) {
         image_data.swap(data.value());
-        image_extension = kPngExtension;
+        mime_type = kImagePng;
       }
       break;
     case chrome::mojom::ImageFormat::WEBP:
       data = gfx::WebpCodec::Encode(bitmap, quality);
       if (data) {
         image_data.swap(data.value());
-        image_extension = kWebpExtension;
+        mime_type = kImageWebp;
       }
       break;
     case chrome::mojom::ImageFormat::ORIGINAL:
@@ -478,7 +508,7 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
       data = gfx::JPEGCodec::Encode(bitmap, quality);
       if (data) {
         image_data.swap(data.value());
-        image_extension = kJpgExtension;
+        mime_type = kImageJpeg;
       }
       break;
   }
@@ -489,8 +519,8 @@ void ChromeRenderFrameObserver::RequestImageForContextNode(
         sizeof(uint8_t) * image_data.size()));
   }
 
-  std::move(callback).Run(image_data, original_size, downscaled_size,
-                          image_extension, std::move(latency_logs));
+  std::move(callback).Run(image_data, original_size, downscaled_size, mime_type,
+                          std::move(latency_logs));
 }
 
 void ChromeRenderFrameObserver::RequestBitmapForContextNode(
@@ -560,7 +590,7 @@ void ChromeRenderFrameObserver::FindImageElements(
 void ChromeRenderFrameObserver::RequestReloadImageForContextNode() {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
   // TODO(dglazkov): This code is clearly in the wrong place. Need
-  // to investigate what it is doing and fix (http://crbug.com/606164).
+  // to investigate what it is doing and fix (http://crbug.com/41250588).
   WebNode context_node = frame->ContextMenuImageNode();
   if (!context_node.IsNull()) {
     frame->ReloadImage(context_node);
@@ -601,14 +631,73 @@ void ChromeRenderFrameObserver::LoadBlockedPlugins(
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 }
 
-void ChromeRenderFrameObserver::SetSupportsDraggableRegions(
-    bool supports_draggable_regions) {
-  render_frame()->GetWebView()->SetSupportsDraggableRegions(
-      supports_draggable_regions);
-}
-
 void ChromeRenderFrameObserver::SetShouldDeferMediaLoad(bool should_defer) {
   prerender::SetShouldDeferMediaLoad(render_frame(), should_defer);
+}
+
+void ChromeRenderFrameObserver::InitializeTool(
+    actor::mojom::ToolInvocationPtr request,
+    InitializeToolCallback callback) {
+  if (!tool_executor_) {
+    tool_executor_ =
+        std::make_unique<actor::ToolExecutor>(render_frame(), *actor_journal_);
+  }
+
+  actor::mojom::InitializeToolResultPtr result =
+      tool_executor_->InitializeTool(std::move(request));
+  std::move(callback).Run(std::move(result));
+}
+
+void ChromeRenderFrameObserver::ExecuteTool(const actor::TaskId& task_id,
+                                            ExecuteToolCallback callback) {
+  CHECK(tool_executor_) << "ExecuteTool was called before InitializeTool";
+  tool_executor_->ExecuteTool(task_id, std::move(callback));
+}
+
+void ChromeRenderFrameObserver::InvokeTool(
+    actor::mojom::ToolInvocationPtr request,
+    InvokeToolCallback callback) {
+  if (!tool_executor_) {
+    tool_executor_ =
+        std::make_unique<actor::ToolExecutor>(render_frame(), *actor_journal_);
+  }
+
+  tool_executor_->InvokeTool(std::move(request), std::move(callback));
+}
+
+void ChromeRenderFrameObserver::CancelTool(const actor::TaskId& task_id) {
+  if (tool_executor_) {
+    tool_executor_->CancelTool(task_id);
+  }
+}
+
+void ChromeRenderFrameObserver::StartActorJournal(
+    mojo::PendingAssociatedRemote<actor::mojom::JournalClient> client) {
+  actor_journal_->Bind(std::move(client));
+}
+
+void ChromeRenderFrameObserver::GetCrossDocumentScriptToolResult(
+    const base::UnguessableToken& execution_id,
+    GetCrossDocumentScriptToolResultCallback callback) {
+  render_frame()->GetWebFrame()->GetDocument().GetCrossDocumentScriptToolResult(
+      execution_id,
+      base::BindOnce(
+          [](GetCrossDocumentScriptToolResultCallback cb,
+             blink::WebString result) { std::move(cb).Run(result.Utf8()); },
+          std::move(callback)));
+}
+
+void ChromeRenderFrameObserver::CreatePageStabilityMonitor(
+    mojo::PendingReceiver<page_content_annotations::mojom::PageStabilityMonitor>
+        monitor,
+    const actor::TaskId& task_id,
+    bool supports_paint_stability) {
+  page_stability_monitor_ =
+      std::make_unique<page_content_annotations::PageStabilityMonitor>(
+          *render_frame(), supports_paint_stability,
+          std::make_unique<actor::PageStabilityMonitorDelegate>(
+              task_id, *actor_journal_));
+  page_stability_monitor_->Bind(std::move(monitor));
 }
 
 void ChromeRenderFrameObserver::SetClientSidePhishingDetection() {
@@ -619,6 +708,16 @@ void ChromeRenderFrameObserver::SetClientSidePhishingDetection() {
       safe_browsing::PhishingImageEmbedderDelegate::Create(render_frame());
 #endif
 }
+
+#if BUILDFLAG(ENABLE_PDF)
+void ChromeRenderFrameObserver::PdfPageCaptured(const std::u16string& contents,
+                                                const std::string& pdf_lang,
+                                                const GURL& page_url) {
+  if (translate_agent_) {
+    translate_agent_->PdfPageCaptured(contents, pdf_lang, page_url);
+  }
+}
+#endif
 
 void ChromeRenderFrameObserver::OnRenderFrameObserverRequest(
     mojo::PendingAssociatedReceiver<chrome::mojom::ChromeRenderFrame>
@@ -727,7 +826,7 @@ void ChromeRenderFrameObserver::CapturePageText(
   // Will swap out the string.
   if (phishing_classifier_) {
     phishing_classifier_->PageCaptured(
-        contents, layout_type == blink::WebMeaningfulLayout::kFinishedParsing);
+        layout_type == blink::WebMeaningfulLayout::kFinishedParsing);
   }
   if (phishing_image_embedder_) {
     phishing_image_embedder_->PageCaptured(
@@ -781,21 +880,18 @@ SkBitmap ChromeRenderFrameObserver::Downscale(
 
 // static
 bool ChromeRenderFrameObserver::NeedsEncodeImage(
-    const std::string& image_extension,
+    const std::string& mime_type,
     chrome::mojom::ImageFormat image_format) {
   switch (image_format) {
     case chrome::mojom::ImageFormat::PNG:
-      return !base::EqualsCaseInsensitiveASCII(image_extension, kPngExtension);
+      return mime_type != kImagePng;
     case chrome::mojom::ImageFormat::WEBP:
-      return !base::EqualsCaseInsensitiveASCII(image_extension, kWebpExtension);
+      return mime_type != kImageWebp;
     case chrome::mojom::ImageFormat::JPEG:
-      return !base::EqualsCaseInsensitiveASCII(image_extension, kJpgExtension);
+      return mime_type != kImageJpeg;
     case chrome::mojom::ImageFormat::ORIGINAL:
-      return !base::EqualsCaseInsensitiveASCII(image_extension,
-                                               kGifExtension) &&
-             !base::EqualsCaseInsensitiveASCII(image_extension,
-                                               kJpgExtension) &&
-             !base::EqualsCaseInsensitiveASCII(image_extension, kPngExtension);
+      return mime_type != kImageGif && mime_type != kImageJpeg &&
+             mime_type != kImagePng;
   }
 
   // Should never hit this code since all cases were handled above.

@@ -1,8 +1,9 @@
 include_rules = [
-  "+third_party/ashmem",
+  "+aidl/org/chromium/base",
   "+third_party/apple_apsl",
   "+third_party/boringssl/src/include",
   "+third_party/ced",
+  "+third_party/fuzztest",
   # We are moving the old jni_generator to jni_zero, some references will remain
   # in //base.
   "+third_party/jni_zero",
@@ -16,6 +17,7 @@ include_rules = [
   # in the gn build; see //base/BUILD.gn's conditional dependency on
   # //build/rust:cxx_cppdeps.
   "+third_party/rust/cxx",
+  "+third_party/simdutf/simdutf.h",
   "+third_party/test_fonts",
   # JSON Deserialization.
   "+third_party/rust/serde_json_lenient/v0_2/wrapper",
@@ -33,12 +35,8 @@ include_rules = [
 ]
 
 specific_include_rules = {
-  # Special case
-  "process/current_process(|_test)\.h": [
-    "+third_party/perfetto/protos/perfetto/trace/track_event/chrome_process_descriptor.pbzero.h",
-  ],
   # To evaluate the performance effects of using absl's flat_hash_map.
-  "supports_user_data\.cc": [
+  "supports_user_data\\.cc": [
     "+third_party/abseil-cpp/absl/container/flat_hash_map.h",
   ]
 }

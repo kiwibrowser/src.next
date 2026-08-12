@@ -40,8 +40,6 @@ class CORE_EXPORT Text : public CharacterData {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static constexpr unsigned kDefaultLengthLimit = 1 << 16;
-
   static Text* Create(Document&, const String&);
   static Text* Create(Document&, String&&);
   static Text* CreateEditingText(Document&, const String&);

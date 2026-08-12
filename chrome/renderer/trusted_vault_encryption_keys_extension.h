@@ -6,10 +6,12 @@
 #define CHROME_RENDERER_TRUSTED_VAULT_ENCRYPTION_KEYS_EXTENSION_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/trusted_vault_encryption_keys_extension.mojom.h"
 #include "content/public/renderer/render_frame_observer.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "v8/include/v8-forward.h"
 #include "v8/include/v8-persistent-handle.h"
@@ -44,11 +46,17 @@ class TrustedVaultEncryptionKeysExtension
   void Install();
 #if !BUILDFLAG(IS_ANDROID)
   void SetSyncEncryptionKeys(gin::Arguments* args);
+  void SetSyncEncryptionKeysContinue(
+      gin::Arguments* args,
+      v8::Local<v8::Function> callback,
+      std::string gaia_id,
+      std::optional<std::vector<chrome::mojom::TrustedVaultKeyPtr>>
+          encryption_keys);
   void SetClientEncryptionKeys(gin::Arguments* args);
   void SetClientEncryptionKeysContinue(
       gin::Arguments* args,
       v8::Local<v8::Function> callback,
-      std::string gaia_id,
+      GaiaId gaia_id,
       std::optional<
           base::flat_map<std::string,
                          std::vector<chrome::mojom::TrustedVaultKeyPtr>>>

@@ -26,12 +26,11 @@ std::string NativeLibraryLoadError::ToString() const {
   return message;
 }
 
-NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
-                                           const NativeLibraryOptions& options,
-                                           NativeLibraryLoadError* error) {
+NativeLibrary LoadNativeLibrary(const FilePath& library_path,
+                                NativeLibraryLoadError* error) {
   // dlopen() etc. open the file off disk.
-  if (library_path.Extension() == "dylib" || !DirectoryExists(library_path)) {
-    void* dylib = dlopen(library_path.value().c_str(), RTLD_LAZY);
+  if (!DirectoryExists(library_path)) {
+    void* dylib = dlopen(library_path.value().c_str(), RTLD_LAZY | RTLD_LOCAL);
     if (!dylib) {
       if (error) {
         error->message = dlerror();
@@ -84,11 +83,7 @@ std::string GetNativeLibraryName(std::string_view name) {
   DCHECK(IsStringASCII(name));
 #if BUILDFLAG(IS_IOS)
   // Returns mylib.framework/mylib
-  return FilePath()
-      .Append(name)
-      .AddExtension("framework")
-      .Append(name)
-      .value();
+  return FilePath().Append(name).AddExtension("framework").Append(name).value();
 #else
   return StrCat({"lib", name, ".dylib"});
 #endif
@@ -98,10 +93,7 @@ std::string GetLoadableModuleName(std::string_view name) {
   DCHECK(IsStringASCII(name));
 #if BUILDFLAG(IS_IOS)
   // Returns mylib.framework
-  return FilePath()
-      .Append(name)
-      .AddExtension("framework")
-      .value();
+  return FilePath().Append(name).AddExtension("framework").value();
 #else
   return StrCat({name, ".so"});
 #endif

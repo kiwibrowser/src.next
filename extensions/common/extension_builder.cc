@@ -8,7 +8,9 @@
 #include <string_view>
 #include <utility>
 
+#include "base/check.h"
 #include "base/json/json_reader.h"
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/common/api/content_scripts.h"
@@ -37,14 +39,14 @@ struct ExtensionBuilder::ManifestData {
   using ContentScriptEntry = std::pair<std::string, std::vector<std::string>>;
   std::vector<ContentScriptEntry> content_scripts;
 
-  std::optional<base::Value::Dict> extra;
+  std::optional<base::DictValue> extra;
 
-  base::Value::Dict GetValue() const {
+  base::DictValue GetValue() const {
     int fallback_manifest_version = type == Type::PLATFORM_APP ? 2 : 3;
     int effective_manifest_version =
         manifest_version.value_or(fallback_manifest_version);
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set(manifest_keys::kName, name)
             .Set(manifest_keys::kManifestVersion,
                  manifest_version.value_or(fallback_manifest_version))
@@ -55,18 +57,18 @@ struct ExtensionBuilder::ManifestData {
       case Type::EXTENSION:
         break;  // Sufficient already.
       case Type::PLATFORM_APP: {
-        base::Value::Dict background;
-        background.Set("scripts", base::Value::List().Append("test.js"));
-        manifest.Set("app", base::Value::Dict().Set("background",
-                                                    std::move(background)));
+        base::DictValue background;
+        background.Set("scripts", base::ListValue().Append("test.js"));
+        manifest.Set(
+            "app", base::DictValue().Set("background", std::move(background)));
         break;
       }
     }
 
-    base::Value::List permissions_value;
-    base::Value::List optional_permissions_value;
-    base::Value::List host_permissions_value;
-    base::Value::List optional_host_permissions_value;
+    base::ListValue permissions_value;
+    base::ListValue optional_permissions_value;
+    base::ListValue host_permissions_value;
+    base::ListValue optional_host_permissions_value;
 
     for (const auto& permission : api_permissions) {
       permissions_value.Append(permission);
@@ -109,11 +111,11 @@ struct ExtensionBuilder::ManifestData {
 
     if (action) {
       const char* action_key = ActionInfo::GetManifestKeyForActionType(*action);
-      manifest.Set(action_key, base::Value(base::Value::Dict()));
+      manifest.Set(action_key, base::Value(base::DictValue()));
     }
 
     if (background_context) {
-      base::Value::Dict background;
+      base::DictValue background;
       std::optional<bool> persistent;
       switch (*background_context) {
         case BackgroundContext::BACKGROUND_PAGE:
@@ -135,18 +137,18 @@ struct ExtensionBuilder::ManifestData {
     }
 
     if (!content_scripts.empty()) {
-      base::Value::List scripts_value;
+      base::ListValue scripts_value;
       scripts_value.reserve(content_scripts.size());
       for (const auto& [script_name, pattern_matches] : content_scripts) {
-        base::Value::List matches;
+        base::ListValue matches;
         matches.reserve(pattern_matches.size());
         for (const auto& pattern_match : pattern_matches) {
           matches.Append(pattern_match);
         }
         scripts_value.Append(
-            base::Value::Dict()
+            base::DictValue()
                 .Set(api::content_scripts::ContentScript::kJs,
-                     base::Value::List().Append(script_name))
+                     base::ListValue().Append(script_name))
                 .Set(api::content_scripts::ContentScript::kMatches,
                      std::move(matches)));
       }
@@ -154,14 +156,14 @@ struct ExtensionBuilder::ManifestData {
                    std::move(scripts_value));
     }
 
-    base::Value::Dict result = std::move(manifest);
+    base::DictValue result = std::move(manifest);
     if (extra)
       result.Merge(extra->Clone());
 
     return result;
   }
 
-  base::Value::Dict& get_extra() {
+  base::DictValue& get_extra() {
     if (!extra)
       extra.emplace();
     return *extra;
@@ -191,11 +193,11 @@ scoped_refptr<const Extension> ExtensionBuilder::Build() {
   if (id_.empty() && manifest_data_)
     id_ = crx_file::id_util::GenerateId(manifest_data_->name);
 
-  std::string error;
+  std::u16string error;
 
   // This allows `*manifest_value` to be passed as a reference instead of
   // needing to be cloned.
-  std::optional<base::Value::Dict> manifest_data_value;
+  std::optional<base::DictValue> manifest_data_value;
   if (manifest_data_) {
     manifest_data_value = manifest_data_->GetValue();
   }
@@ -316,7 +318,8 @@ ExtensionBuilder& ExtensionBuilder::SetManifestVersion(int manifest_version) {
 ExtensionBuilder& ExtensionBuilder::AddJSON(std::string_view json) {
   CHECK(manifest_data_);
   std::string wrapped_json = base::StringPrintf("{%s}", json.data());
-  auto parsed = base::JSONReader::ReadAndReturnValueWithError(wrapped_json);
+  auto parsed = base::JSONReader::ReadAndReturnValueWithError(
+      wrapped_json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   CHECK(parsed.has_value())
       << "Failed to parse json for extension '" << manifest_data_->name
       << "':" << parsed.error().message;
@@ -334,13 +337,13 @@ ExtensionBuilder& ExtensionBuilder::SetLocation(
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetManifest(base::Value::Dict manifest) {
+ExtensionBuilder& ExtensionBuilder::SetManifest(base::DictValue manifest) {
   CHECK(!manifest_data_);
   manifest_value_ = std::move(manifest);
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::MergeManifest(base::Value::Dict to_merge) {
+ExtensionBuilder& ExtensionBuilder::MergeManifest(base::DictValue to_merge) {
   if (manifest_data_) {
     manifest_data_->get_extra().Merge(std::move(to_merge));
   } else {

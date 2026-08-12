@@ -32,7 +32,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_SELECTOR_WATCH_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
@@ -42,6 +41,8 @@
 
 namespace blink {
 
+class StyleRule;
+
 class CORE_EXPORT CSSSelectorWatch final
     : public GarbageCollected<CSSSelectorWatch>,
       public Supplement<Document> {
@@ -49,7 +50,7 @@ class CORE_EXPORT CSSSelectorWatch final
   static const char kSupplementName[];
 
   explicit CSSSelectorWatch(Document&);
-  virtual ~CSSSelectorWatch() = default;
+  ~CSSSelectorWatch() = default;
 
   static CSSSelectorWatch& From(Document&);
   static CSSSelectorWatch* FromIfExists(Document&);

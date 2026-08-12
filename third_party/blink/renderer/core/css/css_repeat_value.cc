@@ -33,6 +33,11 @@ const CSSValueList& CSSRepeatValue::Values() const {
   return *values_.Get();
 }
 
+bool CSSRepeatValue::HasRandomFunctions() const {
+  return (repetitions_ && repetitions_->HasRandomFunctions()) ||
+         (values_ && values_->HasRandomFunctions());
+}
+
 void CSSRepeatValue::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(repetitions_);
   visitor->Trace(values_);
@@ -41,7 +46,7 @@ void CSSRepeatValue::TraceAfterDispatch(blink::Visitor* visitor) const {
 }
 
 bool CSSRepeatValue::Equals(const CSSRepeatValue& other) const {
-  return repetitions_ == other.repetitions_ && values_ == other.values_;
+  return repetitions_ == other.repetitions_ && values_->Equals(other.Values());
 }
 
 }  // namespace blink::cssvalue

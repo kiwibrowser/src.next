@@ -17,20 +17,10 @@
 #include "base/content_uri_utils_jni/ContentUriUtils_jni.h"
 
 using base::android::ConvertUTF8ToJavaString;
-using base::android::JavaParamRef;
 using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
 namespace base {
-namespace {
-std::string SafeConvertJavaStringToUTF8(JNIEnv* env,
-                                        const JavaRef<jstring>& str) {
-  if (str.is_null()) {
-    return std::string();
-  }
-  return base::android::ConvertJavaStringToUTF8(env, str);
-}
-}  // namespace
 
 namespace internal {
 
@@ -44,30 +34,59 @@ std::optional<std::string> TranslateOpenFlagsToJavaMode(uint32_t open_flags) {
   // ("r", "w", "wt", "wa", "rw", "rwt"), we disallow "w" which has been the
   // source of android security issues.
 
-  // Ignore async.
-  open_flags &= ~File::FLAG_ASYNC;
+  // Filter out unsupported or irrelevant flags, not explicitly supported by
+  // Content UI in the switch statement below.
+  open_flags &= (File::FLAG_OPEN | File::FLAG_CREATE | File::FLAG_OPEN_ALWAYS |
+                 File::FLAG_CREATE_ALWAYS | File::FLAG_OPEN_TRUNCATED |
+                 File::FLAG_READ | File::FLAG_WRITE | File::FLAG_APPEND);
 
   switch (open_flags) {
     case File::FLAG_OPEN | File::FLAG_READ:
+    case File::FLAG_OPEN_ALWAYS | File::FLAG_READ:
+    case File::FLAG_CREATE | File::FLAG_READ:
       return "r";
+    case File::FLAG_OPEN | File::FLAG_READ | File::FLAG_WRITE:
     case File::FLAG_OPEN_ALWAYS | File::FLAG_READ | File::FLAG_WRITE:
+    case File::FLAG_CREATE | File::FLAG_READ | File::FLAG_WRITE:
       return "rw";
+    case File::FLAG_OPEN | File::FLAG_APPEND:
+    case File::FLAG_OPEN | File::FLAG_APPEND | File::FLAG_WRITE:
     case File::FLAG_OPEN_ALWAYS | File::FLAG_APPEND:
+    case File::FLAG_OPEN_ALWAYS | File::FLAG_APPEND | File::FLAG_WRITE:
       return "wa";
     case File::FLAG_CREATE_ALWAYS | File::FLAG_READ | File::FLAG_WRITE:
+    case File::FLAG_OPEN_TRUNCATED | File::FLAG_READ | File::FLAG_WRITE:
       return "rwt";
     case File::FLAG_CREATE_ALWAYS | File::FLAG_WRITE:
+    case File::FLAG_CREATE_ALWAYS | File::FLAG_APPEND:
+    case File::FLAG_CREATE_ALWAYS | File::FLAG_APPEND | File::FLAG_WRITE:
+    case File::FLAG_OPEN_TRUNCATED | File::FLAG_WRITE:
       return "wt";
     default:
       return std::nullopt;
   }
 }
 
-int OpenContentUri(const FilePath& content_uri, uint32_t open_flags) {
-  JNIEnv* env = base::android::AttachCurrentThread();
+ScopedJavaLocalRef<jobject> OpenContentUri(const FilePath& content_uri,
+                                           uint32_t open_flags) {
+  JNIEnv* env = android::AttachCurrentThread();
   auto mode = TranslateOpenFlagsToJavaMode(open_flags);
   CHECK(mode.has_value()) << "Unsupported flags=0x" << std::hex << open_flags;
   return Java_ContentUriUtils_openContentUri(env, content_uri.value(), *mode);
+}
+
+int ContentUriGetFd(const JavaRef<jobject>& java_parcel_file_descriptor) {
+  if (!java_parcel_file_descriptor) {
+    return -1;
+  }
+  JNIEnv* env = android::AttachCurrentThread();
+  int fd = Java_ContentUriUtils_getFd(env, java_parcel_file_descriptor);
+  return dup(fd);
+}
+
+void ContentUriClose(const JavaRef<jobject>& java_parcel_file_descriptor) {
+  JNIEnv* env = android::AttachCurrentThread();
+  Java_ContentUriUtils_close(env, java_parcel_file_descriptor);
 }
 
 bool ContentUriGetFileInfo(const FilePath& content_uri,
@@ -75,7 +94,7 @@ bool ContentUriGetFileInfo(const FilePath& content_uri,
   JNIEnv* env = android::AttachCurrentThread();
   std::vector<FileEnumerator::FileInfo> list;
   Java_ContentUriUtils_getFileInfo(env, content_uri.value(),
-                                   reinterpret_cast<jlong>(&list));
+                                   reinterpret_cast<int64_t>(&list));
   // Java will call back sync to AddFileInfoToVector(&list).
   if (list.empty()) {
     return false;
@@ -91,11 +110,12 @@ bool ContentUriGetFileInfo(const FilePath& content_uri,
 }
 
 std::vector<FileEnumerator::FileInfo> ListContentUriDirectory(
-    const FilePath& content_uri) {
+    const FilePath& content_uri,
+    int file_type) {
   JNIEnv* env = android::AttachCurrentThread();
   std::vector<FileEnumerator::FileInfo> result;
-  Java_ContentUriUtils_listDirectory(env, content_uri.value(),
-                                     reinterpret_cast<jlong>(&result));
+  Java_ContentUriUtils_listDirectory(env, content_uri.value(), file_type,
+                                     reinterpret_cast<int64_t>(&result));
   // Java will call back sync to AddFileInfoToVector(&result).
   return result;
 }
@@ -114,33 +134,31 @@ bool IsDocumentUri(const FilePath& content_uri) {
 
 }  // namespace internal
 
-void JNI_ContentUriUtils_AddFileInfoToVector(
+static void JNI_ContentUriUtils_AddFileInfoToVector(
     JNIEnv* env,
-    jlong vector_pointer,
-    const JavaParamRef<jstring>& uri,
-    const JavaParamRef<jstring>& display_name,
-    jboolean is_directory,
-    jlong size,
-    jlong last_modified) {
+    int64_t vector_pointer,
+    const std::string& uri,
+    const std::string& display_name,
+    bool is_directory,
+    int64_t size,
+    int64_t last_modified) {
   auto* result =
       reinterpret_cast<std::vector<FileEnumerator::FileInfo>*>(vector_pointer);
-  result->emplace_back(FilePath(SafeConvertJavaStringToUTF8(env, uri)),
-                       FilePath(SafeConvertJavaStringToUTF8(env, display_name)),
-                       is_directory, size,
+  result->emplace_back(FilePath(uri), FilePath(display_name), is_directory,
+                       size,
                        Time::FromMillisecondsSinceUnixEpoch(last_modified));
 }
 
 std::string GetContentUriMimeType(const FilePath& content_uri) {
   JNIEnv* env = android::AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_mime =
-      Java_ContentUriUtils_getMimeType(env, content_uri.value());
-  return SafeConvertJavaStringToUTF8(env, j_mime);
+  return Java_ContentUriUtils_getMimeType(env, content_uri.value());
 }
 
 bool MaybeGetFileDisplayName(const FilePath& content_uri,
                              std::u16string* file_display_name) {
-  if (!content_uri.IsContentUri())
+  if (!content_uri.IsContentUri()) {
     return false;
+  }
 
   DCHECK(file_display_name);
 
@@ -148,8 +166,9 @@ bool MaybeGetFileDisplayName(const FilePath& content_uri,
   ScopedJavaLocalRef<jstring> j_display_name =
       Java_ContentUriUtils_maybeGetDisplayName(env, content_uri.value());
 
-  if (j_display_name.is_null())
+  if (j_display_name.is_null()) {
     return false;
+  }
 
   *file_display_name = android::ConvertJavaStringToUTF16(j_display_name);
   return true;
@@ -159,10 +178,9 @@ FilePath ContentUriBuildDocumentUriUsingTree(
     const FilePath& tree_uri,
     const std::string& encoded_document_id) {
   JNIEnv* env = android::AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_uri =
-      Java_ContentUriUtils_buildDocumentUriUsingTree(env, tree_uri.value(),
-                                                     encoded_document_id);
-  return FilePath(SafeConvertJavaStringToUTF8(env, j_uri));
+  std::string j_uri = Java_ContentUriUtils_buildDocumentUriUsingTree(
+      env, tree_uri.value(), encoded_document_id);
+  return FilePath(j_uri);
 }
 
 FilePath ContentUriGetChildDocumentOrQuery(const FilePath& parent,
@@ -171,10 +189,9 @@ FilePath ContentUriGetChildDocumentOrQuery(const FilePath& parent,
                                            bool is_directory,
                                            bool create) {
   JNIEnv* env = android::AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_uri =
-      Java_ContentUriUtils_getChildDocumentOrQuery(
-          env, parent.value(), display_name, mime_type, is_directory, create);
-  return FilePath(SafeConvertJavaStringToUTF8(env, j_uri));
+  std::string j_uri = Java_ContentUriUtils_getChildDocumentOrQuery(
+      env, parent.value(), display_name, mime_type, is_directory, create);
+  return FilePath(j_uri);
 }
 
 bool ContentUriIsCreateChildDocumentQuery(const FilePath& content_uri) {
@@ -186,9 +203,11 @@ bool ContentUriIsCreateChildDocumentQuery(const FilePath& content_uri) {
 FilePath ContentUriGetDocumentFromQuery(const FilePath& content_uri,
                                         bool create) {
   JNIEnv* env = android::AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_uri = Java_ContentUriUtils_getDocumentFromQuery(
+  std::string j_uri = Java_ContentUriUtils_getDocumentFromQuery(
       env, content_uri.value(), create);
-  return FilePath(SafeConvertJavaStringToUTF8(env, j_uri));
+  return FilePath(j_uri);
 }
 
 }  // namespace base
+
+DEFINE_JNI(ContentUriUtils)

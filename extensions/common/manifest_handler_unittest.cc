@@ -6,13 +6,13 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -73,7 +73,7 @@ class ManifestHandlerTest : public testing::Test {
                         ParsingWatcher* watcher)
         : name_(name), keys_(keys), prereqs_(prereqs), watcher_(watcher) {
       keys_ptrs_.resize(keys_.size());
-      base::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
+      std::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
     }
 
     bool Parse(Extension* extension, std::u16string* error) override {
@@ -130,14 +130,14 @@ class ManifestHandlerTest : public testing::Test {
           always_validate_(always_validate),
           keys_(keys) {
       keys_ptrs_.resize(keys_.size());
-      base::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
+      std::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
     }
 
     bool Parse(Extension* extension, std::u16string* error) override {
       return true;
     }
 
-    bool Validate(const Extension* extension,
+    bool Validate(const Extension& extension,
                   std::string* error,
                   std::vector<InstallWarning>* warnings) const override {
       return return_value_;
@@ -187,14 +187,14 @@ TEST_F(ManifestHandlerTest, DependentHandlers) {
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
           .SetManifest(
-              base::Value::Dict()
+              base::DictValue()
                   .Set("name", "no name")
                   .Set("version", "0")
                   .Set("manifest_version", 2)
                   .Set("a", 1)
                   .Set("b", 2)
                   .Set("c",
-                       base::Value::Dict().Set("d", 3).Set("e", 4).Set("f", 5))
+                       base::DictValue().Set("d", 3).Set("e", 4).Set("f", 5))
                   .Set("g", 6))
           .Build();
 
@@ -210,14 +210,14 @@ TEST_F(ManifestHandlerTest, FailingHandlers) {
   ScopedTestingManifestHandlerRegistry scoped_registry;
   // Can't use ExtensionBuilder, because this extension will fail to
   // be parsed.
-  base::Value::Dict manifest_a(base::Value::Dict()
-                                   .Set("name", "no name")
-                                   .Set("version", "0")
-                                   .Set("manifest_version", 2)
-                                   .Set("a", 1));
+  base::DictValue manifest_a(base::DictValue()
+                                 .Set("name", "no name")
+                                 .Set("version", "0")
+                                 .Set("manifest_version", 2)
+                                 .Set("a", 1));
 
   // Succeeds when "a" is not recognized.
-  std::string error;
+  std::u16string error;
   scoped_refptr<Extension> extension = Extension::Create(
       base::FilePath(), mojom::ManifestLocation::kInvalidLocation, manifest_a,
       Extension::NO_FLAGS, &error);
@@ -233,14 +233,14 @@ TEST_F(ManifestHandlerTest, FailingHandlers) {
                                 mojom::ManifestLocation::kInvalidLocation,
                                 manifest_a, Extension::NO_FLAGS, &error);
   EXPECT_FALSE(extension.get());
-  EXPECT_EQ("A", error);
+  EXPECT_EQ(u"A", error);
 }
 
 TEST_F(ManifestHandlerTest, Validate) {
   ScopedTestingManifestHandlerRegistry scoped_registry;
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(base::Value::Dict()
+          .SetManifest(base::DictValue()
                            .Set("name", "no name")
                            .Set("version", "0")
                            .Set("manifest_version", 2)

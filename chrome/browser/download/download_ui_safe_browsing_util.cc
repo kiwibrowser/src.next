@@ -9,23 +9,28 @@
 #include "chrome/browser/profiles/profile.h"
 #include "components/download/public/common/download_item.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/content/common/file_type_policies.h"
+#include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/common/features.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #endif
 
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
+#include "components/safe_browsing/content/common/file_type_policies.h"
+#endif
+
 namespace {
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 using safe_browsing::ClientDownloadResponse;
 using safe_browsing::ClientSafeBrowsingReportRequest;
 #endif
 
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 std::string GetDangerPromptHistogramName(const std::string& suffix,
                                          const download::DownloadItem& item) {
   const char kPrefix[] = "Download.DownloadDangerPrompt";
@@ -35,11 +40,17 @@ std::string GetDangerPromptHistogramName(const std::string& suffix,
                             // "Proceed" or "Shown".
                             suffix.c_str());
 }
+#endif  // BUILDFLAG(SAFE_BROWSING_AVAILABLE)
+
+#if BUILDFLAG(IS_ANDROID)
+// File suffix for APKs.
+constexpr base::FilePath::CharType kApkSuffix[] = FILE_PATH_LITERAL(".apk");
+#endif
 
 }  // namespace
 
 bool WasSafeBrowsingVerdictObtained(const download::DownloadItem* item) {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
   return item &&
          safe_browsing::DownloadProtectionService::HasDownloadProtectionVerdict(
              item);
@@ -49,7 +60,7 @@ bool WasSafeBrowsingVerdictObtained(const download::DownloadItem* item) {
 }
 
 bool ShouldShowWarningForNoSafeBrowsing(Profile* profile) {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   return safe_browsing::GetSafeBrowsingState(*profile->GetPrefs()) ==
          safe_browsing::SafeBrowsingState::NO_SAFE_BROWSING;
 #else
@@ -58,7 +69,7 @@ bool ShouldShowWarningForNoSafeBrowsing(Profile* profile) {
 }
 
 bool CanUserTurnOnSafeBrowsing(Profile* profile) {
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   return !safe_browsing::IsSafeBrowsingPolicyManaged(*profile->GetPrefs());
 #else
   return false;
@@ -68,15 +79,17 @@ bool CanUserTurnOnSafeBrowsing(Profile* profile) {
 void RecordDownloadDangerPromptHistogram(
     const std::string& proceed_or_shown_suffix,
     const download::DownloadItem& item) {
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   int64_t file_type_uma_value =
       safe_browsing::FileTypePolicies::GetInstance()->UmaValueForFile(
           item.GetTargetFilePath());
   base::UmaHistogramSparse(
       GetDangerPromptHistogramName(proceed_or_shown_suffix, item),
       file_type_uma_value);
+#endif
 }
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 void SendSafeBrowsingDownloadReport(
     ClientSafeBrowsingReportRequest::ReportType report_type,
     bool did_proceed,
@@ -87,27 +100,20 @@ void SendSafeBrowsingDownloadReport(
                                    /*show_download_in_folder=*/std::nullopt);
   }
 }
-#endif  // BUILDFLAG(FULL_SAFE_BROWSING)
+#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
-bool ShouldShowDeepScanPromptNotice(Profile* profile,
-                                    download::DownloadDangerType danger_type) {
-  if (danger_type != download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING) {
-    return false;
-  }
-
-  if (!safe_browsing::IsEnhancedProtectionEnabled(*profile->GetPrefs())) {
-    return false;
-  }
-
-  if (!base::FeatureList::IsEnabled(
-          safe_browsing::kDeepScanningPromptRemoval)) {
-    return false;
-  }
-
-  if (profile->GetPrefs()->GetBoolean(
-          prefs::kSafeBrowsingAutomaticDeepScanPerformed)) {
-    return false;
-  }
-
-  return true;
+#if BUILDFLAG(IS_ANDROID)
+bool ShouldShowSafeBrowsingAndroidDownloadWarnings() {
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
+  return base::FeatureList::IsEnabled(
+             safe_browsing::kMaliciousApkDownloadCheck) &&
+         !safe_browsing::kMaliciousApkDownloadCheckTelemetryOnly.Get();
+#else
+  return false;
+#endif  // BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 }
+
+bool IsApkFile(download::DownloadItem* item) {
+  return item->GetFileNameToReportUser().MatchesExtension(kApkSuffix);
+}
+#endif

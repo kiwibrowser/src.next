@@ -17,6 +17,7 @@
 #include "net/base/auth.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using net::AuthChallengeInfo;
@@ -25,9 +26,10 @@ namespace {
 
 class LoginHandlerAndroid : public LoginHandler {
  public:
-  LoginHandlerAndroid(const net::AuthChallengeInfo& auth_info,
-                      content::WebContents* web_contents,
-                      LoginAuthRequiredCallback auth_required_callback)
+  LoginHandlerAndroid(
+      const net::AuthChallengeInfo& auth_info,
+      content::WebContents* web_contents,
+      content::LoginDelegate::LoginAuthRequiredCallback auth_required_callback)
       : LoginHandler(auth_info,
                      web_contents,
                      std::move(auth_required_callback)) {}
@@ -55,21 +57,23 @@ class LoginHandlerAndroid : public LoginHandler {
     // Notify WindowAndroid that HTTP authentication is required.
     if (tab && window) {
       chrome_http_auth_handler_ = std::make_unique<ChromeHttpAuthHandler>(
-          authority, explanation, login_model_data);
+          authority, explanation, auth_info().challenger.GetURL(),
+          login_model_data);
       chrome_http_auth_handler_->Init(this);
       chrome_http_auth_handler_->ShowDialog(tab->GetJavaObject(),
                                             window->GetJavaObject());
       return true;
     } else {
       LOG(WARNING) << "HTTP Authentication failed because TabAndroid is "
-          "missing";
+                      "missing";
       return false;
     }
   }
 
   void CloseDialog() override {
-    if (chrome_http_auth_handler_)
+    if (chrome_http_auth_handler_) {
       chrome_http_auth_handler_->CloseDialog();
+    }
   }
 
  private:
@@ -82,7 +86,7 @@ class LoginHandlerAndroid : public LoginHandler {
 std::unique_ptr<LoginHandler> LoginHandler::Create(
     const net::AuthChallengeInfo& auth_info,
     content::WebContents* web_contents,
-    LoginAuthRequiredCallback auth_required_callback) {
+    content::LoginDelegate::LoginAuthRequiredCallback auth_required_callback) {
   return std::make_unique<LoginHandlerAndroid>(
       auth_info, web_contents, std::move(auth_required_callback));
 }

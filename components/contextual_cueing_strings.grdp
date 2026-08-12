@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<grit-part>
+  <!-- Contextual Cueing Menu-->
+  <message name ="IDS_CONTEXTUAL_CUEING_MENU_DISMISS" desc="Title of a menu item which, on click, dismisses the contextual cue.">
+    Dismiss
+  </message>
+  <message name ="IDS_CONTEXTUAL_CUEING_MENU_EDIT_PROMPT" desc="Title of a menu item which, on click, opens the AI chat and allows for the user to edit the prompt.">
+    Edit prompt
+  </message>
+  <message name ="IDS_CONTEXTUAL_CUEING_MENU_SETTINGS" desc="Title of a menu item which, on click, opens the contextual cueing settings page.">
+    Settings
+  </message>
+
+  <!-- Contextual Cueing Settings Page -->
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_PAGE_TITLE" desc="Title of the settings page for suggestions, powered by AI.">
+    Suggestions, powered by AI
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_PAGE_SUBLABEL" desc="Sublabel of the settings row leading to the suggestions settings subpage.">
+    Get real-time suggestions that can help you find new ways to browse with AI
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_TOGGLE_LABEL" desc="Label for the toggle that enables/disables suggestions.">
+    Show suggestions
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_TOGGLE_SUBLABEL" desc="Sublabel of the settings row leading to the suggestions settings subpage.">
+    Get real-time suggestions that can help you find new ways to browse with AI.
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_WHEN_ON_1" desc="First point in the 'when on' column on the suggestions settings subpage.">
+    Page titles and URLs of your open tabs are used to give you relevant suggestions
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_WHEN_ON_2" desc="Second point in the 'when on' column on the suggestions settings subpage.">
+    If you select or ignore a suggestion, Chrome will adapt to make sure you only see what’s relevant to you
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_CONSIDER_1_PRIVATE" desc="First point in the 'things to consider' column on the suggestions settings subpage.">
+    Chrome processes page titles and URLs in a private space in the cloud
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_CONSIDER_1_NON_PRIVATE" desc="First point in the 'things to consider' column on the suggestions settings subpage.">
+    Chrome processes page titles and URLs in the cloud
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_CONSIDER_2" desc="Second point in the 'consider' column on the suggestions settings subpage.">
+    If you turn off suggestions the page title and URLs of your tabs may still be processed for other Chrome features. You can manage browser access to this data in your
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_SETTINGS_CONSIDER_2_LINK" desc="Text for the link to the sync settings page in the 'consider' column on the suggestions settings subpage.">
+    sync settings
+  </message>
+
+  <!-- Contextual Cueing Tab Sharing Indicator -->
+  <message name="IDS_CONTEXTUAL_CUEING_TAB_SHARING_HEADING" desc="Heading for the list of tabs that will be shared with the target feature if the contextual cue action is clicked.">
+    {NUM_TABS, plural,
+    =1 {Will share 1 tab}
+    other {Will share {NUM_TABS} tabs}}
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_TAB_SHARING_CURRENT_TAB" desc="Marker for the active tab in the contextual cue tab sharing list.">
+    Current tab
+  </message>
+  <message name="IDS_CONTEXTUAL_CUEING_TAB_SHARING_EXPAND_BUTTON_ANNOUNCEMENT_V2" desc="Screen reader announcement text for the expand button for the contextual cue tab sharing list. WEBSITE_LIST_STR is a comma-separated list of website domains.">
+    {NUM_TABS, plural,
+    =1 {Tab sharing details. Sharing 1 tab from {WEBSITE_LIST_STR}}
+    other {Tab sharing details. Sharing {NUM_TABS} tabs from {WEBSITE_LIST_STR}}
+    }
+  </message>
+</grit-part>

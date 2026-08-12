@@ -56,7 +56,6 @@
 #include "third_party/blink/renderer/platform/network/mime/content_type.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -91,7 +90,7 @@ bool DocumentInit::IsSrcdocDocument() const {
 }
 
 bool DocumentInit::IsAboutBlankDocument() const {
-  return window_ && url_.IsAboutBlankURL();
+  return window_ && url_.IsAboutBlankUrl();
 }
 
 const KURL& DocumentInit::FallbackBaseURL() const {
@@ -156,16 +155,22 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
     LocalFrame* frame,
     const String& mime_type,
     bool* is_for_external_handler) {
-  if (frame && frame->InViewSourceMode())
+  if (frame && frame->InViewSourceMode()) {
     return Type::kViewSource;
+  }
 
   // Plugins cannot take HTML and XHTML from us, and we don't even need to
   // initialize the plugin database for those.
-  if (mime_type == "text/html")
+  if (mime_type == "text/html") {
     return Type::kHTML;
-
-  if (mime_type == "application/xhtml+xml")
+  }
+  if (mime_type == "application/xhtml+xml") {
     return Type::kXHTML;
+  }
+
+  if (mime_type == "image/svg+xml") {
+    return Type::kSVG;
+  }
 
   // multipart/x-mixed-replace is only supported for images.
   if (MIMETypeRegistry::IsSupportedImageResourceMIMEType(mime_type) ||
@@ -173,10 +178,12 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
     return Type::kImage;
   }
 
-  if (HTMLMediaElement::GetSupportsType(ContentType(mime_type)))
+  if (HTMLMediaElement::GetSupportsType(ContentType(mime_type))) {
     return Type::kMedia;
+  }
 
-  if (frame && frame->GetPage() && frame->Loader().AllowPlugins()) {
+  if (frame && frame->GetPage() && frame->Loader().AllowPlugins())
+      [[unlikely]] {
     PluginData* plugin_data = GetPluginData(frame);
 
     // Everything else except text/plain can be overridden by plugins.
@@ -194,7 +201,6 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
           *is_for_external_handler = true;
         return Type::kHTML;
       }
-
       return Type::kPlugin;
     }
   }
@@ -205,11 +211,9 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
     return Type::kText;
   }
 
-  if (mime_type == "image/svg+xml")
-    return Type::kSVG;
-
-  if (MIMETypeRegistry::IsXMLMIMEType(mime_type))
+  if (MIMETypeRegistry::IsXMLMIMEType(mime_type)) {
     return Type::kXML;
+  }
 
   return Type::kHTML;
 }
@@ -257,13 +261,13 @@ const KURL& DocumentInit::GetCookieUrl() const {
   //
   // TODO(https://crbug.com/1176291): Correctly inherit the `cookie_url` from
   // the initiator.
-  if (cookie_url.IsAboutBlankURL()) {
+  if (cookie_url.IsAboutBlankUrl()) {
     // Signify a cookie-averse document [1] with an null URL.  See how
     // CookiesJar::GetCookies and other methods check `cookie_url` against
     // KURL::IsEmpty.
     //
     // [1] https://html.spec.whatwg.org/#cookie-averse-document-object
-    const KURL& kCookieAverseUrl = NullURL();
+    const KURL& kCookieAverseUrl = NullUrl();
 
     return kCookieAverseUrl;
   }
@@ -289,6 +293,10 @@ DocumentInit& DocumentInit::WithJavascriptURL(bool is_for_javascript_url) {
 DocumentInit& DocumentInit::ForDiscard(bool is_for_discard) {
   is_for_discard_ = is_for_discard;
   return *this;
+}
+
+bool DocumentInit::IsForDiscard() const {
+  return is_for_discard_;
 }
 
 DocumentInit& DocumentInit::WithUkmSourceId(ukm::SourceId ukm_source_id) {

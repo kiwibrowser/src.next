@@ -6,9 +6,11 @@
 #define COMPONENTS_HISTORY_CORE_BROWSER_HISTORY_DATABASE_H_
 
 #include <memory>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/history/core/browser/download_database.h"
@@ -22,10 +24,7 @@
 #include "sql/database.h"
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
-
-#if BUILDFLAG(IS_ANDROID)
-#include "components/history/core/browser/android/android_urls_database.h"
-#endif
+#include "sql/statement.h"
 
 namespace base {
 class FilePath;
@@ -47,15 +46,27 @@ namespace history {
 // as the storage interface. Logic for manipulating this storage layer should
 // be in HistoryBackend.cc.
 class HistoryDatabase : public DownloadDatabase,
-#if BUILDFLAG(IS_ANDROID)
-                        public AndroidURLsDatabase,
-#endif
                         public URLDatabase,
                         public VisitDatabase,
                         public VisitAnnotationsDatabase,
                         public VisitedLinkDatabase,
                         public VisitSegmentDatabase {
  public:
+  // Reasons for initialization to fail. These are logged to UMA. It corresponds
+  // to the HistoryInitStep enum in enums.xml.
+  //
+  // DO NOT CHANGE THE VALUES. Leave holes if anything is removed and add only
+  // to the end.
+  enum class InitStep {
+    OPEN = 0,
+    TRANSACTION_BEGIN = 1,
+    META_TABLE_INIT = 2,
+    CREATE_TABLES = 3,
+    VERSION = 4,
+    COMMIT = 5,
+    RAZE_OLD_DB = 6,
+  };
+
   // Must call Init() to complete construction. Although it can be created on
   // any thread, it must be destructed on the history thread for proper
   // database cleanup.
@@ -83,22 +94,22 @@ class HistoryDatabase : public DownloadDatabase,
   // called once and only upon successful Init.
   void ComputeDatabaseMetrics(const base::FilePath& filename);
 
-  // Counts the number of unique Hosts visited in the last month.
-  int CountUniqueHostsVisitedLastMonth();
-
   // Gets unique domains (eTLD+1) visited within the time range
   // [`begin_time`, `end_time`) for local and synced visits sorted in
-  // reverse-chronological order.
-  DomainsVisitedResult GetUniqueDomainsVisited(base::Time begin_time,
-                                               base::Time end_time);
+  // reverse-chronological order. Whether visits with an HTTP response code of
+  // 404 count is determined by `policy_for_404_visits`.
+  DomainsVisitedResult GetUniqueDomainsVisited(
+      base::Time begin_time,
+      base::Time end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Counts the number of unique domains (eTLD+1) visited within
-  // [`begin_time`, `end_time`).
-  // The return value is a pair of (local, all), where "local" only counts
-  // domains that were visited on this device, whereas "all" also counts
-  // foreign/synced visits.
-  std::pair<int, int> CountUniqueDomainsVisited(base::Time begin_time,
-                                                base::Time end_time);
+  // [`begin_time`, `end_time`). Whether visits with an HTTP response code of
+  // 404 count is determined by `policy_for_404_visits`.  Includes only domains
+  // visited on this device; does not include foreign/synced visits.
+  int CountUniqueDomainsVisited(base::Time begin_time,
+                                base::Time end_time,
+                                VisitQuery404sPolicy policy_for_404_visits);
 
   // Call to set the mode on the database to exclusive. The default locking mode
   // is "normal" but we want to run in exclusive mode for slightly better
@@ -109,6 +120,10 @@ class HistoryDatabase : public DownloadDatabase,
 
   // Returns the current version that we will generate history databases with.
   static int GetCurrentVersion();
+
+  // Returns the version number stored in the database's meta table.
+  // Must be called after Init().
+  int GetDatabaseVersionForTesting();
 
   // Creates a new inactive transaction for the history database. Caller is
   // responsible for calling `sql::Transaction::Begin()` and checking the return
@@ -146,9 +161,6 @@ class HistoryDatabase : public DownloadDatabase,
   // Vacuums the database. This will cause sqlite to defragment and collect
   // unused space in the file. It can be VERY SLOW.
   void Vacuum();
-
-  // Release all non-essential memory associated with this database connection.
-  void TrimMemory();
 
   // Razes the database. Returns true if successful.
   bool Raze();
@@ -192,6 +204,54 @@ class HistoryDatabase : public DownloadDatabase,
   bool KnownToSyncVisitsExist();
   void SetKnownToSyncVisitsExist(bool exist);
 
+  // Visited link with URL enumeration -----------------------------------------
+
+  // Enumerator that returns visited link rows joined with their link URL from
+  // the urls table, avoiding N+1 queries during startup iteration.
+  class VisitedLinkWithUrlEnumerator {
+   public:
+    VisitedLinkWithUrlEnumerator();
+
+    VisitedLinkWithUrlEnumerator(const VisitedLinkWithUrlEnumerator&) = delete;
+    VisitedLinkWithUrlEnumerator& operator=(
+        const VisitedLinkWithUrlEnumerator&) = delete;
+
+    ~VisitedLinkWithUrlEnumerator();
+
+    // Retrieves the next visited link and its associated link URL. Returns
+    // false if no more rows are available.
+    bool GetNextVisitedLink(VisitedLinkRow& row, GURL& link_url);
+
+   private:
+    friend class HistoryDatabase;
+
+    bool initialized_ = false;
+    sql::Statement statement_;
+  };
+
+  // Initializes the given enumerator to enumerate all visited links joined with
+  // their URLs from the urls table. This is more efficient than separately
+  // querying the urls table for each visited link row.
+  bool InitVisitedLinkWithUrlEnumeratorForEverything(
+      VisitedLinkWithUrlEnumerator& enumerator);
+
+  // Batch recent visits -------------------------------------------------------
+
+  // A map from URLID to a vector of (visit_time, transition) pairs, sorted by
+  // visit_time descending. Used to batch-fetch recent visits for multiple URLs
+  // in a single query during startup rebuild, instead of issuing N separate
+  // GetMostRecentVisitsForURL queries.
+  using RecentVisitsMap = std::unordered_map<
+      URLID,
+      std::vector<std::pair<base::Time, ui::PageTransition>>>;
+
+  // Fetches the most recent visits (up to |max_visits_per_url|) for all URLs
+  // that match the "significant" criteria. Returns a map from URLID to visit
+  // info. This replaces the per-URL GetMostRecentVisitsForURL pattern during
+  // RebuildFromHistory, converting N+1 SQL queries into a single query.
+  RecentVisitsMap GetBatchRecentVisitsForSignificantURLs(
+      int max_visits_per_url);
+
   // Sync metadata storage ----------------------------------------------------
 
   // Returns the sub-database used for storing Sync metadata for History.
@@ -200,11 +260,6 @@ class HistoryDatabase : public DownloadDatabase,
   sql::Database& GetDBForTesting();
 
  private:
-#if BUILDFLAG(IS_ANDROID)
-  // AndroidProviderBackend uses the `db_`.
-  friend class AndroidProviderBackend;
-  FRIEND_TEST_ALL_PREFIXES(AndroidURLsMigrationTest, MigrateToVersion22);
-#endif
   friend class ::InMemoryURLIndexTest;
 
   // Overridden from URLDatabase, DownloadDatabase, VisitDatabase, and
@@ -212,6 +267,11 @@ class HistoryDatabase : public DownloadDatabase,
   sql::Database& GetDB() override;
 
   // Migration -----------------------------------------------------------------
+
+  // Razes the database if it's so old that we no longer have to code to migrate
+  // it to the current version. Returns `false` if the database was too old and
+  // could not be razed.
+  bool RazeDbIfTooOld();
 
   // Makes sure the version is up to date, updating if necessary. If the
   // database is too old to migrate, the user will be notified. Returns
@@ -228,6 +288,12 @@ class HistoryDatabase : public DownloadDatabase,
 #endif
 
   bool MigrateRemoveTypedUrlMetadata();
+
+#if BUILDFLAG(IS_ANDROID)
+  // The android_urls table ceased usage in 91.0.4438.0. This method drops the
+  // table if it exists.
+  bool DropAndroidUrlsTable();
+#endif
 
   // ---------------------------------------------------------------------------
 

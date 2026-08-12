@@ -5,22 +5,21 @@
 package org.chromium.chrome.browser;
 
 import android.annotation.SuppressLint;
-import android.provider.Settings;
 import android.text.TextUtils;
-
-import androidx.annotation.Nullable;
 
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ApplicationStateListener;
 import org.chromium.base.Callback;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.LocaleUtils;
 import org.chromium.base.ServiceLoaderUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.OneshotSupplier;
+import org.chromium.build.annotations.MonotonicNonNull;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browsing_data.BrowsingDataBridge;
 import org.chromium.chrome.browser.browsing_data.BrowsingDataType;
 import org.chromium.chrome.browser.browsing_data.TimePeriod;
@@ -33,25 +32,26 @@ import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomiza
 import org.chromium.chrome.browser.password_manager.PasswordManagerLifecycleHelper;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
-import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.privacy.settings.PasswordEchoSettingHandlerFactory;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileKeyedMap;
 import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
 import org.chromium.chrome.browser.profiles.ProfileProvider;
 import org.chromium.chrome.browser.safety_hub.SafetyHubFetchServiceFactory;
 import org.chromium.chrome.browser.translate.TranslateBridge;
+import org.chromium.chrome.browser.util.DefaultBrowserInfo;
 import org.chromium.components.browser_ui.accessibility.DeviceAccessibilitySettingsHandler;
 import org.chromium.components.browser_ui.accessibility.FontSizePrefs;
 import org.chromium.components.browser_ui.share.ShareImageFileUtils;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
-import org.chromium.components.user_prefs.UserPrefs;
 
 /** Tracks the foreground session state for the Chrome activities. */
+@NullMarked
 public class ChromeActivitySessionTracker {
 
     @SuppressLint("StaticFieldLeak")
-    private static ChromeActivitySessionTracker sInstance;
+    private static @MonotonicNonNull ChromeActivitySessionTracker sInstance;
 
     private final OmahaServiceStartDelayer mOmahaServiceStartDelayer =
             new OmahaServiceStartDelayer();
@@ -62,7 +62,7 @@ public class ChromeActivitySessionTracker {
     private final ProfileKeyedMap<Boolean> mStartupProfileTasksCompleted =
             new ProfileKeyedMap<>(
                     ProfileKeyedMap.ProfileSelection.REDIRECTED_TO_ORIGINAL,
-                    ProfileKeyedMap.NO_REQUIRED_CLEANUP_ACTION);
+                    ProfileKeyedMap.noRequiredCleanupAction());
 
     private boolean mIsInitialized;
     private boolean mIsStarted;
@@ -183,7 +183,7 @@ public class ChromeActivitySessionTracker {
         try (TraceEvent te =
                 TraceEvent.scoped(
                         "ChromeActivitySessionTracker.handlePerProfileForegroundSessionStart")) {
-            updatePasswordEchoState(profile);
+            PasswordEchoSettingHandlerFactory.getForProfile(profile).updatePasswordEchoState();
             FontSizePrefs.getInstance(profile).setFontScaleFactor();
             DeviceAccessibilitySettingsHandler.getInstance(profile).updateFontWeightAdjustment();
             updateAcceptLanguages(profile);
@@ -207,6 +207,7 @@ public class ChromeActivitySessionTracker {
 
         IntentHandler.clearPendingReferrer();
         IntentHandler.clearPendingIncognitoUrl();
+        DefaultBrowserInfo.resetDefaultInfoTask();
 
         for (Profile profile : mStartupProfileTasksCompleted.getTrackedProfiles()) {
             Tracker tracker = TrackerFactory.getTrackerForProfile(profile);
@@ -259,25 +260,6 @@ public class ChromeActivitySessionTracker {
                                 null, new int[] {BrowsingDataType.CACHE}, TimePeriod.ALL_TIME);
             }
         }
-    }
-
-    /**
-     * Honor the Android system setting about showing the last character of a password for a short
-     * period of time.
-     */
-    private void updatePasswordEchoState(Profile profile) {
-        boolean systemEnabled =
-                Settings.System.getInt(
-                                ContextUtils.getApplicationContext().getContentResolver(),
-                                Settings.System.TEXT_SHOW_PASSWORD,
-                                1)
-                        == 1;
-        if (UserPrefs.get(profile).getBoolean(Pref.WEB_KIT_PASSWORD_ECHO_ENABLED)
-                == systemEnabled) {
-            return;
-        }
-
-        UserPrefs.get(profile).setBoolean(Pref.WEB_KIT_PASSWORD_ECHO_ENABLED, systemEnabled);
     }
 
     /**

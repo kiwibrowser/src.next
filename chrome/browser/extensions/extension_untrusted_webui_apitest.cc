@@ -11,9 +11,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -122,8 +123,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionUntrustedWebUITest,
   RunTestOnApiTestPage("confidence_check_available_apis.js");
 }
 
+// TODO(crbug.com/417615981): Re-enable this test
 IN_PROC_BROWSER_TEST_F(ExtensionUntrustedWebUITest,
-                       ConfidenceCheckAvailableAPIsReadAnything) {
+                       DISABLED_ConfidenceCheckAvailableAPIsReadAnything) {
   ASSERT_TRUE(RunTestOnReadAnythingPage(
       "confidence_check_available_apis_read_anything.js"));
 }

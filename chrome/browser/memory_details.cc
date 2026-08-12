@@ -11,14 +11,12 @@
 #include "base/containers/adapters.h"
 #include "base/file_version_info.h"
 #include "base/functional/bind.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/nacl/common/nacl_process_type.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -32,6 +30,7 @@
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/child_process_id.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/zygote/zygote_buildflags.h"
 #include "extensions/buildflags/buildflags.h"
@@ -43,7 +42,7 @@
 #include "content/public/browser/zygote_host/zygote_host_linux.h"
 #endif
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "chrome/browser/extensions/chrome_content_browser_client_extensions_part.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/process_manager.h"
@@ -59,16 +58,16 @@ using content::BrowserThread;
 using content::NavigationEntry;
 using content::RenderWidgetHost;
 using content::WebContents;
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 using extensions::Extension;
 #endif
 
 namespace {
 
 void UpdateProcessTypeAndTitles(
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
     const extensions::ExtensionSet* extension_set,
-#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
     ProcessMemoryInformation& process,
     content::RenderFrameHost* rfh) {
   // We check the title and the renderer type only of the primary main
@@ -91,9 +90,9 @@ void UpdateProcessTypeAndTitles(
     process.renderer_type = ProcessMemoryInformation::RENDERER_CHROME;
   }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   if (!is_webui && extension_set) {
-    const Extension* extension = extension_set->GetByID(page_url.host());
+    const Extension* extension = extension_set->GetByID(page_url.GetHost());
     if (extension) {
       process.titles.push_back(base::UTF8ToUTF16(extension->name()));
       process.renderer_type = ProcessMemoryInformation::RENDERER_EXTENSION;
@@ -160,14 +159,14 @@ ProcessMemoryInformation::ProcessMemoryInformation()
 ProcessMemoryInformation::ProcessMemoryInformation(
     const ProcessMemoryInformation& other) = default;
 
-ProcessMemoryInformation::~ProcessMemoryInformation() {}
+ProcessMemoryInformation::~ProcessMemoryInformation() = default;
 
 bool ProcessMemoryInformation::operator<(
     const ProcessMemoryInformation& rhs) const {
   return private_memory_footprint_kb < rhs.private_memory_footprint_kb;
 }
 
-ProcessData::ProcessData() {}
+ProcessData::ProcessData() = default;
 
 ProcessData::ProcessData(const ProcessData& rhs)
     : name(rhs.name),
@@ -175,7 +174,7 @@ ProcessData::ProcessData(const ProcessData& rhs)
       processes(rhs.processes) {
 }
 
-ProcessData::~ProcessData() {}
+ProcessData::~ProcessData() = default;
 
 ProcessData& ProcessData::operator=(const ProcessData& rhs) {
   name = rhs.name;
@@ -218,7 +217,7 @@ void MemoryDetails::StartFetch() {
       base::BindOnce(&MemoryDetails::CollectProcessData, this, child_info));
 }
 
-MemoryDetails::~MemoryDetails() {}
+MemoryDetails::~MemoryDetails() = default;
 
 std::string MemoryDetails::ToLogString(bool include_tab_title) {
   std::string log;
@@ -289,7 +288,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       render_process_host = widgets_by_pid[process.pid].front()->GetProcess();
     }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
     // Determine if this is an extension process.
     bool process_is_for_extensions = false;
     const extensions::ExtensionSet* extension_set = nullptr;
@@ -306,11 +305,11 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       extensions::ProcessMap* process_map =
           extensions::ProcessMap::Get(context);
       DCHECK(process_map);
-      int rph_id = render_process_host->GetID();
+      content::ChildProcessId rph_id = render_process_host->GetID();
       process_is_for_extensions = process_map->Contains(rph_id);
 
       // For our purposes, don't count processes running hosted apps as
-      // extension processes. See also: crbug.com/102533.
+      // extension processes. See also: crbug.com/40107820.
       if (const Extension* extension =
               process_map->GetEnabledExtensionByProcessID(rph_id)) {
         if (!extension->is_hosted_app()) {
@@ -328,7 +327,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       render_process_host->ForEachRenderFrameHost(
           [&](content::RenderFrameHost* frame) {
             UpdateProcessTypeAndTitles(
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
                 process_is_for_extensions ? extension_set : nullptr,
 #endif
                 process, frame);
@@ -350,17 +349,29 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
   std::erase_if(vector, is_unknown);
 
   // Grab a memory dump for all processes.
-  memory_instrumentation::MemoryInstrumentation::GetInstance()
-      ->RequestPrivateMemoryFootprint(
-          base::kNullProcessId,
-          base::BindOnce(&MemoryDetails::DidReceiveMemoryDump, this));
+  auto* memory_instrumentation =
+      memory_instrumentation::MemoryInstrumentation::GetInstance();
+  if (memory_instrumentation) {
+    memory_instrumentation->RequestPrivateMemoryFootprint(
+        base::kNullProcessId,
+        base::BindOnce(
+            [](scoped_refptr<MemoryDetails> details,
+               memory_instrumentation::mojom::RequestOutcome outcome,
+               std::unique_ptr<memory_instrumentation::GlobalMemoryDump>
+                   global_dump) {
+              details->DidReceiveMemoryDump(outcome, std::move(global_dump));
+            },
+            scoped_refptr<MemoryDetails>(this)));
+  } else {
+    DidReceiveMemoryDump(/*outcome=*/std::nullopt, /*dump=*/nullptr);
+  }
 }
 
 void MemoryDetails::DidReceiveMemoryDump(
-    bool success,
+    std::optional<memory_instrumentation::mojom::RequestOutcome> outcome,
     std::unique_ptr<memory_instrumentation::GlobalMemoryDump> global_dump) {
   ProcessData* const chrome_browser = ChromeBrowser();
-  if (success) {
+  if (outcome == memory_instrumentation::mojom::RequestOutcome::kSuccess) {
     for (const memory_instrumentation::GlobalMemoryDump::ProcessDump& dump :
          global_dump->process_dumps()) {
       base::ProcessId dump_pid = dump.pid();

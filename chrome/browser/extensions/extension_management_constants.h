@@ -7,11 +7,16 @@
 
 #include <stddef.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "base/containers/fixed_flat_map.h"
+#include "chrome/browser/extensions/managed_toolbar_pin_mode.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/manifest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 namespace schema_constants {
@@ -42,8 +47,9 @@ extern const char kMinimumVersionRequired[];
 extern const char kUpdateUrlPrefix[];
 
 extern const char kToolbarPin[];
-extern const char kForcePinned[];
-extern const char kDefaultUnpinned[];
+inline constexpr char kForcePinned[] = "force_pinned";
+inline constexpr char kDefaultPinned[] = "default_pinned";
+inline constexpr char kDefaultUnpinned[] = "default_unpinned";
 
 extern const char kFileUrlNavigationAllowed[];
 
@@ -53,18 +59,18 @@ extern const char kBlockedInstallMessage[];
 
 inline constexpr auto kAllowedTypesMap =
     base::MakeFixedFlatMap<std::string_view, Manifest::Type>({
-        {"extension", Manifest::TYPE_EXTENSION},
-        {"theme", Manifest::TYPE_THEME},
-        {"user_script", Manifest::TYPE_USER_SCRIPT},
-        {"hosted_app", Manifest::TYPE_HOSTED_APP},
-        {"legacy_packaged_app", Manifest::TYPE_LEGACY_PACKAGED_APP},
-        {"platform_app", Manifest::TYPE_PLATFORM_APP},
-        {"chromeos_system_extension", Manifest::TYPE_CHROMEOS_SYSTEM_EXTENSION},
+        {"extension", Manifest::Type::kExtension},
+        {"theme", Manifest::Type::kTheme},
+        {"user_script", Manifest::Type::kUserScript},
+        {"hosted_app", Manifest::Type::kHostedApp},
+        {"legacy_packaged_app", Manifest::Type::kLegacyPackagedApp},
+        {"platform_app", Manifest::Type::kPlatformApp},
+        {"chromeos_system_extension", Manifest::Type::kChromeOSSystemExtension},
     });
 
-// Helper fuction over |kAllowedTypesMap|, returns Manifest::TYPE_UNKNOWN if
-// not found.
-Manifest::Type GetManifestType(const std::string& name);
+// Return the `Manifest::Type` for `name`, or `Manifest::Type::kUnknown` if
+// invalid.
+Manifest::Type GetManifestType(std::string_view name);
 
 }  // namespace schema_constants
 }  // namespace extensions

@@ -64,7 +64,33 @@ void TreeScopeAdopter::MoveTreeToNewScope(Node& root) const {
   bool is_document_unmodified_and_uninteracted =
       IsDocumentEligibleForFastAdoption(old_document);
 
+  // Pre-check for scoped custom element registry handling during tree scope
+  // changes (both cross-document adoption and within-document scope changes).
+  bool handle_registry =
+      RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+      (old_document.ScopedCustomElementRegistryUsed() ||
+       new_document.ScopedCustomElementRegistryUsed());
+  if (handle_registry && will_move_to_new_document &&
+      old_document.ScopedCustomElementRegistryUsed()) {
+    new_document.SetScopedCustomElementRegistryUsed();
+  }
+
   for (Node& node : NodeTraversal::InclusiveDescendantsOf(root)) {
+    // Capture the element's registry BEFORE tree scope change. This is
+    // necessary because UpdateTreeScope() below changes the element's tree
+    // scope, and customElementRegistry() would then resolve through the new
+    // tree scope instead of the original one. For example:
+    // - An element from a template document (no browsing context, null registry)
+    //   moved into a scoped shadow root would resolve to the scoped registry.
+    // - A freshly created element (global registry) appended within-document
+    //   into a scoped shadow root would inherit the scoped registry.
+    CustomElementRegistry* pre_move_registry = nullptr;
+    bool need_registry_assignment = false;
+    if (handle_registry && node.IsElementNode()) {
+      pre_move_registry = To<Element>(node).customElementRegistry();
+      need_registry_assignment = true;
+    }
+
     UpdateTreeScope(node);
 
     if (will_move_to_new_document) {
@@ -75,13 +101,47 @@ void TreeScopeAdopter::MoveTreeToNewScope(Node& root) const {
         rare_data->NodeLists()->AdoptTreeScope();
     }
 
+    // 3. if inclusiveDescendant is an element
     auto* element = DynamicTo<Element>(node);
     if (!element)
       continue;
 
+    // 3-1. Set the node document of each attribute in inclusiveDescendant's
+    // attribute list to document.
     if (HeapVector<Member<Attr>>* attrs = element->GetAttrNodeList()) {
       for (const auto& attr : *attrs)
         MoveTreeToNewScope(*attr);
+    }
+
+    // 3-2. If inclusiveDescendant's custom element registry is a global custom
+    // element registry then set inclusiveDescendant's custom element registry
+    // to document's effective global custom element registry.
+    if (need_registry_assignment) {
+      if (will_move_to_new_document) {
+        // Cross-document: elements with null registry (e.g., from a template
+        // document with no browsing context) or global registry should get the
+        // new document's effective global registry.
+        if (!pre_move_registry || pre_move_registry->IsGlobalRegistry()) {
+          element->SetCustomElementRegistry(
+              new_document.EffectiveGlobalCustomElementRegistry(),
+              /*explicitly_set=*/true);
+        }
+      } else {
+        // Within-document scope change (e.g., document scope -> shadow root
+        // scope). If the element doesn't have an explicitly set registry, it
+        // was implicitly using the old scope's registry. Since UpdateTreeScope()
+        // already changed the tree scope, the implicit fallback now returns the
+        // new scope's registry. Explicitly save the old scope's registry to
+        // preserve the element's original registry association.
+        NodeRareData* rare_data = element->RareData();
+        if (!rare_data || !rare_data->HasCustomElementRegistrySet()) {
+          auto* new_registry = NewScope().customElementRegistry();
+          if (pre_move_registry != new_registry) {
+            element->SetCustomElementRegistry(pre_move_registry,
+                                              /*explicitly_set=*/true);
+          }
+        }
+      }
     }
 
     if (ShadowRoot* shadow = element->GetShadowRoot()) {
@@ -113,8 +173,25 @@ void TreeScopeAdopter::MoveShadowTreeToNewDocument(
 
   shadow_root.SetDocument(new_document);
 
-  if (shadow_root.registry()) {
-    shadow_root.registry()->AssociatedWith(new_document);
+  // 2. If inclusiveDescendant is a shadow root and inclusiveDescendant's custom
+  // element registry is a global custom element registry, then set
+  // inclusiveDescendant's custom element registry to document's effective
+  // global custom element registry.
+  auto* shadow_root_registry = shadow_root.customElementRegistry();
+  if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+      (old_document.ScopedCustomElementRegistryUsed() ||
+       new_document.ScopedCustomElementRegistryUsed())) {
+    if ((!shadow_root_registry &&
+         !shadow_root.ShouldKeepCustomElementRegistryNull()) ||
+        (shadow_root_registry && shadow_root_registry->IsGlobalRegistry())) {
+      shadow_root_registry =
+          new_document.EffectiveGlobalCustomElementRegistry();
+      shadow_root.SetCustomElementRegistry(shadow_root_registry);
+    }
+  }
+
+  if (shadow_root_registry) {
+    shadow_root_registry->AssociatedWith(new_document);
   }
 
   MoveTreeToNewDocument(shadow_root, old_document, new_document,
@@ -160,6 +237,21 @@ void TreeScopeAdopter::WillMoveTreeToNewDocument(Node& root) const {
     node.WillMoveToNewDocument(new_document);
 
     if (auto* element = DynamicTo<Element>(node)) {
+      // An element's custom element registry could be implied by its tree
+      // scope's registry if the element's registry wasn't explicitly set
+      // before. However, in the scenario of cross-document adoption, we need
+      // to make sure the element keeps its knowledge about the prior registry
+      // when it's moved to the new scope. Therefore, we're explicitly setting
+      // the element's registry here to ensure the knowledge is kept even with
+      // the scope change.
+      if (old_document.ScopedCustomElementRegistryUsed()) {
+        DCHECK(RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled());
+        auto* registry = element->customElementRegistry();
+        if (registry && registry == old_document.customElementRegistry()) {
+          element->SetCustomElementRegistry(registry,
+                                            /*explicitly_set=*/true);
+        }
+      }
       if (ShadowRoot* shadow_root = element->GetShadowRoot())
         WillMoveTreeToNewDocument(*shadow_root);
 
@@ -216,10 +308,6 @@ inline void TreeScopeAdopter::MoveNodeToNewDocument(
     }
 
     if (auto* element = DynamicTo<Element>(node)) {
-      if (old_document.HasExplicitlySetAttrElements()) {
-        old_document.MoveElementExplicitlySetAttrElementsMapToNewDocument(
-            element, new_document);
-      }
       if (old_document.HasCachedAttrAssociatedElements()) {
         old_document.MoveElementCachedAttrAssociatedElementsMapToNewDocument(
             element, new_document);
@@ -236,7 +324,6 @@ inline void TreeScopeAdopter::MoveNodeToNewDocument(
     DCHECK(!old_document.HasAnyNodeWithEventListeners());
     DCHECK(!old_document.HasMutationObservers());
     DCHECK(!old_document.ShouldInvalidateNodeListCaches());
-    DCHECK(!old_document.HasExplicitlySetAttrElements());
     DCHECK(!old_document.HasCachedAttrAssociatedElements());
   }
 
@@ -262,7 +349,6 @@ inline bool TreeScopeAdopter::IsDocumentEligibleForFastAdoption(
          !old_document.HasAnyNodeWithEventListeners() &&
          !old_document.HasMutationObservers() &&
          !old_document.ShouldInvalidateNodeListCaches() &&
-         !old_document.HasExplicitlySetAttrElements() &&
          !old_document.HasCachedAttrAssociatedElements();
 }
 

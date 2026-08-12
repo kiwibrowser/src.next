@@ -10,13 +10,15 @@
 #include "third_party/blink/renderer/core/layout/inline/inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
-#include "third_party/blink/renderer/core/layout/legacy_layout_tree_walking.h"
 #include "third_party/blink/renderer/core/layout/length_utils.h"
 #include "third_party/blink/renderer/core/layout/logical_fragment.h"
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/physical_fragment.h"
+#include "third_party/blink/renderer/core/layout/transform_utils.h"
 #include "third_party/blink/renderer/core/style/style_overflow_clip_margin.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_transition_element.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -79,6 +81,7 @@ ScrollableOverflowCalculator::ScrollableOverflowCalculator(
       writing_direction_(writing_direction),
       is_scroll_container_(is_css_box && node_.IsScrollContainer()),
       is_view_(node_.IsView()),
+      scrolls_all_directions_(is_css_box && node_.IsOverscrollAreaParent()),
       has_left_overflow_(is_css_box && node_.HasLeftOverflow()),
       has_top_overflow_(is_css_box && node_.HasTopOverflow()),
       has_non_visible_overflow_(is_css_box && node_.HasNonVisibleOverflow()),
@@ -211,23 +214,24 @@ PhysicalRect ScrollableOverflowCalculator::AdjustOverflowForHanging(
 PhysicalRect ScrollableOverflowCalculator::AdjustOverflowForScrollOrigin(
     const PhysicalRect& overflow) {
   LayoutUnit left_offset =
-      has_left_overflow_
+      scrolls_all_directions_ || has_left_overflow_
           ? std::min(padding_rect_.Right(), overflow.offset.left)
           : std::max(padding_rect_.offset.left, overflow.offset.left);
 
   LayoutUnit right_offset =
-      has_left_overflow_
-          ? std::min(padding_rect_.Right(), overflow.Right())
-          : std::max(padding_rect_.offset.left, overflow.Right());
+      scrolls_all_directions_ || !has_left_overflow_
+          ? std::max(padding_rect_.offset.left, overflow.Right())
+          : std::min(padding_rect_.Right(), overflow.Right());
 
   LayoutUnit top_offset =
-      has_top_overflow_
+      scrolls_all_directions_ || has_top_overflow_
           ? std::min(padding_rect_.Bottom(), overflow.offset.top)
           : std::max(padding_rect_.offset.top, overflow.offset.top);
 
   LayoutUnit bottom_offset =
-      has_top_overflow_ ? std::min(padding_rect_.Bottom(), overflow.Bottom())
-                        : std::max(padding_rect_.offset.top, overflow.Bottom());
+      scrolls_all_directions_ || !has_top_overflow_
+          ? std::max(padding_rect_.offset.top, overflow.Bottom())
+          : std::min(padding_rect_.Bottom(), overflow.Bottom());
 
   return {PhysicalOffset(left_offset, top_offset),
           PhysicalSize(right_offset - left_offset, bottom_offset - top_offset)};
@@ -235,7 +239,17 @@ PhysicalRect ScrollableOverflowCalculator::AdjustOverflowForScrollOrigin(
 
 PhysicalRect ScrollableOverflowCalculator::ScrollableOverflowForPropagation(
     const PhysicalBoxFragment& child_fragment) {
-  if (child_fragment.IsHiddenForPaint()) {
+  // Don't propagate any overflow if:
+  //  - We are hidden for painting purposes (empty-cells within a table).
+  //  - We are a ::view-transition pseudo. They are positioned as a child of
+  //    its owning element, but not subject to that elements overflow clip or
+  //    scroll translation. See:
+  //    https://drafts.csswg.org/css-view-transitions-2/#scoped-view-transition-layout
+  //    Note that both the scope and its container will ignore overflow from
+  //    this pseudo; this should be correct as a consequence of the fact that
+  //    the scope is treated as having contain:layout.
+  if (child_fragment.IsHiddenForPaint() ||
+      IsA<ViewTransitionTransitionElement>(child_fragment.GetNode())) {
     return {};
   }
 
@@ -279,13 +293,14 @@ PhysicalRect ScrollableOverflowCalculator::ScrollableOverflowForPropagation(
   }
 
   // Apply any transforms to the overflow.
-  if (std::optional<gfx::Transform> transform =
-          node_.GetTransformForChildFragment(child_fragment, size_)) {
+  if (std::optional<gfx::Transform> transform = GetTransformForChildFragment(
+          child_fragment, *node_.GetLayoutBox(), size_)) {
     overflow =
         PhysicalRect::EnclosingRect(transform->MapRect(gfx::RectF(overflow)));
   }
 
-  if (has_block_fragmentation_ && child_fragment.IsOutOfFlowPositioned()) {
+  if (has_block_fragmentation_ && child_fragment.IsOutOfFlowPositioned() &&
+      !RuntimeEnabledFeatures::FragmentedOofInCbEnabled()) {
     // If the containing block of an out-of-flow positioned box is inside a
     // clipped-overflow container inside a fragmentation context, we shouldn't
     // propagate overflow. Nothing will be painted on the outside of the clipped

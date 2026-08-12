@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/core/css/css_keyframes_rule.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/keyframe_style_rule_css_style_declaration.h"
+#include "third_party/blink/renderer/core/css/style_rule_keyframe.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -51,7 +52,7 @@ void CSSKeyframeRule::setKeyText(const ExecutionContext* execution_context,
   if (!keyframe_->SetKeyText(execution_context, key_text)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
-        "The key '" + key_text + "' is invalid and cannot be parsed");
+        StrCat({"The key '", key_text, "' is invalid and cannot be parsed"}));
   }
 
   if (auto* parent = To<CSSKeyframesRule>(parentRule())) {
@@ -71,9 +72,11 @@ CSSStyleDeclaration* CSSKeyframeRule::style() const {
   return properties_cssom_wrapper_.Get();
 }
 
-void CSSKeyframeRule::Reattach(StyleRuleBase*) {
-  // No need to reattach, the underlying data is shareable on mutation.
-  NOTREACHED();
+void CSSKeyframeRule::Reattach(StyleRuleBase* rule) {
+  keyframe_ = To<StyleRuleKeyframe>(rule);
+  if (properties_cssom_wrapper_) {
+    properties_cssom_wrapper_->Reattach(keyframe_->MutableProperties());
+  }
 }
 
 void CSSKeyframeRule::Trace(Visitor* visitor) const {

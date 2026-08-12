@@ -13,7 +13,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -27,7 +27,8 @@ MockTabModalConfirmDialogDelegate::MockTabModalConfirmDialogDelegate(
     Delegate* delegate)
     : TabModalConfirmDialogDelegate(web_contents), delegate_(delegate) {}
 
-MockTabModalConfirmDialogDelegate::~MockTabModalConfirmDialogDelegate() {}
+MockTabModalConfirmDialogDelegate::~MockTabModalConfirmDialogDelegate() =
+    default;
 
 std::u16string MockTabModalConfirmDialogDelegate::GetTitle() {
   return std::u16string();
@@ -38,18 +39,21 @@ std::u16string MockTabModalConfirmDialogDelegate::GetDialogMessage() {
 }
 
 void MockTabModalConfirmDialogDelegate::OnAccepted() {
-  if (delegate_)
+  if (delegate_) {
     delegate_->OnAccepted();
+  }
 }
 
 void MockTabModalConfirmDialogDelegate::OnCanceled() {
-  if (delegate_)
+  if (delegate_) {
     delegate_->OnCanceled();
+  }
 }
 
 void MockTabModalConfirmDialogDelegate::OnClosed() {
-  if (delegate_)
+  if (delegate_) {
     delegate_->OnClosed();
+  }
 }
 
 TabModalConfirmDialogTest::TabModalConfirmDialogTest()

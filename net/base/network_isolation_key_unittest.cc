@@ -2,21 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/base/network_isolation_key.h"
 
+#include <array>
 #include <optional>
 
 #include "base/test/scoped_feature_list.h"
 #include "base/unguessable_token.h"
 #include "base/values.h"
 #include "net/base/features.h"
+#include "net/base/network_isolation_partition.h"
 #include "net/base/schemeful_site.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/hash/hash_testing.h"
 #include "url/gurl.h"
 #include "url/url_util.h"
 
@@ -27,7 +25,7 @@ const char kDataUrl[] = "data:text/html,<body>Hello World</body>";
 
 TEST(NetworkIsolationKeyTest, EmptyKey) {
   NetworkIsolationKey key;
-  EXPECT_FALSE(key.IsFullyPopulated());
+  EXPECT_TRUE(key.IsEmpty());
   EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
   EXPECT_TRUE(key.IsTransient());
   EXPECT_EQ("null null", key.ToDebugString());
@@ -36,7 +34,7 @@ TEST(NetworkIsolationKeyTest, EmptyKey) {
 TEST(NetworkIsolationKeyTest, NonEmptySameSiteKey) {
   SchemefulSite site1 = SchemefulSite(GURL("http://a.test/"));
   NetworkIsolationKey key(site1, site1);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(site1.Serialize() + " " + site1.Serialize(),
             key.ToCacheKeyString());
   EXPECT_EQ(site1.GetDebugString() + " " + site1.GetDebugString(),
@@ -48,7 +46,7 @@ TEST(NetworkIsolationKeyTest, NonEmptyCrossSiteKey) {
   SchemefulSite site1 = SchemefulSite(GURL("http://a.test/"));
   SchemefulSite site2 = SchemefulSite(GURL("http://b.test/"));
   NetworkIsolationKey key(site1, site2);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(site1.Serialize() + " " + site2.Serialize(),
             key.ToCacheKeyString());
   EXPECT_EQ(site1.GetDebugString() + " " + site2.GetDebugString(),
@@ -61,7 +59,7 @@ TEST(NetworkIsolationKeyTest, KeyWithNonce) {
   SchemefulSite site2 = SchemefulSite(GURL("http://b.test/"));
   base::UnguessableToken nonce = base::UnguessableToken::Create();
   NetworkIsolationKey key(site1, site2, nonce);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
   EXPECT_TRUE(key.IsTransient());
   EXPECT_EQ(site1.GetDebugString() + " " + site2.GetDebugString() +
@@ -81,10 +79,92 @@ TEST(NetworkIsolationKeyTest, KeyWithNonce) {
   EXPECT_NE(key.ToDebugString(), key2.ToDebugString());
 }
 
+TEST(NetworkIsolationKeyTest, KeyWithNonGeneralNetworkPartition) {
+  SchemefulSite site1 = SchemefulSite(GURL("http://a.test/"));
+  SchemefulSite site2 = SchemefulSite(GURL("http://b.test/"));
+  NetworkIsolationKey key(
+      site1, site2, /*nonce=*/std::nullopt,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_FALSE(key.IsEmpty());
+  EXPECT_EQ(NetworkIsolationPartition::kProtectedAudienceSellerWorklet,
+            key.GetNetworkIsolationPartition());
+  EXPECT_EQ(site1.Serialize() + " " + site2.Serialize() + " 1",
+            key.ToCacheKeyString());
+  EXPECT_FALSE(key.IsTransient());
+  EXPECT_EQ(site1.GetDebugString() + " " + site2.GetDebugString() +
+                " (protected audience seller worklet partition)",
+            key.ToDebugString());
+  EXPECT_EQ(site1.Serialize() + " " + site2.Serialize() + " 1",
+            key.ToCacheKeyString());
+
+  // Create another NetworkIsolationKey with the same input parameters, and
+  // check that it is equal.
+  NetworkIsolationKey same_key(
+      site1, site2, /*nonce=*/std::nullopt,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_EQ(NetworkIsolationPartition::kProtectedAudienceSellerWorklet,
+            same_key.GetNetworkIsolationPartition());
+  EXPECT_EQ(key, same_key);
+  EXPECT_EQ(key.ToCacheKeyString(), same_key.ToCacheKeyString());
+  EXPECT_EQ(key.ToDebugString(), same_key.ToDebugString());
+
+  // Create another NetworkIsolationKey with a different
+  // NetworkIsolationPartition and check that it's different.
+  NetworkIsolationKey key2(site1, site2, /*nonce=*/std::nullopt,
+                           NetworkIsolationPartition::kGeneral);
+  EXPECT_EQ(NetworkIsolationPartition::kGeneral,
+            key2.GetNetworkIsolationPartition());
+  EXPECT_NE(key, key2);
+  EXPECT_NE(key.ToCacheKeyString(), key2.ToCacheKeyString());
+  EXPECT_NE(key.ToDebugString(), key2.ToDebugString());
+
+  // Make sure if a nonce is included in addition to a
+  // non-general NetworkPartition, the NIK is transient.
+  auto nonce = base::UnguessableToken::Create();
+  NetworkIsolationKey key3(
+      site1, site2, /*nonce=*/nonce,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_TRUE(key3.IsTransient());
+
+  // Make sure if there's an opaque origin, the NIK is still transient.
+  NetworkIsolationKey key4(
+      site1, SchemefulSite(GURL(kDataUrl)), /*nonce=*/std::nullopt,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_TRUE(key4.IsTransient());
+}
+
+TEST(NetworkIsolationKeyTest, CreateEmptyWithPartition) {
+  NetworkIsolationKey key = NetworkIsolationKey::CreateEmptyWithPartition(
+      NetworkIsolationPartition::kDnsOverHttps);
+  EXPECT_TRUE(key.IsEmpty());
+  EXPECT_TRUE(key.IsTransient());
+  EXPECT_EQ(NetworkIsolationPartition::kDnsOverHttps,
+            key.GetNetworkIsolationPartition());
+  EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
+  EXPECT_EQ("null null (dns over https)", key.ToDebugString());
+
+  // Create another NetworkIsolationKey with the same partition, and check that
+  // they're equal.
+  NetworkIsolationKey same_key = NetworkIsolationKey::CreateEmptyWithPartition(
+      NetworkIsolationPartition::kDnsOverHttps);
+  EXPECT_EQ(key, same_key);
+
+  // Create another NetworkIsolationKey with a different partition, and check
+  // that they're different.
+  NetworkIsolationKey other_key = NetworkIsolationKey::CreateEmptyWithPartition(
+      NetworkIsolationPartition::kFedCmUncredentialedRequests);
+  EXPECT_NE(key, other_key);
+
+  // Check that it's also different from the general case empty
+  // NetworkIsolationKey.
+  NetworkIsolationKey empty_key;
+  EXPECT_NE(key, empty_key);
+}
+
 TEST(NetworkIsolationKeyTest, OpaqueOriginKey) {
   SchemefulSite site_data = SchemefulSite(GURL(kDataUrl));
   NetworkIsolationKey key(site_data, site_data);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
   EXPECT_TRUE(key.IsTransient());
   EXPECT_EQ(site_data.GetDebugString() + " " + site_data.GetDebugString(),
@@ -104,7 +184,7 @@ TEST(NetworkIsolationKeyTest, OpaqueOriginTopLevelSiteKey) {
   SchemefulSite site1 = SchemefulSite(GURL("http://a.test/"));
   SchemefulSite site_data = SchemefulSite(GURL(kDataUrl));
   NetworkIsolationKey key(site_data, site1);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
   EXPECT_TRUE(key.IsTransient());
   EXPECT_EQ(site_data.GetDebugString() + " " + site1.GetDebugString(),
@@ -124,7 +204,7 @@ TEST(NetworkIsolationKeyTest, OpaqueOriginIframeKey) {
   SchemefulSite site1 = SchemefulSite(GURL("http://a.test/"));
   SchemefulSite site_data = SchemefulSite(GURL(kDataUrl));
   NetworkIsolationKey key(site1, site_data);
-  EXPECT_TRUE(key.IsFullyPopulated());
+  EXPECT_FALSE(key.IsEmpty());
   EXPECT_EQ(std::nullopt, key.ToCacheKeyString());
   EXPECT_TRUE(key.IsTransient());
   EXPECT_EQ(site1.GetDebugString() + " " + site_data.GetDebugString(),
@@ -146,7 +226,7 @@ TEST(NetworkIsolationKeyTest, Operators) {
   if (nonce2 < nonce1)
     std::swap(nonce1, nonce2);
   // These are in ascending order.
-  const NetworkIsolationKey kKeys[] = {
+  const auto kKeys = std::to_array<NetworkIsolationKey>({
       NetworkIsolationKey(),
       // Site with unique origins are still sorted by scheme, so data is before
       // file, and file before http.
@@ -159,12 +239,18 @@ TEST(NetworkIsolationKeyTest, Operators) {
       NetworkIsolationKey(SchemefulSite(GURL("http://b.test/")),
                           SchemefulSite(GURL("http://b.test/"))),
       NetworkIsolationKey(SchemefulSite(GURL("https://a.test/")),
-                          SchemefulSite(GURL("https://a.test/"))),
+                          SchemefulSite(GURL("https://a.test/")),
+                          /*nonce=*/std::nullopt,
+                          NetworkIsolationPartition::kGeneral),
+      NetworkIsolationKey(
+          SchemefulSite(GURL("https://a.test/")),
+          SchemefulSite(GURL("https://a.test/")), /*nonce=*/std::nullopt,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet),
       NetworkIsolationKey(SchemefulSite(GURL("https://a.test/")),
                           SchemefulSite(GURL("https://a.test/")), nonce1),
       NetworkIsolationKey(SchemefulSite(GURL("https://a.test/")),
                           SchemefulSite(GURL("https://a.test/")), nonce2),
-  };
+  });
 
   for (size_t first = 0; first < std::size(kKeys); ++first) {
     NetworkIsolationKey key1 = kKeys[first];
@@ -224,9 +310,9 @@ TEST(NetworkIsolationKeyTest, OpaqueSiteKeyBoth) {
   NetworkIsolationKey key3(site_data_1, site_data_3);
 
   // All the keys should be fully populated and transient.
-  EXPECT_TRUE(key1.IsFullyPopulated());
-  EXPECT_TRUE(key2.IsFullyPopulated());
-  EXPECT_TRUE(key3.IsFullyPopulated());
+  EXPECT_FALSE(key1.IsEmpty());
+  EXPECT_FALSE(key2.IsEmpty());
+  EXPECT_FALSE(key3.IsEmpty());
   EXPECT_TRUE(key1.IsTransient());
   EXPECT_TRUE(key2.IsTransient());
   EXPECT_TRUE(key3.IsTransient());
@@ -277,12 +363,24 @@ TEST(NetworkIsolationKeyTest, CreateWithNewFrameSite) {
       key_with_nonce.CreateWithNewFrameSite(site_c);
   EXPECT_EQ(key_with_nonce.GetNonce(), key_with_nonce_c.GetNonce());
   EXPECT_TRUE(key_with_nonce_c.IsTransient());
+
+  // Ensure that `CreateWithNewFrameSite()` preserves the
+  // NetworkIsolationPartition.
+  NetworkIsolationKey key_with_partition(
+      site_a, site_b, /*nonce=*/std::nullopt,
+      NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  NetworkIsolationKey key_with_partition_c =
+      key_with_partition.CreateWithNewFrameSite(site_c);
+  EXPECT_EQ(key_with_partition.GetNetworkIsolationPartition(),
+            NetworkIsolationPartition::kProtectedAudienceSellerWorklet);
+  EXPECT_EQ(key_with_partition.GetNetworkIsolationPartition(),
+            key_with_partition_c.GetNetworkIsolationPartition());
 }
 
 TEST(NetworkIsolationKeyTest, CreateTransientForTesting) {
   NetworkIsolationKey transient_key =
       NetworkIsolationKey::CreateTransientForTesting();
-  EXPECT_TRUE(transient_key.IsFullyPopulated());
+  EXPECT_FALSE(transient_key.IsEmpty());
   EXPECT_TRUE(transient_key.IsTransient());
   EXPECT_FALSE(transient_key.IsEmpty());
   EXPECT_EQ(transient_key, transient_key);
@@ -291,6 +389,39 @@ TEST(NetworkIsolationKeyTest, CreateTransientForTesting) {
   for (int i = 0; i < 1000; ++i) {
     EXPECT_NE(transient_key, NetworkIsolationKey::CreateTransientForTesting());
   }
+}
+
+TEST(NetworkIsolationKeyTest, SupportsAbslHash) {
+  SchemefulSite site_a = SchemefulSite(GURL("http://a.test/"));
+  SchemefulSite site_b = SchemefulSite(GURL("http://b.test/"));
+  // These are different even though they are constructed from the same URL,
+  // because they are opaque origins.
+  SchemefulSite data_site_1 = SchemefulSite(GURL("data:foo"));
+  SchemefulSite data_site_2 = SchemefulSite(GURL("data:foo"));
+  base::UnguessableToken nonce = base::UnguessableToken::Create();
+  base::UnguessableToken different_nonce = base::UnguessableToken::Create();
+
+  EXPECT_TRUE(absl::VerifyTypeImplementsAbslHashCorrectly({
+      NetworkIsolationKey(),
+      NetworkIsolationKey(site_a, site_a),
+      NetworkIsolationKey(site_a, site_b),
+      NetworkIsolationKey(site_b, site_a),
+      NetworkIsolationKey(site_b, site_b),
+      NetworkIsolationKey(data_site_1, data_site_1),
+      NetworkIsolationKey(data_site_2, data_site_2),
+      NetworkIsolationKey(data_site_1, data_site_2),
+      NetworkIsolationKey(site_a, data_site_1),
+      NetworkIsolationKey(data_site_1, site_a),
+      NetworkIsolationKey(site_a, site_a, nonce),
+      NetworkIsolationKey(site_a, site_b, nonce),
+      NetworkIsolationKey(site_a, site_b, different_nonce),
+      NetworkIsolationKey(
+          site_a, site_a, std::nullopt,
+          NetworkIsolationPartition::kProtectedAudienceSellerWorklet),
+      NetworkIsolationKey(
+          site_a, site_a, std::nullopt,
+          NetworkIsolationPartition::kFedCmUncredentialedRequests),
+  }));
 }
 
 }  // namespace

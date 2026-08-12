@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/stringprintf.h"
+#include "base/test/with_feature_override.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
@@ -30,7 +32,7 @@ namespace {
 // TODO(crbug.com/40909770): Create test cases where we test "failures" like
 // events not acking.
 
-using ContextType = ExtensionBrowserTest::ContextType;
+using ContextType = extensions::browser_test_util::ContextType;
 using EventMetricsBrowserTest = ExtensionBrowserTest;
 using service_worker_test_utils::TestServiceWorkerTaskQueueObserver;
 
@@ -38,14 +40,7 @@ using service_worker_test_utils::TestServiceWorkerContextObserver;
 
 // Tests that the only the dispatch time histogram provided to the test is
 // emitted with a sane value, and that other provided metrics are not emitted.
-// TODO(crbug.com/40282331): Disabled on ASAN due to leak caused by renderer gin
-// objects which are intended to be leaked.
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_DispatchMetricTest DISABLED_DispatchMetricTest
-#else
-#define MAYBE_DispatchMetricTest DispatchMetricTest
-#endif
-IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest, MAYBE_DispatchMetricTest) {
+IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest, DispatchMetricTest) {
   ASSERT_TRUE(embedded_test_server()->Start());
   struct {
     const std::string event_metric_emitted;
@@ -263,7 +258,7 @@ IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest,
 
   ExtensionBackgroundPageWaiter(profile(), *extension).WaitForBackgroundOpen();
   ProcessManager* process_manager = ProcessManager::Get(profile());
-  ASSERT_FALSE(process_manager->IsEventPageSuspended(extension->id()));
+  ASSERT_TRUE(process_manager->GetBackgroundHostForExtension(extension->id()));
 
   base::HistogramTester histogram_tester;
   ExtensionTestMessageListener test_event_listener_fired("listener fired");
@@ -311,7 +306,7 @@ IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest,
   ExtensionBackgroundPageWaiter(profile(), *extension)
       .WaitForBackgroundClosed();
   ProcessManager* process_manager = ProcessManager::Get(profile());
-  ASSERT_TRUE(process_manager->IsEventPageSuspended(extension->id()));
+  ASSERT_FALSE(process_manager->GetBackgroundHostForExtension(extension->id()));
 
   base::HistogramTester histogram_tester;
   ExtensionTestMessageListener test_event_listener_fired("listener fired");
@@ -531,9 +526,8 @@ IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest,
       /*expected_count=*/0);
 }
 
-// Tests that a running service worker will be unnecessarily started when it
-// receives an event while it is already started if there are no pending events
-// (the worker worker isn't in the process of starting).
+// Tests that a running service worker will not be unnecessarily started when it
+// receives an event while it is already started.
 IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest,
                        ServiceWorkerRedundantStartCountTest) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -564,25 +558,18 @@ IN_PROC_BROWSER_TEST_F(EventMetricsBrowserTest,
       embedded_test_server()->GetURL("example.com", "/simple.html")));
   ASSERT_TRUE(test_event_listener_fired.WaitUntilSatisfied());
 
-  {
-    SCOPED_TRACE("Waiting for the worker to start.");
-    ready_observer.WaitForWorkerStarted(extension->id());
-  }
-  // TODO(crbug.com/40276609): Once we no longer unnecessarily start the
-  // worker
-  // this will become 0.
-  // Since we don't check if a worker is ready before dispatching the the
-  // event we will attempt to start the worker.
+  // We do check if a worker is ready before attempting to
+  // start it again.
   histogram_tester.ExpectTotalCount(
       "Extensions.ServiceWorkerBackground."
       "RequestedWorkerStartForStartedWorker3",
-      /*expected_count=*/1);
+      /*expected_count=*/0);
   // Verify that the value is `true` since the worker
   // will be unnecessarily started.
   histogram_tester.ExpectBucketCount(
       "Extensions.ServiceWorkerBackground."
       "RequestedWorkerStartForStartedWorker3",
-      /*sample=*/true, /*expected_count=*/1);
+      /*sample=*/true, /*expected_count=*/0);
 }
 
 class EventMetricsDispatchToSenderBrowserTest
@@ -733,10 +720,6 @@ class LazyBackgroundEventMetricsApiTest : public ExtensionApiTest {
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartEmbeddedTestServer());
   }
-
-  content::WebContents* web_contents() {
-    return browser()->tab_strip_model()->GetActiveWebContents();
-  }
 };
 
 // Tests that if there is a listener in the extension renderer process, but that
@@ -798,7 +781,7 @@ IN_PROC_BROWSER_TEST_F(
   // Navigate to page.html to get the content_script to load.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension->GetResourceURL("page.html")));
-  ASSERT_TRUE(content::WaitForLoadStop(web_contents()));
+  ASSERT_TRUE(content::WaitForLoadStop(GetActiveWebContents()));
   ASSERT_TRUE(page_script_loaded.WaitUntilSatisfied());
 
   // Set storage value which should fire chrome.storage.onChanged listener in

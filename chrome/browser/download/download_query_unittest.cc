@@ -54,12 +54,12 @@ bool AlwaysReturn(bool result, const DownloadItem& item) {
 
 class DownloadQueryTest : public testing::Test {
  public:
-  DownloadQueryTest() {}
+  DownloadQueryTest() = default;
 
   DownloadQueryTest(const DownloadQueryTest&) = delete;
   DownloadQueryTest& operator=(const DownloadQueryTest&) = delete;
 
-  ~DownloadQueryTest() override {}
+  ~DownloadQueryTest() override = default;
 
   void TearDown() override {}
 
@@ -145,7 +145,7 @@ void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
 template <>
 void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
                                   std::vector<std::u16string> cpp_value) {
-  base::Value::List list;
+  base::ListValue list;
   for (const auto& value : cpp_value)
     list.Append(value);
   CHECK(query_.AddFilter(name, base::Value(std::move(list))));
@@ -153,7 +153,7 @@ void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
 
 template<> void DownloadQueryTest::AddFilter(
     DownloadQuery::FilterType name, std::vector<std::string> cpp_value) {
-  base::Value::List list;
+  base::ListValue list;
   for (const auto& value : cpp_value)
     list.Append(std::move(value));
   CHECK(query_.AddFilter(name, base::Value(std::move(list))));

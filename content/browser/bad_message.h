@@ -7,9 +7,9 @@
 
 #include "base/debug/crash_logging.h"
 #include "content/common/buildflags.h"
+#include "content/public/common/child_process_id.h"
 
 namespace content {
-class BrowserMessageFilter;
 class RenderProcessHost;
 
 namespace bad_message {
@@ -315,7 +315,7 @@ enum BadMessageReason {
   OBSOLETE_MSDH_INCONSISTENT_AUDIO_TYPE_AND_REQUESTED_FIELDS = 287,
   OBSOLETE_MSDH_INCONSISTENT_VIDEO_TYPE_AND_REQUESTED_FIELDS = 288,
   MSDH_SUPPRESS_LOCAL_AUDIO_PLAYBACK_BUT_AUDIO_NOT_REQUESTED = 289,
-  MSDH_HOTWORD_ENABLED_BUT_AUDIO_NOT_REQUESTED = 290,
+  OBSOLETE_MSDH_HOTWORD_ENABLED_BUT_AUDIO_NOT_REQUESTED = 290,
   MSDH_DISABLE_LOCAL_ECHO_BUT_AUDIO_NOT_REQUESTED = 291,
   MSDH_ON_STREAM_STARTED_DISALLOWED = 292,
   RFH_WINDOW_CLOSE_ON_NON_OUTERMOST_FRAME = 293,
@@ -348,10 +348,44 @@ enum BadMessageReason {
   PSI_ADD_PAGE_EMBEDDED_PERMISSION_OBSERVER_WITHOUT_FEATURE = 320,
   RFH_INITIATOR_BASE_URL_IS_EMPTY = 321,
   MDDH_SELECT_AUDIO_OUTPUT_WITHOUT_FEATURE = 322,
+  MDDH_SET_PREFERRED_SINK_ID_WITHOUT_FEATURE = 323,
+  MH_MULTIPLE_MIDI_SESSIONS = 324,
+  RFHI_INVALID_NET_ERROR_CODE = 325,
+  MSDH_RESTRICT_OWN_AUDIO_IS_SET_WHEN_UNSUPPORTED = 326,
+  RFH_SAME_DOC_INSECURE_REQUEST_POLICY_CHANGE = 327,
+  RFH_SAME_DOC_INSECURE_NAV_SET_CHANGE = 328,
+  RFH_ORIGIN_TO_COMMIT_MISMATCH = 329,
+  RFH_CRASH_REPORT_STORAGE_SIZE_TOO_LARGE = 330,
+  RFH_CRASH_REPORT_STORAGE_ALREADY_INITIALIZED = 331,
+  RFH_INVALID_DOCUMENT_SEQUENCE_NUMBER = 332,
+  RFH_NEW_ISOLATED_WEB_APP_PERMISSION_POLICIES = 333,
+  RFH_CREATE_NEW_WINDOW_INVALID_DISPOSITION = 334,
+  RFH_CREATE_NEW_WINDOW_FROM_SANDBOXED_FRAME = 335,
+  RFH_MODAL_DIALOG_FROM_SANDBOXED_FRAME = 336,
+  RFH_OPEN_URL_INVALID_DISPOSITION = 337,
+  RFH_ENTER_FULLSCREEN_PERMISSION_DENIED = 338,
+  DT_DUPLICATE_CHILD_TARGET_CREATED = 339,
+  RWH_POINTER_LOCK_FROM_SANDBOXED_FRAME = 340,
+  SWSI_CROSS_ORIGIN_SCRIPT_URL = 341,
+  RFH_INVALID_NAVIGATION_HEADERS = 342,
+  RFHI_WEBMCP_NOT_ENABLED = 343,
+  RFHI_WEBMCP_UNKNOWN_TOOL_NAME = 344,
+  RFHI_WEBMCP_REGISTER_DUPLICATE_TOOL_NAME = 345,
+  RFHI_WEBMCP_DUPLICATE_BIND = 346,
+  RFHI_WEBMCP_DUPLICATE_SET_RECEIVER = 347,
+  RFHI_WEBMCP_EXPOSED_UNTRUSTWORTHY_ORIGIN = 348,
+  RFHI_SYNCHONOUS_COMMIT_ORIGIN_MISMATCH = 349,
+  RFHI_WEBMCP_INVALID_TOOL_OWNER = 350,
+  NR_BAD_ORIGIN_HEADER = 351,
+  RFH_DID_COMMIT_NAVIGATION_WHILE_BFCACHED = 352,
+  BIBI_BIND_WEBNN_CONTEXT_PROVIDER_BLOCKED_BY_PERMISSIONS_POLICY = 353,
+  BIBI_BIND_WEBNN_WEIGHTS_FILE_CREATOR_BLOCKED_BY_PERMISSIONS_POLICY = 354,
+  RFH_AUTHENTICATOR_PDF_PROCESS_BLOCKED = 355,
+
   // Please add new elements here. The naming convention is abbreviated class
   // name (e.g. RenderFrameHost becomes RFH) plus a unique description of the
-  // reason. After making changes, you MUST update histograms.xml by running:
-  // "python tools/metrics/histograms/update_bad_message_reasons.py"
+  // reason. After making changes, you MUST update enums.xml by running:
+  // "python3 tools/metrics/histograms/update_bad_message_reasons.py"
   BAD_MESSAGE_MAX
 };
 
@@ -361,14 +395,12 @@ enum BadMessageReason {
 void ReceivedBadMessage(RenderProcessHost* host, BadMessageReason reason);
 
 // Equivalent to the above, but callable from any thread.
-void ReceivedBadMessage(int render_process_id, BadMessageReason reason);
+void ReceivedBadMessage(ChildProcessId render_process_id,
+                        BadMessageReason reason);
 
-#if BUILDFLAG(CONTENT_ENABLE_LEGACY_IPC)
-// Called when a browser message filter receives a bad IPC message from a
-// renderer or other child process. Logs the event, records a histogram metric
-// for the |reason|, and terminates the process for |filter|.
-void ReceivedBadMessage(BrowserMessageFilter* filter, BadMessageReason reason);
-#endif
+// TODO(crbug.com/379869738): Deprecated, please use ReceivedBadMessage with
+// ChildProcessId above.
+void ReceivedBadMessage(int render_process_id, BadMessageReason reason);
 
 // Site isolation. These keys help debug renderer kills such as
 // https://crbug.com/773140.

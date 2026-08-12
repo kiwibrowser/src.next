@@ -5,13 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_EMBEDDED_CONTENT_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_EMBEDDED_CONTENT_PAINTER_H_
 
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class LayoutEmbeddedContent;
+class ScopedPaintChunkProperties;
 struct PaintInfo;
-struct PhysicalOffset;
 
 class EmbeddedContentPainter {
   STACK_ALLOCATED();
@@ -21,6 +22,12 @@ class EmbeddedContentPainter {
       : layout_embedded_content_(layout_embedded_content) {}
 
   void PaintReplaced(const PaintInfo&, const PhysicalOffset& paint_offset);
+
+  // Returns scoped paint properties that omit SVG filter effects for security,
+  // when painting remote frames and plugins.
+  [[nodiscard]] static std::optional<ScopedPaintChunkProperties>
+  RemoveSvgFilterPaint(const LayoutEmbeddedContent& layout_embedded_content,
+                       const PaintInfo& paint_info);
 
  private:
   const LayoutEmbeddedContent& layout_embedded_content_;

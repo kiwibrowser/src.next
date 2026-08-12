@@ -17,12 +17,13 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/page_load_metrics/browser/observers/use_counter_page_load_metrics_observer.h"
 #include "components/page_load_metrics/browser/page_load_metrics_test_waiter.h"
-#include "components/subresource_filter/content/shared/browser/ruleset_service.h"
+#include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/subresource_filter/core/common/activation_scope.h"
 #include "components/subresource_filter/core/common/common_features.h"
 #include "components/subresource_filter/core/common/test_ruleset_utils.h"
 #include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -32,6 +33,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
 #include "url/gurl.h"
@@ -127,10 +129,13 @@ class PopupPageLoadMetricsWaiterInitializer : public TabStripModelObserver {
 
 }  // namespace
 
+// TODO(yaoxia): Rename the test file/suite to something more general. This no
+// longer is restricted to frames, but doesn't yet cover all browser download
+// interventions (e.g., multiple downloads), only the web platform related ones.
 class DownloadFramePolicyBrowserTest
     : public subresource_filter::SubresourceFilterBrowserTest {
  public:
-  ~DownloadFramePolicyBrowserTest() override {}
+  ~DownloadFramePolicyBrowserTest() override = default;
 
   // Override embedded_test_server() with a variant that uses HTTPS to avoid
   // insecure download warnings.
@@ -139,6 +144,8 @@ class DownloadFramePolicyBrowserTest
   }
 
   void SetUpOnMainThread() override {
+    ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
+
     host_resolver()->AddRule("*", "127.0.0.1");
     SetRulesetWithRules(
         {subresource_filter::testing::CreateSuffixRule("ad_script.js"),
@@ -271,6 +278,28 @@ class DownloadFramePolicyBrowserTest
             web_contents());
   }
 
+  bool RecordedUkmUseCounter(const blink::mojom::WebFeature& expected_entry,
+                             const GURL& expected_url) {
+    const auto& entries = ukm_recorder_->GetEntriesByName(
+        ukm::builders::Blink_UseCounter::kEntryName);
+    for (const ukm::mojom::UkmEntry* entry : entries) {
+      const ukm::UkmSource* src =
+          ukm_recorder_->GetSourceForSourceId(entry->source_id);
+
+      if (!src || src->url() != expected_url) {
+        continue;
+      }
+
+      const int64_t* metric = ukm_recorder_->GetEntryMetric(
+          entry, ukm::builders::Blink_UseCounter::kFeatureName);
+      if (*metric == static_cast<int>(expected_entry)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   base::HistogramTester* GetHistogramTester() {
     return histogram_tester_.get();
   }
@@ -285,6 +314,7 @@ class DownloadFramePolicyBrowserTest
 
  private:
   std::unique_ptr<base::HistogramTester> histogram_tester_;
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
   std::unique_ptr<content::DownloadTestObserver> download_observer_;
   std::unique_ptr<page_load_metrics::PageLoadMetricsTestWaiter>
       web_feature_waiter_;
@@ -722,6 +752,240 @@ IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
   GetHistogramTester()->ExpectBucketCount(
       "Blink.UseCounter.Features",
       blink::mojom::WebFeature::kDownloadPrePolicyCheck, 0);
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       PopUpDownload_RecordsUseCounterAgainstInitiator) {
+  base::HistogramTester histogram_tester;
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+
+  // Create a popup that loads the download.
+  EXPECT_TRUE(ExecJs(web_contents(),
+                     "window.open('" + download_url.spec() + "', '_blank');"));
+
+  CheckNumDownloadsExpectation();
+
+  // Close browser to trigger metric recording.
+  CloseBrowserSynchronously(browser());
+
+  // Verify that the use counter was recorded for the initiator page.
+  ASSERT_TRUE(RecordedUkmUseCounter(
+      blink::mojom::WebFeature::kDownloadPrePolicyCheck, top_frame_url));
+  ASSERT_TRUE(RecordedUkmUseCounter(
+      blink::mojom::WebFeature::kDownloadPostPolicyCheck, top_frame_url));
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_SameOriginMainFrameNavigation) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(
+      ExecJs(web_contents(),
+             content::JsReplace("executeLocationAssignFromAdScript($1);",
+                                download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_CrossOriginMainFrameNavigation) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("b.test", "/allow.zip");
+  EXPECT_TRUE(
+      ExecJs(web_contents(),
+             content::JsReplace("executeLocationAssignFromAdScript($1);",
+                                download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_SameOriginNonAdSubframeNavigation) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  InitializeOneSubframeSetup(SandboxOption::kNotSandboxed,
+                             /*is_ad_frame=*/false,
+                             /*is_cross_origin=*/false);
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(ExecJs(web_contents(),
+                     content::JsReplace("navigateIframeFromAdScript($1, $2);",
+                                        GetSubframeId(), download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+// An ad script navigating a same-origin ad subframe to a download.
+// In this case, only the kDownloadInAdFrame use counter should be recorded, as
+// it already covers the download, avoiding double counting.
+IN_PROC_BROWSER_TEST_F(
+    DownloadFramePolicyBrowserTest,
+    AdScriptUseCounterNotRecorded_SameOriginAdSubframeNavigation) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  InitializeOneSubframeSetup(SandboxOption::kNotSandboxed,
+                             /*is_ad_frame=*/true,
+                             /*is_cross_origin=*/false);
+
+  // Wait for the ad frame use counter.
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadInAdFrame);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(ExecJs(web_contents(),
+                     content::JsReplace("navigateIframeFromAdScript($1, $2);",
+                                        GetSubframeId(), download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  EXPECT_FALSE(GetWebFeatureWaiter()->DidObserveWebFeature(
+      blink::mojom::WebFeature::kDownloadFromAdScript));
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_CrossOriginNonAdSubframeNavigation) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  InitializeOneSubframeSetup(SandboxOption::kNotSandboxed,
+                             /*is_ad_frame=*/false,
+                             /*is_cross_origin=*/true);
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("b.test", "/allow.zip");
+  EXPECT_TRUE(ExecJs(web_contents(),
+                     content::JsReplace("navigateIframeFromAdScript($1, $2);",
+                                        GetSubframeId(), download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_SameOriginPopup) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(
+      ExecJs(web_contents(),
+             content::JsReplace("windowOpenFromAdScript($1);", download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_CrossOriginPopup) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("b.test", "/allow.zip");
+  EXPECT_TRUE(
+      ExecJs(web_contents(),
+             content::JsReplace("windowOpenFromAdScript($1);", download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadFramePolicyBrowserTest,
+                       AdScriptUseCounter_ClickAnchorDownloadLinkFromAdScript) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  GURL top_frame_url =
+      embedded_test_server()->GetURL("a.test", "/frame_factory.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), top_frame_url));
+
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadFromAdScript);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(ExecJs(
+      web_contents(),
+      content::JsReplace("clickDownloadLinkFromAdScript($1);", download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  CheckNumDownloadsExpectation();
+}
+
+// An ad script clicking a download link in a same-origin ad subframe.
+// In this case, only the kDownloadInAdFrame use counter should be recorded, as
+// it already covers the download, avoiding double counting.
+IN_PROC_BROWSER_TEST_F(
+    DownloadFramePolicyBrowserTest,
+    AdScriptUseCounterNotRecorded_ClickAnchorDownloadLinkInAdSubframe) {
+  InitializeHistogramTesterAndWebFeatureWaiter();
+  SetNumDownloadsExpectation(1);
+
+  InitializeOneSubframeSetup(SandboxOption::kNotSandboxed,
+                             /*is_ad_frame=*/true,
+                             /*is_cross_origin=*/false);
+
+  // Wait for the ad frame use counter.
+  GetWebFeatureWaiter()->AddWebFeatureExpectation(
+      blink::mojom::WebFeature::kDownloadInAdFrame);
+
+  GURL download_url = embedded_test_server()->GetURL("a.test", "/allow.zip");
+  EXPECT_TRUE(ExecJs(
+      GetSubframeRfh(),
+      content::JsReplace("clickDownloadLinkFromAdScript($1);", download_url)));
+  GetWebFeatureWaiter()->Wait();
+
+  EXPECT_FALSE(GetWebFeatureWaiter()->DidObserveWebFeature(
+      blink::mojom::WebFeature::kDownloadFromAdScript));
 
   CheckNumDownloadsExpectation();
 }

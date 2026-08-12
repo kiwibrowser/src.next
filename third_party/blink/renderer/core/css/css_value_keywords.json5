@@ -485,6 +485,7 @@
     "right",
     "center",
     "justify",
+    "match-parent",
     "-webkit-left",
     "-webkit-right",
     "-webkit-center",
@@ -512,6 +513,7 @@
     //none
     //
     // The order must match the order found in IsDisplayOutside().
+    // "block" also a keyword for caret-shape
     "inline",
     "block",
     // The order must match the order found in IsDisplayInside().
@@ -520,7 +522,7 @@
     "table",
     "flex",
     "grid",
-    "masonry",
+    "grid-lanes",
     //"math",
     //"ruby",
     // The order must match the order found in IsDisplayBox().
@@ -541,7 +543,7 @@
     "inline-table",
     "inline-flex",
     "inline-grid",
-    "inline-masonry",
+    "inline-grid-lanes",
     "-webkit-box",
     "-webkit-inline-box",
     "-webkit-flex",
@@ -606,6 +608,7 @@
     "lowercase",
     //none
     "math-auto",
+    "full-size-kana",
     //
     // visibility
     //
@@ -785,6 +788,13 @@
     "max-content",
     "fit-content",
 
+    // frame-sizing
+    // "auto",
+    "content-width",
+    "content-height",
+    "content-block-size",
+    "content-inline-size",
+
     //
     // text-autospace
     //
@@ -829,6 +839,15 @@
     //
     // auto
     // none
+    // all
+
+    //
+    // text-decoration-skip-spaces
+    //
+    // none
+    // start
+    // end
+    // all
 
     //
     // text-decoration-thickness
@@ -904,10 +923,12 @@
     // stretch
     // repeat
     "round",
-    // TODO(crbug.com/1511354): "base-select" is a temporary name for customizable
-    // <select>. It should be renamed when a standardized name is chosen.
+    "base",
     "base-select",
-    "-internal-appearance-auto-base-select",
+    "-internal-auto-base",
+    // Used to set the `content` property of the pseudo-element "hint" given to
+    // elements with partial interest (via `interestfor` keyboard activation).
+    "-internal-partial-interest-content",
 
     //
     // background-clip/background-origin
@@ -921,6 +942,11 @@
     "content-box",
     "padding",
     "padding-box",
+
+    // background-clip: border-area (CSS Backgrounds Level 4)
+    // NOTE: This must be outside the kBorder..kPaddingBox range used by
+    // ConsumePrefixedBackgroundBox's ConsumeIdentRange.
+    "border-area",
 
     // CSS 3 SHAPES
     "margin-box",
@@ -968,6 +994,7 @@
     //
     "running",
     "paused",
+    "stopped",
 
     //
     // transform-style
@@ -1089,6 +1116,7 @@
     "under",
     //right
     //left
+    //auto
 
     // -webkit-text-emphasis-style
     "filled",
@@ -1125,6 +1153,7 @@
     //optimizespeed
     "optimizequality",
     "pixelated",
+    "crisp-edges",
     "-webkit-optimize-contrast",
 
     // image-orientation
@@ -1145,7 +1174,6 @@
     "alphabetic",
 
     // (display-mode:) media feature
-    "borderless",
     "fullscreen",
     "standalone",
     "minimal-ui",
@@ -1153,6 +1181,7 @@
     "window-controls-overlay",
     "tabbed",
     "picture-in-picture",
+    "unframed",
 
     // (display-state:) media feature
     // normal
@@ -1204,12 +1233,32 @@
     // column-fill
     "balance",
 
+    // corner-shape
+    // "bevel",
+    "notch",
+    // "round",
+    "scoop",
+    "squircle",
+    // "square",
+    "superellipse",
+
     // -webkit-app-region
     "drag",
     "no-drag",
 
     // grid-{column|row}-{start|end}
     "span",
+
+    // grid-lanes-direction
+    // normal
+    // row
+    // column
+    "fill-reverse",
+    "track-reverse",
+
+    // grid-lanes-pack
+    // normal
+    // dense
 
     // grid-template-{columns|rows}
     "minmax",
@@ -1264,6 +1313,35 @@
     "hanging",
     "mathematical",
 
+    // rule-overlap
+    "row-over-column",
+    "column-over-row",
+
+    // column-rule-break
+    // none
+    "intersection",
+    // normal
+
+    // row-rule-break
+    // none
+    // intersection
+    // normal
+
+    // rule-inset
+    "overlap-join",
+
+    // column-rule-visibility-items
+    // normal
+    // all
+    "around",
+    "between",
+
+    // row-rule-visibility-items
+    // normal
+    // all
+    // around
+    // between
+
     // dominant-baseline
     // auto
     "use-script",
@@ -1278,11 +1356,6 @@
     // vector-effect
     // none
     "non-scaling-stroke",
-
-    //
-    // CSS3 viewport-length keywords
-    //
-    "-internal-extend-to-zoom",
 
     // isolation
     // auto
@@ -1334,6 +1407,7 @@
     // inherit
     "revert",
     "revert-layer",
+    "revert-rule",
     "unset",
 
     // background-image, etc.
@@ -1346,6 +1420,7 @@
     "paint",
     "cross-fade",
     "-webkit-cross-fade",
+    "image",
     "-webkit-gradient",
     "-webkit-linear-gradient",
     "-webkit-radial-gradient",
@@ -1371,8 +1446,30 @@
 
     // shapes
     "polygon",
+    "shape",
+    // "from",
+    // "to",
+    "by",
+    "line",
+    "close",
+    "hline",
+    "vline",
+    "arc",
+    // "rotate",
+    "cw",
+    "ccw",
+    // "large",
+    // "small",
+    // "of",
+    "curve",
+    // "smooth",
+    // "start",
+    // "end",
+    "origin",
+    "with",
 
     // @font-face src
+    "avar2",
     "format",
     "collection",
     "embedded-opentype",
@@ -1407,6 +1504,9 @@
     "drop-shadow",
     "url",
 
+    // Route matching, such as @route, @navigation, and :link-to().
+    "url-pattern",
+
     // colors
     "rgb",
     "rgba",
@@ -1425,8 +1525,10 @@
     // "rec2020", included in color-gamut
     "srgb-linear",
     "display-p3",
+    "display-p3-linear",
     "a98-rgb",
     "prophoto-rgb",
+    "rec2100-linear",
     "xyz",
     "xyz-d50",
     "xyz-d65",
@@ -1496,6 +1598,10 @@
     // coord-box
     "stroke-box",
 
+    // border-shape specific geometry box
+    // https://drafts.csswg.org/css-borders-4/#border-shape
+    "half-border-box",
+
     // math functions
     // https://drafts.csswg.org/css-values-4/#math
     "calc",
@@ -1536,6 +1642,9 @@
     "hypot",
     "log",
     "exp",
+
+    // Random functions
+    "random",
 
     //<calc-constant>
     //https://drafts.csswg.org/css-values/#calc-syntax
@@ -1585,6 +1694,7 @@
     "block-end",
     // inline-start,
     // inline-end,
+    "anchored",
 
     // grid auto-repeat
     "auto-fill",
@@ -1617,6 +1727,7 @@
     // auto,
     // contain
     // none
+    "chain",
 
     //scroll-customization
     // auto
@@ -1720,22 +1831,23 @@
     // ([video]-dynamic-range) media feature, and dynamic-range-limit property
     "standard",
     "high",
-    "constrained-high",
+    "no-limit",
+    "constrained",
     "dynamic-range-limit-mix",
 
     // Layered @import rule
     "layer",
 
+    // if(navigation())
+    "navigation",
+
     // supports in import rule: @import supports()
     "supports",
+    // @import scope()
+    "scope",
 
-    // color-contrast()
-    "color-contrast",
-    "vs",
-    "AA",
-    "AA-large",
-    "AAA",
-    "AAA-large",
+    // contrast-color()
+    "contrast-color",
 
     // initial-letter
     "drop",
@@ -1790,16 +1902,21 @@
     // @view-transition navigation
     // auto
     // none
+    "preview",
 
     // view-transition-capture-mode
     "layered",
     // flat
+
+    // view-transition-name
+    "match-element",
 
     // container-type
     // inline-size,
     // normal,
     // size,
     // scroll-state,
+    // anchored,
 
     // (scripting:) media feature
     "enabled",
@@ -1817,10 +1934,10 @@
     "x-end",
     "span-x-start",
     "span-x-end",
-    "x-self-start",
-    "x-self-end",
-    "span-x-self-start",
-    "span-x-self-end",
+    "self-x-start",
+    "self-x-end",
+    "span-self-x-start",
+    "span-self-x-end",
     "span-all",
     // top,
     // bottom,
@@ -1830,10 +1947,10 @@
     "y-end",
     "span-y-start",
     "span-y-end",
-    "y-self-start",
-    "y-self-end",
-    "span-y-self-start",
-    "span-y-self-end",
+    "self-y-start",
+    "self-y-end",
+    "span-self-y-start",
+    "span-self-y-end",
     // block-start,
     // block-end,
     "span-block-start",
@@ -1883,6 +2000,8 @@
     "flip-block",
     "flip-inline",
     "flip-start",
+    "flip-x",
+    "flip-y",
 
     // position-visibility
     // always
@@ -1898,10 +2017,18 @@
     "grid-rows",
     "grid-columns",
     "grid-order",
+    "source-order",
 
     // fill / stroke
     "context-fill",
     "context-stroke",
+
+    // text-fit
+    "grow",
+    "shrink",
+    "per-line",
+    "per-line-all",
+    "consistent",
 
     // media-progress()
     "media-progress",
@@ -1920,5 +2047,101 @@
     // interactivity
     // auto
     "inert",
+
+    // Used as functions in calc()
+    "sibling-count",
+    "sibling-index",
+
+    // https://drafts.csswg.org/css-values-5/#ident
+    "ident",
+
+    // @function
+    "returns",
+
+    // animation-trigger-type
+    // repeat
+    // alternate
+    "once",
+    "state",
+
+    // inline conditional
+    "if",
+    "else",
+    "media",
+
+    // scroll-marker-group navigation/a11y modes
+    "tabs",
+    "links",
+
+    // caret-shape
+    // block is elsewhere
+    "bar",
+    "underscore",
+
+    // continue
+    "-webkit-legacy",
+
+    // block-ellipsis
+    "no-ellipsis",
+
+    // text-indent
+    "each-line",
+    // "hanging",
+
+    // text-justify
+    // "auto",
+    // "none",
+    "inter-word",
+    // "inter-character",
+    "distribute",
+
+    // animation-trigger
+    "play",
+    "pause",
+    // "reset",
+    "play-once",
+    "play-alternate",
+    "play-forwards",
+    "play-backwards",
+    "play-pause",
+    "replay",
+    // "none",
+
+    // counter-reset
+    "reversed",
+
+    // https://drafts.csswg.org/css-conditional-5/#typedef-supports-named-feature-fn
+    "named-feature",
+    "anchor-position-follows-transforms",
+    "single-axis-scroll-container",
+
+    // hanging-punctuation
+    // "first",
+    // "last",
+    // not for the initial version
+    // "force-end"
+    "allow-end",
+
+    // https://drafts.csswg.org/css-values-5/#request-url-modifiers
+    // URL modifier function names
+    "cross-origin",
+    "integrity",
+    "referrer-policy",
+    // cross-origin() values
+    "anonymous",
+    "use-credentials",
+    // referrer-policy() values
+    "no-referrer",
+    "no-referrer-when-downgrade",
+    "same-origin",
+    // "origin" already exists above
+    "strict-origin",
+    "origin-when-cross-origin",
+    "strict-origin-when-cross-origin",
+    "unsafe-url",
+
+    // ruby-overhang
+    // "auto",
+    "spaces",
   ],
 }

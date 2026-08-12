@@ -15,12 +15,14 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
-#include "base/types/pass_key.h"
-#include "build/build_config.h"
+#include "build/robolectric_buildflags.h"
+#include "third_party/abseil-cpp/absl/numeric/int128.h"
 
-namespace content {
-class FileSystemAccessManagerImpl;
-}
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ROBOLECTRIC)
+#include "base/android/jni_string.h"
+#include "base/system_jni/UUID_jni.h"
+#include "third_party/jni_zero/jni_zero.h"
+#endif
 
 namespace base {
 
@@ -37,21 +39,6 @@ class BASE_EXPORT Uuid {
   // A cryptographically secure random source will be used, but consider using
   // UnguessableToken for greater type-safety if Uuid format is unnecessary.
   static Uuid GenerateRandomV4();
-
-  // Formats a sequence of 16 random bytes as a Uuid in the form of version 4.
-  // `input` must:
-  // - have been randomly generated (e.g. created from an UnguessableToken), and
-  // - be of length 16 (this is checked at compile-time).
-  // Despite taking 128 bits of randomness, certain bits will always be
-  // masked over to adhere to the V4 Uuid format.
-  // Useful in cases where an opaque identifier that is generated from stable
-  // inputs needs to be formatted as a V4 Uuid. Currently only exposed to the
-  // File System Access API to return a V4 Uuid for the getUniqueId() method.
-  static Uuid FormatRandomDataAsV4(
-      base::span<const uint8_t, kGuidV4InputLength> input,
-      base::PassKey<content::FileSystemAccessManagerImpl> pass_key);
-  static Uuid FormatRandomDataAsV4ForTesting(
-      base::span<const uint8_t, kGuidV4InputLength> input);
 
   // Returns a valid Uuid if the input string conforms to the Uuid format, and
   // an invalid Uuid otherwise. Note that this does NOT check if the hexadecimal
@@ -84,6 +71,12 @@ class BASE_EXPORT Uuid {
   // more context.
   const std::string& AsLowercaseString() const LIFETIME_BOUND;
 
+  // Returns the Uuid as a 128-bit integer, or 0 if the Uuid is invalid.
+  // Note: The memory layout is platform-dependent. On little-endian systems, it
+  // matches neither the RFC 4122 byte sequence nor the Microsoft GUID layout.
+  // Do not interpret or store the returned integer as a byte array.
+  absl::uint128 AsInteger() const;
+
   // Invalid Uuids are equal.
   friend bool operator==(const Uuid&, const Uuid&) = default;
   // Uuids are 128bit chunks of data so must be indistinguishable if equivalent.
@@ -112,5 +105,36 @@ struct BASE_EXPORT UuidHash {
 BASE_EXPORT std::ostream& operator<<(std::ostream& out, const Uuid& uuid);
 
 }  // namespace base
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ROBOLECTRIC)
+
+namespace jni_zero {
+
+template <>
+inline base::Uuid FromJniType<base::Uuid>(
+    JNIEnv* env,
+    const jni_zero::JavaRef<jobject>& obj) {
+  if (!obj) {
+    return base::Uuid();
+  }
+  return base::Uuid::ParseLowercase(
+      FromJniType<std::string>(env, JNI_UUID::Java_UUID_toString(env, obj)));
+}
+
+template <>
+inline ScopedJavaLocalRef<jobject> ToJniType<base::Uuid>(
+    JNIEnv* env,
+    const base::Uuid& uuid) {
+  if (!uuid.is_valid()) {
+    return nullptr;
+  }
+  absl::uint128 value = uuid.AsInteger();
+  return JNI_UUID::Java_UUID_Constructor(
+      env, static_cast<jlong>(absl::Uint128High64(value)),
+      static_cast<jlong>(absl::Uint128Low64(value)));
+}
+
+}  // namespace jni_zero
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ROBOLECTRIC)
 
 #endif  // BASE_UUID_H_

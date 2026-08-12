@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/trace_event/trace_event.h"
+#include "base/tracing/protos/chrome_track_event.pbzero.h"
 #include "content/public/browser/render_process_host.h"
 
 namespace bad_message {
@@ -22,9 +23,8 @@ void LogBadMessage(BadMessageReason reason) {
 
 void ReceivedBadMessage(content::RenderProcessHost* host,
                         BadMessageReason reason) {
-  TRACE_EVENT_INSTANT2("ipc,security", "chrome::ReceivedBadMessage",
-                       TRACE_EVENT_SCOPE_THREAD, "reason", reason,
-                       "render_process_host", host);
+  TRACE_EVENT_INSTANT("ipc,security", "chrome::ReceivedBadMessage", "reason",
+                      reason, "render_process_host", host);
   LogBadMessage(reason);
   host->ShutdownForBadMessage(
       content::RenderProcessHost::CrashReportMode::GENERATE_CRASH_DUMP);

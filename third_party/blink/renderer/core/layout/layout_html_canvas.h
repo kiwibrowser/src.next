@@ -48,7 +48,9 @@ class CORE_EXPORT LayoutHTMLCanvas final : public LayoutReplaced {
 
   bool DrawsBackgroundOntoContentLayer() const final;
 
-  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
+  void StyleDidChange(StyleDifference,
+                      const ComputedStyle* old_style,
+                      const StyleChangeContext&) override;
 
   const char* GetName() const override {
     NOT_DESTROYED();
@@ -94,18 +96,21 @@ class CORE_EXPORT LayoutHTMLCanvas final : public LayoutReplaced {
   }
   bool CanHaveChildren() const final {
     NOT_DESTROYED();
-    return RuntimeEnabledFeatures::CanvasPlaceElementEnabled();
+    return RuntimeEnabledFeatures::CanvasDrawElementEnabled(
+        GetDocument().GetExecutionContext());
   }
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const final;
 
   void PaintReplaced(const PaintInfo&,
                      const PhysicalOffset& paint_offset) const override;
-  void IntrinsicSizeChanged() override {
+  void NaturalSizeChanged() override {
     NOT_DESTROYED();
     CanvasSizeChanged();
   }
+  PhysicalNaturalSizingInfo GetNaturalDimensions() const override;
 
   LayoutObjectChildList children_;
+  PhysicalSize natural_size_;
 };
 
 template <>

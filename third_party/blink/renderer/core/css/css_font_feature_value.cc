@@ -25,29 +25,36 @@
 
 #include "third_party/blink/renderer/core/css/css_font_feature_value.h"
 
+#include "third_party/blink/renderer/core/css/css_markup.h"
+#include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 namespace cssvalue {
 
-CSSFontFeatureValue::CSSFontFeatureValue(const AtomicString& tag, int value)
+CSSFontFeatureValue::CSSFontFeatureValue(const AtomicString& tag,
+                                         const CSSPrimitiveValue* value)
     : CSSValue(kFontFeatureClass), tag_(tag), value_(value) {}
 
 String CSSFontFeatureValue::CustomCSSText() const {
   StringBuilder builder;
-  builder.Append('"');
-  builder.Append(tag_);
-  builder.Append('"');
+  SerializeString(tag_, builder);
   // Omit the value if it's 1 as 1 is implied by default.
-  if (value_ != 1) {
+  if (!value_->IsNumericLiteralValue() ||
+      ClampTo<int>(To<CSSNumericLiteralValue>(*value_).ClampedDoubleValue()) !=
+          1) {
     builder.Append(' ');
-    builder.AppendNumber(value_);
+    builder.Append(value_->CustomCSSText());
   }
   return builder.ReleaseString();
 }
 
 bool CSSFontFeatureValue::Equals(const CSSFontFeatureValue& other) const {
-  return tag_ == other.tag_ && value_ == other.value_;
+  return tag_ == other.tag_ && *value_ == *other.value_;
+}
+
+bool CSSFontFeatureValue::HasRandomFunctions() const {
+  return value_ && value_->HasRandomFunctions();
 }
 
 }  // namespace cssvalue

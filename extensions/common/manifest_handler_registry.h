@@ -5,6 +5,7 @@
 #ifndef EXTENSIONS_COMMON_MANIFEST_HANDLER_REGISTRY_H_
 #define EXTENSIONS_COMMON_MANIFEST_HANDLER_REGISTRY_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/raw_ptr.h"
 #include "extensions/common/manifest_handler.h"
@@ -21,7 +22,7 @@ class ManifestHandlerRegistry {
   static ManifestHandlerRegistry* Get();
 
   // Registers a ManifestHandler, associating it with its keys. If there is
-  // already a handler registered for any key |handler| manages, this method
+  // already a handler registered for any key `handler` manages, this method
   // will DCHECK.
   void RegisterHandler(std::unique_ptr<ManifestHandler> handler);
 
@@ -56,7 +57,7 @@ class ManifestHandlerRegistry {
   static void ResetForTesting();
 
   // Overrides the current global ManifestHandlerRegistry with
-  // |registry|, returning the current one.
+  // `registry`, returning the current one.
   static ManifestHandlerRegistry* SetForTesting(
       ManifestHandlerRegistry* new_registry);
 

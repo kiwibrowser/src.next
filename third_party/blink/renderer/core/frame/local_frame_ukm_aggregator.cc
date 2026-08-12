@@ -11,20 +11,22 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
+#include "base/strings/strcat.h"
 #include "base/time/default_tick_clock.h"
 #include "cc/metrics/begin_main_frame_metrics.h"
+#include "cc/metrics/frame_sequence_tracker_collection.h"
 #include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace {
 
-inline base::HistogramBase::Sample ToSample(int64_t value) {
-  return base::saturated_cast<base::HistogramBase::Sample>(value);
+inline base::HistogramBase::Sample32 ToSample(int64_t value) {
+  return base::saturated_cast<base::HistogramBase::Sample32>(value);
 }
 
 inline int64_t ApplyBucket(int64_t value) {
@@ -32,7 +34,6 @@ inline int64_t ApplyBucket(int64_t value) {
 }
 
 BASE_FEATURE(kAvoidUnnecessaryForcedLayoutMeasurements,
-             "AvoidUnnecessaryForcedLayoutMeasurements",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace
@@ -138,8 +139,7 @@ LocalFrameUkmAggregator::ScopedForcedLayoutTimer::ScopedForcedLayoutTimer(
       avoid_unnecessary_forced_layout_measurements_(
           avoid_unnecessary_forced_layout_measurements),
       should_report_uma_this_frame_(should_report_uma_this_frame),
-      is_pre_fcp_(is_pre_fcp),
-      record_ukm_for_current_frame_(record_ukm_for_current_frame) {
+      is_pre_fcp_(is_pre_fcp) {
   aggregator_->BeginForcedLayout();
 }
 
@@ -212,24 +212,21 @@ LocalFrameUkmAggregator::LocalFrameUkmAggregator()
     absolute_record.reset();
     absolute_record.pre_fcp_aggregate = 0;
     if (metric_data.has_uma) {
-      StringBuilder pre_fcp_uma_name;
-      pre_fcp_uma_name.Append(metric_data.name);
-      pre_fcp_uma_name.Append(uma_prefcp_postscript);
+      const std::string pre_fcp_uma_name =
+          base::StrCat({metric_data.name, uma_prefcp_postscript});
       absolute_record.pre_fcp_uma_counter =
-          std::make_unique<CustomCountHistogram>(
-              pre_fcp_uma_name.ToString().Utf8().c_str(), 1, 10000000, 50);
-      StringBuilder post_fcp_uma_name;
-      post_fcp_uma_name.Append(metric_data.name);
-      post_fcp_uma_name.Append(uma_postfcp_postscript);
+          std::make_unique<CustomCountHistogram>(pre_fcp_uma_name.c_str(), 1,
+                                                 10000000, 50);
+      const std::string post_fcp_uma_name =
+          base::StrCat({metric_data.name, uma_postfcp_postscript});
       absolute_record.post_fcp_uma_counter =
-          std::make_unique<CustomCountHistogram>(
-              post_fcp_uma_name.ToString().Utf8().c_str(), 1, 10000000, 50);
-      StringBuilder aggregated_uma_name;
-      aggregated_uma_name.Append(metric_data.name);
-      aggregated_uma_name.Append(uma_pre_fcp_aggregated_postscript);
+          std::make_unique<CustomCountHistogram>(post_fcp_uma_name.c_str(), 1,
+                                                 10000000, 50);
+      const std::string aggregated_uma_name =
+          base::StrCat({metric_data.name, uma_pre_fcp_aggregated_postscript});
       absolute_record.uma_aggregate_counter =
-          std::make_unique<CustomCountHistogram>(
-              aggregated_uma_name.ToString().Utf8().c_str(), 1, 10000000, 50);
+          std::make_unique<CustomCountHistogram>(aggregated_uma_name.c_str(), 1,
+                                                 10000000, 50);
     }
 
     metric_index++;
@@ -274,8 +271,8 @@ LocalFrameUkmAggregator::GetScopedForcedLayoutTimer(
   // avoid overflowing the counters.
   bool should_report_uma_this_frame = !calls_to_next_forced_style_layout_uma_;
   if (should_report_uma_this_frame) {
-    calls_to_next_forced_style_layout_uma_ =
-        base::RandInt(0, mean_calls_between_forced_style_layout_uma_ * 2);
+    calls_to_next_forced_style_layout_uma_ = base::RandIntInclusive(
+        0, mean_calls_between_forced_style_layout_uma_ * 2);
   } else {
     DCHECK_GT(calls_to_next_forced_style_layout_uma_, 0u);
     --calls_to_next_forced_style_layout_uma_;
@@ -373,7 +370,7 @@ void LocalFrameUkmAggregator::RecordCountSample(size_t metric_index,
     record.pre_fcp_aggregate += count;
 
   // Subsampling these metrics reduced CPU utilization (crbug.com/1295441).
-  if (!metrics_subsampler_.ShouldSample(0.001)) {
+  if (!base::ShouldRecordSubsampledMetric(0.001)) {
     return;
   }
 
@@ -686,6 +683,7 @@ void LocalFrameUkmAggregator::EndForcedLayout(
 
     case DocumentUpdateReason::kAccessibility:
     case DocumentUpdateReason::kBaseColor:
+    case DocumentUpdateReason::kBaseSelect:
     case DocumentUpdateReason::kComputedStyle:
     case DocumentUpdateReason::kDisplayLock:
     case DocumentUpdateReason::kViewTransition:
@@ -701,6 +699,7 @@ void LocalFrameUkmAggregator::EndForcedLayout(
       break;
 
     case DocumentUpdateReason::kCanvas:
+    case DocumentUpdateReason::kCanvasDrawElementImage:
     case DocumentUpdateReason::kPlugin:
     case DocumentUpdateReason::kSVGImage:
       sub_metric = kContentDocumentUpdate;

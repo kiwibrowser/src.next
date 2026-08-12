@@ -6,22 +6,14 @@ boliu@chromium.org
 per-file BUILD.gn=*
 
 # For security review.
-per-file child_process_security_policy_impl.*=set noparent
-per-file child_process_security_policy_impl.*=file://content/browser/CHILD_PROCESS_SECURITY_POLICY_OWNERS
-per-file child_process_security_policy_unittest.cc=set noparent
-per-file child_process_security_policy_unittest.cc=file://content/browser/CHILD_PROCESS_SECURITY_POLICY_OWNERS
 per-file browser_interface_binders.*=set noparent
 per-file browser_interface_binders.*=file://ipc/SECURITY_OWNERS
 per-file mojo_binder_policy_map_impl.*=set noparent
 per-file mojo_binder_policy_map_impl.*=file://ipc/SECURITY_OWNERS
-per-file ppapi_plugin_process_host_receiver_bindings.*=set noparent
-per-file ppapi_plugin_process_host_receiver_bindings.*=file://ipc/SECURITY_OWNERS
 per-file browser_child_process_host_impl_receiver_bindings.*=set noparent
 per-file browser_child_process_host_impl_receiver_bindings.*=file://ipc/SECURITY_OWNERS
-per-file utility_process_host_receiver_bindings.*=set noparent
-per-file utility_process_host_receiver_bindings.*=file://ipc/SECURITY_OWNERS
+per-file child_process_launcher_helper_ios.mm=file://ipc/SECURITY_OWNERS
 
-per-file host_zoom_*=wjmaclean@chromium.org
 per-file site_per_process_*=kenrb@chromium.org
 
 # Mac Sandbox parameters and unit tests.
@@ -31,26 +23,13 @@ per-file sandbox_mac_unittest.*=file://sandbox/mac/OWNERS
 # Linux sandboxing.
 per-file sandbox_host_linux.*=file://sandbox/linux/OWNERS
 per-file sandbox_ipc_linux.*=file://sandbox/linux/OWNERS
-per-file utility_process_sandbox_browsertest.cc=file://sandbox/linux/OWNERS
-
-# Utility sandbox delegate requires security review.
-per-file utility_sandbox_delegate.*=set noparent
-per-file utility_sandbox_delegate.*=file://sandbox/OWNERS
-per-file utility_sandbox_delegate_unittest.*=set noparent
-per-file utility_sandbox_delegate_unittest.*=file://sandbox/OWNERS
-per-file utility_sandbox_delegate_win.*=set noparent
-per-file utility_sandbox_delegate_win.*=file://sandbox/win/OWNERS
-
-# PPAPI sandbox delegate requires security review.
-per-file ppapi_plugin_sandboxed_process_launcher_delegate.*=set noparent
-per-file ppapi_plugin_sandboxed_process_launcher_delegate.*=file://sandbox/OWNERS
 
 # BackForwardCache
-per-file back_forward_cache*=file://content/browser/BACK_FORWARD_CACHE_OWNERS
+per-file back_forward_cache*=file://content/browser/back_forward_cache/OWNERS
 
 # Storage API dependencies.
 per-file storage_partition*=file://storage/OWNERS
-per-file storage_service*=file://components/services/storage/OWNERS
+per-file storage_service*=file://storage/OWNERS
 
 # Variations.
 per-file field_trial_synchronizer.*=file://base/metrics/OWNERS

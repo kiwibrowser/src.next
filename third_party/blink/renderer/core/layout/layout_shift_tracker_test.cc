@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/layout/layout_shift_tracker.h"
 
 #include "third_party/blink/public/common/input/web_mouse_event.h"
@@ -99,9 +94,8 @@ TEST_F(LayoutShiftTrackerTest, IgnoreSVG) {
               stroke="black" stroke-width="3" fill="red" />
     </svg>
   )HTML");
-  GetDocument()
-      .QuerySelector(AtomicString("circle"))
-      ->setAttribute(svg_names::kCxAttr, AtomicString("100"));
+  QuerySelector("circle")->setAttribute(svg_names::kCxAttr,
+                                        AtomicString("100"));
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
 }
@@ -332,7 +326,8 @@ void LayoutShiftTrackerNavigationTest::RunTest(bool is_browser_initiated) {
       /*is_synchronously_committed=*/false, /*source_element=*/nullptr,
       mojom::blink::TriggeringEventInfo::kNotFromEvent, is_browser_initiated,
       /*has_ua_visual_transition,=*/false,
-      /*soft_navigation_heuristics_task_id=*/std::nullopt);
+      /*soft_navigation_heuristics_task_id=*/std::nullopt,
+      /*should_skip_screenshot=*/false);
 
   Compositor().BeginFrame();
   test::RunPendingTasks();
@@ -867,10 +862,11 @@ TEST_F(LayoutShiftTrackerTest, StableCompositingChanges) {
     // - add/remove a cc::Layer when there is already a PaintLayer
     // - add/remove a cc::Layer and a PaintLayer together
 
-    static const char* states[] = {"", "pl", "pl tr", "pl", "", "tr", ""};
+    static const std::array<const char*, 7> states = {"", "pl", "pl tr", "pl",
+                                                      "", "tr", ""};
     element->setAttribute(html_names::kClassAttr, AtomicString(states[state]));
     UpdateAllLifecyclePhasesForTest();
-    return ++state < sizeof states / sizeof *states;
+    return ++state < states.size();
   };
   while (advance()) {
   }
@@ -959,7 +955,7 @@ TEST_F(LayoutShiftTrackerTest, ContentVisibilityAutoFirstPaint) {
   // 100x100 on the first frame, via a synchronous second layout, and there is
   // no CLS impact.
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), target->StitchedSize());
 }
 
 TEST_F(LayoutShiftTrackerTest,
@@ -979,15 +975,15 @@ TEST_F(LayoutShiftTrackerTest,
   auto* target = To<LayoutBox>(GetLayoutObjectByElementId("target"));
   // #target starts offsceen, which doesn't count for CLS.
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 1), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 1), target->StitchedSize());
 
   // In the next frame, we scroll it onto the screen, but it still doesn't
   // count for CLS, and its subtree is not yet unskipped, because the
   // intersection observation takes effect on the subsequent frame.
-  GetDocument().domWindow()->scrollTo(0, 100000);
+  GetDocument().domWindow()->scrollToForTesting(0, 100000);
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 1), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 1), target->StitchedSize());
 
   // Now the subtree is unskipped, and #target renders at size 100x100.
   // Nevertheless, there is no impact on CLS.
@@ -995,7 +991,7 @@ TEST_F(LayoutShiftTrackerTest,
   // Target's LayoutObject gets re-attached.
   target = To<LayoutBox>(GetLayoutObjectByElementId("target"));
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), target->StitchedSize());
 }
 
 TEST_F(LayoutShiftTrackerTest, ContentVisibilityHiddenFirstPaint) {
@@ -1015,7 +1011,7 @@ TEST_F(LayoutShiftTrackerTest, ContentVisibilityHiddenFirstPaint) {
 
   // Skipped subtrees don't cause CLS impact.
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 1), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 1), target->StitchedSize());
 }
 
 TEST_F(LayoutShiftTrackerTest, ContentVisibilityAutoResize) {
@@ -1039,7 +1035,7 @@ TEST_F(LayoutShiftTrackerTest, ContentVisibilityAutoResize) {
   UpdateAllLifecyclePhasesForTest();
   auto* target = To<LayoutBox>(GetLayoutObjectByElementId("target"));
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), target->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), target->StitchedSize());
 }
 
 TEST_F(LayoutShiftTrackerTest,
@@ -1064,17 +1060,17 @@ TEST_F(LayoutShiftTrackerTest,
 
   // #offscreen starts offsceen, which doesn't count for CLS.
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 1), offscreen->Size());
-  EXPECT_EQ(PhysicalSize(100, 100), onscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 1), offscreen->StitchedSize());
+  EXPECT_EQ(PhysicalSize(100, 100), onscreen->StitchedSize());
 
   // In the next frame, we scroll it onto the screen, but it still doesn't
   // count for CLS, and its subtree is not yet unskipped, because the
   // intersection observation takes effect on the subsequent frame.
-  GetDocument().domWindow()->scrollTo(0, 100000 + 100);
+  GetDocument().domWindow()->scrollToForTesting(0, 100000 + 100);
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 1), offscreen->Size());
-  EXPECT_EQ(PhysicalSize(100, 100), onscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 1), offscreen->StitchedSize());
+  EXPECT_EQ(PhysicalSize(100, 100), onscreen->StitchedSize());
 
   // Now the subtree is unskipped, and #offscreen renders at size 100x100.
   // Nevertheless, there is no impact on CLS.
@@ -1085,10 +1081,10 @@ TEST_F(LayoutShiftTrackerTest,
   // Target's LayoutObject gets re-attached.
   offscreen = To<LayoutBox>(GetLayoutObjectByElementId("offscreen"));
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), offscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), offscreen->StitchedSize());
   // Because content-visibility: auto implies contain-intrinsic-size auto, the
   // size stays at 100x100.
-  EXPECT_EQ(PhysicalSize(100, 100), onscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), onscreen->StitchedSize());
 
   // Move |offscreen| (which is visible and unlocked now), for which we should
   // report layout shift.
@@ -1100,11 +1096,11 @@ TEST_F(LayoutShiftTrackerTest,
   EXPECT_GT(score, 0);
 
   // Now scroll the element back off-screen.
-  GetDocument().domWindow()->scrollTo(0, 0);
+  GetDocument().domWindow()->scrollToForTesting(0, 0);
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FLOAT_EQ(score, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), offscreen->Size());
-  EXPECT_EQ(PhysicalSize(100, 100), onscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), offscreen->StitchedSize());
+  EXPECT_EQ(PhysicalSize(100, 100), onscreen->StitchedSize());
 
   // In the subsequent frame, #offscreen becomes locked and changes its
   // layout size (and vice-versa for #onscreen).
@@ -1113,8 +1109,8 @@ TEST_F(LayoutShiftTrackerTest,
   onscreen = To<LayoutBox>(GetLayoutObjectByElementId("onscreen"));
 
   EXPECT_FLOAT_EQ(score, GetLayoutShiftTracker().Score());
-  EXPECT_EQ(PhysicalSize(100, 100), offscreen->Size());
-  EXPECT_EQ(PhysicalSize(100, 100), onscreen->Size());
+  EXPECT_EQ(PhysicalSize(100, 100), offscreen->StitchedSize());
+  EXPECT_EQ(PhysicalSize(100, 100), onscreen->StitchedSize());
 }
 
 TEST_F(LayoutShiftTrackerTest, NestedFixedPos) {
@@ -1158,10 +1154,12 @@ TEST_F(LayoutShiftTrackerTest, ClipByVisualViewport) {
   UpdateAllLifecyclePhasesForTest();
   // The visual viewport.
   EXPECT_EQ(gfx::Rect(0, 100, 200, 500),
-            GetDocument().View()->GetScrollableArea()->VisibleContentRect());
+            GetDocument().View()->GetScrollableArea()->VisibleContentRect(
+                kExcludeScrollbars));
   // The layout viewport .
   EXPECT_EQ(gfx::Rect(0, 0, 800, 600),
-            GetDocument().View()->LayoutViewport()->VisibleContentRect());
+            GetDocument().View()->LayoutViewport()->VisibleContentRect(
+                kExcludeScrollbars));
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
 
   GetElementById("target")->setAttribute(html_names::kStyleAttr,
@@ -1199,7 +1197,7 @@ TEST_F(LayoutShiftTrackerTest, ScrollThenCauseScrollAnchoring) {
   auto* target_element = GetElementById("target");
 
   // Scroll the window which accumulates a scroll in the layout shift tracker.
-  GetDocument().domWindow()->scrollBy(0, 1000);
+  GetDocument().domWindow()->scrollByForTesting(0, 1000);
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());

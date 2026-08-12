@@ -9,12 +9,10 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/features.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
-#include "base/json/json_reader.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -126,10 +124,12 @@ class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
 
  private:
   ~MockSandboxedUnpackerClient() override {
-    if (deleted_tracker_)
+    if (deleted_tracker_) {
       *deleted_tracker_ = true;
-    if (quit_closure_)
+    }
+    if (quit_closure_) {
       std::move(quit_closure_).Run();
+    }
   }
 
   void ShouldComputeHashesForOffWebstoreExtension(
@@ -140,10 +140,10 @@ class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
 
   void OnUnpackSuccess(const base::FilePath& temp_dir,
                        const base::FilePath& extension_root,
-                       std::unique_ptr<base::Value::Dict> original_manifest,
+                       std::unique_ptr<base::DictValue> original_manifest,
                        const Extension* extension,
                        const SkBitmap& install_icon,
-                       base::Value::Dict ruleset_install_prefs) override {
+                       base::DictValue ruleset_install_prefs) override {
     temp_dir_ = temp_dir;
     callback_runner_->PostTask(FROM_HERE, std::move(quit_closure_));
   }
@@ -270,7 +270,7 @@ class SandboxedUnpackerTest : public ExtensionsTest {
 
   void ExpectInstallErrorContains(const std::string& error) {
     std::string full_error = base::UTF16ToUTF8(client_->unpack_error_message());
-    EXPECT_TRUE(base::Contains(full_error, error))
+    EXPECT_TRUE(full_error.contains(error))
         << "Error message " << full_error << " does not contain " << error;
   }
 
@@ -305,8 +305,8 @@ class SandboxedUnpackerTest : public ExtensionsTest {
     sandboxed_unpacker_->extension_root_ = path;
   }
 
-  std::optional<base::Value::Dict> RewriteManifestFile(
-      const base::Value::Dict& manifest) {
+  std::optional<base::DictValue> RewriteManifestFile(
+      const base::DictValue& manifest) {
     return sandboxed_unpacker_->RewriteManifestFile(manifest);
   }
 
@@ -489,8 +489,8 @@ TEST_F(SandboxedUnpackerTest, TestRewriteManifestInjections) {
   base::WriteFile(extensions_dir_.GetPath().Append(
                       FILE_PATH_LITERAL("manifest.fingerprint")),
                   fingerprint);
-  std::optional<base::Value::Dict> manifest(
-      RewriteManifestFile(base::Value::Dict().Set(kVersionStr, kTestVersion)));
+  std::optional<base::DictValue> manifest(
+      RewriteManifestFile(base::DictValue().Set(kVersionStr, kTestVersion)));
   auto* key = manifest->FindString("key");
   auto* version = manifest->FindString(kVersionStr);
   auto* differential_fingerprint =
@@ -508,17 +508,10 @@ TEST_F(SandboxedUnpackerTest, InvalidMessagesFile) {
   // Check that there is no _locales folder.
   base::FilePath install_path = GetInstallPath().Append(kLocaleFolder);
   EXPECT_FALSE(base::PathExists(install_path));
-  if (base::JSONReader::UsingRust()) {
-    EXPECT_TRUE(base::MatchPattern(GetInstallErrorMessage(),
-                                   u"*_locales?en_US?messages.json': EOF while "
-                                   u"parsing a string at line 4*"))
-        << GetInstallErrorMessage();
-  } else {
-    EXPECT_TRUE(base::MatchPattern(
-        GetInstallErrorMessage(),
-        u"*_locales?en_US?messages.json': Line: 4, column: 1,*"))
-        << GetInstallErrorMessage();
-  }
+  EXPECT_TRUE(base::MatchPattern(GetInstallErrorMessage(),
+                                 u"*_locales?en_US?messages.json': EOF while "
+                                 u"parsing a string at line 4*"))
+      << GetInstallErrorMessage();
   ASSERT_EQ(CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE,
             GetInstallErrorType());
   EXPECT_EQ(static_cast<int>(
@@ -562,21 +555,6 @@ TEST_F(SandboxedUnpackerTest, UnzipperServiceFails) {
             GetInstallErrorType());
   EXPECT_EQ(static_cast<int>(SandboxedUnpackerFailureReason::UNZIP_FAILED),
             GetInstallErrorDetail());
-}
-
-TEST_F(SandboxedUnpackerTest, JsonParserFails) {
-  // Disable the Rust JSON parser, as it is in-process and cannot crash.
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatureState(base::features::kUseRustJsonParser, false);
-
-  in_process_data_decoder().SimulateJsonParserCrash(true);
-  InitSandboxedUnpacker();
-
-  SetupUnpacker("good_package.crx", "");
-  EXPECT_FALSE(InstallSucceeded());
-  EXPECT_FALSE(GetInstallErrorMessage().empty());
-  ASSERT_EQ(CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE,
-            GetInstallErrorType());
 }
 
 TEST_F(SandboxedUnpackerTest, ImageDecoderFails) {

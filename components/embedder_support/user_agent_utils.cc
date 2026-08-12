@@ -4,18 +4,23 @@
 
 #include "components/embedder_support/user_agent_utils.h"
 
+#include <stdint.h>
+
 #include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "base/android/device_info.h"
 #include "base/command_line.h"
-#include "base/debug/stack_trace.h"
+#include "base/compiler_specific.h"
 #include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/version.h"
@@ -26,10 +31,6 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
-#include "content/public/common/content_switches.h"
-#include "content/public/common/user_agent.h"
 #include "net/http/http_util.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
@@ -40,6 +41,18 @@
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
+
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
+#include "ui/base/device_form_factor.h"
+#endif
+
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+#include <sys/utsname.h>
+#endif
 
 namespace embedder_support {
 
@@ -64,7 +77,7 @@ constexpr wchar_t kUniversalApiContractName[] =
 // available, there will either be a new API introduced, or we will need
 // to rely on querying the IsApiContractPresentByMajor function used by
 // user_agent_utils_unittest.cc.
-const int kHighestKnownUniversalApiContractVersion = 15;
+const int kHighestKnownUniversalApiContractVersion = 19;
 
 int GetPreRS5UniversalApiContractVersion() {
   // This calls Kernel32Version() to get the real non-spoofable version (as
@@ -92,8 +105,7 @@ int GetPreRS5UniversalApiContractVersion() {
   }
   // The list above should account for all Windows versions prior to
   // RS5.
-  NOTREACHED_IN_MIGRATION();
-  return 0;
+  NOTREACHED();
 }
 
 // Returns the UniversalApiContract version number, which is available for
@@ -142,48 +154,8 @@ const std::string& GetWindowsPlatformVersion() {
 }
 #endif  // BUILDFLAG(IS_WIN)
 
-// Returns true if the user agent reduction should be forced (or prevented).
-// TODO(crbug.com/1330890): Remove this method along with policy.
-bool ShouldReduceUserAgentMinorVersion(
-    UserAgentReductionEnterprisePolicyState user_agent_reduction) {
-  return ((user_agent_reduction !=
-               UserAgentReductionEnterprisePolicyState::kForceDisabled &&
-           base::FeatureList::IsEnabled(
-               blink::features::kReduceUserAgentMinorVersion)) ||
-          user_agent_reduction ==
-              UserAgentReductionEnterprisePolicyState::kForceEnabled);
-}
-
-// For desktop:
-// Returns true if both kReduceUserAgentMinorVersionName and
-// kReduceUserAgentPlatformOsCpu are enabled. It makes
-// kReduceUserAgentPlatformOsCpu depend on kReduceUserAgentMinorVersionName.
-//
-// For android:
-// Returns true if both kReduceUserAgentMinorVersionName and
-// kReduceUserAgentAndroidVersionDeviceModel are enabled. It makes
-// kReduceUserAgentAndroidVersionDeviceModel depend on
-// kReduceUserAgentMinorVersionName.
-//
-// It helps us avoid introducing individual enterprise policy controls for
-// sending unified platform for the user agent string.
-bool ShouldSendUserAgentUnifiedPlatform(
-    UserAgentReductionEnterprisePolicyState user_agent_reduction) {
-#if BUILDFLAG(IS_ANDROID)
-  return ShouldReduceUserAgentMinorVersion(user_agent_reduction) &&
-         base::FeatureList::IsEnabled(
-             blink::features::kReduceUserAgentAndroidVersionDeviceModel);
-#else
-  return ShouldReduceUserAgentMinorVersion(user_agent_reduction) &&
-         base::FeatureList::IsEnabled(
-             blink::features::kReduceUserAgentPlatformOsCpu) &&
-         blink::features::kAllExceptLegacyWindowsPlatform.Get();
-#endif
-}
-
 const blink::UserAgentBrandList GetUserAgentBrandList(
     const std::string& major_version,
-    bool enable_updated_grease_by_policy,
     const std::string& full_version,
     blink::UserAgentBrandVersionType output_version_type,
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
@@ -194,26 +166,15 @@ const blink::UserAgentBrandList GetUserAgentBrandList(
 #if !BUILDFLAG(CHROMIUM_BRANDING)
   brand = version_info::GetProductName();
 #endif
-  std::optional<std::string> maybe_brand_override =
-      base::GetFieldTrialParamValueByFeature(features::kGreaseUACH,
-                                             "brand_override");
-  std::optional<std::string> maybe_version_override =
-      base::GetFieldTrialParamValueByFeature(features::kGreaseUACH,
-                                             "version_override");
-  if (maybe_brand_override->empty())
-    maybe_brand_override = std::nullopt;
-  if (maybe_version_override->empty())
-    maybe_version_override = std::nullopt;
 
   std::string brand_version =
       output_version_type == blink::UserAgentBrandVersionType::kFullVersion
           ? full_version
           : major_version;
 
-  return GenerateBrandVersionList(
-      major_version_number, brand, brand_version, maybe_brand_override,
-      maybe_version_override, enable_updated_grease_by_policy,
-      output_version_type, additional_brand_version);
+  return GenerateBrandVersionList(major_version_number, brand, brand_version,
+                                  output_version_type,
+                                  additional_brand_version);
 }
 
 // Return UserAgentBrandList with the major version populated in the brand
@@ -221,13 +182,21 @@ const blink::UserAgentBrandList GetUserAgentBrandList(
 // TODO(crbug.com/1291612): Consolidate *MajorVersionList() methods by using
 // GetVersionNumber()
 const blink::UserAgentBrandList GetUserAgentBrandMajorVersionListInternal(
-    bool enable_updated_grease_by_policy,
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
   return GetUserAgentBrandList(version_info::GetMajorVersionNumber(),
-                               enable_updated_grease_by_policy,
                                std::string(version_info::GetVersionNumber()),
                                blink::UserAgentBrandVersionType::kMajorVersion,
                                additional_brand_version);
+}
+
+// For desktop and android:
+// Returns true if kReduceUserAgentMinorVersionName is enabled.
+//
+// It helps us avoid introducing individual enterprise policy controls for
+// sending unified platform for the user agent string.
+bool ShouldSendUserAgentUnifiedPlatform() {
+  return base::FeatureList::IsEnabled(
+      blink::features::kReduceUserAgentMinorVersion);
 }
 
 // Return UserAgentBrandList with the full version populated in the brand
@@ -235,49 +204,30 @@ const blink::UserAgentBrandList GetUserAgentBrandMajorVersionListInternal(
 // TODO(crbug.com/1291612): Consolidate *FullVersionList() methods by using
 // GetVersionNumber()
 const blink::UserAgentBrandList GetUserAgentBrandFullVersionListInternal(
-    bool enable_updated_grease_by_policy,
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
-  return GetUserAgentBrandList(
-      version_info::GetMajorVersionNumber(), enable_updated_grease_by_policy,
-      std::string(version_info::GetVersionNumber()),
-      blink::UserAgentBrandVersionType::kFullVersion, additional_brand_version);
-}
-
-std::vector<std::string> GetFormFactorsClientHint(
-    const blink::UserAgentMetadata& metadata,
-    bool is_mobile) {
-  // By default, use "Mobile" or "Desktop" depending on the `mobile` bit.
-  std::vector<std::string> form_factors = {
-      is_mobile ? blink::kMobileFormFactor : blink::kDesktopFormFactor};
-
-  if (base::FeatureList::IsEnabled(blink::features::kClientHintsXRFormFactor)) {
-    form_factors.push_back(blink::kXRFormFactor);
-  }
-  return form_factors;
+  return GetUserAgentBrandList(version_info::GetMajorVersionNumber(),
+                               std::string(version_info::GetVersionNumber()),
+                               blink::UserAgentBrandVersionType::kFullVersion,
+                               additional_brand_version);
 }
 
 // Internal function to handle return the full or "reduced" user agent string,
-// depending on the UserAgentReduction enterprise policy.
-std::string GetUserAgentInternal(
-    UserAgentReductionEnterprisePolicyState user_agent_reduction) {
-  std::string product = GetProductAndVersion(user_agent_reduction);
+// depending on the Reduce User-Agent reduction phase features.
+std::string GetUserAgentInternal() {
+  std::string product = GetProductAndVersion();
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kHeadless)) {
     product.insert(0, "Headless");
   }
 
-#if BUILDFLAG(IS_ANDROID)
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUseMobileUserAgent))
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(kUseMobileUserAgent)) {
     product += " Mobile";
+  }
 #endif
 
-  // In User-Agent reduction phase 5, only apply the <unifiedPlatform> to
-  // desktop UA strings.
-  // In User-Agent reduction phase 6, only apply the <unifiedPlatform> to
-  // android UA strings.
-  return ShouldSendUserAgentUnifiedPlatform(user_agent_reduction)
-             ? content::BuildUnifiedPlatformUserAgentFromProduct(product)
-             : content::BuildUserAgentFromProduct(product);
+  return ShouldSendUserAgentUnifiedPlatform()
+             ? BuildUnifiedPlatformUserAgentFromProduct(product)
+             : BuildUserAgentFromProduct(product);
 }
 
 // Generate random order list based on the input size and seed.
@@ -328,13 +278,174 @@ blink::UserAgentBrandList ShuffleBrandList(
   return shuffled_brand_version_list;
 }
 
+std::string GetUserAgentPlatform() {
+#if BUILDFLAG(IS_WIN)
+  return "";
+#elif BUILDFLAG(IS_MAC)
+  return "Macintosh; ";
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  return "X11; ";  // strange, but that's what Firefox uses
+#elif BUILDFLAG(IS_ANDROID)
+  return "Linux; ";
+#elif BUILDFLAG(IS_FUCHSIA)
+  return "";
+#elif BUILDFLAG(IS_IOS)
+  return ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET
+             ? "iPad; "
+             : "iPhone; ";
+#else
+#error Unsupported platform
+#endif
+}
+
+std::string GetUnifiedPlatform() {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+  // This constant is only used on Android (desktop) and Linux.
+  constexpr char kUnifiedPlatformChromeOSX64[] = "X11; CrOS x86_64 14541.0.0";
+
+#endif
+#if BUILDFLAG(IS_ANDROID)
+  // The Android XR device by default also has the unified platform of desktop
+  // form factor.
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return base::FeatureList::IsEnabled(
+               blink::features::kAndroidDesktopUASpoofAsChromeOS)
+               ? kUnifiedPlatformChromeOSX64
+               : "X11; Linux x86_64";
+  }
+  return "Linux; Android 10; K";
+#elif BUILDFLAG(IS_CHROMEOS)
+  return kUnifiedPlatformChromeOSX64;
+#elif BUILDFLAG(IS_MAC)
+  return "Macintosh; Intel Mac OS X 10_15_7";
+#elif BUILDFLAG(IS_WIN)
+  return "Windows NT 10.0; Win64; x64";
+#elif BUILDFLAG(IS_FUCHSIA)
+  return "Fuchsia";
+#elif BUILDFLAG(IS_LINUX)
+  return "X11; Linux x86_64";
+#elif BUILDFLAG(IS_IOS)
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
+    return "iPad; CPU iPad OS 14_0 like Mac OS X";
+  }
+  return "iPhone; CPU iPhone OS 14_0 like Mac OS X";
+#else
+#error Unsupported platform
+#endif
+}
+
+// Builds a string that describes the CPU type when available (or blank
+// otherwise).
+std::string BuildCpuInfo() {
+  std::string cpuinfo;
+
+#if BUILDFLAG(IS_MAC)
+  cpuinfo = "Intel";
+#elif BUILDFLAG(IS_IOS)
+  cpuinfo = ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET
+                ? "iPad"
+                : "iPhone";
+#elif BUILDFLAG(IS_WIN)
+  base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
+  if (os_info->IsWowX86OnAMD64()) {
+    cpuinfo = "WOW64";
+  } else {
+    base::win::OSInfo::WindowsArchitecture windows_architecture =
+        os_info->GetArchitecture();
+    if (windows_architecture == base::win::OSInfo::X64_ARCHITECTURE) {
+      cpuinfo = "Win64; x64";
+    } else if (windows_architecture == base::win::OSInfo::IA64_ARCHITECTURE) {
+      cpuinfo = "Win64; IA64";
+    }
+  }
+#elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+  // Should work on any Posix system.
+  struct utsname unixinfo;
+  uname(&unixinfo);
+
+  // special case for biarch systems
+  if (UNSAFE_TODO(strcmp(unixinfo.machine, "x86_64")) == 0 &&
+      sizeof(void*) == sizeof(int32_t)) {
+    cpuinfo.assign("i686 (x86_64)");
+  } else {
+    cpuinfo.assign(unixinfo.machine);
+  }
+#endif
+
+  return cpuinfo;
+}
+
+// Returns the OS version.
+// On Android, the string will only include the build number and model if
+// relevant enums indicate they should be included.
+std::string GetOSVersion(IncludeAndroidBuildNumber include_android_build_number,
+                         IncludeAndroidModel include_android_model) {
+  std::string os_version;
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_CHROMEOS)
+  int32_t os_major_version = 0;
+  int32_t os_minor_version = 0;
+  int32_t os_bugfix_version = 0;
+  base::SysInfo::OperatingSystemVersionNumbers(
+      &os_major_version, &os_minor_version, &os_bugfix_version);
+
+#if BUILDFLAG(IS_MAC)
+  // A significant amount of web content breaks if the reported "Mac
+  // OS X" major version number is greater than 10. Continue to report
+  // this as 10_15_7, the last dot release for that macOS version.
+  if (os_major_version > 10) {
+    os_major_version = 10;
+    os_minor_version = 15;
+    os_bugfix_version = 7;
+  }
+#endif
+
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+  std::string android_version_str = base::SysInfo::OperatingSystemVersion();
+  std::string android_info_str =
+      GetAndroidOSInfo(include_android_build_number, include_android_model);
+#endif
+
+  base::StringAppendF(&os_version,
+#if BUILDFLAG(IS_WIN)
+                      "%d.%d", os_major_version, os_minor_version
+#elif BUILDFLAG(IS_MAC)
+                      "%d_%d_%d", os_major_version, os_minor_version,
+                      os_bugfix_version
+#elif BUILDFLAG(IS_IOS)
+                      "%d_%d", os_major_version, os_minor_version
+#elif BUILDFLAG(IS_CHROMEOS)
+                      "%d.%d.%d", os_major_version, os_minor_version,
+                      os_bugfix_version
+#elif BUILDFLAG(IS_ANDROID)
+                      "%s%s", android_version_str.c_str(),
+                      android_info_str.c_str()
+#else
+                      ""
+#endif
+  );
+  return os_version;
+}
+
+// Builds a User-agent compatible string that describes the OS and CPU type.
+// On Android, the string will only include the build number and model if
+// relevant enums indicate they should be included.
+std::string BuildOSCpuInfo(
+    IncludeAndroidBuildNumber include_android_build_number,
+    IncludeAndroidModel include_android_model) {
+  return BuildOSCpuInfoFromOSVersionAndCpuType(
+      GetOSVersion(include_android_build_number, include_android_model),
+      BuildCpuInfo());
+}
+
 }  // namespace
 
-std::string GetProductAndVersion(
-    UserAgentReductionEnterprisePolicyState user_agent_reduction) {
-  return ShouldReduceUserAgentMinorVersion(user_agent_reduction)
-             ? version_info::GetProductNameAndVersionForReducedUserAgent(
-                   blink::features::kUserAgentFrozenBuildVersion.Get())
+std::string GetProductAndVersion() {
+  return base::FeatureList::IsEnabled(
+             blink::features::kReduceUserAgentMinorVersion)
+             ? version_info::GetProductNameAndVersionForReducedUserAgent()
              : std::string(
                    version_info::GetProductNameAndVersionForUserAgent());
 }
@@ -351,26 +462,23 @@ std::optional<std::string> GetUserAgentFromCommandLine() {
   return std::nullopt;
 }
 
-std::string GetUserAgent(
-    UserAgentReductionEnterprisePolicyState user_agent_reduction) {
+std::string GetUserAgent() {
   std::optional<std::string> custom_ua = GetUserAgentFromCommandLine();
   if (custom_ua.has_value()) {
     return custom_ua.value();
   }
 
-  return GetUserAgentInternal(user_agent_reduction);
+  return GetUserAgentInternal();
 }
 
 const blink::UserAgentBrandList GetUserAgentBrandMajorVersionList(
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
-  return GetUserAgentBrandMajorVersionListInternal(
-      /*enable_updated_grease_by_policy=*/true, additional_brand_version);
+  return GetUserAgentBrandMajorVersionListInternal(additional_brand_version);
 }
 
 const blink::UserAgentBrandList GetUserAgentBrandFullVersionList(
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
-  return GetUserAgentBrandMajorVersionListInternal(
-      /*enable_updated_grease_by_policy=*/true, additional_brand_version);
+  return GetUserAgentBrandFullVersionListInternal(additional_brand_version);
 }
 
 // Generate a pseudo-random permutation of the following brand/version pairs:
@@ -384,16 +492,12 @@ blink::UserAgentBrandList GenerateBrandVersionList(
     int seed,
     std::optional<std::string> brand,
     const std::string& version,
-    std::optional<std::string> maybe_greasey_brand,
-    std::optional<std::string> maybe_greasey_version,
-    bool enable_updated_grease_by_policy,
     blink::UserAgentBrandVersionType output_version_type,
     std::optional<blink::UserAgentBrandVersion> additional_brand_version) {
   DCHECK_GE(seed, 0);
 
-  blink::UserAgentBrandVersion greasey_bv = GetGreasedUserAgentBrandVersion(
-      seed, maybe_greasey_brand, maybe_greasey_version,
-      enable_updated_grease_by_policy, output_version_type);
+  blink::UserAgentBrandVersion greasey_bv =
+      GetGreasedUserAgentBrandVersion(seed, output_version_type);
   blink::UserAgentBrandVersion chromium_bv = {"Chromium", version};
 
   blink::UserAgentBrandList brand_version_list = {std::move(greasey_bv),
@@ -444,49 +548,74 @@ blink::UserAgentBrandVersion GetProcessedGreasedBrandVersion(
 
 blink::UserAgentBrandVersion GetGreasedUserAgentBrandVersion(
     int seed,
-    std::optional<std::string> maybe_greasey_brand,
-    std::optional<std::string> maybe_greasey_version,
-    bool enable_updated_grease_by_policy,
     blink::UserAgentBrandVersionType output_version_type) {
   std::string greasey_brand;
   std::string greasey_version;
-  // The updated algorithm is enabled by default, but we maintain the ability
-  // to opt out of it either via Finch (setting updated_algorithm to false) or
-  // via an enterprise policy escape hatch.
-  if (enable_updated_grease_by_policy &&
-      base::GetFieldTrialParamByFeatureAsBool(features::kGreaseUACH,
-                                              "updated_algorithm", true)) {
-    const std::vector<std::string> greasey_chars = {
-        " ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"};
-    const std::vector<std::string> greased_versions = {"8", "99", "24"};
-    // See the spec:
-    // https://wicg.github.io/ua-client-hints/#create-arbitrary-brands-section
-    greasey_brand = base::StrCat(
-        {"Not", greasey_chars[(seed) % greasey_chars.size()], "A",
-         greasey_chars[(seed + 1) % greasey_chars.size()], "Brand"});
-    greasey_version = greased_versions[seed % greased_versions.size()];
+  const std::vector<std::string> greasey_chars = {" ", "(", ":", "-", ".", "/",
+                                                  ")", ";", "=", "?", "_"};
+  const std::vector<std::string> greased_versions = {"8", "99", "24"};
+  // See the spec:
+  // https://wicg.github.io/ua-client-hints/#create-arbitrary-brands-section
+  greasey_brand =
+      base::StrCat({"Not", greasey_chars[(seed) % greasey_chars.size()], "A",
+                    greasey_chars[(seed + 1) % greasey_chars.size()], "Brand"});
+  greasey_version = greased_versions[seed % greased_versions.size()];
+  return GetProcessedGreasedBrandVersion(greasey_brand, greasey_version,
+                                         output_version_type);
+}
 
-    return GetProcessedGreasedBrandVersion(
-        maybe_greasey_brand.value_or(greasey_brand),
-        maybe_greasey_version.value_or(greasey_version), output_version_type);
-  } else {
-    const std::vector<std::string> greasey_chars = {" ", " ", ";"};
-    const std::vector<size_t> permuted_order =
-        GetRandomOrder(seed, greasey_chars.size());
-    CHECK_EQ(greasey_chars.size(), permuted_order.size());
-    greasey_brand = base::StrCat({greasey_chars[permuted_order[0]], "Not",
-                                  greasey_chars[permuted_order[1]], "A",
-                                  greasey_chars[permuted_order[2]], "Brand"});
-    greasey_version = "99";
-
-    // The old algorithm is held constant; it does not respond to experiment
-    // overrides.
-    return GetProcessedGreasedBrandVersion(greasey_brand, greasey_version,
-                                           output_version_type);
+bool GetMobileBitForUAMetadata() {
+  // The mobile bit for UA-CH is true if the platform is iOS, or if it's
+  // Android and not a desktop form factor, AND the kUseMobileUserAgent switch
+  // is present.
+#if BUILDFLAG(IS_ANDROID)
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return false;
   }
+#endif
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kUseMobileUserAgent);
+#else
+  return false;
+#endif
+}
+
+std::string GetPlatformVersion() {
+#if BUILDFLAG(IS_ANDROID)
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return std::string();
+  }
+#endif
+
+#if BUILDFLAG(IS_WIN)
+  return GetWindowsPlatformVersion();
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA)
+  return std::string();
+#else
+
+  int32_t major, minor, bugfix = 0;
+  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
+  return base::StringPrintf("%d.%d.%d", major, minor, bugfix);
+#endif
 }
 
 std::string GetPlatformForUAMetadata() {
+#if BUILDFLAG(IS_ANDROID)
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return base::FeatureList::IsEnabled(
+               blink::features::kAndroidDesktopUAPlatform)
+               ? "Android"
+               : (base::FeatureList::IsEnabled(
+                      blink::features::kAndroidDesktopUASpoofAsChromeOS)
+                      ? "Chrome OS"
+                      : "Linux");
+  }
+#endif
+
 #if BUILDFLAG(IS_MAC)
   // TODO(crbug.com/40704421): This can be removed/re-refactored once we use
   // "macOS" by default
@@ -495,42 +624,23 @@ std::string GetPlatformForUAMetadata() {
   // TODO(crbug.com/40846294): The branding change to remove the space caused a
   // regression that's solved here. Ideally, we would just use the new OS name
   // without the space here too, but that needs a launch plan.
-# if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return "Chrome OS";
-# else
+#else
   return "Chromium OS";
-# endif
+#endif
 #else
   return std::string(version_info::GetOSType());
 #endif
 }
 
 blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch) {
-  return GetUserAgentMetadata(nullptr, only_low_entropy_ch);
-}
-
-blink::UserAgentMetadata GetUserAgentMetadata(const PrefService* pref_service,
-                                              bool only_low_entropy_ch) {
   blink::UserAgentMetadata metadata;
 
-  bool enable_updated_grease_by_policy = true;
-  // TODO(crbug.com/40838057): Remove this after M126 which deprecates the
-  // policy.
-  if (pref_service) {
-    if (pref_service->HasPrefPath(
-            policy::policy_prefs::kUserAgentClientHintsGREASEUpdateEnabled))
-      enable_updated_grease_by_policy = pref_service->GetBoolean(
-          policy::policy_prefs::kUserAgentClientHintsGREASEUpdateEnabled);
-  }
-
   // Low entropy client hints.
-  metadata.brand_version_list = GetUserAgentBrandMajorVersionListInternal(
-      enable_updated_grease_by_policy, std::nullopt);
-  metadata.mobile = false;
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-  metadata.mobile = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseMobileUserAgent);
-#endif
+  metadata.brand_version_list =
+      GetUserAgentBrandMajorVersionListInternal(std::nullopt);
+  metadata.mobile = GetMobileBitForUAMetadata();
   metadata.platform = GetPlatformForUAMetadata();
 
   // For users providing a valid user-agent override via the command line:
@@ -551,54 +661,32 @@ blink::UserAgentMetadata GetUserAgentMetadata(const PrefService* pref_service,
   }
 
   // High entropy client hints.
-  metadata.brand_full_version_list = GetUserAgentBrandFullVersionListInternal(
-      enable_updated_grease_by_policy, std::nullopt);
+  metadata.brand_full_version_list =
+      GetUserAgentBrandFullVersionListInternal(std::nullopt);
   metadata.full_version = std::string(version_info::GetVersionNumber());
-  metadata.architecture = content::GetCpuArchitecture();
-  metadata.model = content::BuildModelInfo();
+  metadata.architecture = GetCpuArchitecture();
+  metadata.model = BuildModelInfo();
   metadata.form_factors = GetFormFactorsClientHint(metadata, metadata.mobile);
-
-#if BUILDFLAG(IS_WIN)
-  metadata.platform_version = GetWindowsPlatformVersion();
-#else
-  int32_t major, minor, bugfix = 0;
-  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
-  metadata.platform_version =
-      base::StringPrintf("%d.%d.%d", major, minor, bugfix);
-#endif
-  metadata.architecture = content::GetCpuArchitecture();
-  metadata.bitness = content::GetCpuBitness();
-  metadata.wow64 = content::IsWoW64();
-
+  metadata.bitness = GetCpuBitness();
+  metadata.wow64 = IsWoW64();
+  metadata.platform_version = GetPlatformVersion();
   return metadata;
 }
 
+std::vector<std::string> GetFormFactorsClientHint(
+    const blink::UserAgentMetadata& metadata,
+    bool is_mobile) {
+  // By default, use "Mobile" or "Desktop" depending on the `mobile` bit.
+  std::vector<std::string> form_factors = {
+      is_mobile ? blink::kMobileFormFactor : blink::kDesktopFormFactor};
+
 #if BUILDFLAG(IS_ANDROID)
-void SetDesktopUserAgentOverride(content::WebContents* web_contents,
-                                 const blink::UserAgentMetadata& metadata,
-                                 bool override_in_new_tabs) {
-  const char kLinuxInfoStr[] = "X11; Linux x86_64";
-
-  blink::UserAgentOverride spoofed_ua;
-  spoofed_ua.ua_string_override = content::BuildUserAgentFromOSAndProduct(
-      kLinuxInfoStr, GetProductAndVersion());
-  spoofed_ua.ua_metadata_override = metadata;
-  spoofed_ua.ua_metadata_override->platform = "Linux";
-  spoofed_ua.ua_metadata_override->platform_version =
-      std::string();  // match content::GetOSVersion(false) on Linux
-  spoofed_ua.ua_metadata_override->model = std::string();
-  spoofed_ua.ua_metadata_override->mobile = false;
-  spoofed_ua.ua_metadata_override->form_factors =
-      GetFormFactorsClientHint(metadata, /*is_mobile=*/false);
-  // Match the above "CpuInfo" string, which is also the most common Linux
-  // CPU architecture and bitness.`
-  spoofed_ua.ua_metadata_override->architecture = "x86";
-  spoofed_ua.ua_metadata_override->bitness = "64";
-  spoofed_ua.ua_metadata_override->wow64 = false;
-
-  web_contents->SetUserAgentOverride(spoofed_ua, override_in_new_tabs);
-}
+  if (base::android::device_info::is_xr()) {
+    form_factors.push_back(blink::kXRFormFactor);
+  }
 #endif  // BUILDFLAG(IS_ANDROID)
+  return form_factors;
+}
 
 #if BUILDFLAG(IS_WIN)
 int GetHighestKnownUniversalApiContractVersionForTesting() {
@@ -606,19 +694,239 @@ int GetHighestKnownUniversalApiContractVersionForTesting() {
 }
 #endif  // BUILDFLAG(IS_WIN)
 
-embedder_support::UserAgentReductionEnterprisePolicyState
-GetUserAgentReductionFromPrefs(const PrefService* pref_service) {
-  if (!pref_service->HasPrefPath(kReduceUserAgentMinorVersion))
-    return UserAgentReductionEnterprisePolicyState::kDefault;
-  switch (pref_service->GetInteger(kReduceUserAgentMinorVersion)) {
-    case 1:
-      return UserAgentReductionEnterprisePolicyState::kForceDisabled;
-    case 2:
-      return UserAgentReductionEnterprisePolicyState::kForceEnabled;
-    case 0:
-    default:
-      return UserAgentReductionEnterprisePolicyState::kDefault;
+std::string GetUnifiedPlatformForTesting() {
+  return GetUnifiedPlatform();
+}
+
+// Return the CPU architecture in Windows/Mac/POSIX/Fuchsia and the empty string
+// on Android or if unknown.
+std::string GetCpuArchitecture() {
+#if BUILDFLAG(IS_WIN)
+  base::win::OSInfo::WindowsArchitecture windows_architecture =
+      base::win::OSInfo::GetInstance()->GetArchitecture();
+  base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
+  // When running a Chrome x86_64 (AMD64) build on an ARM64 device,
+  // the OS lies and returns 0x9 (PROCESSOR_ARCHITECTURE_AMD64)
+  // for wProcessorArchitecture.
+  if (windows_architecture == base::win::OSInfo::ARM64_ARCHITECTURE ||
+      os_info->IsWowX86OnARM64() || os_info->IsWowAMD64OnARM64()) {
+    return "arm";
+  } else if ((windows_architecture == base::win::OSInfo::X86_ARCHITECTURE) ||
+             (windows_architecture == base::win::OSInfo::X64_ARCHITECTURE)) {
+    return "x86";
   }
+#elif BUILDFLAG(IS_MAC)
+  base::mac::CPUType cpu_type = base::mac::GetCPUType();
+  if (cpu_type == base::mac::CPUType::kIntel) {
+    return "x86";
+  } else if (cpu_type == base::mac::CPUType::kArm ||
+             cpu_type == base::mac::CPUType::kTranslatedIntel) {
+    return "arm";
+  }
+#elif BUILDFLAG(IS_IOS)
+  return "arm";
+#elif BUILDFLAG(IS_ANDROID)
+  // TODO(crbug.com/433345971) The user agent string should contain the actual
+  // cpu type information obtained from the Android device. Same for the cpu bit
+  // count in #GetCpuBitness below.
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return "x86";
+  }
+  return std::string();
+#elif BUILDFLAG(IS_POSIX)
+  std::string cpu_info = BuildCpuInfo();
+  if (base::StartsWith(cpu_info, "arm") ||
+      base::StartsWith(cpu_info, "aarch")) {
+    return "arm";
+  } else if ((base::StartsWith(cpu_info, "i") &&
+              cpu_info.substr(2, 2) == "86") ||
+             base::StartsWith(cpu_info, "x86")) {
+    return "x86";
+  }
+#elif BUILDFLAG(IS_FUCHSIA)
+  std::string cpu_arch = base::SysInfo::ProcessCPUArchitecture();
+  if (base::StartsWith(cpu_arch, "x86")) {
+    return "x86";
+  } else if (base::StartsWith(cpu_arch, "ARM")) {
+    return "arm";
+  }
+#else
+#error Unsupported platform
+#endif
+  DLOG(WARNING) << "Unrecognized CPU Architecture";
+  return std::string();
+}
+
+// Return the CPU bitness in Windows/Mac/POSIX/Fuchsia and the empty string
+// on Android.
+std::string GetCpuBitness() {
+#if BUILDFLAG(IS_WIN)
+  return (base::win::OSInfo::GetInstance()->GetArchitecture() ==
+          base::win::OSInfo::X86_ARCHITECTURE)
+             ? "32"
+             : "64";
+#elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA)
+  return "64";
+#elif BUILDFLAG(IS_ANDROID)
+  if (base::android::device_info::is_desktop() ||
+      base::android::device_info::is_xr()) {
+    return "64";
+  }
+  return std::string();
+#elif BUILDFLAG(IS_POSIX)
+  return BuildCpuInfo().contains("64") ? "64" : "32";
+#else
+#error Unsupported platform
+#endif
+}
+
+std::string BuildOSCpuInfoFromOSVersionAndCpuType(const std::string& os_version,
+                                                  const std::string& cpu_type) {
+  std::string os_cpu;
+
+#if !BUILDFLAG(IS_ANDROID) && BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
+  // Should work on any Posix system.
+  struct utsname unixinfo;
+  uname(&unixinfo);
+#endif
+
+#if BUILDFLAG(IS_WIN)
+  if (!cpu_type.empty()) {
+    base::StringAppendF(&os_cpu, "Windows NT %s; %s", os_version.c_str(),
+                        cpu_type.c_str());
+  } else {
+    base::StringAppendF(&os_cpu, "Windows NT %s", os_version.c_str());
+  }
+#else
+  base::StringAppendF(&os_cpu,
+#if BUILDFLAG(IS_MAC)
+                      "%s Mac OS X %s", cpu_type.c_str(), os_version.c_str()
+#elif BUILDFLAG(IS_CHROMEOS)
+                      "CrOS "
+                      "%s %s",
+                      cpu_type.c_str(),  // e.g. i686
+                      os_version.c_str()
+#elif BUILDFLAG(IS_ANDROID)
+                      "Android %s", os_version.c_str()
+#elif BUILDFLAG(IS_FUCHSIA)
+                      "Fuchsia"
+#elif BUILDFLAG(IS_IOS)
+                      "CPU %s OS %s like Mac OS X", cpu_type.c_str(),
+                      os_version.c_str()
+#elif BUILDFLAG(IS_POSIX)
+                      "%s %s",
+                      unixinfo.sysname,  // e.g. Linux
+                      cpu_type.c_str()   // e.g. i686
+#endif
+  );
+#endif
+
+  return os_cpu;
+}
+
+std::string BuildUnifiedPlatformUserAgentFromProduct(
+    const std::string& product) {
+  return BuildUserAgentFromOSAndProduct(GetUnifiedPlatform(), product);
+}
+
+std::string BuildUserAgentFromProduct(const std::string& product) {
+  std::string os_info;
+  base::StringAppendF(&os_info, "%s%s", GetUserAgentPlatform().c_str(),
+                      BuildOSCpuInfo(IncludeAndroidBuildNumber::Exclude,
+                                     IncludeAndroidModel::Include)
+                          .c_str());
+  return BuildUserAgentFromOSAndProduct(os_info, product);
+}
+
+std::string BuildModelInfo() {
+#if BUILDFLAG(IS_ANDROID)
+  // Model information is not exposed on Android desktop.
+  if (base::android::device_info::is_desktop()) {
+    return std::string();
+  }
+
+  // Only send the model information if on the release build of Android,
+  // matching user agent behaviour.
+  if (base::SysInfo::GetAndroidBuildCodename() == "REL") {
+    return base::SysInfo::HardwareModelName();
+  }
+#endif
+
+  return std::string();
+}
+
+#if BUILDFLAG(IS_ANDROID)
+std::string BuildUserAgentFromProductAndExtraOSInfo(
+    const std::string& product,
+    const std::string& extra_os_info,
+    IncludeAndroidBuildNumber include_android_build_number) {
+  std::string os_info;
+  base::StrAppend(&os_info, {GetUserAgentPlatform(),
+                             BuildOSCpuInfo(include_android_build_number,
+                                            IncludeAndroidModel::Include),
+                             extra_os_info});
+  return BuildUserAgentFromOSAndProduct(os_info, product);
+}
+
+std::string BuildUnifiedPlatformUAFromProductAndExtraOs(
+    const std::string& product,
+    const std::string& extra_os_info) {
+  std::string os_info;
+  base::StrAppend(&os_info, {GetUnifiedPlatform(), extra_os_info});
+  return BuildUserAgentFromOSAndProduct(os_info, product);
+}
+
+std::string GetAndroidOSInfo(
+    IncludeAndroidBuildNumber include_android_build_number,
+    IncludeAndroidModel include_android_model) {
+  std::string android_info_str;
+
+  // Send information about the device.
+  bool semicolon_inserted = false;
+  if (include_android_model == IncludeAndroidModel::Include) {
+    std::string android_device_name = BuildModelInfo();
+    if (!android_device_name.empty()) {
+      android_info_str += "; " + android_device_name;
+      semicolon_inserted = true;
+    }
+  }
+
+  // Append the build ID.
+  if (include_android_build_number == IncludeAndroidBuildNumber::Include) {
+    std::string android_build_id = base::SysInfo::GetAndroidBuildID();
+    if (!android_build_id.empty()) {
+      if (!semicolon_inserted) {
+        android_info_str += ";";
+      }
+      android_info_str += " Build/" + android_build_id;
+    }
+  }
+
+  return android_info_str;
+}
+#endif  // BUILDFLAG(IS_ANDROID)
+
+std::string BuildUserAgentFromOSAndProduct(const std::string& os_info,
+                                           const std::string& product) {
+  // Derived from Safari's UA string.
+  // This is done to expose our product name in a manner that is maximally
+  // compatible with Safari, we hope!!
+  std::string user_agent;
+  base::StringAppendF(&user_agent,
+                      "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "%s Safari/537.36",
+                      os_info.c_str(), product.c_str());
+  return user_agent;
+}
+
+bool IsWoW64() {
+#if BUILDFLAG(IS_WIN)
+  base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
+  return os_info->IsWowX86OnAMD64();
+#else
+  return false;
+#endif
 }
 
 }  // namespace embedder_support

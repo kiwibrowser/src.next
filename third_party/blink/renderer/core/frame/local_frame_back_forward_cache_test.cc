@@ -2,19 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-blink.h"
-#include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom-blink.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include <tuple>
 
 #include "base/run_loop.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-blink.h"
+#include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom-blink.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/renderer/bindings/core/v8/local_window_proxy.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_document.h"
+#include "third_party/blink/renderer/bindings/core/v8/window_proxy.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/script/classic_script.h"
@@ -34,7 +39,7 @@ class TestLocalFrameBackForwardCacheClient
       blink::AssociatedInterfaceProvider* provider) {
     provider->OverrideBinderForTesting(
         mojom::blink::BackForwardCacheControllerHost::Name_,
-        WTF::BindRepeating(
+        BindRepeating(
             [](TestLocalFrameBackForwardCacheClient* parent,
                mojo::ScopedInterfaceEndpointHandle handle) {
               parent->receiver_.Bind(
@@ -88,10 +93,11 @@ class LocalFrameBackForwardCacheTest : public testing::Test,
 // JavaScript execution at a microtask. Eviction is necessary to ensure that the
 // frame state is immutable when the frame is in the bfcache.
 // (https://www.chromestatus.com/feature/5815270035685376).
-TEST_F(LocalFrameBackForwardCacheTest, EvictionOnV8ExecutionAtMicrotask) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      features::kBackForwardCacheDWCOnJavaScriptExecution);
+TEST_F(LocalFrameBackForwardCacheTest, PauseMicrotaskExecution) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kBackForwardCachePauseMicrotasks);
+
   frame_test_helpers::TestWebFrameClient web_frame_client;
   TestLocalFrameBackForwardCacheClient frame_host(
       web_frame_client.GetRemoteNavigationAssociatedInterfaces());
@@ -112,18 +118,85 @@ TEST_F(LocalFrameBackForwardCacheTest, EvictionOnV8ExecutionAtMicrotask) {
   auto* script_state = ToScriptStateForMainWorld(frame);
   ScriptState::Scope scope(script_state);
 
-  // There are two types of microtasks:
-  //   1) V8 function
-  //   2) C++ closure
-  // The case 1) should never happen when the frame is in bfcache. On the other
-  // hand, the case 2) can happen. See https://crbug.com/994169
-  frame->DomWindow()->GetAgent()->event_loop()->EnqueueMicrotask(WTF::BindOnce(
-      [](LocalFrame* frame) {
-        ClassicScript::CreateUnspecifiedScript("console.log('hi');")
-            ->RunScript(frame->DomWindow());
-      },
-      WrapWeakPersistent(frame)));
-  frame_host.WaitUntilEvictedFromBackForwardCache();
+  int microtask_execution_count = 0;
+  scoped_refptr<scheduler::EventLoop> event_loop =
+      frame->DomWindow()->GetAgent()->event_loop();
+  event_loop->EnqueueMicrotask(base::BindLambdaForTesting(
+      [&microtask_execution_count]() { microtask_execution_count++; }));
+
+  event_loop->PerformMicrotaskCheckpoint();
+  EXPECT_EQ(microtask_execution_count, 0);
+
+  frame->GetPage()->GetPageScheduler()->SetPageFrozen(false);
+  frame->GetPage()->GetPageScheduler()->SetPageBackForwardCached(false);
+  frame->RemoveBackForwardCacheEviction();
+  event_loop->PerformMicrotaskCheckpoint();
+
+  EXPECT_EQ(microtask_execution_count, 1);
+}
+
+TEST_F(LocalFrameBackForwardCacheTest, EvictionHookOnDisposedContext) {
+  frame_test_helpers::TestWebFrameClient web_frame_client;
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.Initialize(&web_frame_client);
+  web_view_helper.Resize(gfx::Size(640, 480));
+
+  LocalFrame* frame = web_view_helper.GetWebView()->MainFrameImpl()->GetFrame();
+
+  auto* script_state = ToScriptStateForMainWorld(frame);
+  ASSERT_TRUE(script_state);
+  ASSERT_TRUE(script_state->ContextIsValid());
+
+  // Initialize the main world's JS context and create a JavaScript wrapper
+  // for the Document to populate its inline storage.
+  {
+    ScriptState::Scope scope(script_state);
+    v8::Local<v8::Value> document_wrapper =
+        ToV8Traits<Document>::ToV8(script_state, frame->GetDocument());
+    ASSERT_FALSE(document_wrapper.IsEmpty());
+  }
+
+  // Dispose the context, simulating context disposal on navigation.
+  frame->WindowProxy(DOMWrapperWorld::MainWorld(script_state->GetIsolate()))
+      ->ClearForNavigation();
+
+  // Hook BFCache eviction, which calls SetAbortScriptExecution. We verify that
+  // this does not force-initialize the context (which would crash due to the
+  // stale Document wrapper in inline storage).
+  frame->HookBackForwardCacheEviction();
+}
+
+TEST_F(LocalFrameBackForwardCacheTest,
+       WindowProxyReinitializationOnDisposedContext) {
+  frame_test_helpers::TestWebFrameClient web_frame_client;
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.Initialize(&web_frame_client);
+  web_view_helper.Resize(gfx::Size(640, 480));
+
+  LocalFrame* frame = web_view_helper.GetWebView()->MainFrameImpl()->GetFrame();
+
+  auto* script_state = ToScriptStateForMainWorld(frame);
+  ASSERT_TRUE(script_state);
+  ASSERT_TRUE(script_state->ContextIsValid());
+
+  // Initialize the main world's JS context and create a JavaScript wrapper
+  // for the Document to populate its inline storage.
+  {
+    ScriptState::Scope scope(script_state);
+    v8::Local<v8::Value> document_wrapper =
+        ToV8Traits<Document>::ToV8(script_state, frame->GetDocument());
+    ASSERT_FALSE(document_wrapper.IsEmpty());
+  }
+
+  // Dispose the context, simulating context disposal on navigation.
+  frame->WindowProxy(DOMWrapperWorld::MainWorld(script_state->GetIsolate()))
+      ->ClearForNavigation();
+
+  // Access WindowProxy before UpdateDocument() installs the next page's
+  // Document. Verify that reinitializing a context against an existing Document
+  // whose inline storage already contains a wrapper completes cleanly.
+  std::ignore = frame->WindowProxy(
+      DOMWrapperWorld::MainWorld(script_state->GetIsolate()));
 }
 
 }  // namespace blink

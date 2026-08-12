@@ -115,7 +115,7 @@ bool IsolatedOriginUtil::IsValidIsolatedOrigin(const url::Origin& origin) {
 }
 
 // static
-bool IsolatedOriginUtil::IsValidOriginForOptInIsolation(
+bool IsolatedOriginUtil::IsValidOriginForOriginAgentClusterOptIn(
     const url::Origin& origin) {
   // Per https://html.spec.whatwg.org/C/#initialise-the-document-object,
   // non-secure contexts cannot be isolated via opt-in origin isolation.
@@ -125,7 +125,7 @@ bool IsolatedOriginUtil::IsValidOriginForOptInIsolation(
 }
 
 // static
-bool IsolatedOriginUtil::IsValidOriginForOptOutIsolation(
+bool IsolatedOriginUtil::IsValidOriginForOriginAgentClusterOptOut(
     const url::Origin& origin) {
   // Per https://html.spec.whatwg.org/C/#initialise-the-document-object,
   // non-secure contexts cannot be isolated via opt-in origin isolation,

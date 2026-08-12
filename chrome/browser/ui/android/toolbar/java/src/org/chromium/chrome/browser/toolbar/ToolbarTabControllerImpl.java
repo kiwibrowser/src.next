@@ -4,34 +4,48 @@
 
 package org.chromium.chrome.browser.toolbar;
 
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.Callback;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.Supplier;
-import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestrator;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestratorFactory;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.toolbar.bottom.BottomControlsCoordinator;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
-import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
+import org.chromium.components.browser_ui.widget.gesture.BackPressHandler.BackPressResult;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
-import org.chromium.components.profile_metrics.BrowserProfileType;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.ui.base.PageTransition;
 
+import java.util.Collections;
+import java.util.function.Supplier;
+
 /** Implementation of {@link ToolbarTabController}. */
+@NullMarked
 public class ToolbarTabControllerImpl implements ToolbarTabController {
-    private final Supplier<Tab> mTabSupplier;
-    private final Supplier<Tracker> mTrackerSupplier;
-    private final ObservableSupplier<BottomControlsCoordinator> mBottomControlsCoordinatorSupplier;
+    private final Supplier<@Nullable Tab> mTabSupplier;
+    private final Supplier<@Nullable Tracker> mTrackerSupplier;
+    private final Supplier<@Nullable BackPressHandler> mBottomControlsBackPressHandlerSupplier;
     private final Supplier<String> mHomepageUrlSupplier;
     private final Runnable mOnSuccessRunnable;
-    private final Supplier<Tab> mActivityTabSupplier;
+    private final Supplier<@Nullable Tab> mActivityTabSupplier;
+    private final TabCreatorManager mTabCreatorManager;
+    private final Supplier<Boolean> mIsOffTheRecordSupplier;
+    private final MultiInstanceOrchestrator mMultiInstanceOrchestrator;
+    private final Runnable mOpenHomepageRunnable;
+    private final Callback<String> mOnHomepageOpenedCallback;
 
     /**
      * @param tabSupplier Supplier for the currently active tab.
      * @param trackerSupplier Supplier for the current profile tracker.
+     * @param bottomControlsBackPressHandlerSupplier Supplier for the bottom controls back press
+     *     handler.
      * @param homepageUrlSupplier Supplier for the homepage URL.
      * @param onSuccessRunnable Runnable that is invoked when the active tab is asked to perform the
      *     corresponding ToolbarTabController action; it is not invoked if the tab cannot
@@ -39,26 +53,43 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
      *     tabSupplier and activityTabSupplier can return the same tab if tab is active and
      *     interactable. But activityTabSupplier will return null if it is non-interactable, such as
      *     on overview mode.
+     * @param tabCreatorManager The {@link TabCreatorManager} used to create new tabs.
+     * @param isOffTheRecordSupplier Supplier for whether the current UI is off-the-record.
+     * @param openHomepageRunnable Runnable that handles opening the homepage.
+     * @param onHomepageOpenedCallback Callback to run when a homepage is opened.
      */
     public ToolbarTabControllerImpl(
-            Supplier<Tab> tabSupplier,
-            Supplier<Tracker> trackerSupplier,
-            ObservableSupplier<BottomControlsCoordinator> bottomControlsCoordinatorSupplier,
+            Supplier<@Nullable Tab> tabSupplier,
+            Supplier<@Nullable Tracker> trackerSupplier,
+            Supplier<@Nullable BackPressHandler> bottomControlsBackPressHandlerSupplier,
             Supplier<String> homepageUrlSupplier,
             Runnable onSuccessRunnable,
-            Supplier<Tab> activityTabSupplier) {
+            Supplier<@Nullable Tab> activityTabSupplier,
+            TabCreatorManager tabCreatorManager,
+            Supplier<Boolean> isOffTheRecordSupplier,
+            Runnable openHomepageRunnable,
+            Callback<String> onHomepageOpenedCallback) {
         mTabSupplier = tabSupplier;
         mTrackerSupplier = trackerSupplier;
-        mBottomControlsCoordinatorSupplier = bottomControlsCoordinatorSupplier;
+        mBottomControlsBackPressHandlerSupplier = bottomControlsBackPressHandlerSupplier;
         mHomepageUrlSupplier = homepageUrlSupplier;
         mOnSuccessRunnable = onSuccessRunnable;
         mActivityTabSupplier = activityTabSupplier;
+        mTabCreatorManager = tabCreatorManager;
+        mIsOffTheRecordSupplier = isOffTheRecordSupplier;
+        mMultiInstanceOrchestrator = MultiInstanceOrchestratorFactory.getInstance();
+        mOpenHomepageRunnable = openHomepageRunnable;
+        mOnHomepageOpenedCallback = onHomepageOpenedCallback;
     }
 
     @Override
     public boolean back() {
-        BottomControlsCoordinator controlsCoordinator = mBottomControlsCoordinatorSupplier.get();
-        if (controlsCoordinator != null && controlsCoordinator.onBackPressed()) {
+        BackPressHandler bottomControlsBackPressHandler =
+                mBottomControlsBackPressHandlerSupplier.get();
+        if (bottomControlsBackPressHandler != null
+                && Boolean.TRUE.equals(
+                        bottomControlsBackPressHandler.getHandleBackPressChangedSupplier().get())
+                && bottomControlsBackPressHandler.handleBackPress() == BackPressResult.SUCCESS) {
             return true;
         }
         Tab tab = mActivityTabSupplier.get();
@@ -76,6 +107,38 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
     }
 
     @Override
+    public boolean backInNewTab(boolean foregroundNewTab) {
+        Tab tab = mTabSupplier.get();
+        if (tab != null && tab.canGoBack()) {
+            @Nullable Tab newTab = createTabWithHistory(tab, foregroundNewTab);
+            if (newTab == null) return false;
+            newTab.goBack();
+            // Don't run mOnSuccessRunnable since nothing happened in the current tab.
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean backInNewWindow() {
+        Tab tab = mTabSupplier.get();
+        if (tab != null && tab.canGoBack()) {
+            @Nullable Tab newTab = createTabWithHistory(tab, /* foregroundNewTab= */ false);
+            if (newTab == null) return false;
+            newTab.goBack();
+            // Move tab to a new window.
+            mMultiInstanceOrchestrator.moveTabsToNewWindow(
+                    ContextUtils.activityFromContext(newTab.getContext()),
+                    Collections.singletonList(newTab),
+                    /* finalizeCallback= */ null,
+                    NewWindowAppSource.KEYBOARD_SHORTCUT);
+            // Don't run mOnSuccessRunnable since nothing happened in the current tab.
+            return true;
+        }
+        return false;
+    }
+
+    @Override
     public boolean forward() {
         Tab tab = mTabSupplier.get();
         if (tab != null && tab.canGoForward()) {
@@ -84,6 +147,48 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
             return true;
         }
         return false;
+    }
+
+    @Override
+    public boolean forwardInNewTab(boolean foregroundNewTab) {
+        Tab tab = mTabSupplier.get();
+        if (tab != null && tab.canGoForward()) {
+            @Nullable Tab newTab = createTabWithHistory(tab, foregroundNewTab);
+            if (newTab == null) return false;
+            newTab.goForward();
+            // Don't run mOnSuccessRunnable since nothing happened in the current tab.
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean forwardInNewWindow() {
+        Tab tab = mTabSupplier.get();
+        if (tab != null && tab.canGoForward()) {
+            @Nullable Tab newTab = createTabWithHistory(tab, /* foregroundNewTab= */ false);
+            if (newTab == null) return false;
+            newTab.goForward();
+            // Move tab to a new window.
+            mMultiInstanceOrchestrator.moveTabsToNewWindow(
+                    ContextUtils.activityFromContext(newTab.getContext()),
+                    Collections.singletonList(newTab),
+                    /* finalizeCallback= */ null,
+                    NewWindowAppSource.KEYBOARD_SHORTCUT);
+            // Don't run mOnSuccessRunnable since nothing happened in the current tab.
+            return true;
+        }
+        return false;
+    }
+
+    private @Nullable Tab createTabWithHistory(Tab tab, boolean foregroundNewTab) {
+        return mTabCreatorManager
+                .getTabCreator(tab.isOffTheRecord())
+                .createTabWithHistory(
+                        tab,
+                        foregroundNewTab
+                                ? TabLaunchType.FROM_HISTORY_NAVIGATION_FOREGROUND
+                                : TabLaunchType.FROM_HISTORY_NAVIGATION_BACKGROUND);
     }
 
     @Override
@@ -108,35 +213,70 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
     @Override
     public void openHomepage() {
         RecordUserAction.record("Home");
-        recordHomeButtonUserPerProfileType();
-        Tab currentTab = mTabSupplier.get();
-        if (currentTab == null) return;
+        recordHomeButtonUseForIph();
+        mOpenHomepageRunnable.run();
+    }
+
+    @Override
+    public void openHomepageInNewTab(boolean foregroundNewTab) {
+        RecordUserAction.record(
+                foregroundNewTab ? "HomeInNewForegroundTab" : "HomeInNewBackgroundTab");
         String homePageUrl = mHomepageUrlSupplier.get();
-        boolean is_chrome_internal =
-                homePageUrl.startsWith(ContentUrlConstants.ABOUT_URL_SHORT_PREFIX)
-                        || homePageUrl.startsWith(UrlConstants.CHROME_URL_SHORT_PREFIX)
-                        || homePageUrl.startsWith(UrlConstants.CHROME_NATIVE_URL_SHORT_PREFIX);
-        RecordHistogram.recordBooleanHistogram(
-                "Navigation.Home.IsChromeInternal", is_chrome_internal);
-        // Log a user action for the !is_chrome_internal case. This value is used as part of a
-        // high-level guiding metric, which is being migrated to user actions.
-        if (!is_chrome_internal) {
-            RecordUserAction.record("Navigation.Home.NotChromeInternal");
-        }
+        mOnHomepageOpenedCallback.onResult(homePageUrl);
 
         recordHomeButtonUseForIph();
-        currentTab.loadUrl(new LoadUrlParams(homePageUrl, PageTransition.HOME_PAGE));
+        Tab currentTab = mTabSupplier.get();
+        boolean isOffTheRecord =
+                currentTab != null ? currentTab.isOffTheRecord() : mIsOffTheRecordSupplier.get();
+        mTabCreatorManager
+                .getTabCreator(isOffTheRecord)
+                .createNewTab(
+                        new LoadUrlParams(homePageUrl, PageTransition.HOME_PAGE),
+                        foregroundNewTab
+                                ? TabLaunchType.FROM_CHROME_UI
+                                : TabLaunchType.FROM_LONGPRESS_BACKGROUND,
+                        currentTab);
+    }
+
+    @Override
+    public void openHomepageInNewWindow() {
+        RecordUserAction.record("HomeInNewForegroundWindow");
+        String homePageUrl = mHomepageUrlSupplier.get();
+        mOnHomepageOpenedCallback.onResult(homePageUrl);
+
+        recordHomeButtonUseForIph();
+        Tab currentTab = mTabSupplier.get();
+        boolean isOffTheRecord =
+                currentTab != null ? currentTab.isOffTheRecord() : mIsOffTheRecordSupplier.get();
+        Tab newTab =
+                mTabCreatorManager
+                        .getTabCreator(isOffTheRecord)
+                        .createNewTab(
+                                new LoadUrlParams(homePageUrl, PageTransition.HOME_PAGE),
+                                TabLaunchType.FROM_CHROME_UI,
+                                currentTab);
+
+        if (newTab == null) return;
+
+        // Move tab to a new window.
+        mMultiInstanceOrchestrator.moveTabsToNewWindow(
+                ContextUtils.activityFromContext(newTab.getContext()),
+                Collections.singletonList(newTab),
+                /* finalizeCallback= */ null,
+                NewWindowAppSource.KEYBOARD_SHORTCUT);
     }
 
     /**
      * Whether Toolbar Tab Controller can consume a back press.
+     *
      * @return True if a back press can be consumed.
      */
     boolean canGoBack() {
-        BottomControlsCoordinator controlsCoordinator = mBottomControlsCoordinatorSupplier.get();
-        if (controlsCoordinator != null
+        BackPressHandler bottomControlsBackPressHandler =
+                mBottomControlsBackPressHandlerSupplier.get();
+        if (bottomControlsBackPressHandler != null
                 && Boolean.TRUE.equals(
-                        controlsCoordinator.getHandleBackPressChangedSupplier().get())) {
+                        bottomControlsBackPressHandler.getHandleBackPressChangedSupplier().get())) {
             return true;
         }
         Tab tab = mActivityTabSupplier.get();
@@ -150,14 +290,5 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
         if (tab == null || tracker == null) return;
 
         tracker.notifyEvent(EventConstants.HOMEPAGE_BUTTON_CLICKED);
-    }
-
-    private void recordHomeButtonUserPerProfileType() {
-        Tab tab = mTabSupplier.get();
-        if (tab == null) return;
-        Profile profile = tab.getProfile();
-        @BrowserProfileType int type = Profile.getBrowserProfileTypeFromProfile(profile);
-        RecordHistogram.recordEnumeratedHistogram(
-                "Android.HomeButton.PerProfileType", type, BrowserProfileType.MAX_VALUE + 1);
     }
 }

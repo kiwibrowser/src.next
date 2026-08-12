@@ -82,6 +82,12 @@ export function getHtml(this: ItemElement) {
           <span id="blocklisted-warning" class="cr-secondary-text"><!--
             -->${this.data.blocklistText}<!-- No whitespace; use :empty in css.
        --></span>
+          <span id="unsupported-developer-extension-warning"
+              class="cr-secondary-text"
+              ?hidden="${!this.data.disableReasons.
+            unsupportedDeveloperExtension}">
+            $i18n{itemUnsupportedDeveloperMode}
+          </span>
         </div>` : ''}
       ${this.showMv2DeprecationWarning_() ? html`
         <div id="warnings">
@@ -141,12 +147,22 @@ export function getHtml(this: ItemElement) {
         $i18n{remove}
       </cr-button>
       ${this.shouldShowErrorsButton_() ? html`
-        <cr-button id="errors-button" @click="${this.onErrorsClick_}"
+        <cr-button id="errors-button"
+            class="${this.showErrorsAsWarningsButtonLabel_()
+            ? 'warning' : 'error'}"
+            @click="${this.onErrorsClick_}"
             aria-describedby="a11yAssociation">
-          $i18n{itemErrors}
+          ${this.showErrorsAsWarningsButtonLabel_()
+          ? '$i18n{itemWarnings}' : '$i18n{itemErrors}'}
         </cr-button>` : ''}
     </div>
-    ${!this.computeDevReloadButtonHidden_() ? html`
+    ${this.showAccountUploadButton_() ? html`
+      <cr-icon-button id="account-upload-button" class="no-overlap"
+          title="$i18n{itemUpload}" aria-label="$i18n{itemUpload}"
+          iron-icon="extensions-icons:extension_cloud_upload"
+          aria-describedby="a11yAssociation" @click="${this.onUploadClick_}">
+      </cr-icon-button>` : ''}
+    ${this.showDevReloadButton_() ? html`
       <cr-icon-button id="dev-reload-button" class="icon-refresh no-overlap"
           title="$i18n{itemReload}" aria-label="$i18n{itemReload}"
           aria-describedby="a11yAssociation" @click="${this.onReloadClick_}">
@@ -167,13 +183,9 @@ export function getHtml(this: ItemElement) {
         icon-class="cr20:kite"
         icon-aria-label="$i18n{parentDisabledPermissions}">
     </cr-tooltip-icon>
-    <cr-tooltip id="enable-toggle-tooltip" for="enableToggle" position="left"
-        aria-hidden="true" animation-delay="0" fit-to-visible-bounds>
-      ${this.getEnableToggleTooltipText_()}
-    </cr-tooltip>
     <cr-toggle id="enableToggle"
         aria-label="${this.getEnableToggleAriaLabel_()}"
-        aria-describedby="a11yAssociation enable-toggle-tooltip"
+        aria-describedby="a11yAssociation"
         ?checked="${this.isEnabled_()}" @change="${this.onEnableToggleChange_}"
         ?disabled="${!this.isEnableToggleEnabled_()}"
         ?hidden="${!this.showEnableToggle_()}">

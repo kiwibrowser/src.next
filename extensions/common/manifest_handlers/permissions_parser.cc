@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
@@ -41,7 +40,8 @@ namespace errors = manifest_errors;
 namespace {
 
 struct ManifestPermissions : public Extension::ManifestData {
-  ManifestPermissions(std::unique_ptr<const PermissionSet> permissions);
+  explicit ManifestPermissions(
+      std::unique_ptr<const PermissionSet> permissions);
   ~ManifestPermissions() override;
 
   std::unique_ptr<const PermissionSet> permissions;
@@ -51,8 +51,7 @@ ManifestPermissions::ManifestPermissions(
     std::unique_ptr<const PermissionSet> permissions)
     : permissions(std::move(permissions)) {}
 
-ManifestPermissions::~ManifestPermissions() {
-}
+ManifestPermissions::~ManifestPermissions() = default;
 
 // Checks whether the host |pattern| is allowed for the given |extension|,
 // given API permissions |permissions|.
@@ -64,8 +63,9 @@ bool CanSpecifyHostPermission(const Extension* extension,
     URLPatternSet chrome_scheme_hosts =
         ExtensionsClient::Get()->GetPermittedChromeSchemeHosts(extension,
                                                                permissions);
-    if (chrome_scheme_hosts.ContainsPattern(pattern))
+    if (chrome_scheme_hosts.ContainsPattern(pattern)) {
       return true;
+    }
 
     // Component extensions can have access to all of chrome://*.
     if (PermissionsData::CanExecuteScriptEverywhere(extension->id(),
@@ -73,8 +73,7 @@ bool CanSpecifyHostPermission(const Extension* extension,
       return true;
     }
 
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kExtensionsOnChromeURLs)) {
+    if (switches::AreExtensionsOnChromeURLsAllowed()) {
       return true;
     }
 
@@ -92,8 +91,9 @@ bool ParseHostsFromJSON(Extension* extension,
                         const char* key,
                         std::vector<std::string>* hosts,
                         std::u16string* error) {
-  if (!extension->manifest()->FindKey(key))
+  if (!extension->manifest()->FindKey(key)) {
     return true;
+  }
 
   const base::Value* permissions = nullptr;
   if (!extension->manifest()->GetList(key, &permissions)) {
@@ -103,7 +103,7 @@ bool ParseHostsFromJSON(Extension* extension,
   }
 
   // Add all permissions parsed from the manifest to |hosts|.
-  const base::Value::List& list = permissions->GetList();
+  const base::ListValue& list = permissions->GetList();
   for (size_t i = 0; i < list.size(); ++i) {
     if (list[i].is_string()) {
       hosts->push_back(list[i].GetString());
@@ -128,7 +128,7 @@ void ParseHostPermissions(Extension* extension,
 
   // Users should be able to enable file access for extensions with activeTab.
   if (!can_execute_script_everywhere &&
-      base::Contains(api_permissions, APIPermissionID::kActiveTab)) {
+      api_permissions.count(APIPermissionID::kActiveTab)) {
     extension->set_wants_file_access(true);
   }
 
@@ -154,8 +154,9 @@ void ParseHostPermissions(Extension* extension,
       if (pattern.MatchesScheme(url::kFileScheme) &&
           !can_execute_script_everywhere) {
         extension->set_wants_file_access(true);
-        if (!(extension->creation_flags() & Extension::ALLOW_FILE_ACCESS))
+        if (!(extension->creation_flags() & Extension::ALLOW_FILE_ACCESS)) {
           valid_schemes &= ~URLPattern::SCHEME_FILE;
+        }
       }
 
       if (pattern.scheme() != content::kChromeUIScheme &&
@@ -208,8 +209,9 @@ bool ParseHelper(Extension* extension,
                  APIPermissionSet* api_permissions,
                  URLPatternSet* host_permissions,
                  std::u16string* error) {
-  if (!extension->manifest()->FindKey(key))
+  if (!extension->manifest()->FindKey(key)) {
     return true;
+  }
 
   const base::Value* permissions = nullptr;
   if (!extension->manifest()->GetList(key, &permissions)) {
@@ -244,7 +246,7 @@ bool ParseHelper(Extension* extension,
     // The feature should exist since we just got an APIPermission for it. The
     // two systems should be updated together whenever a permission is added.
     DCHECK(feature) << "Could not find feature for " << iter->name();
-    // http://crbug.com/176381
+    // http://crbug.com/40302033
     if (!feature) {
       to_remove.push_back(iter->id());
       continue;
@@ -303,8 +305,9 @@ void RemoveNonAllowedOptionalPermissions(
   std::set<APIPermissionID> ids_to_erase;
 
   for (const auto* api_permission : *optional_api_permissions) {
-    if (api_permission->info()->supports_optional())
+    if (api_permission->info()->supports_optional()) {
       continue;
+    }
     // A permission that doesn't support being optional was listed in optional
     // permissions. Add a warning, and slate it for removal from the set.
     install_warnings.emplace_back(
@@ -334,8 +337,9 @@ void RemoveOverlappingAPIPermissions(
                                  *optional_api_permissions,
                                  &overlapping_api_permissions);
 
-  if (overlapping_api_permissions.empty())
+  if (overlapping_api_permissions.empty()) {
     return;
+  }
 
   std::vector<InstallWarning> install_warnings;
   install_warnings.reserve(overlapping_api_permissions.size());
@@ -383,8 +387,9 @@ void RemoveOverlappingHostPermissions(
     }
   }
 
-  if (!install_warnings.empty())
+  if (!install_warnings.empty()) {
     extension->AddInstallWarnings(std::move(install_warnings));
+  }
 
   *optional_host_permissions = std::move(new_optional_host_permissions);
 }
@@ -398,11 +403,8 @@ struct PermissionsParser::InitialPermissions {
   URLPatternSet scriptable_hosts;
 };
 
-PermissionsParser::PermissionsParser() {
-}
-
-PermissionsParser::~PermissionsParser() {
-}
+PermissionsParser::PermissionsParser() = default;
+PermissionsParser::~PermissionsParser() = default;
 
 bool PermissionsParser::Parse(Extension* extension, std::u16string* error) {
   initial_required_permissions_ = std::make_unique<InitialPermissions>();

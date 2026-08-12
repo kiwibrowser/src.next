@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/visual_viewport.h"
+#include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -132,7 +137,7 @@ TEST_P(VisualRectMappingTest, LayoutText) {
   auto* text = GetLayoutObjectByElementId("text")->SlowFirstChild();
 
   auto* scrollable_area = GetScrollableArea(container);
-  scrollable_area->ScrollToAbsolutePosition(
+  scrollable_area->ScrollToAbsolutePositionForTest(
       gfx::PointF(scrollable_area->ScrollPosition().x(), 50));
   UpdateAllLifecyclePhasesForTest();
 
@@ -171,7 +176,7 @@ TEST_P(VisualRectMappingTest, LayoutTextContainerFlippedWritingMode) {
   auto* text = GetLayoutObjectByElementId("text")->SlowFirstChild();
 
   auto* scrollable_area = GetScrollableArea(container);
-  scrollable_area->ScrollToAbsolutePosition(
+  scrollable_area->ScrollToAbsolutePositionForTest(
       gfx::PointF(scrollable_area->ScrollPosition().x(), 50));
   UpdateAllLifecyclePhasesForTest();
 
@@ -208,7 +213,7 @@ TEST_P(VisualRectMappingTest, LayoutInline) {
   LayoutObject* leaf = container->LastChild();
 
   auto* scrollable_area = GetScrollableArea(container);
-  scrollable_area->ScrollToAbsolutePosition(
+  scrollable_area->ScrollToAbsolutePositionForTest(
       gfx::PointF(scrollable_area->ScrollPosition().x(), 50));
   UpdateAllLifecyclePhasesForTest();
 
@@ -247,7 +252,7 @@ TEST_P(VisualRectMappingTest, LayoutInlineContainerFlippedWritingMode) {
   LayoutObject* leaf = container->LastChild();
 
   auto* scrollable_area = GetScrollableArea(container);
-  scrollable_area->ScrollToAbsolutePosition(
+  scrollable_area->ScrollToAbsolutePositionForTest(
       gfx::PointF(scrollable_area->ScrollPosition().x(), 50));
   UpdateAllLifecyclePhasesForTest();
 
@@ -273,6 +278,267 @@ TEST_P(VisualRectMappingTest, LayoutInlineContainerFlippedWritingMode) {
   EXPECT_EQ(rect, PhysicalRect(0, 10, 80, 0));
 }
 
+TEST_P(VisualRectMappingTest, SkipAncestorAndViewportClipFlag) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #clipper {
+        position: absolute;
+        left: 10px;
+        top: 15px;
+        width: 60px;
+        height: 60px;
+        overflow: hidden;
+      }
+      #target {
+        position: absolute;
+        left: 40px;
+        top: 40px;
+        width: 80px;
+        height: 80px;
+        background: green;
+      }
+    </style>
+    <div id="clipper"><div id="target"></div></div>
+  )HTML");
+
+  LayoutObject* target = GetLayoutObjectByElementId("target");
+  ASSERT_TRUE(target);
+  UpdateAllLifecyclePhasesForTest();
+
+  gfx::RectF local_rect_f = target->LocalBoundingBoxRectForAccessibility(
+      LayoutObject::IncludeDescendants(true));
+  PhysicalRect local_rect = PhysicalRect::EnclosingRect(local_rect_f);
+  ASSERT_FALSE(local_rect.IsEmpty());
+
+  PhysicalRect clipped = local_rect;
+  EXPECT_TRUE(
+      target->MapToVisualRectInAncestorSpace(&GetLayoutView(), clipped));
+  // The overflow clip on #clipper limits the visible rect to the portion of
+  // #target intersecting the 60x60 clip.
+  EXPECT_EQ(clipped, PhysicalRect(50, 55, 20, 20));
+
+  PhysicalRect unclipped = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      &GetLayoutView(), unclipped, kSkipAncestorAndViewportClips));
+  // Skipping ancestor clips should report the target's full rect relative to
+  // the viewport rather than the 20x20 clipped region.
+  EXPECT_EQ(unclipped, PhysicalRect(50, 55, 80, 80));
+
+  // Check again, using geometry mapper (fast path).
+  PhysicalRect unclipped_fast = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      &GetLayoutView(), unclipped_fast,
+      static_cast<VisualRectFlags>(kSkipAncestorAndViewportClips |
+                                   kUseGeometryMapper)));
+  EXPECT_EQ(unclipped_fast, PhysicalRect(50, 55, 80, 80));
+}
+
+TEST_P(VisualRectMappingTest, SkipAncestorAndViewportClipFlagViewportSpace) {
+  // Mapping directly into viewport space (ancestor == nullptr) should skip the
+  // viewport and ancestor clips when explicitly requested so callers can clamp
+  // the result themselves without recomputing geometry.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #clipper {
+        position: absolute;
+        left: -10px;
+        top: -10px;
+        width: 35px;
+        height: 35px;
+        overflow: hidden;
+      }
+      #target {
+        position: absolute;
+        left: -20px;
+        top: -25px;
+        width: 40px;
+        height: 40px;
+        background: coral;
+      }
+    </style>
+    <div id="clipper"><div id="target"></div></div>
+  )HTML");
+
+  LayoutObject* target = GetLayoutObjectByElementId("target");
+  ASSERT_TRUE(target);
+  UpdateAllLifecyclePhasesForTest();
+
+  const gfx::Rect viewport_rect =
+      GetDocument().View()->LayoutViewport()->VisibleContentRect(
+          IncludeScrollbarsInRect::kIncludeScrollbars);
+  SCOPED_TRACE(testing::Message()
+               << "viewport_rect=" << viewport_rect.ToString());
+  EXPECT_TRUE(GetLayoutView().HasClipRelatedProperty());
+  EXPECT_EQ(viewport_rect, gfx::Rect(0, 0, 800, 600));
+
+  gfx::RectF local_rect_f = target->LocalBoundingBoxRectForAccessibility(
+      LayoutObject::IncludeDescendants(false));
+  PhysicalRect local_rect = PhysicalRect::EnclosingRect(local_rect_f);
+  ASSERT_FALSE(local_rect.IsEmpty());
+
+  PhysicalRect clipped_to_view = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(&GetLayoutView(),
+                                                     clipped_to_view));
+  // Mapping into the LayoutView coordinate space should apply the ancestor
+  // (#clipper) overflow clip but leave the viewport clip for the caller.
+  EXPECT_EQ(clipped_to_view, PhysicalRect(-10, -10, 20, 15));
+
+  PhysicalRect clipped = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(nullptr, clipped));
+  SCOPED_TRACE(testing::Message()
+               << "local_rect=" << local_rect.ToString()
+               << " clipped_to_view=" << clipped_to_view.ToString()
+               << " clipped=" << clipped.ToString() << " target_location="
+               << To<LayoutBox>(target)->PhysicalLocation().ToString());
+  // Regular mapping applies the ancestor clip (#clipper) and the viewport
+  // clip, so the rect collapses to the small portion that intersects both
+  // clips. The clipper trims to 20x15 at (-10,-10) and the viewport then clips
+  // that down to the visible 10x5 slice.
+  EXPECT_EQ(clipped, PhysicalRect(0, 0, 10, 5));
+
+  PhysicalRect unclipped = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, unclipped, kSkipAncestorAndViewportClips));
+  // The block is positioned at (-30, -35) relative to the viewport once the
+  // ancestor offsets are applied. Skipping clips should expose the entire rect
+  // even though none of it is currently visible.
+  EXPECT_EQ(unclipped, PhysicalRect(-30, -35, 40, 40));
+
+  // Check again, using geometry mapper (fast path).
+  PhysicalRect unclipped_fast = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, unclipped_fast,
+      static_cast<VisualRectFlags>(kSkipAncestorAndViewportClips |
+                                   kUseGeometryMapper)));
+  EXPECT_EQ(unclipped_fast, PhysicalRect(-30, -35, 40, 40));
+}
+
+TEST_P(VisualRectMappingTest, SkipAncestorAndViewportClipsInSubframe) {
+  // Validate that iframe viewport clipping can be skipped on request so callers
+  // can compute both unclipped and clipped geometry in one pass.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      iframe {
+        width: 100px;
+        height: 100px;
+        border: none;
+      }
+    </style>
+    <iframe id="child"></iframe>
+  )HTML");
+
+  SetChildFrameHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #target {
+        position: absolute;
+        left: -20px;
+        top: -30px;
+        width: 80px;
+        height: 80px;
+        background: red;
+      }
+    </style>
+    <body><div id="target"></div></body>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* iframe_element = To<HTMLIFrameElement>(
+      GetDocument().getElementById(AtomicString("child")));
+  ASSERT_TRUE(iframe_element);
+  auto* child_frame = DynamicTo<LocalFrame>(iframe_element->ContentFrame());
+  ASSERT_TRUE(child_frame);
+  auto* child_view = child_frame->View();
+  ASSERT_TRUE(child_view);
+  child_view->UpdateAllLifecyclePhasesForTest();
+
+  auto* target_element =
+      child_frame->GetDocument()->getElementById(AtomicString("target"));
+  ASSERT_TRUE(target_element);
+  LayoutObject* target = target_element->GetLayoutObject();
+  ASSERT_TRUE(target);
+
+  gfx::RectF local_rect_f = target->LocalBoundingBoxRectForAccessibility(
+      LayoutObject::IncludeDescendants(false));
+  PhysicalRect local_rect = PhysicalRect::EnclosingRect(local_rect_f);
+  ASSERT_FALSE(local_rect.IsEmpty());
+
+  PhysicalRect clipped = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(nullptr, clipped));
+  EXPECT_EQ(clipped, PhysicalRect(0, 0, 60, 50));
+
+  PhysicalRect unclipped = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, unclipped, kSkipAncestorAndViewportClips));
+  EXPECT_EQ(unclipped, PhysicalRect(-20, -30, 80, 80));
+
+  // Check again, using geometry mapper (fast path).
+  PhysicalRect unclipped_fast = local_rect;
+  EXPECT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, unclipped_fast,
+      static_cast<VisualRectFlags>(kSkipAncestorAndViewportClips |
+                                   kUseGeometryMapper)));
+  EXPECT_EQ(unclipped_fast, PhysicalRect(-20, -30, 80, 80));
+}
+
+TEST_P(VisualRectMappingTest, RegressionTest_SkipAncestorClipExpansion) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #grandparent {
+        position: relative;
+        left: 100px; top: 100px;
+      }
+      #parent {
+        width: 100px; height: 100px;
+        transform: rotate(45deg);
+        overflow: hidden;
+      }
+      #child {
+        width: 20px; height: 20px;
+        background: green;
+        transform: rotate(-45deg);
+      }
+    </style>
+    <div id="grandparent">
+      <div id="parent">
+        <div id="child"></div>
+      </div>
+    </div>
+  )HTML");
+
+  auto* grandparent = GetLayoutObjectByElementId("grandparent");
+  auto* child = GetLayoutObjectByElementId("child");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  PhysicalRect local_rect(0, 0, 20, 20);
+
+  // Slow path.
+  PhysicalRect slow_result = local_rect;
+  child->MapToVisualRectInAncestorSpace(To<LayoutBoxModelObject>(grandparent),
+                                        slow_result,
+                                        kSkipAncestorAndViewportClips);
+
+  // Fast path (GeometryMapper).
+  PhysicalRect fast_result = local_rect;
+  child->MapToVisualRectInAncestorSpace(
+      To<LayoutBoxModelObject>(grandparent), fast_result,
+      static_cast<VisualRectFlags>(kSkipAncestorAndViewportClips |
+                                   kUseGeometryMapper));
+
+  EXPECT_NEAR(slow_result.Width().ToFloat(), 20.0f, 0.1f);
+  EXPECT_NEAR(slow_result.Height().ToFloat(), 20.0f, 0.1f);
+  EXPECT_NEAR(fast_result.Width().ToFloat(), 20.0f, 0.1f);
+  EXPECT_NEAR(fast_result.Height().ToFloat(), 20.0f, 0.1f);
+
+  EXPECT_EQ(slow_result, fast_result);
+}
+
 TEST_P(VisualRectMappingTest, LayoutView) {
   GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(R"HTML(
@@ -295,7 +561,8 @@ TEST_P(VisualRectMappingTest, LayoutView) {
   // This case involves clipping: frame height is 50, y-coordinate of result
   // rect is 13, so height should be clipped to (50 - 13) == 37.
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   UpdateAllLifecyclePhasesForTest();
 
   PhysicalRect original_rect(4, 60, 20, 80);
@@ -371,7 +638,8 @@ TEST_P(VisualRectMappingTest, LayoutViewDisplayNone) {
   // This part is copied from the LayoutView test, just to ensure that the
   // mapped rect is valid before display:none is set on the iframe.
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   UpdateAllLifecyclePhasesForTest();
 
   PhysicalRect original_rect(4, 60, 20, 80);
@@ -465,7 +733,7 @@ TEST_P(VisualRectMappingTest, ContainerOverflowScroll) {
   auto* scrollable_area = GetScrollableArea(container);
   EXPECT_EQ(0, scrollable_area->ScrollPosition().y());
   EXPECT_EQ(0, scrollable_area->ScrollPosition().x());
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(8, 7));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(8, 7));
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -527,7 +795,7 @@ TEST_P(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowScroll) {
   // 150 = total_scrollable_overflow(100 + 100) - width(50)
   EXPECT_EQ(150, scrollable_area->ScrollPosition().x());
   // Scroll to the right by 8 pixels.
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(142, 7));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(142, 7));
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -585,7 +853,7 @@ TEST_P(VisualRectMappingTest, ContainerOverflowHidden) {
   auto* scrollable_area = GetScrollableArea(container);
   EXPECT_EQ(0, scrollable_area->ScrollPosition().y());
   EXPECT_EQ(0, scrollable_area->ScrollPosition().x());
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(28, 27));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(28, 27));
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -621,7 +889,7 @@ TEST_P(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowHidden) {
   // writing mode.
   // 150 = total_scrollable_overflow(100 + 100) - width(50)
   EXPECT_EQ(150, scrollable_area->ScrollPosition().x());
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(82, 7));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(82, 7));
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -661,7 +929,7 @@ TEST_P(VisualRectMappingTest, ContainerAndTargetDifferentFlippedWritingMode) {
   // 150 = total_scrollable_overflow(100 + 100) - width(50)
   EXPECT_EQ(150, scrollable_area->ScrollPosition().x());
   // Scroll to the right by 8 pixels.
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(142, 7));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(142, 7));
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -703,7 +971,8 @@ TEST_P(VisualRectMappingTest,
   )HTML");
 
   auto* scroller = To<LayoutBlock>(GetLayoutObjectByElementId("scroller"));
-  GetScrollableArea(scroller)->ScrollToAbsolutePosition(gfx::PointF(88, 77));
+  GetScrollableArea(scroller)->ScrollToAbsolutePositionForTest(
+      gfx::PointF(88, 77));
   UpdateAllLifecyclePhasesForTest();
 
   auto* normal_flow =
@@ -1104,7 +1373,7 @@ TEST_P(VisualRectMappingTest, PerspectivePlusScroll) {
     </div>
   )HTML");
   auto* container = To<LayoutBlock>(GetLayoutObjectByElementId("container"));
-  To<Element>(container->GetNode())->scrollTo(0, 5);
+  To<Element>(container->GetNode())->scrollToForTesting(0, 5);
   UpdateAllLifecyclePhasesForTest();
 
   auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
@@ -1148,7 +1417,8 @@ TEST_P(VisualRectMappingTest, FixedContentsInIframe) {
                                       root_view, kDefaultVisualRectFlags, true);
 
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   UpdateAllLifecyclePhasesForTest();
 
   // The fixed element should not scroll so the mapped visual rect should not
@@ -1180,7 +1450,8 @@ TEST_P(VisualRectMappingTest, FixedContentsWithScrollOffset) {
                                       ancestor, kDefaultVisualRectFlags, true);
 
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   UpdateAllLifecyclePhasesForTest();
 
   // The fixed element does not scroll but the ancestor does which changes the
@@ -1207,7 +1478,8 @@ TEST_P(VisualRectMappingTest, FixedContentsUnderViewWithScrollOffset) {
       fixed->View(), kDefaultVisualRectFlags, true);
 
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kNone);
   UpdateAllLifecyclePhasesForTest();
 
   // Results of mapping to ancestor are in absolute coordinates of the
@@ -1287,6 +1559,37 @@ TEST_P(VisualRectMappingTest, PerspectiveWithAnonymousTable) {
   EXPECT_EQ(gfx::Rect(1, -1, 8, 12), ToEnclosingRect(rect));
 }
 
+TEST_P(VisualRectMappingTest, MapToVisualRectFastPathMapsToViewport) {
+  // Mapping to a null ancestor uses the GeometryMapper fast path to reach the
+  // local root viewport (including remote viewport transforms).
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #target {
+        position: absolute;
+        left: 15px;
+        top: 25px;
+        width: 60px;
+        height: 40px;
+      }
+    </style>
+    <div id='target'></div>
+  )HTML");
+
+  auto* target = To<LayoutBlock>(GetLayoutObjectByElementId("target"));
+  ASSERT_TRUE(target);
+  gfx::RectF rect(0, 0, 60, 40);
+  constexpr auto kMapperFlags =
+      static_cast<VisualRectFlags>(kIgnoreFilters | kUseGeometryMapper |
+                                   kVisualRectApplyRemoteViewportTransform);
+
+  bool intersects = false;
+  ASSERT_TRUE(target->MapToVisualRectInAncestorSpaceInternalFastPath(
+      /*ancestor=*/nullptr, rect, kMapperFlags, intersects));
+  EXPECT_EQ(gfx::Rect(15, 25, 60, 40), gfx::ToEnclosingRect(rect));
+  EXPECT_TRUE(intersects);
+}
+
 TEST_P(VisualRectMappingTest, AnchorPositionScroll) {
   GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(R"HTML(
@@ -1339,7 +1642,7 @@ TEST_P(VisualRectMappingTest, AnchorPositionScroll) {
 
   auto* scrollable_area =
       GetScrollableArea(To<LayoutBlock>(GetLayoutBoxByElementId("scroller")));
-  scrollable_area->ScrollToAbsolutePosition(gfx::PointF(400, 0));
+  scrollable_area->ScrollToAbsolutePositionForTest(gfx::PointF(400, 0));
 
   // Simulates a frame to update snapshotted scroll offset.
   GetPage().Animator().ServiceScriptedAnimations(
@@ -1378,6 +1681,461 @@ TEST_P(VisualRectMappingTest, IgnoreFilters) {
                                       parent, kDefaultVisualRectFlags, true);
   CheckMapToVisualRectInAncestorSpace(input, expected_without_filter, filter,
                                       parent, kIgnoreFilters, true);
+}
+
+TEST_P(VisualRectMappingTest, NestedTransformsFastVsSlowPath) {
+  // Purpose: validate that the non-GeometryMapper code path produces the same
+  // visual rect as the GeometryMapper fast path, even when mapping through
+  // nested transforms.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #parent {
+        position: relative;
+        top: 100px;
+        left: 100px;
+        width: 100px;
+        height: 100px;
+        transform: rotate(45deg);
+      }
+      #child {
+        width: 100px;
+        height: 100px;
+        transform: rotate(45deg);
+      }
+    </style>
+    <div id="parent"><div id="child"></div></div>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* layout_view = &GetLayoutView();
+  auto* child = GetLayoutObjectByElementId("child");
+  ASSERT_TRUE(child);
+
+  constexpr VisualRectFlags kGeomFlags = static_cast<VisualRectFlags>(
+      kUseGeometryMapper | kDefaultVisualRectFlags);
+  constexpr VisualRectFlags kNonMapperFlags = kDefaultVisualRectFlags;
+  PhysicalRect local_rect(0, 0, 100, 100);
+
+  // GeometryMapper path (expected reference).
+  PhysicalRect mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(layout_view, mapper_rect,
+                                                    kGeomFlags));
+  EXPECT_EQ(PhysicalRect(100, 100, 100, 100), mapper_rect);
+
+  // Non-GeometryMapper path with the same ancestor should match the reference.
+  PhysicalRect non_mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(
+      layout_view, non_mapper_rect, kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, non_mapper_rect);
+
+  // Mapping to the main frame (null ancestor) should also match.
+  PhysicalRect root_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(nullptr, root_rect,
+                                                    kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, root_rect);
+}
+
+TEST_P(VisualRectMappingTest, SVGTransformsFastVsSlowPath) {
+  // Purpose: validate that the non-GeometryMapper code path produces the same
+  // visual rect as the GeometryMapper fast path, even when mapping through
+  // SVG transforms.
+  SetBodyInnerHTML(R"HTML(
+    <style>body { margin: 0; }</style>
+    <svg width="100" height="100" viewBox="-10 10 100 200"
+        preserveAspectRatio="none">
+      <rect id="green_box" x="0" y="1" width="20" height="20" fill="green"/>
+    </svg>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* layout_view = &GetLayoutView();
+  auto* green_box = GetLayoutObjectByElementId("green_box");
+  ASSERT_TRUE(green_box);
+
+  constexpr VisualRectFlags kGeomFlags = static_cast<VisualRectFlags>(
+      kUseGeometryMapper | kDefaultVisualRectFlags);
+  constexpr VisualRectFlags kNonMapperFlags = kDefaultVisualRectFlags;
+  PhysicalRect local_rect(0, 0, 20, 20);
+
+  // GeometryMapper path (expected reference).
+  PhysicalRect mapper_rect = local_rect;
+  ASSERT_TRUE(green_box->MapToVisualRectInAncestorSpace(
+      layout_view, mapper_rect, kGeomFlags));
+
+  // The green box is located at the SVG origin with width and height 20, which
+  // maps to (10, -5) with a width of 20 and height of 10. Note the y axis is
+  // squished due to `preserveAspectRatio="none"`. Then, the negative y portion
+  // is clipped away.
+  EXPECT_EQ(PhysicalRect(10, 0, 20, 5), mapper_rect);
+
+  // Non-GeometryMapper path with the same ancestor should match the reference.
+  PhysicalRect non_mapper_rect = local_rect;
+  ASSERT_TRUE(green_box->MapToVisualRectInAncestorSpace(
+      layout_view, non_mapper_rect, kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, non_mapper_rect);
+
+  // Mapping to the main frame (null ancestor) should also match.
+  PhysicalRect root_rect = local_rect;
+  ASSERT_TRUE(green_box->MapToVisualRectInAncestorSpace(nullptr, root_rect,
+                                                        kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, root_rect);
+}
+
+TEST_P(VisualRectMappingTest, NestedTransformsGeometryMapperFlag) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #grandparent {
+        position: relative;
+      }
+      #parent {
+        width: 100px;
+        height: 100px;
+        transform: rotate(45deg);
+      }
+      #child {
+        width: 100px;
+        height: 100px;
+        transform: rotate(45deg);
+      }
+      #grandchild {
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id="grandparent">
+      <div id="parent">
+        <div id="child">
+          <div id="grandchild"></div>
+        </div>
+      </div>
+    </div>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* grandparent = GetLayoutObjectByElementId("grandparent");
+  auto* grandchild = GetLayoutObjectByElementId("grandchild");
+
+  PhysicalRect local_rect(0, 0, 100, 100);
+  PhysicalRect mapper_rect = local_rect;
+  ASSERT_TRUE(grandchild->MapToVisualRectInAncestorSpace(
+      To<LayoutBoxModelObject>(grandparent), mapper_rect, kUseGeometryMapper));
+  PhysicalRect slow_rect = local_rect;
+  ASSERT_TRUE(grandchild->MapToVisualRectInAncestorSpace(
+      To<LayoutBoxModelObject>(grandparent), slow_rect,
+      kDefaultVisualRectFlags));
+  EXPECT_NEAR(mapper_rect.X().ToFloat(), slow_rect.X().ToFloat(), 0.1f);
+  EXPECT_NEAR(mapper_rect.Y().ToFloat(), slow_rect.Y().ToFloat(), 0.1f);
+  EXPECT_NEAR(mapper_rect.Width().ToFloat(), slow_rect.Width().ToFloat(), 0.1f);
+  EXPECT_NEAR(mapper_rect.Height().ToFloat(), slow_rect.Height().ToFloat(),
+              0.1f);
+}
+
+TEST_P(VisualRectMappingTest, NestedTransformsComposeAngles) {
+  // Purpose: prove that nested rotations accumulate (10deg + 35deg = 45deg)
+  // and that the non-GeometryMapper path matches the GeometryMapper result.
+  // Using a non-square box and transform-origin: 0 0 ensures the bounding box
+  // shifts and grows; if rotations were skipped we would still see 100x50 at
+  // the origin.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #parent {
+        width: 100px;
+        height: 50px;
+        transform-origin: 0 0;
+        transform: rotate(10deg);
+      }
+      #child {
+        width: 100px;
+        height: 50px;
+        transform-origin: 0 0;
+        transform: rotate(35deg);
+      }
+    </style>
+    <div id="parent"><div id="child"></div></div>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* layout_view = &GetLayoutView();
+  auto* child = GetLayoutObjectByElementId("child");
+  ASSERT_TRUE(child);
+
+  constexpr VisualRectFlags kGeomFlags = static_cast<VisualRectFlags>(
+      kUseGeometryMapper | kDefaultVisualRectFlags);
+  constexpr VisualRectFlags kNonMapperFlags = kDefaultVisualRectFlags;
+  PhysicalRect local_rect(0, 0, 100, 50);
+
+  PhysicalRect mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(layout_view, mapper_rect,
+                                                    kGeomFlags));
+
+  // A 45deg rotation of a 100x50 box around the origin produces a bounding box
+  // roughly [-35.36, 0] with size ~106.07x106.07. Allow a small tolerance for
+  // snapping and rounding.
+  EXPECT_NEAR(mapper_rect.X().ToFloat(), -35.4f, 1.5f);
+  EXPECT_NEAR(mapper_rect.Y().ToFloat(), 0.0f, 1.5f);
+  EXPECT_NEAR(mapper_rect.Width().ToFloat(), 106.1f, 1.5f);
+  EXPECT_NEAR(mapper_rect.Height().ToFloat(), 106.1f, 1.5f);
+
+  PhysicalRect non_mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(
+      layout_view, non_mapper_rect, kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, non_mapper_rect);
+}
+
+TEST_P(VisualRectMappingTest, NestedTransformsFractionalPositionSnapsOnce) {
+  // Purpose: guard against reintroducing subpixel accumulation through
+  // non-translation transforms (crbug.com/710665). Place the child at a
+  // fractional position under a rotation/scale; verify both GeometryMapper
+  // and the non-GeometryMapper path produce the same enclosed rect and that
+  // positions are snapped once (no cascading subpixel drift).
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #container {
+        transform: rotate(15deg) scale(1.2);
+      }
+      #child {
+        position: absolute;
+        left: 10.25px;
+        top: 20.75px;
+        width: 40px;
+        height: 30px;
+      }
+    </style>
+    <div id="container"><div id="child"></div></div>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* layout_view = &GetLayoutView();
+  auto* child = GetLayoutObjectByElementId("child");
+  ASSERT_TRUE(child);
+
+  constexpr VisualRectFlags kGeomFlags = static_cast<VisualRectFlags>(
+      kUseGeometryMapper | kDefaultVisualRectFlags);
+  constexpr VisualRectFlags kNonMapperFlags = kDefaultVisualRectFlags;
+  PhysicalRect local_rect(0, 0, 40, 30);
+
+  PhysicalRect mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(layout_view, mapper_rect,
+                                                    kGeomFlags));
+
+  PhysicalRect non_mapper_rect = local_rect;
+  ASSERT_TRUE(child->MapToVisualRectInAncestorSpace(
+      layout_view, non_mapper_rect, kNonMapperFlags));
+  EXPECT_EQ(mapper_rect, non_mapper_rect);
+
+  // Ensure we produced a real, non-empty rect and avoided explosive
+  // accumulation. Using loose size checks keeps the test resilient to minor
+  // layout rounding while still catching regressions like NaN/zero/negative.
+  EXPECT_FALSE(mapper_rect.IsEmpty());
+  EXPECT_GT(mapper_rect.Width(), LayoutUnit(30));
+  EXPECT_GT(mapper_rect.Height(), LayoutUnit(30));
+}
+
+TEST_P(VisualRectMappingTest, FractionalSnapping) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * { margin: 0; }
+      #container {
+        position: relative;
+        transform-origin: 0 0;
+        transform: scale(100);
+      }
+      #a {
+        position: absolute;
+        top: 0;
+        left: 0.25px;
+        width: 1px;
+        height: 1px;
+      }
+      #b {
+        position: absolute;
+        top: 0;
+        left: 0.75px;
+        width: 1px;
+        height: 1px;
+      }
+    </style>
+    <div id="container">
+      <div id="a"></div>
+      <div id="b"></div>
+    </div>
+  )HTML");
+  auto* a = To<LayoutBlock>(GetLayoutObjectByElementId("a"));
+  auto* b = To<LayoutBlock>(GetLayoutObjectByElementId("b"));
+
+  PhysicalRect a_local_rect = LocalVisualRect(*a);
+  EXPECT_EQ(PhysicalRect(0, 0, 1, 1), a_local_rect);
+  PhysicalRect b_local_rect = LocalVisualRect(*b);
+  EXPECT_EQ(PhysicalRect(0, 0, 1, 1), b_local_rect);
+
+  PhysicalRect a_visual_rect_slow = a_local_rect;
+  EXPECT_TRUE(
+      a->MapToVisualRectInAncestorSpace(&GetLayoutView(), a_visual_rect_slow));
+  EXPECT_EQ(PhysicalRect(25, 0, 100, 100), a_visual_rect_slow);
+
+  PhysicalRect b_visual_rect_slow = b_local_rect;
+  EXPECT_TRUE(
+      b->MapToVisualRectInAncestorSpace(&GetLayoutView(), b_visual_rect_slow));
+  EXPECT_EQ(PhysicalRect(75, 0, 100, 100), b_visual_rect_slow);
+
+  PhysicalRect a_visual_rect_mapper = a_local_rect;
+  EXPECT_TRUE(a->MapToVisualRectInAncestorSpace(
+      &GetLayoutView(), a_visual_rect_mapper, kUseGeometryMapper));
+  EXPECT_EQ(PhysicalRect(25, 0, 100, 100), a_visual_rect_mapper);
+
+  PhysicalRect b_visual_rect_mapper = b_local_rect;
+  EXPECT_TRUE(b->MapToVisualRectInAncestorSpace(
+      &GetLayoutView(), b_visual_rect_mapper, kUseGeometryMapper));
+  EXPECT_EQ(PhysicalRect(75, 0, 100, 100), b_visual_rect_mapper);
+}
+
+TEST_P(VisualRectMappingTest,
+       ViewportMappingIsConsistentWithAndWithoutGeometryMapperUnderPinchZoom) {
+  // Regression test for a slow-path bug: viewport mapping (ancestor == nullptr)
+  // should produce the same result with and without the GeometryMapper fast
+  // path, even when pinch-zoom is active.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      blink::features::kVisualRectMappingApplyLocalVisualViewportTransform);
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #target {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 50px;
+        height: 50px;
+        background: green;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  // Simulate pinch-zoom by changing the visual viewport scale and location.
+  // The location is in CSS pixels.
+  VisualViewport& visual_viewport =
+      GetDocument().GetPage()->GetVisualViewport();
+  visual_viewport.SetScaleAndLocation(2.f, /*is_pinch_gesture_active=*/true,
+                                      gfx::PointF(0, 20));
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* target = GetLayoutObjectByElementId("target");
+  ASSERT_TRUE(target);
+
+  constexpr VisualRectFlags kBaseFlags = static_cast<VisualRectFlags>(
+      kIgnoreFilters | kVisualRectApplyRemoteViewportTransform);
+
+  gfx::RectF slow_path_rect(0, 0, 50, 50);
+  ASSERT_TRUE(target->MapToVisualRectInAncestorSpace(nullptr, slow_path_rect,
+                                                     kBaseFlags));
+
+  constexpr VisualRectFlags kGeomFlags =
+      static_cast<VisualRectFlags>(kBaseFlags | kUseGeometryMapper);
+  gfx::RectF geometry_mapper_rect(0, 0, 50, 50);
+  ASSERT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, geometry_mapper_rect, kGeomFlags));
+
+  EXPECT_EQ(gfx::ToEnclosingRect(slow_path_rect),
+            gfx::ToEnclosingRect(geometry_mapper_rect));
+}
+
+TEST_P(VisualRectMappingTest,
+       ViewportMappingAppliesVisualViewportTransformButClipsToLayoutViewport) {
+  // This test documents a potentially surprising behavior for viewport mapping
+  // (ancestor == nullptr):
+  //
+  // Layout viewport vs visual viewport:
+  // - Layout viewport: the viewport used for layout and scrolling.
+  // - Visual viewport: what the user actually sees. It can be offset relative
+  //   to the layout viewport (for example while browser controls animate in/out
+  //   during scroll on mobile, or during pinch-zoom).
+  //
+  // - Under pinch-zoom, viewport mapping applies the visual viewport transform
+  //   (page scale and visual viewport location), so the final mapped rect is
+  //   expressed in visual-viewport coordinates.
+  // - Viewport clipping is still applied in layout-viewport space
+  //   (LayoutView::ViewRect()).
+  //
+  // IMPORTANT: This mixes two viewports in one API call: the returned
+  // coordinates are in visual-viewport space, but clipping uses the layout
+  // viewport. This can be surprising.
+  //
+  // As a result, when the visual viewport origin is offset relative to the
+  // layout viewport origin, the mapped rect can be clipped even though
+  // coordinates are defined relative to the visual viewport.
+  //
+  // Example (like this test):
+  // - The element is at the layout-viewport origin (top: 0).
+  // - The visual viewport is shifted down (e.g. location.y = 20 CSS px under
+  //   pinch-zoom).
+  // - After applying the visual viewport transform, the element's visual-
+  //   viewport-relative y becomes negative (it is "above" the visual viewport
+  //   origin).
+  // - Clipping still uses the layout viewport rect (y >= 0), so the negative-y
+  //   portion is removed.
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      #target {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 50px;
+        height: 50px;
+        background: green;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  VisualViewport& visual_viewport =
+      GetDocument().GetPage()->GetVisualViewport();
+  visual_viewport.SetScaleAndLocation(2.f, /*is_pinch_gesture_active=*/true,
+                                      gfx::PointF(0, 20));
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* target = GetLayoutObjectByElementId("target");
+  ASSERT_TRUE(target);
+
+  constexpr VisualRectFlags kBaseFlags = static_cast<VisualRectFlags>(
+      kIgnoreFilters | kVisualRectApplyRemoteViewportTransform);
+
+  gfx::RectF slow_path_rect(0, 0, 50, 50);
+  ASSERT_TRUE(target->MapToVisualRectInAncestorSpace(nullptr, slow_path_rect,
+                                                     kBaseFlags));
+
+  constexpr VisualRectFlags kGeomFlags =
+      static_cast<VisualRectFlags>(kBaseFlags | kUseGeometryMapper);
+  gfx::RectF geometry_mapper_rect(0, 0, 50, 50);
+  ASSERT_TRUE(target->MapToVisualRectInAncestorSpace(
+      nullptr, geometry_mapper_rect, kGeomFlags));
+
+  // Both implementations should exhibit the same two-viewport behavior.
+  const gfx::Rect slow_path_enclosing = gfx::ToEnclosingRect(slow_path_rect);
+  const gfx::Rect geometry_mapper_enclosing =
+      gfx::ToEnclosingRect(geometry_mapper_rect);
+  EXPECT_EQ(slow_path_enclosing, geometry_mapper_enclosing);
+
+  // Pinch-zoom scale should affect viewport mapping.
+  EXPECT_GT(slow_path_enclosing.width(), 50);
+  EXPECT_GT(slow_path_enclosing.height(), 50);
+
+  // Viewport clipping is applied in layout-viewport space. The visual viewport
+  // is shifted down by 20 CSS px at 2.0x, so the top portion is clipped.
+  EXPECT_EQ(slow_path_enclosing.y(), 0);
+  EXPECT_LT(slow_path_enclosing.height(), slow_path_enclosing.width());
 }
 
 }  // namespace blink

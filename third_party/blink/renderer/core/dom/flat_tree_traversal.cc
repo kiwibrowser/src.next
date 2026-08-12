@@ -33,6 +33,16 @@
 
 namespace blink {
 
+static_assert(std::forward_iterator<
+              TraversalIterator<TraversalParent<FlatTreeTraversal>>>);
+static_assert(std::forward_iterator<
+              TraversalDescendantIterator<TraversalParent<FlatTreeTraversal>>>);
+static_assert(std::forward_iterator<TraversalDescendantWithFilterIterator<
+                  TraversalParent<FlatTreeTraversal>,
+                  Element::TinyBloomFilter>>);
+static_assert(std::forward_iterator<TraversalInclusiveDescendantIterator<
+                  TraversalParent<FlatTreeTraversal>>>);
+
 #if DCHECK_IS_ON()
 void FlatTreeTraversal::AssertFlatTreeNodeDataUpdated(
     const Node& root,
@@ -151,7 +161,7 @@ ContainerNode* FlatTreeTraversal::TraverseParent(const Node& node) {
   // This code is called extensively, so it minimizes repetitive work (such
   // as avoiding multiple calls to parentElement()).
 
-  // TODO(hayato): Stop this hack for a pseudo element because a pseudo element
+  // TODO(hayato): Stop this hack for a pseudo-element because a pseudo-element
   // is not a child of its parentOrShadowHostNode() in a flat tree.
   if (node.IsPseudoElement())
     return node.ParentOrShadowHostNode();

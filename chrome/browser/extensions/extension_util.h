@@ -9,7 +9,15 @@
 #include <string>
 
 #include "base/values.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_id.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+namespace base {
+class CommandLine;
+}
 
 namespace content {
 class BrowserContext;
@@ -19,7 +27,12 @@ namespace extensions {
 class PermissionSet;
 }
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 class Profile;
+class GURL;
 
 namespace extensions {
 
@@ -27,7 +40,7 @@ class Extension;
 
 namespace util {
 
-// Returns true if the extension associated with |extension_id| has isolated
+// Returns true if the extension associated with `extension_id` has isolated
 // storage. This can be either because it is an app that requested this in its
 // manifest, or because it is a policy-installed app or extension running on
 // the Chrome OS sign-in profile.
@@ -36,31 +49,32 @@ bool HasIsolatedStorage(const std::string& extension_id,
 bool HasIsolatedStorage(const Extension& extension,
                         content::BrowserContext* context);
 
-// Sets whether |extension_id| can run in an incognito window. Reloads the
+// Returns whether the extension with `extension_id` is force installed by
+// policy, and fills `reason` (if non-null) with expository text.
+bool IsExtensionForceInstalled(const std::string& extension_id,
+                               content::BrowserContext* context,
+                               std::u16string* reason = nullptr);
+
+// Sets whether `extension_id` can run in an incognito window. Reloads the
 // extension if it's enabled since this permission is applied at loading time
 // only. Note that an ExtensionService must exist.
 void SetIsIncognitoEnabled(const std::string& extension_id,
                            content::BrowserContext* context,
                            bool enabled);
 
-// Sets whether |extension_id| can inject scripts into pages with file URLs.
+// Sets whether `extension_id` can inject scripts into pages with file URLs.
 // Reloads the extension if it's enabled since this permission is applied at
 // loading time only. Note than an ExtensionService must exist.
 void SetAllowFileAccess(const std::string& extension_id,
                         content::BrowserContext* context,
                         bool allow);
 
-// Returns true if |extension_id| is idle and it is safe to perform actions such
-// as updating.
-bool IsExtensionIdle(const std::string& extension_id,
-                     content::BrowserContext* context);
-
 // Sets the name, id, and icon resource path of the given extension into the
 // returned dictionary.
-base::Value::Dict GetExtensionInfo(const Extension* extension);
+base::DictValue GetExtensionInfo(const Extension* extension);
 
 // Returns a PermissionSet configured with the permissions that should be
-// displayed in an extension installation prompt for the specified |extension|.
+// displayed in an extension installation prompt for the specified `extension`.
 std::unique_ptr<const PermissionSet> GetInstallPromptPermissionSetForExtension(
     const Extension* extension,
     Profile* profile);
@@ -75,13 +89,23 @@ std::vector<content::BrowserContext*> GetAllRelatedProfiles(
 // relevant subsystems.
 void SetDeveloperModeForProfile(Profile* profile, bool in_developer_mode);
 
-// Returns the extension name to be used in UI surfaces. Name will be truncated
-// if its very long, preventing extension name to spoof or break UI surfaces
-// (see crbug.com/40063885).
-std::u16string GetFixupExtensionNameForUIDisplay(
-    const std::u16string& extension_name);
-std::u16string GetFixupExtensionNameForUIDisplay(
-    const std::string& extension_name);
+// Registers miscellaneous chrome-level extension-related prefs.
+void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
+// Returns true if extensions have been disabled (e.g. via a command-line flag
+// or preference).
+bool AreExtensionsDisabled(const base::CommandLine& command_line,
+                           content::BrowserContext* context);
+
+// Returns the URL for the chrome://extensions page and highlights the
+// extension with `extension_id`. If `extension_id` is empty, just shows the
+// main extensions page.
+GURL GetExtensionsPageUrl(const ExtensionId& extension_id);
+
+// Returns true if the extension with the given ID is allowed to use MojoJS
+// bindings.
+bool IsMojoJsEnabledForExtension(const ExtensionId& extension_id,
+                                 content::BrowserContext* context);
 
 }  // namespace util
 }  // namespace extensions

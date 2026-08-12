@@ -4,17 +4,17 @@
 
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 
+#include <variant>
+
 #include "base/functional/bind.h"
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
+#include "chrome/browser/metrics/profile_metrics_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "third_party/abseil-cpp/absl/types/variant.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chromeos/ash/components/account_manager/account_manager_factory.h"
-#include "components/account_manager_core/chromeos/account_manager_facade_factory.h"
 #endif
 
 // static
@@ -46,7 +46,7 @@ void IdentityTestEnvironmentProfileAdaptor::
     SetIdentityTestEnvironmentFactoriesOnBrowserContext(
         content::BrowserContext* context) {
   for (auto& f : GetIdentityTestEnvironmentFactories()) {
-    absl::visit(
+    std::visit(
         [context](auto& p) {
           p.first->SetTestingFactory(context, std::move(p.second));
         },
@@ -77,17 +77,9 @@ std::unique_ptr<KeyedService>
 IdentityTestEnvironmentProfileAdaptor::BuildIdentityManagerForTests(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-#if BUILDFLAG(IS_CHROMEOS_ASH)
   return signin::IdentityTestEnvironment::BuildIdentityManagerForTests(
       ChromeSigninClientFactory::GetForProfile(profile), profile->GetPrefs(),
-      profile->GetPath(),
-      g_browser_process->platform_part()->GetAccountManagerFactory(),
-      GetAccountManagerFacade(profile->GetPath().value()));
-#else
-  return signin::IdentityTestEnvironment::BuildIdentityManagerForTests(
-      ChromeSigninClientFactory::GetForProfile(profile), profile->GetPrefs(),
-      profile->GetPath());
-#endif
+      ProfileMetricsServiceFactory::GetForProfile(profile), profile->GetPath());
 }
 
 IdentityTestEnvironmentProfileAdaptor::IdentityTestEnvironmentProfileAdaptor(

@@ -3,7 +3,9 @@
 # found in the LICENSE file.
 
 import("//crypto/features.gni")
+import("//tools/grit/grit_rule.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
+import("//ui/webui/webui_features.gni")
 
 if (use_blink) {
   import("//chrome/common/features.gni")
@@ -36,11 +38,9 @@ generate_grd("build_grd") {
     "images:build_grdp",
     "js:build_grdp",
     "mojo:build_grdp",
-    "//third_party/jstemplate:build_grdp",
     "//third_party/lit/v3_0:build_grdp",
   ]
   grdp_files = [
-    "$root_gen_dir/third_party/jstemplate/resources.grdp",
     "$root_gen_dir/third_party/lit/v3_0/resources.grdp",
     "$target_gen_dir/cr_components/commerce/resources.grdp",
     "$target_gen_dir/cr_elements/resources.grdp",
@@ -50,63 +50,68 @@ generate_grd("build_grd") {
     "$target_gen_dir/mojo/resources.grdp",
   ]
 
-  if (!is_android && !is_ios) {
+  if ((!is_android && !is_ios) || is_desktop_android) {
     public_deps += [
       "cr_components/app_management:build_grdp",
+      "cr_components/color_change_listener:build_grdp",
+      "cr_components/cr_shortcut_input:build_grdp",
       "cr_components/customize_color_scheme_mode:build_grdp",
       "cr_components/help_bubble:build_grdp",
-      "cr_components/localized_link:build_grdp",
+      "cr_components/history:build_grdp",
+      "cr_components/history_clusters:build_grdp",
+      "cr_components/history_embeddings:build_grdp",
       "cr_components/managed_dialog:build_grdp",
       "cr_components/managed_footnote:build_grdp",
       "cr_components/most_visited:build_grdp",
+      "cr_components/page_image_service:build_grdp",
+      "cr_components/searchbox:build_grdp",
+      "cr_components/searchbox/icons:build_grdp",
       "cr_components/theme_color_picker:build_grdp",
       "//third_party/d3:build_grdp",
+      "//third_party/lottie:build_grdp",
       "//third_party/polymer/v3_0:build_grdp",
     ]
     grdp_files += [
       "$root_gen_dir/third_party/d3/d3_resources.grdp",
+      "$root_gen_dir/third_party/lottie/resources.grdp",
       "$root_gen_dir/third_party/polymer/v3_0/polymer_3_0_resources.grdp",
+      "$root_gen_dir/ui/webui/resources/cr_components/color_change_listener/resources.grdp",
+      "$root_gen_dir/ui/webui/resources/cr_components/page_image_service/resources.grdp",
       "$target_gen_dir/cr_components/app_management/resources.grdp",
-      "$target_gen_dir/cr_components/theme_color_picker/resources.grdp",
+      "$target_gen_dir/cr_components/cr_shortcut_input/resources.grdp",
       "$target_gen_dir/cr_components/customize_color_scheme_mode/resources.grdp",
       "$target_gen_dir/cr_components/help_bubble/resources.grdp",
-      "$target_gen_dir/cr_components/localized_link/resources.grdp",
+      "$target_gen_dir/cr_components/history_clusters/resources.grdp",
+      "$target_gen_dir/cr_components/history_embeddings/resources.grdp",
+      "$target_gen_dir/cr_components/history/resources.grdp",
       "$target_gen_dir/cr_components/managed_dialog/resources.grdp",
       "$target_gen_dir/cr_components/managed_footnote/resources.grdp",
       "$target_gen_dir/cr_components/most_visited/resources.grdp",
+      "$target_gen_dir/cr_components/searchbox/icons/resources.grdp",
+      "$target_gen_dir/cr_components/searchbox/resources.grdp",
+      "$target_gen_dir/cr_components/theme_color_picker/resources.grdp",
     ]
 
-    if (use_blink) {
-      if (use_nss_certs || chrome_root_store_cert_management_ui) {
-        public_deps += [ "cr_components/certificate_manager:build_grdp" ]
-        grdp_files += [
-          "$target_gen_dir/cr_components/certificate_manager/resources.grdp",
-        ]
-      }
+    if (is_chrome_branded) {
+      public_deps +=
+          [ "cr_components/searchbox/icons:chrome_branded_build_grdp" ]
+      grdp_files += [ "$target_gen_dir/cr_components/searchbox/icons/chrome_branded_resources.grdp" ]
     }
+  }
 
-    if (!is_android) {
-      public_deps += [
-        "cr_components/history:build_grdp",
-        "cr_components/history_clusters:build_grdp",
-        "cr_components/history_embeddings:build_grdp",
-        "cr_components/searchbox:build_grdp",
-        "cr_components/searchbox/icons:build_grdp",
-      ]
-      grdp_files += [
-        "$target_gen_dir/cr_components/history/resources.grdp",
-        "$target_gen_dir/cr_components/history_clusters/resources.grdp",
-        "$target_gen_dir/cr_components/history_embeddings/resources.grdp",
-        "$target_gen_dir/cr_components/searchbox/resources.grdp",
-        "$target_gen_dir/cr_components/searchbox/icons/resources.grdp",
-      ]
-
-      if (is_chrome_branded) {
-        public_deps +=
-            [ "cr_components/searchbox/icons:chrome_branded_build_grdp" ]
-        grdp_files += [ "$target_gen_dir/cr_components/searchbox/icons/chrome_branded_resources.grdp" ]
-      }
-    }
+  if (!is_ios) {
+    # TODO(crbug.com/527601593): Revert by moving these components back into the
+    # main desktop block at L53 if we disable composebox on Android phones.
+    public_deps += [
+      "cr_components/composebox:build_grdp",
+      "cr_components/localized_link:build_grdp",
+      "cr_components/search:build_grdp",
+    ]
+    grdp_files += [
+      "$target_gen_dir/cr_components/composebox/resources.grdp",
+      "$target_gen_dir/cr_components/localized_link/resources.grdp",
+      "$target_gen_dir/cr_components/search/resources.grdp",
+    ]
   }
 
   if (is_chromeos) {
@@ -115,19 +120,6 @@ generate_grd("build_grd") {
     # ash/webui/common/resources:build_grd
     public_deps += [ ":build_cros_styles_grdp" ]
     grdp_files += [ "$target_gen_dir/cros_styles_resources.grdp" ]
-  }
-
-  if (!is_android && !is_ios) {
-    public_deps += [
-      "cr_components/color_change_listener:build_grdp",
-      "cr_components/page_image_service:build_grdp",
-      "//third_party/lottie:build_grdp",
-    ]
-    grdp_files += [
-      "$root_gen_dir/third_party/lottie/resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/color_change_listener/resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/page_image_service/resources.grdp",
-    ]
   }
 }
 
@@ -140,5 +132,68 @@ if (is_chromeos) {
     input_files = [ "ui/chromeos/styles/cros_styles.css" ]
     resource_path_rewrites =
         [ "ui/chromeos/styles/cros_styles.css|chromeos/colors/cros_styles.css" ]
+  }
+}
+
+grit("resources") {
+  enable_input_discovery_for_gn_analyze = false
+  source = "$target_gen_dir/webui_resources.grd"
+  deps = [ ":build_grd" ]
+
+  outputs = [
+    "grit/webui_resources.h",
+    "grit/webui_resources_map.cc",
+    "grit/webui_resources_map.h",
+    "webui_resources.pak",
+  ]
+
+  grit_flags = [
+    "-E",
+    "add_filepath_to_resource_map=${load_webui_from_disk}",
+  ]
+}
+
+if (enable_webui_generate_code_cache) {
+  generate_grd("build_code_cache_grd") {
+    grd_prefix = "webui_code_cache"
+    out_grd = "$target_gen_dir/${grd_prefix}_resources.grd"
+    grdp_files = [
+      "$root_gen_dir/mojo/public/js/code_cache_resources.grdp",
+      "$root_gen_dir/third_party/lit/v3_0/code_cache_resources.grdp",
+      "$root_gen_dir/third_party/polymer/v3_0/code_cache_resources.grdp",
+      "$target_gen_dir/cr_elements/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/color_change_listener/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/commerce/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/customize_color_scheme_mode/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/help_bubble/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/managed_dialog/code_cache_resources.grdp",
+      "$target_gen_dir/cr_components/theme_color_picker/code_cache_resources.grdp",
+    ]
+
+    public_deps = [
+      "cr_components/color_change_listener:build_code_cache_grdp",
+      "cr_components/commerce:build_code_cache_grdp",
+      "cr_components/customize_color_scheme_mode:build_code_cache_grdp",
+      "cr_components/help_bubble:build_code_cache_grdp",
+      "cr_components/managed_dialog:build_code_cache_grdp",
+      "cr_components/theme_color_picker:build_code_cache_grdp",
+      "cr_elements:build_code_cache_grdp",
+      "//mojo/public/js:build_code_cache_grdp",
+      "//third_party/lit/v3_0:build_code_cache_grdp",
+      "//third_party/polymer/v3_0:build_code_cache_grdp",
+    ]
+  }
+
+  grit("code_cache_resources") {
+    enable_input_discovery_for_gn_analyze = false
+    source = "$target_gen_dir/webui_code_cache_resources.grd"
+    deps = [ ":build_code_cache_grd" ]
+
+    outputs = [
+      "grit/webui_code_cache_resources.h",
+      "grit/webui_code_cache_resources_map.cc",
+      "grit/webui_code_cache_resources_map.h",
+      "webui_code_cache_resources.pak",
+    ]
   }
 }

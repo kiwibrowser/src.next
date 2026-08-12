@@ -5,6 +5,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "content/public/test/browser_test.h"
@@ -37,7 +38,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ExtensionFullscreenAccessPass) {
 }
 
 #if BUILDFLAG(IS_MAC)
-// Entering fullscreen is flaky on Mac: http://crbug.com/824517
+// Entering fullscreen is flaky on Mac: http://crbug.com/41378166
 #define MAYBE_FocusWindowDoesNotExitFullscreen \
     DISABLED_FocusWindowDoesNotExitFullscreen
 #else
@@ -45,26 +46,36 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ExtensionFullscreenAccessPass) {
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
                        MAYBE_FocusWindowDoesNotExitFullscreen) {
-  browser()->exclusive_access_manager()->context()->EnterFullscreen(
-      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
-      display::kInvalidDisplayId);
-  ASSERT_TRUE(browser()->window()->IsFullscreen());
+  browser()
+      ->GetFeatures()
+      .exclusive_access_manager()
+      ->context()
+      ->EnterFullscreen(
+          url::Origin(),
+          EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
+          FullscreenTabParams());
+  ASSERT_TRUE(browser()->GetWindow()->IsFullscreen());
   ASSERT_TRUE(RunExtensionTest("window_update/focus")) << message_;
-  ASSERT_TRUE(browser()->window()->IsFullscreen());
+  ASSERT_TRUE(browser()->GetWindow()->IsFullscreen());
 }
 
 // Fails flakily: crbug.com/335640705.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
                        DISABLED_UpdateWindowSizeExitsFullscreen) {
-  browser()->exclusive_access_manager()->context()->EnterFullscreen(
-      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
-      display::kInvalidDisplayId);
+  browser()
+      ->GetFeatures()
+      .exclusive_access_manager()
+      ->context()
+      ->EnterFullscreen(
+          url::Origin(),
+          EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
+          FullscreenTabParams());
   ASSERT_TRUE(RunExtensionTest("window_update/sizing")) << message_;
-  ASSERT_FALSE(browser()->window()->IsFullscreen());
+  ASSERT_FALSE(browser()->GetWindow()->IsFullscreen());
 }
 
 #if BUILDFLAG(IS_MAC)
-// Fails on MAC: http://crbug.com/480370
+// Fails on MAC: http://crbug.com/40415216
 #define MAYBE_DisplayModeWindowIsInFullscreen \
   DISABLED_DisplayModeWindowIsInFullscreen
 #else

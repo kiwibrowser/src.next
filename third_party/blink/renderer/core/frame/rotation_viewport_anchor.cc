@@ -128,15 +128,16 @@ void RotationViewportAnchor::SetAnchor() {
 
   // Save the absolute location in case we won't find the anchor node, we'll
   // fall back to that.
-  visual_viewport_in_document_ =
-      gfx::PointF(root_frame_viewport->VisibleContentRect().origin());
+  visual_viewport_in_document_ = gfx::PointF(
+      root_frame_viewport->VisibleContentRect(kExcludeScrollbars).origin());
 
   anchor_node_ = nullptr;
   anchor_node_bounds_ = PhysicalRect();
   anchor_in_node_coords_ = gfx::PointF();
   normalized_visual_viewport_offset_ = gfx::Vector2dF();
 
-  gfx::Rect inner_view_rect = root_frame_viewport->VisibleContentRect();
+  gfx::Rect inner_view_rect =
+      root_frame_viewport->VisibleContentRect(kExcludeScrollbars);
 
   // Preserve origins at the absolute screen origin.
   if (inner_view_rect.origin().IsOrigin() || inner_view_rect.IsEmpty())
@@ -199,7 +200,8 @@ void RotationViewportAnchor::RestoreToAnchor() {
 
   LayoutViewport().SetScrollOffset(
       ScrollOffset(main_frame_origin.OffsetFromOrigin()),
-      mojom::blink::ScrollType::kProgrammatic);
+      mojom::blink::ScrollType::kProgrammatic,
+      cc::ScrollSourceType::kStationaryScroll);
 
   // Set scale before location, since location can be clamped on setting scale.
   visual_viewport_->SetScale(new_page_scale_factor);
@@ -217,7 +219,8 @@ void RotationViewportAnchor::ComputeOrigins(
     const gfx::SizeF& inner_size,
     gfx::Point& main_frame_origin,
     gfx::PointF& visual_viewport_origin) const {
-  gfx::Size outer_size = LayoutViewport().VisibleContentRect().size();
+  gfx::Size outer_size =
+      LayoutViewport().VisibleContentRect(kExcludeScrollbars).size();
 
   // Compute the viewport origins in CSS pixels relative to the document.
   gfx::Vector2dF abs_visual_viewport_offset =

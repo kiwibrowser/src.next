@@ -6,10 +6,15 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/position.h"
+#include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/layout/block_node.h"
 #include "third_party/blink/renderer/core/layout/inline/inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/paint/paint_controller_paint_test.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 using testing::ElementsAre;
 
@@ -117,7 +122,7 @@ TEST_P(TextFragmentPainterTest, WheelEventListenerOnInlineElement) {
   LoadAhem();
   SetBodyInnerHTML(R"HTML(
     <style>body {margin: 0}</style>
-    <div id="parent" style="width: 100px; height: 100px; position: absolute">
+    <div id="parent" style="width: 100px; height: 100px; will-change: opacity">
       <span id="child" style="font: 50px Ahem">ABC</span>
     </div>
   )HTML");
@@ -134,6 +139,139 @@ TEST_P(TextFragmentPainterTest, WheelEventListenerOnInlineElement) {
                                               DisplayItem::kLayerChunk),
                                parent->FirstFragment().ContentsProperties(),
                                hit_test_data, gfx::Rect(0, 0, 150, 100))));
+}
+
+TEST_P(TextFragmentPainterTest,
+       WheelEventListenerOnInlineElementUnderBackgroundClipText) {
+  LoadAhem();
+  SetBodyInnerHTML(R"HTML(
+    <div style="background-clip: text; color: transparent;
+                background-color: blue">
+      <div style="overflow: hidden; height: 10px">
+        <span id="child" style="font: 50px Ahem">ABC</span>
+      </div>
+    </div>
+  )HTML");
+
+  SetWheelEventListener("child");
+  GetLayoutView().SetSubtreeShouldDoFullPaintInvalidation();
+  UpdateAllLifecyclePhasesForTest();
+
+  int wheel_hit_test_data_count = 0;
+  for (const auto& chunk : ContentPaintChunks()) {
+    if (chunk.hit_test_data && chunk.hit_test_data->wheel_event_rects.size()) {
+      wheel_hit_test_data_count++;
+      EXPECT_THAT(chunk.hit_test_data->wheel_event_rects,
+                  ElementsAre(gfx::Rect(8, 8, 150, 50)));
+    }
+  }
+  EXPECT_EQ(1, wheel_hit_test_data_count);
+}
+
+// Painting tests on text color for block caret.
+class BlockCaretTextColorPainterTest : public TextFragmentPainterTest {
+ public:
+  BlockCaretTextColorPainterTest() = default;
+
+ protected:
+  void SetUpBlockCaretEditable(const String& style) {
+    GetFocusController().SetActive(true);
+    GetFocusController().SetFocused(true);
+    SetBodyInnerHTML(
+        "<div id='target' contenteditable spellcheck='false' "
+        "style='font: 16px monospace; " +
+        style + "'>abc</div>");
+    auto* target = GetElementById("target");
+    target->Focus();
+    UpdateAllLifecyclePhasesForTest();
+  }
+
+  // Move the caret to |dom_offset| inside the editable's first text node.
+  void MoveCaretTo(unsigned dom_offset) {
+    auto* target = GetElementById("target");
+    auto* text = target->firstChild();
+    auto& selection = Selection();
+    selection.SetSelection(SelectionInDomTree::Builder()
+                               .Collapse(Position(text, dom_offset))
+                               .Build(),
+                           SetSelectionOptions());
+    UpdateAllLifecyclePhasesForTest();
+  }
+
+  // Returns ComputeBlockCaretCharacterOffset() for the first text fragment of
+  // the editable.
+  std::optional<unsigned> CaretFragmentOffset() {
+    auto* target = GetElementById("target");
+    InlineCursor cursor;
+    cursor.MoveTo(
+        *To<LayoutBlockFlow>(*target->GetLayoutObject()).FirstChild());
+    return Selection().ComputeBlockCaretCharacterOffset(cursor);
+  }
+};
+
+INSTANTIATE_PAINT_TEST_SUITE_P(BlockCaretTextColorPainterTest);
+
+// Default focus places the caret at offset 0.
+TEST_P(BlockCaretTextColorPainterTest, OffsetForBlockCaretAtFirstCharacter) {
+  ScopedCSSCaretColorWithOptionalSecondValueForTest scoped(true);
+  SetUpBlockCaretEditable(
+      "caret-color: black white; caret-shape: block; "
+      "caret-animation: manual");
+
+  EXPECT_EQ(CaretFragmentOffset(), 0u);
+}
+
+// Caret moved one character forward inside the same text node: the override
+// must follow.
+TEST_P(BlockCaretTextColorPainterTest, OffsetFollowsCaretMovement) {
+  ScopedCSSCaretColorWithOptionalSecondValueForTest scoped(true);
+  SetUpBlockCaretEditable(
+      "caret-color: black white; caret-shape: block; "
+      "caret-animation: manual");
+
+  MoveCaretTo(1);
+  EXPECT_EQ(CaretFragmentOffset(), 1u);
+
+  MoveCaretTo(2);
+  EXPECT_EQ(CaretFragmentOffset(), 2u);
+}
+
+// Caret past the last character: nothing is overlapped.
+TEST_P(BlockCaretTextColorPainterTest, NoOffsetWhenCaretIsPastLastCharacter) {
+  ScopedCSSCaretColorWithOptionalSecondValueForTest scoped(true);
+  SetUpBlockCaretEditable(
+      "caret-color: black white; caret-shape: block; "
+      "caret-animation: manual");
+
+  MoveCaretTo(3);
+  // After 'c', no character to overlap.
+  EXPECT_EQ(CaretFragmentOffset(), std::nullopt);
+}
+
+// For other caret shapes (bar, underscore), the second value of caret-color
+// does not apply.
+TEST_P(BlockCaretTextColorPainterTest, NoOffsetForNonBlockCaretShape) {
+  ScopedCSSCaretColorWithOptionalSecondValueForTest scoped(true);
+  SetUpBlockCaretEditable(
+      "caret-color: black white; caret-shape: bar; "
+      "caret-animation: manual");
+
+  EXPECT_EQ(CaretFragmentOffset(), std::nullopt);
+}
+
+// Paint does not happen when the second value of caret-color is auto.
+TEST_P(BlockCaretTextColorPainterTest, NoOverrideColorWhenSecondValueIsAuto) {
+  ScopedCSSCaretColorWithOptionalSecondValueForTest scoped(true);
+  SetUpBlockCaretEditable(
+      "caret-color: black auto; caret-shape: block; "
+      "caret-animation: manual");
+
+  auto* target = GetElementById("target");
+
+  // Still returns 0 from the offset help function. The painter is aware that
+  // the color value is auto.
+  EXPECT_TRUE(target->GetLayoutObject()->StyleRef().IsCaretTextColorAuto());
+  EXPECT_EQ(CaretFragmentOffset(), 0u);
 }
 
 }  // namespace blink

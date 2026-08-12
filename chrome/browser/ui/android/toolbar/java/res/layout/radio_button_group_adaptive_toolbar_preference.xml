@@ -46,6 +46,15 @@ found in the LICENSE file.
           app:primaryText="@string/adaptive_toolbar_button_preference_share" />
 
       <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+          android:id="@+id/adaptive_option_glic"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:minHeight="@dimen/min_touch_target_size"
+          android:paddingTop="10dp"
+          app:iconSrc="@drawable/ic_spark_24dp"
+          app:primaryText="@string/glic_button_entrypoint_ask_gemini_label" />
+
+      <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
           android:id="@+id/adaptive_option_voice_search"
           android:layout_width="match_parent"
           android:layout_height="wrap_content"
@@ -69,7 +78,7 @@ found in the LICENSE file.
           android:layout_height="wrap_content"
           android:minHeight="@dimen/min_touch_target_size"
           android:paddingTop="10dp"
-          app:iconSrc="@drawable/star_outline_24dp"
+          app:iconSrc="@drawable/ic_star_24dp"
           app:primaryText="@string/adaptive_toolbar_button_preference_add_to_bookmarks" />
 
       <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
@@ -80,15 +89,6 @@ found in the LICENSE file.
           android:paddingTop="10dp"
           app:iconSrc="@drawable/ic_play_circle"
           app:primaryText="@string/adaptive_toolbar_button_preference_read_aloud" />
-
-      <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
-          android:id="@+id/adaptive_option_page_summary"
-          android:layout_width="match_parent"
-          android:layout_height="wrap_content"
-          android:minHeight="@dimen/min_touch_target_size"
-          android:paddingTop="10dp"
-          app:iconSrc="@drawable/ic_mobile_friendly"
-          app:primaryText="@string/adaptive_toolbar_button_preference_page_summary" />
 
     </org.chromium.components.browser_ui.widget.RadioButtonWithDescriptionLayout>
 

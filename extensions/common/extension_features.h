@@ -7,6 +7,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "extensions/buildflags/buildflags.h"
 
 namespace extensions_features {
 
@@ -39,15 +40,30 @@ namespace extensions_features {
 // Controls the availability of action.openPopup().
 BASE_DECLARE_FEATURE(kApiActionOpenPopup);
 
+// Controls the limit for alarms.create() API input.
+BASE_DECLARE_FEATURE(kApiAlarmsCreateLengthLimit);
+
 // Controls the availability of contentSettings.clipboard.
 BASE_DECLARE_FEATURE(kApiContentSettingsClipboard);
 
 // Controls the availability of the enterprise.kioskInput API.
 BASE_DECLARE_FEATURE(kApiEnterpriseKioskInput);
 
+// Controls the availability of registering public MIME handlers via
+// the mimeHandler manifest key.
+BASE_DECLARE_FEATURE(kApiMimeHandler);
+
+// Controls the availability of the runtime.actionData API.
+// TODO(crbug.com/376354347): Remove this when the experiment is finished.
+BASE_DECLARE_FEATURE(kApiRuntimeActionData);
+
 // Controls the availability of adding and removing site access requests with
 // the permissions API.
-BASE_DECLARE_FEATURE(kApiPermissionsSiteAccessRequests);
+BASE_DECLARE_FEATURE(kApiPermissionsHostAccessRequests);
+
+// Controls the availability of executing user scripts programmatically using
+// the userScripts API.
+BASE_DECLARE_FEATURE(kApiUserScriptsExecute);
 
 // Controls the availability of specifying different world IDs in the
 // userScripts API.
@@ -56,9 +72,45 @@ BASE_DECLARE_FEATURE(kApiUserScriptsMultipleWorlds);
 // Controls the availability of the odfsConfigPrivate API.
 BASE_DECLARE_FEATURE(kApiOdfsConfigPrivate);
 
-// If enabled, allows using the
-// `enterprise.reportingPrivate.reportDataMaskingEvent` API.
-BASE_DECLARE_FEATURE(kApiEnterpriseReportingPrivateReportDataMaskingEvent);
+// Controls the availability of the contextualTasksPrivate API.
+BASE_DECLARE_FEATURE(kApiContextualTasksPrivate);
+
+// Controls the availability of the glicPrivate API.
+BASE_DECLARE_FEATURE(kApiGlicPrivate);
+
+// Controls the availability of the
+// `enterprise.reportingPrivate.onDataMaskingRulesTriggered` API.
+BASE_DECLARE_FEATURE(kApiEnterpriseReportingPrivateOnDataMaskingRulesTriggered);
+
+// Controls the availability of Glic access from Google webpages.
+BASE_DECLARE_FEATURE(kApiGlicAccessFromGoogleWebpage);
+// Controls the availability of Glic access from Chrome promotion pages.
+BASE_DECLARE_FEATURE(kApiGlicAccessFromPromotionPage);
+extern const base::FeatureParam<std::string> kProdPromptEndpointUrlParam;
+extern const base::FeatureParam<std::string> kGlicInvokeApiOAuth2ScopeParam;
+extern const base::FeatureParam<bool> kGlicRequireConsentForInvokeParam;
+
+enum class GlicOpenNewTabDisposition {
+  kForeground,                // Always open in foreground.
+  kBackground,                // Always open in background.
+  kForegroundIfNotConsented,  // Open in foreground if user has not consented,
+                              // else in background.
+};
+extern const base::FeatureParam<GlicOpenNewTabDisposition>
+    kGlicOpenNewTabDispositionParam;
+
+// String constants for GlicOpenNewTabDisposition.
+inline constexpr char kGlicOpenNewTabDispositionForeground[] = "foreground";
+inline constexpr char kGlicOpenNewTabDispositionBackground[] = "background";
+inline constexpr char kGlicOpenNewTabDispositionForegroundIfNotConsented[] =
+    "foreground_if_not_consented";
+
+// Controls the availability of the new `proxyOverrideRulesPrivate` API.
+BASE_DECLARE_FEATURE(kApiProxyOverrideRulesPrivate);
+
+// Controls the availability of the deprecated nacl_arch in
+// runtime.getPlatformInfo() API.
+BASE_DECLARE_FEATURE(kApiRuntimeGetPlatformInfoNaClArch);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Other Features
@@ -66,19 +118,9 @@ BASE_DECLARE_FEATURE(kApiEnterpriseReportingPrivateReportDataMaskingEvent);
 
 // For historical reasons, this includes some APIs. Please don't add more APIs.
 
-// Whether extension contexts can use SharedArrayBuffers unconditionally (i.e.
-// without requiring cross origin isolation).
-// TODO(crbug.com/40752831): Flip this in M95.
-BASE_DECLARE_FEATURE(kAllowSharedArrayBuffersUnconditionally);
-
 // Enables the UI in the install prompt which lets a user choose to withhold
 // requested host permissions by default.
 BASE_DECLARE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall);
-
-// If enabled, calls RenderFrame::SetAllowsCrossBrowsingInstanceFrameLookup() in
-// DidCreateScriptContext() instead of DidCommitProvisionalLoad() to avoid
-// creating the script context too early which can be bad for performance.
-BASE_DECLARE_FEATURE(kAvoidEarlyExtensionScriptContextCreation);
 
 // When enabled, then bad_message::ReceivedBadMessage will be called when
 // browser receives an IPC from a content script and the IPC that unexpectedly
@@ -87,57 +129,48 @@ BASE_DECLARE_FEATURE(kAvoidEarlyExtensionScriptContextCreation);
 // extension).
 BASE_DECLARE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs);
 
+// Controls whether component extensions are allowed to use chrome://resources/
+// URLs in worker scripts and subresources.
+BASE_DECLARE_FEATURE(kComponentExtensionAllowWorkerChromeResources);
+
 // If enabled, <webview>s will be allowed to request permission from an
 // embedding Chrome App to request access to Human Interface Devices.
 BASE_DECLARE_FEATURE(kEnableWebHidInWebView);
 
+#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
+// If enabled, extensions will be enabled for @google.com and @managedchrome.com
+// users on desktop Android. Otherwise they will be blocked.
+BASE_DECLARE_FEATURE(kEnableExtensionsForCorpDesktopAndroid);
+#endif
+
+// If enabled, JS content scripts injected at document start will be compiled
+// in a background thread.
+BASE_DECLARE_FEATURE(kExtensionsBackgroundCompilation);
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kBackgroundCompilationTimeout);
+BASE_DECLARE_FEATURE_PARAM(size_t, kMinScriptSizeForBackgroundCompilation);
+BASE_DECLARE_FEATURE_PARAM(size_t, kMaxScriptSizeForBackgroundCompilation);
+
 // If enabled, disables unpacked extensions if developer mode is off.
 BASE_DECLARE_FEATURE(kExtensionDisableUnsupportedDeveloper);
 
-// Determine if dynamic extension URLs are handled and redirected.
-BASE_DECLARE_FEATURE(kExtensionDynamicURLRedirection);
+// Allow e.g. .css files to use default_locale messages in WAR files via GUID.
+// TODO(crbug.com/435609878): Remove after m142. It's for safe m141 back merge.
+BASE_DECLARE_FEATURE(kExtensionLocalizationGuid);
 
 // A replacement key for declaring icons, in addition to supporting dark mode.
 BASE_DECLARE_FEATURE(kExtensionIconVariants);
 
-// Controls displaying a warning that affected MV2 extensions may no longer be
-// supported.
-BASE_DECLARE_FEATURE(kExtensionManifestV2DeprecationWarning);
+// If enabled, allows an extension to specify protocol_handlers keys in the
+// Manifest, registering a group of custom handlers so that the browser can
+// handle navigation requests to URLs with unknown schemes. This feature
+// provides similar behavior and capabilities than the one implemented by
+// the 'registerProtocolHandler' Web API, defined in the Custom Handlers
+// section of the HTML specification.
+BASE_DECLARE_FEATURE(kExtensionProtocolHandlers);
 
-// Controls disabling affected MV2 extensions that are no longer supported.
-// Users can re-enable these extensions.
-BASE_DECLARE_FEATURE(kExtensionManifestV2Disabled);
-
-// Controls fully removing support for user-installed MV2 extensions.
-// Users may no longer re-enable these extensions. Enterprises may still
-// override this.
-BASE_DECLARE_FEATURE(kExtensionManifestV2Unsupported);
-
-// Allows server-side configuration of a temporary exception list.
-BASE_DECLARE_FEATURE(kExtensionManifestV2ExceptionList);
-extern const base::FeatureParam<std::string>
-    kExtensionManifestV2ExceptionListParam;
-
-// A feature to allow legacy MV2 extensions, even if they are not supported by
-// the browser or experiment configuration. This is important to allow
-// developers of MV2 extensions to continue loading, running, and testing their
-// extensions for as long as MV2 is supported in any variant.
-// This will be removed once the ExtensionManifestV2Availability enterprise
-// policy is no longer supported.
-BASE_DECLARE_FEATURE(kAllowLegacyMV2Extensions);
-
-// IsValidSourceUrl enforcement for ExtensionHostMsg_OpenChannelToExtension IPC.
-BASE_DECLARE_FEATURE(kExtensionSourceUrlEnforcement);
-
-// File Handlers.
-BASE_DECLARE_FEATURE(kExtensionWebFileHandlers);
-
-// If enabled, only manifest v3 extensions is allowed while v2 will be disabled.
-// Note that this feature is now only checked by `ExtensionManagement` which
-// represents enterprise extension configurations. Flip the feature will block
-// mv2 extension by default but the error messages will improperly mention
-// enterprise policy.
-BASE_DECLARE_FEATURE(kExtensionsManifestV3Only);
+// Enables extension support for the "tab" context menu, allowing extensions
+// to add custom items when right-clicking a tab.
+BASE_DECLARE_FEATURE(kExtensionTabContextMenu);
 
 // Enables enhanced site control for extensions and allowing the user to control
 // site permissions.
@@ -154,6 +187,9 @@ BASE_DECLARE_FEATURE(kExtensionsMenuAccessControlWithPermittedSites);
 // extensions submenu with an alternative submenu to recommend extensions.
 BASE_DECLARE_FEATURE(kExtensionsToolbarZeroState);
 
+// Retries starting a service worker if it fails with a transient error.
+BASE_DECLARE_FEATURE(kExtensionsServiceWorkerStartRetry);
+
 // Forces requests to go through WebRequestProxyingURLLoaderFactory.
 BASE_DECLARE_FEATURE(kForceWebRequestProxyForTest);
 
@@ -161,11 +197,9 @@ BASE_DECLARE_FEATURE(kForceWebRequestProxyForTest);
 // cmd.exe process as a proxy.
 BASE_DECLARE_FEATURE(kLaunchWindowsNativeHostsDirectly);
 
-// Controls whether extensions can use the new favicon fetching in Manifest V3.
-BASE_DECLARE_FEATURE(kNewExtensionFaviconHandling);
-
-// To investigate signal beacon loss in crrev.com/c/2262402.
-BASE_DECLARE_FEATURE(kReportKeepaliveUkm);
+// Controls whether omnibox extensions can use the new capability to intercept
+// input without needing keyword mode.
+BASE_DECLARE_FEATURE(kExperimentalOmniboxLabs);
 
 // Reports Extensions.WebRequest.KeepaliveRequestFinished when enabled.
 // Automatically disable extensions not included in the Safe Browsing CRX
@@ -174,21 +208,17 @@ BASE_DECLARE_FEATURE(kReportKeepaliveUkm);
 // out of the allowlist.
 BASE_DECLARE_FEATURE(kSafeBrowsingCrxAllowlistAutoDisable);
 
-// Controls whether we show an install friction dialog when an Enhanced Safe
-// Browsing user tries to install an extension that is not included in the
-// Safe Browsing CRX allowlist. This feature also controls if we show a warning
-// in 'chrome://extensions' for extensions not included in the allowlist.
-BASE_DECLARE_FEATURE(kSafeBrowsingCrxAllowlistShowWarnings);
+// When enabled, cause extensions to use structured cloning (instead of JSON
+// serialization) for extension messaging, except when communicating with native
+// messaging hosts.
+BASE_DECLARE_FEATURE(kStructuredCloningForMessaging);
 
-// When enabled, causes Manifest V3 (and greater) extensions to use structured
-// cloning (instead of JSON serialization) for extension messaging, except when
-// communicating with native messaging hosts.
-BASE_DECLARE_FEATURE(kStructuredCloningForMV3Messaging);
+// Controls whether the component webstore hosted app is loaded.
+BASE_DECLARE_FEATURE(kWebstoreHostedApp);
 
-// If enabled, APIs of the Telemetry Extension platform that have pending
-// approval will be enabled. Read more about the platform here:
-// https://chromium.googlesource.com/chromium/src/+/master/docs/telemetry_extension/README.md.
-BASE_DECLARE_FEATURE(kTelemetryExtensionPendingApprovalApi);
+// Used to control whether downloads initiated by `WebstoreInstaller` are marked
+// as having a corresponding user gesture or not.
+BASE_DECLARE_FEATURE(kWebstoreInstallerUserGestureKillSwitch);
 
 ///////////////////////////////////////////////////////////////////////////////
 // STOP!
@@ -200,7 +230,7 @@ BASE_DECLARE_FEATURE(kTelemetryExtensionPendingApprovalApi);
 // matching condition.
 BASE_DECLARE_FEATURE(kDeclarativeNetRequestResponseHeaderMatching);
 
-// Enables a relaxed rule count for "safe" dynqmic or session scoped rules above
+// Enables a relaxed rule count for "safe" dynamic or session scoped rules above
 // the current limit. If disabled, all dynamic and session scoped rules are
 // treated as "safe" but the rule limit's value will be the stricter "unsafe"
 // limit.
@@ -210,11 +240,6 @@ BASE_DECLARE_FEATURE(kDeclarativeNetRequestSafeRuleLimits);
 // sent to the browser process. This data is used for telemetry purpose
 // only.
 BASE_DECLARE_FEATURE(kIncludeJSCallStackInExtensionApiRequest);
-
-// If enabled, the button for visiting the chrome webstore in both the
-// extensions menu in the app menu and the chrome://extensions sidebar will send
-// the user to the new chrome webstore URL.
-BASE_DECLARE_FEATURE(kNewWebstoreURL);
 
 // If enabled, use the new CWS itemSnippets API to fetch extension info.
 BASE_DECLARE_FEATURE(kUseItemSnippetsAPI);
@@ -226,8 +251,83 @@ BASE_DECLARE_FEATURE(kUseNewServiceWorkerTaskQueue);
 // type for modifying headers.
 BASE_DECLARE_FEATURE(kDeclarativeNetRequestHeaderSubstitution);
 
-// Show no warning banner when an extension uses CDP's `chrome.debugger`.
-BASE_DECLARE_FEATURE(kSilentDebuggerExtensionAPI);
+// Disables loading extensions via the `--disable-extensions-except` command
+// line switch.
+BASE_DECLARE_FEATURE(kDisableDisableExtensionsExceptCommandLineSwitch);
+
+// Disables the `--extensions-on-chrome-urls` flag's functionality on
+// `chrome://` URLs. Extension can still run on extension URLs using the new
+// flag `--extensions-on-extension-urls` flag.
+BASE_DECLARE_FEATURE(kDisableExtensionsOnChromeUrlsSwitch);
+
+// If enabled, high-risk extension DOM activity is collected and reported
+// for enterprise auditing.
+BASE_DECLARE_FEATURE(kEnterpriseExtensionDOMActivityTelemetry);
+
+// Forces the debugger API/feature to always be restricted by developer mode.
+// This ensures we're always testing the developer mode API/feature restriction
+// capability, even when no other API/feature might be restricted by it.
+BASE_DECLARE_FEATURE(kDebuggerAPIRestrictedToDevMode);
+
+// When enabled, the `browser` namespace is made available on web pages
+// even if they are not externally connectable.
+BASE_DECLARE_FEATURE(kExtensionBrowserNamespaceOnWebPages);
+
+// When enabled, a call to base::ListValue::Clone is avoided when dispatching an
+// extension function. Behind a feature to assess impact
+// (go/chrome-performance-work-should-be-finched).
+// TODO(crbug.com/424432184): Clean up when experiment is complete.
+BASE_DECLARE_FEATURE(kAvoidCloneArgsOnExtensionFunctionDispatch);
+
+// If enabled, the ContentVerifier cache key will include the extension root
+// path. This prevents collisions when an extension is updated or reloaded
+// to a new directory while keeping the same version ID.
+// This also controls content verifier behavior when starting new
+// ContentVerifyJobs: it will ensure that only jobs matching the currently
+// loaded extension's root directory are allowed to start. This helps avoid
+// memory leaks from stale cache entries and false-positive corruption reports.
+BASE_DECLARE_FEATURE(kExtensionContentVerificationUsesExtensionRoot);
+
+// Enables the shouldShowPromotion API to determine which promotion to show for
+// Chrome Enterprise on CWS.
+BASE_DECLARE_FEATURE(kEnableShouldShowPromotion);
+
+// When enabled, web searches with a newly-installed search engine-changing
+// extension will be blocked behind a new explicit-choice dialog. The dialog
+// must be used to confirm the choice of using the new search engine, or
+// returning to the previous provider.
+BASE_DECLARE_FEATURE(kSearchEngineExplicitChoiceDialog);
+BASE_DECLARE_FEATURE_PARAM(bool, kSearchEngineExplicitChoiceDialogEscapable);
+
+// If true, the dialog is re-shown until a choice is made. If false, the
+// dialog is limited to once per session, as the original dialog works.
+BASE_DECLARE_FEATURE_PARAM(bool,
+                           kSearchEngineExplicitChoiceDialogUnlimitedShows);
+
+// When enabled, all search extensions will unconditionally get the search
+// engine override dialog.
+BASE_DECLARE_FEATURE(kSearchEngineUnconditionalDialog);
+
+// Enables the securityInfo in chrome.webRequest API for extensions.
+// Allowing them to retrieve certificate information from web requests.
+BASE_DECLARE_FEATURE(kWebRequestSecurityInfo);
+
+// When enabled, optimizes WebRequest proxying by strictly limiting it to
+// requests that are subject to interception. This ensures that the 'webview'
+// permission only triggers proxying for its own guest frames (e.g., <webview>
+// or Controlled Frame), rather than globally proxying all requests. This
+// avoids unnecessary performance overhead and restores navigation
+// optimizations like preconnect.
+BASE_DECLARE_FEATURE(kOptimizeWebRequestProxy);
+
+// When enabled, the browser dispatches blocking webRequest events once per
+// renderer context (using the parent event name) instead of once per listener
+// (using per-listener synthetic sub-event names). The renderer matches
+// listeners itself, reports each blocking listener's response via the
+// `webRequestInternal.eventHandled` function, and signals completion with a
+// single `webRequestInternal.eventHandlingDone` per context.
+BASE_DECLARE_FEATURE(kWebRequestPerContextEventDispatch);
+
 }  // namespace extensions_features
 
 #endif  // EXTENSIONS_COMMON_EXTENSION_FEATURES_H_

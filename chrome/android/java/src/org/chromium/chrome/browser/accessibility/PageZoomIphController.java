@@ -4,11 +4,13 @@
 
 package org.chromium.chrome.browser.accessibility;
 
+
 import android.app.Activity;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuHandler;
@@ -17,29 +19,30 @@ import org.chromium.chrome.browser.user_education.UserEducationHelper;
 import org.chromium.components.feature_engagement.FeatureConstants;
 
 /** Controller for In-Product Help for the Page Zoom feature. */
+@NullMarked
 public class PageZoomIphController {
     private final AppMenuHandler mAppMenuHandler;
     private final View mToolbarMenuButton;
     private final UserEducationHelper mUserEducationHelper;
 
     public PageZoomIphController(
-            Activity mActivity,
+            Activity activity,
             Profile profile,
-            AppMenuHandler mAppMenuHandler,
-            View mToolbarMenuButton) {
+            AppMenuHandler appMenuHandler,
+            View toolbarMenuButton) {
         this(
-                mAppMenuHandler,
-                mToolbarMenuButton,
-                new UserEducationHelper(mActivity, profile, new Handler(Looper.getMainLooper())));
+                appMenuHandler,
+                toolbarMenuButton,
+                new UserEducationHelper(activity, profile, new Handler(Looper.getMainLooper())));
     }
 
     protected PageZoomIphController(
-            AppMenuHandler mAppMenuHandler,
-            View mToolbarMenuButton,
-            UserEducationHelper mUserEducationHelper) {
-        this.mAppMenuHandler = mAppMenuHandler;
-        this.mToolbarMenuButton = mToolbarMenuButton;
-        this.mUserEducationHelper = mUserEducationHelper;
+            AppMenuHandler appMenuHandler,
+            View toolbarMenuButton,
+            UserEducationHelper userEducationHelper) {
+        mAppMenuHandler = appMenuHandler;
+        mToolbarMenuButton = toolbarMenuButton;
+        mUserEducationHelper = userEducationHelper;
     }
 
     /**

@@ -5,11 +5,13 @@
 #include "base/functional/bind.h"
 #include "chrome/browser/extensions/chrome_content_browser_client_extensions_part.h"
 #include "components/guest_view/buildflags/buildflags.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/service_worker_version_base_info.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/renderer_startup_helper.h"
 #include "extensions/browser/service_worker/service_worker_host.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/mojom/event_router.mojom.h"
 #include "extensions/common/mojom/renderer_host.mojom.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
@@ -23,6 +25,8 @@
 #include "extensions/browser/guest_view/extensions_guest_view.h"
 #include "extensions/common/mojom/guest_view.mojom.h"
 #endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -39,8 +43,7 @@ void ChromeContentBrowserClientExtensionsPart::
         const content::ServiceWorkerVersionBaseInfo&
             service_worker_version_info,
         blink::AssociatedInterfaceRegistry& associated_registry) {
-  CHECK(service_worker_version_info.process_id !=
-        content::ChildProcessHost::kInvalidUniqueID);
+  CHECK(service_worker_version_info.process_id);
   associated_registry.AddInterface<mojom::RendererHost>(
       base::BindRepeating(&RendererStartupHelper::BindForRenderer,
                           service_worker_version_info.process_id));
@@ -60,7 +63,7 @@ void ChromeContentBrowserClientExtensionsPart::
     ExposeInterfacesToRendererForRenderFrameHost(
         content::RenderFrameHost& frame_host,
         blink::AssociatedInterfaceRegistry& associated_registry) {
-  int render_process_id = frame_host.GetProcess()->GetID();
+  content::ChildProcessId render_process_id = frame_host.GetProcess()->GetID();
   associated_registry.AddInterface<mojom::RendererHost>(base::BindRepeating(
       &RendererStartupHelper::BindForRenderer, render_process_id));
 #if BUILDFLAG(ENABLE_EXTENSIONS)

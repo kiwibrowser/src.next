@@ -4,6 +4,7 @@
 
 #include "net/http/http_auth_filter.h"
 
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
@@ -48,11 +49,12 @@ bool HttpAuthFilterAllowlist::IsValid(
 void HttpAuthFilterAllowlist::SetAllowlist(
     const std::string& server_allowlist) {
   // TODO(eroman): Is this necessary? The issue is that
-  // HttpAuthFilterAllowlist is trying to use ProxyBypassRules as a generic
-  // URL filter. However internally it has some implicit rules for localhost
-  // and linklocal addresses.
-  rules_.ParseFromString(ProxyBypassRules::GetRulesToSubtractImplicit() + ";" +
-                         server_allowlist);
+  // HttpAuthFilterAllowlist is trying to use ProxyHostMatchingRules as a
+  // generic URL filter. However internally it has some implicit rules for
+  // localhost and linklocal addresses.
+  rules_.ParseFromString(
+      base::StrCat({ProxyHostMatchingRules::GetRulesToSubtractImplicit(), ";",
+                    server_allowlist}));
 }
 
 }  // namespace net

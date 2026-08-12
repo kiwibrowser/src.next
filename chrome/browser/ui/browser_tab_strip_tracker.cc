@@ -5,9 +5,10 @@
 #include "chrome/browser/ui/browser_tab_strip_tracker.h"
 
 #include "base/auto_reset.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tab_strip_tracker_delegate.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 BrowserTabStripTracker::BrowserTabStripTracker(
@@ -20,61 +21,59 @@ BrowserTabStripTracker::BrowserTabStripTracker(
 }
 
 BrowserTabStripTracker::~BrowserTabStripTracker() {
-  // Per ObserverList::RemoveObserver() documentation, this does nothing if the
-  // observer is not in the ObserverList (i.e. if |browser| is not tracked).
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    browser->tab_strip_model()->RemoveObserver(tab_strip_model_observer_);
-  }
-
-  BrowserList::RemoveObserver(this);
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [this](BrowserWindowInterface* browser) {
+        browser->GetTabStripModel()->RemoveObserver(tab_strip_model_observer_);
+        return true;
+      });
 }
 
 void BrowserTabStripTracker::Init() {
-  BrowserList::AddObserver(this);
-
   base::AutoReset<bool> resetter(&is_processing_initial_browsers_, true);
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    MaybeTrackBrowser(browser);
-  }
+  ForEachCurrentAndNewBrowserWindowInterfaceOrderedByActivation(
+      [this](BrowserWindowInterface* browser) {
+        MaybeTrackBrowser(browser);
+        return true;
+      });
+  browser_collection_observation_.Observe(
+      GlobalBrowserCollection::GetInstance());
 }
 
-bool BrowserTabStripTracker::ShouldTrackBrowser(Browser* browser) {
+bool BrowserTabStripTracker::ShouldTrackBrowser(
+    BrowserWindowInterface* browser) {
   return !delegate_ || delegate_->ShouldTrackBrowser(browser);
 }
 
-void BrowserTabStripTracker::MaybeTrackBrowser(Browser* browser) {
-  if (!ShouldTrackBrowser(browser))
+void BrowserTabStripTracker::MaybeTrackBrowser(
+    BrowserWindowInterface* browser) {
+  if (!ShouldTrackBrowser(browser)) {
     return;
+  }
 
-  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  TabStripModel* const tab_strip_model = browser->GetTabStripModel();
   tab_strip_model->AddObserver(tab_strip_model_observer_);
 
   TabStripModelChange::Insert insert;
-  for (int i = 0; i < tab_strip_model->count(); ++i) {
-    insert.contents.push_back({tab_strip_model->GetWebContentsAt(i), i});
+  insert.contents.reserve(tab_strip_model->count());
+  for (int i = 0; tabs::TabInterface* tab : *tab_strip_model) {
+    insert.contents.push_back({tab, tab->GetContents(), i});
+    ++i;
   }
 
   TabStripModelChange change(std::move(insert));
-  TabStripSelectionChange selection(tab_strip_model->GetActiveWebContents(),
-                                    tab_strip_model->selection_model());
+  TabStripSelectionChange selection(
+      tab_strip_model->GetActiveTab(),
+      tab_strip_model->selection_model().GetListSelectionModel());
   tab_strip_model_observer_->OnTabStripModelChanged(tab_strip_model, change,
                                                     selection);
 }
 
-void BrowserTabStripTracker::OnBrowserAdded(Browser* browser) {
-  // No Browser should be added when iterating on Browsers in Init(), as that
-  // may invalidate the iterator.
-  DCHECK(!is_processing_initial_browsers_);
-
+void BrowserTabStripTracker::OnBrowserCreated(BrowserWindowInterface* browser) {
   MaybeTrackBrowser(browser);
 }
 
-void BrowserTabStripTracker::OnBrowserRemoved(Browser* browser) {
-  // No Browser should be removed when iterating on Browsers in Init(), as that
-  // invalidates any iterator that is past the removed Browser.
-  DCHECK(!is_processing_initial_browsers_);
-
+void BrowserTabStripTracker::OnBrowserClosed(BrowserWindowInterface* browser) {
   // Per ObserverList::RemoveObserver() documentation, this does nothing if the
   // observer is not in the ObserverList (i.e. if |browser| is not tracked).
-  browser->tab_strip_model()->RemoveObserver(tab_strip_model_observer_);
+  browser->GetTabStripModel()->RemoveObserver(tab_strip_model_observer_);
 }

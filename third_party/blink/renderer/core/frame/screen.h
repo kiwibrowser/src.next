@@ -69,7 +69,7 @@ class CORE_EXPORT Screen : public EventTarget,
   void Trace(Visitor*) const override;
 
   // EventTarget:
-  const WTF::AtomicString& InterfaceName() const override;
+  const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
   // Whether the device’s visual output extends over multiple screens.

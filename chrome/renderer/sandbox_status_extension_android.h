@@ -21,7 +21,7 @@ class Arguments;
 
 // On Android, this class adds a function chrome.getAndroidSandboxStatus()
 // to the chrome://sandbox/ WebUI page. This is done only after the browser
-// SandboxInternalsUI sends an IPC mesage blessing this RenderFrame.
+// SandboxInternalsUI sends an IPC message blessing this RenderFrame.
 class SandboxStatusExtension
     : public base::RefCountedThreadSafe<SandboxStatusExtension>,
       public content::RenderFrameObserver,
@@ -59,14 +59,14 @@ class SandboxStatusExtension
   void GetSandboxStatus(gin::Arguments* args);
 
   // Called on the blocking pool, this gets the sandbox status of the current
-  // renderer process and returns a status object as a base::Value::Dict.
-  base::Value::Dict ReadSandboxStatus();
+  // renderer process and returns a status object as a base::DictValue.
+  base::DictValue ReadSandboxStatus();
 
   // Runs the callback argument provided to GetSandboxStatus() with the status
   // object computed by ReadSandboxStatus(). This is called back on the thread
   // on which GetSandboxStatus() was called originally.
   void RunCallback(std::unique_ptr<v8::Global<v8::Function>> callback,
-                   base::Value::Dict status);
+                   base::DictValue status);
 
   // Set to true by AddSandboxStatusExtension().
   bool should_install_ = false;

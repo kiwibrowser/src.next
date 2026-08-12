@@ -2,12 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
+
+#include <array>
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -52,7 +49,7 @@ class NodeTraversalTest : public PageTestBase {
 
 void NodeTraversalTest::SetupSampleHTML(const char* html) {
   Element* body = GetDocument().body();
-  SetBodyInnerHTML(String::FromUTF8(html));
+  SetBodyInnerHTML(String::FromUtf8(html));
   RemoveWhiteSpaceOnlyTextNodes(*body);
 }
 
@@ -209,7 +206,7 @@ TEST_F(NodeTraversalTest, ChildAt) {
   Element* c00 = body->QuerySelector(AtomicString("#c00"));
 
   const unsigned kNumberOfChildNodes = 3;
-  Node* expected_child_nodes[3] = {c0, c1, c2};
+  std::array<Node*, 3> expected_child_nodes = {c0, c1, c2};
 
   ASSERT_EQ(kNumberOfChildNodes, NodeTraversal::CountChildren(*body));
   EXPECT_TRUE(NodeTraversal::HasChildren(*body));
@@ -411,6 +408,31 @@ TEST_F(NodeTraversalTest, InclusiveDescendantsOf) {
     actual_nodes.push_back(&descendant);
 
   EXPECT_EQ(expected_nodes, actual_nodes);
+}
+
+TEST_F(NodeTraversalTest, IsInclusiveDescendantOf) {
+  SetupSampleHTML(R"(
+      <div id='c0'>
+        <div id='c00'></div>
+        <div id='c01'></div>
+      </div>)");
+
+  Element* body = GetDocument().body();
+  Element* c0 = body->QuerySelector(AtomicString("#c0"));
+  Element* c00 = body->QuerySelector(AtomicString("#c00"));
+  Element* c01 = body->QuerySelector(AtomicString("#c01"));
+
+  // Inclusive: node == other.
+  EXPECT_TRUE(NodeTraversal::IsInclusiveDescendantOf(*c0, *c0));
+
+  // Descendant: child is a descendant of ancestor.
+  EXPECT_TRUE(NodeTraversal::IsInclusiveDescendantOf(*c00, *c0));
+
+  // Non-descendant: ancestor is not a descendant of child.
+  EXPECT_FALSE(NodeTraversal::IsInclusiveDescendantOf(*c0, *c00));
+
+  // Siblings are not inclusive descendants of each other.
+  EXPECT_FALSE(NodeTraversal::IsInclusiveDescendantOf(*c00, *c01));
 }
 
 }  // namespace node_traversal_test

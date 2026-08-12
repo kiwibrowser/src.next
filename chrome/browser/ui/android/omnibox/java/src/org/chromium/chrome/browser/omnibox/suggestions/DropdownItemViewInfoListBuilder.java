@@ -7,13 +7,16 @@ package org.chromium.chrome.browser.omnibox.suggestions;
 import android.content.Context;
 import android.text.TextUtils;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.supplier.Supplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.build.annotations.Initializer;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxImageSupplier;
+import org.chromium.chrome.browser.omnibox.suggestions.SuggestionCommonProperties.PositionalMode;
 import org.chromium.chrome.browser.omnibox.suggestions.answer.AnswerSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.BasicSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.BasicSuggestionProcessor.BookmarkState;
@@ -23,6 +26,7 @@ import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionPr
 import org.chromium.chrome.browser.omnibox.suggestions.groupseparator.GroupSeparatorProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.mostvisited.MostVisitedTilesProcessor;
+import org.chromium.chrome.browser.omnibox.suggestions.tabgroup.TabGroupSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionProcessor;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
@@ -31,31 +35,63 @@ import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.AutocompleteResult;
 import org.chromium.components.omnibox.GroupsProto.GroupConfig;
+import org.chromium.components.omnibox.OmniboxCapabilities;
 import org.chromium.components.omnibox.OmniboxFeatures;
+import org.chromium.components.omnibox.ToolModeUtils;
+import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.function.Supplier;
 
 /** Builds DropdownItemViewInfo list from AutocompleteResult for the Suggestions list. */
+@NullMarked
 class DropdownItemViewInfoListBuilder {
+    private final List<SuggestionProcessor> mPriorityOrderedSuggestionProcessors;
+    private final Supplier<@Nullable Tab> mActivityTabSupplier;
 
-    private final @NonNull List<SuggestionProcessor> mPriorityOrderedSuggestionProcessors;
-    private final @NonNull Supplier<Tab> mActivityTabSupplier;
-
-    private @Nullable GroupSeparatorProcessor mGroupSeparatorProcessor;
-    private @Nullable HeaderProcessor mHeaderProcessor;
+    private GroupSeparatorProcessor mGroupSeparatorProcessor;
+    private HeaderProcessor mHeaderProcessor;
     private @Nullable Supplier<ShareDelegate> mShareDelegateSupplier;
-    private @NonNull Optional<OmniboxImageSupplier> mImageSupplier;
-    private @NonNull BookmarkState mBookmarkState;
+    private @Nullable OmniboxImageSupplier mImageSupplier;
+    private final BookmarkState mBookmarkState;
+    private final MonotonicObservableSupplier<@ControlsPosition Integer> mToolbarPositionSupplier;
 
     DropdownItemViewInfoListBuilder(
-            @NonNull Supplier<Tab> tabSupplier, @NonNull BookmarkState bookmarkState) {
+            Supplier<@Nullable Tab> tabSupplier,
+            BookmarkState bookmarkState,
+            MonotonicObservableSupplier<@ControlsPosition Integer> toolbarPositionSupplier) {
         mPriorityOrderedSuggestionProcessors = new ArrayList<>();
         mActivityTabSupplier = tabSupplier;
-        mImageSupplier = Optional.empty();
+        mImageSupplier = null;
         mBookmarkState = bookmarkState;
+        mToolbarPositionSupplier = toolbarPositionSupplier;
+    }
+
+    /**
+     * Creates a UI context object containing common dependencies for suggestion processors.
+     *
+     * @param context Current context
+     * @param host Component creating suggestion view delegates and responding to suggestion events
+     * @param textProvider Provider of querying/editing the Omnibox
+     * @return AutocompleteUIContext with all necessary dependencies
+     */
+    private AutocompleteUIContext createUIContext(
+            Context context,
+            SuggestionHost host,
+            UrlBarEditingTextStateProvider textProvider,
+            OmniboxActionDelegate actionDelegate) {
+        return new AutocompleteUIContext(
+                context,
+                host,
+                textProvider,
+                mImageSupplier,
+                mBookmarkState,
+                mActivityTabSupplier,
+                mShareDelegateSupplier,
+                mToolbarPositionSupplier,
+                actionDelegate);
     }
 
     /**
@@ -65,42 +101,37 @@ class DropdownItemViewInfoListBuilder {
      * @param host Component creating suggestion view delegates and responding to suggestion events.
      * @param textProvider Provider of querying/editing the Omnibox.
      */
+    @Initializer
     void initDefaultProcessors(
-            @NonNull Context context,
-            @NonNull SuggestionHost host,
-            @NonNull UrlBarEditingTextStateProvider textProvider) {
+            Context context,
+            SuggestionHost host,
+            UrlBarEditingTextStateProvider textProvider,
+            OmniboxActionDelegate actionDelegate) {
         assert mPriorityOrderedSuggestionProcessors.size() == 0 : "Processors already initialized.";
 
-        final Supplier<ShareDelegate> shareSupplier =
-                () -> mShareDelegateSupplier == null ? null : mShareDelegateSupplier.get();
-
         mImageSupplier =
-                OmniboxFeatures.isLowMemoryDevice()
-                        ? Optional.empty()
-                        : Optional.of(new OmniboxImageSupplier(context));
+                OmniboxCapabilities.isLowMemoryDevice() ? null : new OmniboxImageSupplier(context);
 
-        mGroupSeparatorProcessor = new GroupSeparatorProcessor(context);
-        mHeaderProcessor = new HeaderProcessor(context);
-        registerSuggestionProcessor(
-                new EditUrlSuggestionProcessor(
-                        context, host, mImageSupplier, mActivityTabSupplier, shareSupplier));
-        registerSuggestionProcessor(
-                new AnswerSuggestionProcessor(context, host, textProvider, mImageSupplier));
-        registerSuggestionProcessor(
-                new ClipboardSuggestionProcessor(context, host, mImageSupplier));
-        registerSuggestionProcessor(
-                new EntitySuggestionProcessor(
-                        context, host, textProvider, mImageSupplier, mBookmarkState));
-        registerSuggestionProcessor(new TailSuggestionProcessor(context, host));
-        registerSuggestionProcessor(new MostVisitedTilesProcessor(context, host, mImageSupplier));
-        registerSuggestionProcessor(
-                new BasicSuggestionProcessor(
-                        context, host, textProvider, mImageSupplier, mBookmarkState));
+        AutocompleteUIContext uiContext =
+                createUIContext(context, host, textProvider, actionDelegate);
+
+        mGroupSeparatorProcessor = new GroupSeparatorProcessor(uiContext.context);
+        mHeaderProcessor = new HeaderProcessor(uiContext.context);
+        registerSuggestionProcessor(new EditUrlSuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new AnswerSuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new ClipboardSuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new EntitySuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new TailSuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new MostVisitedTilesProcessor(uiContext));
+        registerSuggestionProcessor(new TabGroupSuggestionProcessor(uiContext));
+        registerSuggestionProcessor(new BasicSuggestionProcessor(uiContext));
     }
 
     void destroy() {
-        mImageSupplier.ifPresent(s -> s.destroy());
-        mImageSupplier = Optional.empty();
+        if (mImageSupplier != null) {
+            mImageSupplier.destroy();
+        }
+        mImageSupplier = null;
     }
 
     /**
@@ -109,7 +140,7 @@ class DropdownItemViewInfoListBuilder {
      *
      * @param processor SuggestionProcessor that handles OmniboxSuggestions.
      */
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    @VisibleForTesting
     void registerSuggestionProcessor(SuggestionProcessor processor) {
         mPriorityOrderedSuggestionProcessors.add(processor);
     }
@@ -138,7 +169,9 @@ class DropdownItemViewInfoListBuilder {
      * @param profile Current user profile.
      */
     void setProfile(Profile profile) {
-        mImageSupplier.ifPresent(s -> s.setProfile(profile));
+        if (mImageSupplier != null) {
+            mImageSupplier.setProfile(profile);
+        }
     }
 
     /**
@@ -146,7 +179,7 @@ class DropdownItemViewInfoListBuilder {
      *
      * @param shareDelegateSupplier Share facility supplier.
      */
-    void setShareDelegateSupplier(Supplier<ShareDelegate> shareDelegateSupplier) {
+    void setShareDelegateSupplier(@Nullable Supplier<ShareDelegate> shareDelegateSupplier) {
         mShareDelegateSupplier = shareDelegateSupplier;
     }
 
@@ -156,7 +189,9 @@ class DropdownItemViewInfoListBuilder {
      * @param activated Indicates whether omnibox session is activated.
      */
     void onOmniboxSessionStateChange(boolean activated) {
-        if (!activated) mImageSupplier.ifPresent(s -> s.resetCache());
+        if (!activated && mImageSupplier != null) {
+            mImageSupplier.resetCache();
+        }
 
         mHeaderProcessor.onOmniboxSessionStateChange(activated);
         for (int index = 0; index < mPriorityOrderedSuggestionProcessors.size(); index++) {
@@ -167,7 +202,9 @@ class DropdownItemViewInfoListBuilder {
     /** Signals that native initialization has completed. */
     void onNativeInitialized() {
         mHeaderProcessor.onNativeInitialized();
-        mImageSupplier.ifPresent(s -> s.onNativeInitialized());
+        if (mImageSupplier != null) {
+            mImageSupplier.onNativeInitialized();
+        }
 
         for (int index = 0; index < mPriorityOrderedSuggestionProcessors.size(); index++) {
             mPriorityOrderedSuggestionProcessors.get(index).onNativeInitialized();
@@ -188,12 +225,11 @@ class DropdownItemViewInfoListBuilder {
      * @param firstVerticalPosition The index of the first AutocompleteMatch in the target list
      */
     @VisibleForTesting
-    @NonNull
     List<DropdownItemViewInfo> buildVerticalSuggestionsGroup(
-            @NonNull AutocompleteInput input,
-            @NonNull GroupConfig groupDetails,
+            AutocompleteInput input,
+            GroupConfig groupDetails,
             @Nullable GroupConfig previousDetails,
-            @NonNull List<AutocompleteMatch> groupMatches,
+            List<AutocompleteMatch> groupMatches,
             int firstVerticalPosition) {
         assert groupDetails != null;
         assert groupMatches != null;
@@ -206,33 +242,49 @@ class DropdownItemViewInfoListBuilder {
         // Note that despite GroupsDetails map not holding <null> values,
         // a group definition for specific ID may be unavailable, or the group
         // header text may be empty.
-        // TODO(http://crbug/1518967): move this to the calling function and instantiate the
+        // TODO(http://crbug.com/41491951): move this to the calling function and instantiate the
         // HeaderView undonditionally when passing from one suggestion group to another.
-        // TODO(http://crbug/1518967): collapse Header and DivierLine to a single component.
+        // TODO(http://crbug.com/41491951): collapse Header and DivierLine to a single component.
+        String headerText = null;
+        boolean showGroupSeparatorDecoration = false;
+
         if (!TextUtils.isEmpty(groupDetails.getHeaderText())) {
-            final PropertyModel model = mHeaderProcessor.createModel();
-            mHeaderProcessor.populateModel(model, groupDetails.getHeaderText());
-            result.add(new DropdownItemViewInfo(mHeaderProcessor, model, groupDetails));
+            if (OmniboxFeatures.sOmniboxItemDecoration.isEnabled()) {
+                headerText = groupDetails.getHeaderText();
+            } else {
+                final PropertyModel model = mHeaderProcessor.createModel();
+                mHeaderProcessor.populateModel(model, groupDetails.getHeaderText());
+                result.add(new DropdownItemViewInfo(mHeaderProcessor, model, groupDetails));
+            }
         } else if (previousDetails != null
                 && previousDetails.getRenderType() == GroupConfig.RenderType.DEFAULT_VERTICAL) {
-            final PropertyModel model = mGroupSeparatorProcessor.createModel();
-            result.add(new DropdownItemViewInfo(mGroupSeparatorProcessor, model, groupDetails));
+            if (OmniboxFeatures.sOmniboxItemDecoration.isEnabled()) {
+                showGroupSeparatorDecoration = true;
+            } else {
+                final PropertyModel model = mGroupSeparatorProcessor.createModel();
+                result.add(new DropdownItemViewInfo(mGroupSeparatorProcessor, model, groupDetails));
+            }
         }
 
         for (int indexInList = 0; indexInList < numGroupMatches; indexInList++) {
             var indexOnList = firstVerticalPosition + indexInList;
-            @SuppressWarnings("null")
-            @NonNull
             AutocompleteMatch match = groupMatches.get(indexInList);
             var processor = getProcessorForSuggestion(match, indexOnList);
             var model = processor.createModel();
 
-            model.set(DropdownCommonProperties.BG_TOP_CORNER_ROUNDED, indexInList == 0);
+            boolean isFirstItem = indexInList == 0;
+            boolean isLastItem = indexInList == numGroupMatches - 1;
             model.set(
-                    DropdownCommonProperties.BG_BOTTOM_CORNER_ROUNDED,
-                    indexInList == numGroupMatches - 1);
-            model.set(DropdownCommonProperties.SHOW_DIVIDER, indexInList < numGroupMatches - 1);
+                    SuggestionCommonProperties.BG_POSITIONAL_MODE,
+                    getPositionalMode(isFirstItem, isLastItem));
+            model.set(SuggestionCommonProperties.SHOW_DIVIDER, indexInList < numGroupMatches - 1);
+            model.set(
+                    SuggestionCommonProperties.SHOW_GROUP_SEPARATOR,
+                    showGroupSeparatorDecoration && isFirstItem);
+            model.set(SuggestionCommonProperties.HEADER_TITLE, isFirstItem ? headerText : null);
 
+            model.set(SuggestionCommonProperties.INDEX_IN_GROUP, indexInList);
+            model.set(SuggestionCommonProperties.TOTAL_IN_GROUP, numGroupMatches);
             processor.populateModel(input, match, model, indexOnList);
             result.add(new DropdownItemViewInfo(processor, model, groupDetails));
         }
@@ -256,11 +308,10 @@ class DropdownItemViewInfoListBuilder {
      * @param position The index on the target list
      */
     @VisibleForTesting
-    @NonNull
     List<DropdownItemViewInfo> buildHorizontalSuggestionsGroup(
-            @NonNull AutocompleteInput input,
-            @NonNull GroupConfig groupDetails,
-            @NonNull List<AutocompleteMatch> groupMatches,
+            AutocompleteInput input,
+            GroupConfig groupDetails,
+            List<AutocompleteMatch> groupMatches,
             int position) {
         assert groupDetails != null;
         assert groupMatches != null;
@@ -272,19 +323,24 @@ class DropdownItemViewInfoListBuilder {
         // Note that despite GroupsDetails map not holding <null> values,
         // a group definition for specific ID may be unavailable, or the group
         // header text may be empty.
+        String headerText = null;
         if (!TextUtils.isEmpty(groupDetails.getHeaderText())) {
-            final PropertyModel model = mHeaderProcessor.createModel();
-            mHeaderProcessor.populateModel(model, groupDetails.getHeaderText());
-            result.add(new DropdownItemViewInfo(mHeaderProcessor, model, groupDetails));
+            if (OmniboxFeatures.sOmniboxItemDecoration.isEnabled()) {
+                headerText = groupDetails.getHeaderText();
+            } else {
+                final PropertyModel model = mHeaderProcessor.createModel();
+                mHeaderProcessor.populateModel(model, groupDetails.getHeaderText());
+                result.add(new DropdownItemViewInfo(mHeaderProcessor, model, groupDetails));
+            }
         }
 
         int numGroupMatches = groupMatches.size();
         var processor = getProcessorForSuggestion(groupMatches.get(0), position);
         var model = processor.createModel();
 
+        model.set(SuggestionCommonProperties.HEADER_TITLE, headerText);
+
         for (int index = 0; index < numGroupMatches; index++) {
-            @SuppressWarnings("null") // The list should never include null elements.
-            @NonNull
             AutocompleteMatch match = groupMatches.get(index);
             assert processor.doesProcessSuggestion(match, position);
             processor.populateModel(input, match, model, position);
@@ -305,7 +361,6 @@ class DropdownItemViewInfoListBuilder {
      * @return List of DropdownItemViewInfo representing the corresponding content of the
      *     suggestions list.
      */
-    @NonNull
     List<DropdownItemViewInfo> buildDropdownViewInfoList(
             AutocompleteInput input, AutocompleteResult autocompleteResult) {
         mHeaderProcessor.onSuggestionsReceived();
@@ -319,6 +374,7 @@ class DropdownItemViewInfoListBuilder {
         var currentGroupMatches = new ArrayList<AutocompleteMatch>();
         var nextSuggestionLogicalIndex = 0;
         var groupsInfo = autocompleteResult.getGroupsInfo();
+        boolean isAimRequest = ToolModeUtils.isAimRequest(input.getRequestType());
 
         GroupConfig previousGroupConfig = null;
 
@@ -334,6 +390,13 @@ class DropdownItemViewInfoListBuilder {
             // Inner loop to populate AutocompleteMatch objects belonging to this group.
             while (index < newMatchesCount) {
                 var match = newMatches.get(index);
+                if (isAimRequest
+                        && OmniboxFeatures.sAIMSuppressVerbatimMatch.isEnabled()
+                        && match.isWhatYouTyped()) {
+                    index++;
+                    continue;
+                }
+
                 var matchGroupConfig =
                         groupsInfo.getGroupConfigsOrDefault(
                                 match.getGroupId(), GroupConfig.getDefaultInstance());
@@ -341,6 +404,10 @@ class DropdownItemViewInfoListBuilder {
                 currentGroupMatches.add(match);
                 index++;
             }
+
+            // Corner case: if disabling SRO and the verbatim match on the Web, the top group may be
+            // empty.
+            if (currentGroupMatches.isEmpty()) continue;
 
             // Append this suggestions group/section to resulting model, following the render type
             // dictated by GroupConfig.
@@ -375,21 +442,33 @@ class DropdownItemViewInfoListBuilder {
         return viewInfoList;
     }
 
+    private static @PositionalMode int getPositionalMode(boolean isFirstItem, boolean isLastItem) {
+        if (isFirstItem && isLastItem) {
+            return PositionalMode.SINGLE;
+        } else if (isFirstItem) {
+            return PositionalMode.TOP;
+        } else if (isLastItem) {
+            return PositionalMode.BOTTOM;
+        } else {
+            return PositionalMode.MIDDLE;
+        }
+    }
+
     /**
      * Search for Processor that will handle the supplied suggestion at specific position.
      *
      * @param suggestion The suggestion to be processed.
      * @param position Position of the suggestion in the list.
      */
-    private @NonNull SuggestionProcessor getProcessorForSuggestion(
-            @NonNull AutocompleteMatch suggestion, int position) {
+    private SuggestionProcessor getProcessorForSuggestion(
+            AutocompleteMatch suggestion, int position) {
         for (int index = 0; index < mPriorityOrderedSuggestionProcessors.size(); index++) {
             SuggestionProcessor processor = mPriorityOrderedSuggestionProcessors.get(index);
             if (processor.doesProcessSuggestion(suggestion, position)) return processor;
         }
 
-        // Crash intentionally. This should never happen.
-        assert false : "No default handler for suggestions";
-        return null;
+        // Crash intentionally. This should never happen. The final suggestion processor is the
+        // catch-all.
+        throw new RuntimeException("No default handler for suggestions");
     }
 }

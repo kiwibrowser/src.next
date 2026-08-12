@@ -4,12 +4,15 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.ALL_KEYS;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.CLUSTER_DATA;
-import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.CREATION_MILLIS;
+import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.OPEN_RUNNABLE;
+import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.TIMESTAMP_EVENT;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.TITLE_DATA;
 
 import android.app.Activity;
@@ -18,12 +21,10 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
-import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.widget.FrameLayout;
 
 import androidx.annotation.LayoutRes;
-import androidx.core.util.Pair;
 import androidx.test.filters.MediumTest;
 
 import org.junit.Before;
@@ -40,10 +41,14 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tasks.tab_management.TabGroupFaviconCluster.ClusterData;
-import org.chromium.chrome.test.R;
+import org.chromium.chrome.browser.tasks.tab_management.TabGroupRowView.TabGroupRowViewTitleData;
+import org.chromium.chrome.browser.tasks.tab_management.TabGroupTimeAgo.TimestampEvent;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.components.tab_groups.TabGroupColorId;
+import org.chromium.components.tab_groups.TabGroupsFeatureMap;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.ui.test.util.BlankUiTestActivity;
@@ -59,6 +64,7 @@ import java.util.stream.Collectors;
 
 /** Render tests for {@link TabGroupRowView}. */
 @RunWith(BaseJUnit4ClassRunner.class)
+@DisableFeatures({TabGroupsFeatureMap.UPDATE_TAB_GROUP_COLORS})
 public class TabGroupRowViewRenderTest {
 
     @Rule
@@ -69,7 +75,7 @@ public class TabGroupRowViewRenderTest {
     public ChromeRenderTestRule mRenderTestRule =
             ChromeRenderTestRule.Builder.withPublicCorpus()
                     .setBugComponent(Component.UI_BROWSER_MOBILE_TAB_GROUPS)
-                    .setRevision(2)
+                    .setRevision(5)
                     .build();
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -101,9 +107,8 @@ public class TabGroupRowViewRenderTest {
         doAnswer(
                         (Answer<Void>)
                                 invocation -> {
-                                    GURL url = (GURL) invocation.getArguments()[0];
-                                    Callback<Drawable> callback =
-                                            (Callback<Drawable>) invocation.getArguments()[1];
+                                    GURL url = invocation.getArgument(0);
+                                    Callback<Drawable> callback = invocation.getArgument(1);
                                     callback.onResult(new ColorDrawable(urlToColor.get(url)));
                                     return null;
                                 })
@@ -115,7 +120,7 @@ public class TabGroupRowViewRenderTest {
         mTabGroupRowView = inflateAndAttach(mActivity, R.layout.tab_group_row);
     }
 
-    private <T extends View> T inflateAndAttach(Context context, @LayoutRes int layoutRes) {
+    private TabGroupRowView inflateAndAttach(Context context, @LayoutRes int layoutRes) {
         FrameLayout contentView = new FrameLayout(mActivity);
         contentView.setLayoutParams(
                 new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -123,8 +128,8 @@ public class TabGroupRowViewRenderTest {
 
         LayoutInflater inflater = LayoutInflater.from(context);
         inflater.inflate(layoutRes, contentView);
-        assert contentView.getChildCount() == 1;
-        return (T) contentView.getChildAt(0);
+        assertThat(contentView.getChildCount()).isEqualTo(1);
+        return (TabGroupRowView) contentView.getChildAt(0);
     }
 
     private ClusterData makeCornerData(GURL... urls) {
@@ -141,8 +146,17 @@ public class TabGroupRowViewRenderTest {
                     PropertyModel.Builder builder = new PropertyModel.Builder(ALL_KEYS);
                     builder.with(CLUSTER_DATA, makeCornerData(urls));
                     builder.with(TabGroupRowProperties.COLOR_INDEX, TabGroupColorId.GREY);
-                    builder.with(TITLE_DATA, new Pair<>("Title", 1));
-                    builder.with(CREATION_MILLIS, Clock.systemUTC().millis());
+                    builder.with(OPEN_RUNNABLE, () -> {});
+                    builder.with(
+                            TITLE_DATA,
+                            new TabGroupRowViewTitleData(
+                                    "Title",
+                                    1,
+                                    R.plurals.tab_group_bottom_sheet_row_accessibility_text));
+                    builder.with(
+                            TIMESTAMP_EVENT,
+                            new TabGroupTimeAgo(
+                                    Clock.systemUTC().millis(), TimestampEvent.CREATED));
                     mPropertyModel = builder.build();
                     PropertyModelChangeProcessor.create(
                             mPropertyModel, mTabGroupRowView, TabGroupRowViewBinder::bind);
@@ -160,9 +174,14 @@ public class TabGroupRowViewRenderTest {
                     builder.with(TabGroupRowProperties.COLOR_INDEX, TabGroupColorId.GREY);
                     builder.with(
                             TITLE_DATA,
-                            new Pair<>(
-                                    "VeryLongTitleThatGetsTruncatedOrSplitOverMultipleLines", 1));
-                    builder.with(CREATION_MILLIS, Clock.systemUTC().millis());
+                            new TabGroupRowViewTitleData(
+                                    "VeryLongTitleThatGetsTruncatedOrSplitOverMultipleLines",
+                                    1,
+                                    R.plurals.tab_group_bottom_sheet_row_accessibility_text));
+                    builder.with(
+                            TIMESTAMP_EVENT,
+                            new TabGroupTimeAgo(
+                                    Clock.systemUTC().millis(), TimestampEvent.CREATED));
                     mPropertyModel = builder.build();
                     PropertyModelChangeProcessor.create(
                             mPropertyModel, mTabGroupRowView, TabGroupRowViewBinder::bind);
@@ -197,5 +216,67 @@ public class TabGroupRowViewRenderTest {
 
         remakeWithUrls(JUnitTestGURLs.RED_1);
         mRenderTestRule.render(mTabGroupRowView, "one");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testRenderWithDisabledMenu() throws Exception {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    PropertyModel.Builder builder = new PropertyModel.Builder(ALL_KEYS);
+                    builder.with(CLUSTER_DATA, makeCornerData(JUnitTestGURLs.RED_1));
+                    builder.with(TabGroupRowProperties.COLOR_INDEX, TabGroupColorId.GREY);
+                    builder.with(
+                            TITLE_DATA,
+                            new TabGroupRowViewTitleData(
+                                    "A generic title",
+                                    1,
+                                    R.plurals.tab_group_bottom_sheet_row_accessibility_text));
+                    builder.with(
+                            TIMESTAMP_EVENT,
+                            new TabGroupTimeAgo(
+                                    Clock.systemUTC().millis(), TimestampEvent.CREATED));
+                    builder.with(OPEN_RUNNABLE, null);
+                    mPropertyModel = builder.build();
+                    PropertyModelChangeProcessor.create(
+                            mPropertyModel, mTabGroupRowView, TabGroupRowViewBinder::bind);
+                });
+        mRenderTestRule.render(mTabGroupRowView, "menu_disabled");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testRenderWithNoSubtitle() throws Exception {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    PropertyModel.Builder builder = new PropertyModel.Builder(ALL_KEYS);
+                    builder.with(CLUSTER_DATA, makeCornerData(JUnitTestGURLs.RED_1));
+                    builder.with(TabGroupRowProperties.COLOR_INDEX, TabGroupColorId.GREY);
+                    builder.with(
+                            TITLE_DATA,
+                            new TabGroupRowViewTitleData(
+                                    "A generic title",
+                                    1,
+                                    R.plurals.tab_group_bottom_sheet_row_accessibility_text));
+                    builder.with(OPEN_RUNNABLE, null);
+                    mPropertyModel = builder.build();
+                    PropertyModelChangeProcessor.create(
+                            mPropertyModel, mTabGroupRowView, TabGroupRowViewBinder::bind);
+                });
+        mRenderTestRule.render(mTabGroupRowView, "subtitle_disabled");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testRenderWithContainment() throws Exception {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    mTabGroupRowView.setupForContainment();
+                });
+        remakeWithUrls(JUnitTestGURLs.RED_1);
+        mRenderTestRule.render(mTabGroupRowView, "containment");
     }
 }

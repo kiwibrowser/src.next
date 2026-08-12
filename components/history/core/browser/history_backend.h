@@ -22,7 +22,7 @@
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/memory_pressure_listener.h"
+#include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/task/sequenced_task_runner.h"
@@ -161,10 +161,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
     // Notify HistoryService that the user is visiting a URL. The event will
     // be forwarded to the HistoryServiceObservers in the correct thread.
-    virtual void NotifyURLVisited(
-        const URLRow& url_row,
-        const VisitRow& visit_row,
-        std::optional<int64_t> local_navigation_id) = 0;
+    virtual void NotifyURLVisited(VisitedURLInfo visited_url_info) = 0;
 
     // Notify HistoryService that some URLs have been modified. The event will
     // be forwarded to the HistoryServiceObservers in the correct thread.
@@ -302,9 +299,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Querying ------------------------------------------------------------------
 
-  QueryURLResult QueryURL(const GURL& url, bool want_visits);
-  std::vector<QueryURLResult> QueryURLs(const std::vector<GURL>& urls,
-                                        bool want_visits);
+  QueryURLResult QueryURL(const GURL& url);
+  std::optional<std::vector<URLID>> QueryUrlIds(const std::vector<GURL>& urls);
+  QueryURLAndVisitsResult QueryURLAndVisits(
+      const GURL& url,
+      VisitQuery404sPolicy policy_for_404s);
   QueryResults QueryHistory(const std::u16string& text_query,
                             const QueryOptions& options);
 
@@ -312,20 +311,30 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // redirected to. There may be more than one redirect in a row, so this
   // function will fill the given array with the entire chain. If there are
   // no redirects for the most recent visit of the URL, or the URL is not
-  // in history, the array will be empty.
+  // in history, the array will be empty. Excludes redirects that result in a
+  // 404 status code.
   RedirectList QueryRedirectsFrom(const GURL& url);
 
   // Similar to above function except computes a chain of redirects to the
   // given URL. Stores the most recent list of redirects ending at `url` in the
   // given RedirectList. For example, if we have the redirect list A -> B -> C,
   // then calling this function with url=C would fill redirects with {B, A}.
+  // Includes redirects that result in a 404 response.
   RedirectList QueryRedirectsTo(const GURL& url);
 
   VisibleVisitCountToHostResult GetVisibleVisitCountToHost(const GURL& url);
 
   // Request the `result_count` most visited URLs and the chain of
   // redirects leading to each of these URLs. Used by TopSites.
-  MostVisitedURLList QueryMostVisitedURLs(int result_count);
+  // `recency_factor_name` is the type of scoring algorithm SegmentScorer
+  // will use when rankings results.
+  // `recency_window_days` is the number of days of history to consider
+  // when scoring segments. A result older than this window will not add to a
+  // segment's score.
+  MostVisitedURLList QueryMostVisitedURLs(
+      int result_count,
+      const std::optional<std::string>& recency_factor_name = std::nullopt,
+      std::optional<size_t> recency_window_days = std::nullopt);
 
   // Request `result_count` of the most repeated queries for the given keyword.
   // Used by TopSites.
@@ -339,51 +348,55 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // [`begin_time`, `end_time`). Each URL is counted only once per day. For
   // determination of the date, timestamps are converted to dates using local
   // time.
-  HistoryCountResult GetHistoryCount(const base::Time& begin_time,
-                                     const base::Time& end_time);
-
-  // Returns the number of hosts visited in the last month.
-  HistoryCountResult CountUniqueHostsVisitedLastMonth();
+  HistoryCountResult GetHistoryCount(
+      const base::Time& begin_time,
+      const base::Time& end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Returns a collection of domain diversity metrics. Each metric is an
   // unsigned integer representing the number of unique domains (effective
   // top-level domain (eTLD) + 1, e.g. "foo.com", "bar.co.uk") visited within
   // the 1-day, 7-day or 28-day span that ends at a midnight in local timezone.
   //
+  // Includes only visits from this device; foreign/synced visits are ignored.
+  //
   // For each of the most recent `number_of_days_to_report` midnights before
   // `report_time`(inclusive), this function computes a subset of
   // {1-day, 7-day, 28-day} metrics whose spanning periods all end on that
   // midnight. This subset of metrics to compute is specified by a bitmask
   // `metric_type_bitmask`, which takes a bitwise combination of
-  // kEnableLast1DayMetric, kEnableLast7DayMetric and kEnableLast28DayMetric.
+  // `kEnableLast1DayMetric`, `kEnableLast7DayMetric` and
+  // `kEnableLast28DayMetric`. Callers specify whether they want calculations to
+  // consider visits that had an HTTP response code of 404 by setting
+  // `policy_for_404_visits`.
   //
-  // All computed metrics are stored in DomainDiversityResults, which represents
-  // a collection of DomainMetricSet's. Each DomainMetricSet contains up to 3
-  // metrics ending at one unique midnight in the time range of
+  // All computed metrics are stored in `DomainDiversityResults`, which
+  // represents a collection of `DomainMetricSet`s. Each `DomainMetricSet`
+  // contains up to 3 metrics ending at one unique midnight in the time range of
   // `number_of_days_to_report` days before `report_time`. The collection of
-  // DomainMetricSet is sorted reverse chronologically by the ending midnight.
+  // `DomainMetricSet`s is sorted reverse chronologically by the ending
+  // midnight.
   //
   // For example, when `report_time` = 2019/11/01 00:01am, `number_of_days` = 3,
-  // `metric_type_bitmask` = kEnableLast28DayMetric | kEnableLast1DayMetric,
-  // DomainDiversityResults will hold 3 DomainMetricSets, each containing 2
+  // `metric_type_bitmask` = `kEnableLast28DayMetric | kEnableLast1DayMetric`,
+  // DomainDiversityResults will hold 3 `DomainMetricSet`s, each containing 2
   // metrics measuring domain visit counts spanning the following date ranges
   // (all dates are inclusive):
-  // {{10/30, 10/3~10/30}, {10/29, 10/2~10/29}, {10/28, 10/1~10/28}}
-  //
-  // The return value is a pair of results, where the first member counts only
-  // local visits, and the second counts both local and foreign (synced) visits.
-  // TODO(crbug.com/40896778): Once the "V2" domain diversity metrics are
-  // deprecated, return only a single result, the "local" one.
-  std::pair<DomainDiversityResults, DomainDiversityResults> GetDomainDiversity(
+  // {{10/30, 10/3–10/30}, {10/29, 10/2–10/29}, {10/28, 10/1–10/28}}
+  DomainDiversityResults GetDomainDiversity(
       base::Time report_time,
       int number_of_days_to_report,
-      DomainMetricBitmaskType metric_type_bitmask);
+      DomainMetricBitmaskType metric_type_bitmask,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Gets unique domains (eTLD+1) visited within the time range
   // [`begin_time`, `end_time`) for local and synced visits sorted in
-  // reverse-chronological order.
-  DomainsVisitedResult GetUniqueDomainsVisited(base::Time begin_time,
-                                               base::Time end_time);
+  // reverse-chronological order. Visits with an HTTP response code of 404 will
+  // be factored in or ignored according to `policy_for_404_visits`.
+  DomainsVisitedResult GetUniqueDomainsVisited(
+      base::Time begin_time,
+      base::Time end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Gets all the app IDs used in the database entries.
   GetAllAppIdsResult GetAllAppIds();
@@ -392,28 +405,29 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // time range [`begin_time`, `end_time`). If the given host has not been
   // visited in the given time range, the result will have a null base::Time,
   // but still report success. Only queries http and https hosts.
-  HistoryLastVisitResult GetLastVisitToHost(const std::string& host,
-                                            base::Time begin_time,
-                                            base::Time end_time);
+  HistoryLastVisitResult GetLastVisitToHost(
+      const std::string& host,
+      base::Time begin_time,
+      base::Time end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Same as the above, but for the given origin instead of host.
-  HistoryLastVisitResult GetLastVisitToOrigin(const url::Origin& origin,
-                                              base::Time begin_time,
-                                              base::Time end_time);
+  HistoryLastVisitResult GetLastVisitToOrigin(
+      const url::Origin& origin,
+      base::Time begin_time,
+      base::Time end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
-  // Gets the last time `url` was visited before `end_time`. If the given URL
-  // has not been visited in the past, the result will have a null base::Time,
-  // but still report success.
-  HistoryLastVisitResult GetLastVisitToURL(const GURL& url,
-                                           base::Time end_time);
+  // Gets counts for total visits and days visited for pages matching `origin`.
+  // Counts only user-visible visits. Counts or ignores visits with an HTTP
+  // response code of 404 based on `policy_for_404_visits`.
+  DailyVisitsResult GetDailyVisitsToOrigin(
+      const url::Origin& origin,
+      base::Time begin_time,
+      base::Time end_time,
+      VisitQuery404sPolicy policy_for_404_visits);
 
-  // Gets counts for total visits and days visited for pages matching `host`'s
-  // scheme, port, and host. Counts only user-visible visits.
-  DailyVisitsResult GetDailyVisitsToHost(const GURL& host,
-                                         base::Time begin_time,
-                                         base::Time end_time);
-
-  // Favicon -------------------------------------------------------------------
+  // Favicons ------------------------------------------------------------------
 
   std::vector<favicon_base::FaviconRawBitmapResult> GetFavicon(
       const GURL& icon_url,
@@ -546,31 +560,26 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // this boundary won't be clustered nor cause re-clustering.
   base::Time FindMostRecentClusteredTime();
 
-  void ReplaceClusters(const std::vector<int64_t>& ids_to_delete,
+  void ReplaceClusters(const std::vector<ClusterId>& ids_to_delete,
                        const std::vector<Cluster>& clusters_to_add);
 
-  int64_t ReserveNextClusterIdWithVisit(const ClusterVisit& cluster_visit);
+  ClusterId ReserveNextClusterIdWithVisit(ClusterVisit cluster_visit);
 
-  void AddVisitsToCluster(int64_t cluster_id,
-                          const std::vector<ClusterVisit>& visits);
+  void AddVisitsToCluster(ClusterId cluster_id,
+                          std::vector<ClusterVisit> visits);
 
   // Adds `cluster_visit` to the local cluster with `originator_cache_guid` and
   // `originator_cluster_id`. If an existing cluster does not exist with those
   // synced details, a new one will be created.
   void AddVisitToSyncedCluster(const history::ClusterVisit& cluster_visit,
                                const std::string& originator_cache_guid,
-                               int64_t originator_cluster_id) override;
+                               ClusterId originator_cluster_id) override;
 
   void UpdateClusterTriggerability(const std::vector<Cluster>& clusters);
 
-  // Use `UpdateVisitsInteractionState` instead to preserve the visits' scores.
   void HideVisits(const std::vector<VisitID>& visit_ids);
 
-  void UpdateClusterVisit(const history::ClusterVisit& cluster_visit);
-
-  void UpdateVisitsInteractionState(
-      const std::vector<VisitID>& visit_ids,
-      const ClusterVisit::InteractionState interaction_state);
+  void UpdateClusterVisit(history::ClusterVisit cluster_visit);
 
   std::vector<Cluster> GetMostRecentClusters(
       base::Time inclusive_min_time,
@@ -582,13 +591,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Get a `Cluster`. Since `keyword_to_data_map` and `visits.duplicate_visits`
   // aren't always useful and require extra SQL executions, they're only
   // populated if `include_keywords_and_duplicates` is true.
-  Cluster GetCluster(int64_t cluster_id,
+  Cluster GetCluster(ClusterId cluster_id,
                      bool include_keywords_and_duplicates = true);
 
   // Returns the ID of the cluster containing `visit_id`. Returns 0 if
   // `visit_id` is not in a cluster.
   // HistoryBackendForSync:
-  int64_t GetClusterIdContainingVisit(VisitID visit_id) override;
+  ClusterId GetClusterIdContainingVisit(VisitID visit_id) override;
 
   // Finds the 1st visit in the redirect chain containing `visit`.
   // Unlike `GetRedirectsToSpecificVisit()`, this only considers actual
@@ -638,30 +647,28 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   bool CanAddURL(const GURL& url) const override;
 
-  bool GetAllTypedURLs(URLRows* urls);
-
   // TODO(manukh): It's confusing to have 5 methods for fetching URLs' visits
   //   and continuously adding more methods for each use case. Maybe we can
   //   satisfy all the callsites with just a few generic methods. E.g.:
   //   - GetMostRecentVisitsForUrlId(URLID id, int max_visits)
   //   - GetMostRecentVisitsForGurl(GURL url, int max_visits)
   //   - GetMostRecentVisitsForEachGurl(std::vector<GURL> urls, int max_visits)
+  // Likewise `VisitDatabase::Get[MostRecent]VisitsFor[Gurl|Url|EachGurl]`
+  // methods.
 
   // TODO(manukh): DEPRECATED (see above comment)
-  bool GetVisitsForURL(URLID id, VisitVector* visits);
+  bool GetMostRecentVisitForURL(
+      URLID id,
+      VisitRow* visit_row,
+      VisitQuery404sPolicy policy_for_404_visits) override;
 
-  // TODO(manukh): Rename to `GetMostRecentVisitsForEachGurl`.
-  std::map<GURL, VisitRow> GetMostRecentVisitForEachURL(
-      const std::vector<GURL>& urls);
+  QueryURLAndVisitsResult GetMostRecentVisitsForGurl(
+      GURL url,
+      int max_visits,
+      VisitQuery404sPolicy policy_for_404_visits);
 
-  // TODO(manukh): DEPRECATED (see above comment)
-  bool GetMostRecentVisitForURL(URLID id, VisitRow* visit_row) override;
-
-  // Fetches up to `max_visits` most recent visits for the passed URL.
-  // TODO(manukh): Rename to `GetMostRecentVisitsForUrlId`.
-  bool GetMostRecentVisitsForURL(URLID id, int max_visits, VisitVector* visits);
-
-  QueryURLResult GetMostRecentVisitsForGurl(GURL url, int max_visits);
+  // Gets whether the URL is known to sync.
+  bool GetIsUrlKnownToSync(URLID id, bool* is_known_to_sync);
 
   // Searches for a visit with the given `originator_visit_id` coming from
   // another device (identified by `originator_cache_guid`). If found, returns
@@ -724,7 +731,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   bool GetVisitsSource(const VisitVector& visits, VisitSourceMap* sources);
 
   // Like `GetVisitsSource`, but for a single visit.
-  bool GetVisitSource(const VisitID visit_id, VisitSource* source);
+  bool GetVisitSource(const VisitID visit_id, VisitSource* source) override;
 
   bool GetURL(const GURL& url, URLRow* url_row);
 
@@ -734,7 +741,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Returns the visit matching a given timestamp. In case of redirects (where
   // multiple visits can have the same timestamp), returns the last visit in the
-  // redirect chain.
+  // redirect chain. Includes visits and redirects that result in a 404 response
+  // code.
   bool GetLastVisitByTime(base::Time visit_time, VisitRow* visit_row) override;
 
   // Returns the sync controller delegate for syncing history. The returned
@@ -776,14 +784,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // ExpireHistoryBetween().
   void ExpireHistory(const std::vector<ExpireHistoryArgs>& expire_list);
 
-  // Expires all visits before and including the given time, updating the URLs
-  // accordingly.
-  void ExpireHistoryBeforeForTesting(base::Time end_time);
-
   // Bookmarks -----------------------------------------------------------------
 
   // Notification that a URL is no longer bookmarked. If there are no visits
-  // for the specified url, it is deleted.
+  // for the specified url, it is deleted. Includes visits that result in a 404
+  // status code.
   void URLsNoLongerBookmarked(const std::set<GURL>& urls);
 
   // Callbacks To Kill Database When It Gets Corrupted -------------------------
@@ -846,10 +851,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Does the work of Init.
   void InitImpl(const HistoryDatabaseParams& history_database_params);
 
-  // Called when the system is under memory pressure.
-  void OnMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
-
   // Closes all databases managed by HistoryBackend. Commits any pending
   // transactions.
   void CloseAllDatabases();
@@ -860,16 +861,21 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // be 0 on failure.
   //
   // If the caller wants to add this visit to the VisitedLinkDatabase, it needs
-  // to provide values for the `top_level_url`, `frame_url`, `is_ephemeral`
-  // parameters. `top_level_url` is a GURL representing the top-level frame that
-  // this navigation originated from. `frame_url` is GURL representing the
-  // immediate frame that this navigation originated from. For example, if a
-  // link to `c.com` is clicked in an iframe `b.com` that is embedded in
-  // `a.com`, the `top_level_url` is `a.com` and the `frame_url` is `b.com` (and
-  // the `url` is `c.com`). `is_ephemeral` represents whether our navigation
-  // came from a credentialless iframe (which is an ephemeral context). When
-  // true, we want to avoid adding the visit into the VisitedLinkDatabase. This
-  // does not schedule database commits, it is intended to be used as a
+  // to provide values for the `top_level_url`, `frame_url`,
+  // `visit_context_ephemerality` parameters. `top_level_url` is a GURL
+  // representing the top-level frame that this navigation originated from.
+  // `frame_url` is GURL representing the immediate frame that this navigation
+  // originated from. For example, if a link to `c.com` is clicked in an iframe
+  // `b.com` that is embedded in `a.com`, the `top_level_url` is `a.com` and the
+  // `frame_url` is `b.com` (and the `url` is `c.com`).
+  // `visit_context_ephemerality` represents whether our navigation came from a
+  // credentialless iframe (which is an ephemeral context). When `kEphemeral`,
+  // we want to avoid adding the visit into the VisitedLinkDatabase.
+  // `response_code_category` indicates whether or not the visit had a 404
+  // response and is used to notify observers of the visit status without
+  // writing to the database.
+  //
+  // This does not schedule database commits, it is intended to be used as a
   // subroutine for AddPage only. It also assumes the database is valid.
   // Note that |app_is| is used for mobile only; |nullopt| on other platforms.
   std::pair<URLID, VisitID> AddPageVisit(
@@ -880,10 +886,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       ui::PageTransition transition,
       bool hidden,
       VisitSource visit_source,
+      VisitResponseCodeCategory response_code_category,
       bool should_increment_typed_count,
       VisitID opener_visit,
       bool consider_for_ntp_most_visited,
-      bool is_ephemeral = false,
+      VisitContextEphemerality visit_context_ephemerality =
+          VisitContextEphemerality::kNotEphemeral,
       std::optional<int64_t> local_navigation_id = std::nullopt,
       std::optional<std::u16string> title = std::nullopt,
       std::optional<GURL> top_level_url = std::nullopt,
@@ -898,9 +906,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Returns a redirect-or-referral chain in `redirects` for the VisitID
   // `cur_visit`. `cur_visit` is assumed to be valid. Assumes that
-  // this HistoryBackend object has been Init()ed successfully.
-  void GetRedirectsFromSpecificVisit(VisitID cur_visit,
-                                     RedirectList* redirects);
+  // this HistoryBackend object has been Init()ed successfully. Includes or
+  // excludes redirects that result in a 404 response based on
+  // `policy_for_404_visits`.
+  void GetRedirectsFromSpecificVisit(
+      VisitID cur_visit,
+      RedirectList* redirects,
+      VisitQuery404sPolicy policy_for_404_visits);
 
   // Similar to the above function except returns a redirect-or-referral list
   // ending at `cur_visit`. E.g. if visit A redirected to visit B, which
@@ -1007,6 +1019,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // `icon_url` may be mapped to hundreds of page URLs.
   void SendFaviconChangedNotificationForIconURL(const GURL& icon_url);
 
+  // favicon::FaviconBackendDelegate
+  std::vector<GURL> GetCachedRecentRedirectsForPage(
+      const GURL& page_url) override;
+  std::optional<GURL> GetMostRecentlyVisitedURLForOrigin(
+      const url::Origin& origin) override;
+
+  bool ProcessSetFaviconsResult(const favicon::SetFaviconsResult& result,
+                                const GURL& icon_url);
+
   // Generic stuff -------------------------------------------------------------
 
   // Processes the next scheduled HistoryDBTask, scheduling this method
@@ -1016,9 +1037,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // HistoryBackendNotifier:
   void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                              const GURL& icon_url) override;
-  void NotifyURLVisited(const URLRow& url_row,
-                        const VisitRow& visit_row,
-                        std::optional<int64_t> local_navigation_id) override;
+  void NotifyURLVisited(VisitedURLInfo visited_url_info) override;
   void NotifyURLsModified(const URLRows& changed_urls,
                           bool is_from_expiration) override;
   void NotifyDeletions(DeletionInfo deletion_info) override;
@@ -1046,16 +1065,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   //
   // The IDs of the URLs may change.
   bool ClearAllMainHistory(const URLRows& kept_urls);
-
-  // Deletes the FTS index database files, which are no longer used.
-  void DeleteFTSIndexDatabases();
-
-  // favicon::FaviconBackendDelegate
-  std::vector<GURL> GetCachedRecentRedirectsForPage(
-      const GURL& page_url) override;
-
-  bool ProcessSetFaviconsResult(const favicon::SetFaviconsResult& result,
-                                const GURL& icon_url);
 
   // Implementation of DeleteAllForeignVisits(): Since there may be many (1000s)
   // of foreign visits, the deletion is implemented in multiple small batches to
@@ -1130,9 +1139,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   ExpireHistoryBackend expirer_;
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-
-  // Listens for the system being under memory pressure.
-  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   // Contains diagnostic information about the sql database that is non-empty
   // when a catastrophic error occurs.

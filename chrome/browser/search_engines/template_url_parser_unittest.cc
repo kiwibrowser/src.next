@@ -57,10 +57,9 @@ class TemplateURLParserTest : public testing::Test {
   data_decoder::test::InProcessDataDecoder data_decoder_;
 };
 
-TemplateURLParserTest::TemplateURLParserTest() {}
+TemplateURLParserTest::TemplateURLParserTest() = default;
 
-TemplateURLParserTest::~TemplateURLParserTest() {
-}
+TemplateURLParserTest::~TemplateURLParserTest() = default;
 
 void TemplateURLParserTest::SetUp() {
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &osdd_dir_));
@@ -259,7 +258,7 @@ TEST_F(TemplateURLParserTest, TestEmptyKeyword) {
 }
 
 // An invalid template URL should not crash the parser.
-// crbug.com/770734
+// crbug.com/40089184
 TEST_F(TemplateURLParserTest, InvalidInput) {
   TemplateURLParser::ParameterFilter filter = base::BindRepeating(
       [](const std::string&, const std::string&) -> bool { return true; });

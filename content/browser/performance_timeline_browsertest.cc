@@ -7,8 +7,12 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
-#include "base/test/trace_event_analyzer.h"
+#include "base/test/test_future.h"
+#include "base/test/tracing/trace_event_analyzer.h"
+#include "base/trace_event/trace_config.h"
+#include "build/build_config.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/content_navigation_policy.h"
@@ -171,35 +175,54 @@ IN_PROC_BROWSER_TEST_F(PerformanceTimelineBrowserTest,
                 "name.includes('resources/non_exist_style.css')).length;"));
 }
 
-class PerformanceTimelineLCPStartTimePrecisionBrowserTest
-    : public PerformanceTimelineBrowserTest {
- protected:
-  EvalJsResult GetIsEqualToPrecision() const {
-    std::string script =
-        content::JsReplace("isEqualToPrecision($1);", getPrecision());
-    return EvalJs(shell(), script);
-  }
+// Assumes the context is text-lcp-start-time.html or
+// cross-origin-non-tao-image.html.
+double GetStartTime(Shell* shell, std::string type, std::string name) {
+  std::string script = content::JsReplace("getStartTime($1, $2);", type, name);
+  return EvalJs(shell, script).ExtractDouble();
+}
 
-  int32_t getPrecision() const { return precision_; }
-
- private:
-  int32_t precision_ = 10;
-};
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#define MAYBE_LCPStartTimePrecision DISABLED_LCPStartTimePrecision
-#else
-#define MAYBE_LCPStartTimePrecision LCPStartTimePrecision
-#endif
-IN_PROC_BROWSER_TEST_F(PerformanceTimelineLCPStartTimePrecisionBrowserTest,
-                       MAYBE_LCPStartTimePrecision) {
+// Tests that the startTime of the 'first-contentful-paint' performance
+// timeline entry and the startTime of the first 'largest-contentful-paint'
+// performance timeline entry are exactly the same when the LCP element
+// is a text element which also happens to be what's painted in the FCP.
+IN_PROC_BROWSER_TEST_F(PerformanceTimelineBrowserTest,
+                       LCPStartTimeBrowserTestForText) {
+  SetupCrossSiteRedirector(embedded_test_server());
   ASSERT_TRUE(embedded_test_server()->Start());
-  const GURL url1(embedded_test_server()->GetURL(
-      "a.com", "/performance_timeline/lcp-start-time-precision.html"));
 
-  EXPECT_TRUE(NavigateToURL(shell(), url1));
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com", "/performance_timeline/text-lcp-start-time.html"));
 
-  EXPECT_TRUE(GetIsEqualToPrecision().ExtractBool());
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  double fcp = GetStartTime(shell(), "paint", "first-contentful-paint");
+  double lcp = GetStartTime(shell(), "largest-contentful-paint", "");
+  EXPECT_GT(fcp, 0.0);
+  EXPECT_GT(lcp, 0.0);
+  EXPECT_EQ(fcp, lcp);
+}
+
+// Tests that the startTime of the 'first-contentful-paint' performance
+// timeline entry and the startTime of the first 'largest-contentful-paint'
+// performance timeline entry are ordered with FCP <= LCP, when the
+// LCP element is a cross-origin image that  also happens to be what's
+// painted in the FCP.
+IN_PROC_BROWSER_TEST_F(PerformanceTimelineBrowserTest,
+                       LCPStartTimeForCrossOriginImage) {
+  SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com", "/performance_timeline/cross-origin-non-tao-image.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  double fcp = GetStartTime(shell(), "paint", "first-contentful-paint");
+  double lcp = GetStartTime(shell(), "largest-contentful-paint", "");
+  EXPECT_GT(fcp, 0.0);
+  EXPECT_GT(lcp, 0.0);
+  EXPECT_LE(fcp, lcp);
 }
 
 class PerformanceTimelineNavigationIdBrowserTest
@@ -221,14 +244,13 @@ IN_PROC_BROWSER_TEST_F(PerformanceTimelineNavigationIdBrowserTest,
 
   EXPECT_TRUE(NavigateToURL(shell(), url1));
 
-  const std::string initial_navigation_id =
-      GetNavigationId("first_nav").ExtractString();
+  const int initial_navigation_id = GetNavigationId("first_nav").ExtractInt();
   // Navigate away and back 3 times. The 1st time is to verify the
   // navigation id is incremented. The 2nd time is to verify that the id is
   // incremented on the same restored document. The 3rd time is to
   // verify the increment does not stop at 2.
   RenderFrameHostImplWrapper rfh_a(current_frame_host());
-  std::string prev_navigation_id = initial_navigation_id;
+  int prev_navigation_id = initial_navigation_id;
 
   for (int i = 1; i <= 3; i++) {
     // Navigate away
@@ -250,9 +272,9 @@ IN_PROC_BROWSER_TEST_F(PerformanceTimelineNavigationIdBrowserTest,
     // Verify navigation id is re-generated each time in case back/forward
     // cache feature is enabled. Verify navigation id is not changed in case
     // back/forward cache feature is not enabled.
-    std::string curr_navigation_id =
+    int curr_navigation_id =
         GetNavigationId("subsequent_nav" + base::NumberToString(i))
-            .ExtractString();
+            .ExtractInt();
     EXPECT_NE(curr_navigation_id, prev_navigation_id);
     EXPECT_NE(curr_navigation_id, initial_navigation_id);
 
@@ -286,15 +308,15 @@ IN_PROC_BROWSER_TEST_F(PerformanceTimelinePrefetchTransferSizeBrowserTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   const GURL prefetch_url(
-      embedded_test_server()->GetURL("a.com", "/title1.html"));
+      embedded_test_server()->GetURL("a.com", "/cacheable.html"));
   const GURL landing_url(embedded_test_server()->GetURL(
       "a.com", "/performance_timeline/prefetch.html"));
 
   EXPECT_TRUE(NavigateToURL(shell(), landing_url));
   Prefetch();
   EXPECT_TRUE(NavigateToURL(shell(), prefetch_url));
-  // Navigate to a prefetched url should result in a navigation timing entry
-  // with 0 transfer size.
+  // Navigate to a HTTP-cached prefetched url should result in a navigation
+  // timing entry with 0 transfer size since the HTTP cache gets used.
   EXPECT_EQ(0, GetTransferSize());
 }
 
@@ -381,9 +403,9 @@ class PerformanceTimelineBackForwardCacheRestorationBrowserTest
   // This method checks a list of performance entries of the
   // back-forward-cache-restoration type. Each entry is created when there is
   // a back/forward cache restoration.
-  void CheckEntries(const base::Value::List lst,
-                    const std::string& initial_navigation_id) const {
-    std::string prev_navigation_id = initial_navigation_id;
+  void CheckEntries(const base::ListValue lst,
+                    int initial_navigation_id) const {
+    int prev_navigation_id = initial_navigation_id;
 
     for (const auto& i : lst) {
       auto* dict = i.GetIfDict();
@@ -392,7 +414,7 @@ class PerformanceTimelineBackForwardCacheRestorationBrowserTest
       EXPECT_EQ("back-forward-cache-restoration",
                 *dict->FindString("entryType"));
 
-      const std::string* curr_navigation_id = dict->FindString("navigationId");
+      std::optional<int> curr_navigation_id = dict->FindInt("navigationId");
       // This verifies the navigation id changes each time a back/forward
       // restoration happens.
       EXPECT_NE(prev_navigation_id, *curr_navigation_id);
@@ -424,8 +446,8 @@ IN_PROC_BROWSER_TEST_F(
   SetBackForwardCacheRestorationBufferSize(buffer_size);
   RegisterPerformanceObservers(num_of_loops);
 
-  std::string initial_navigation_id =
-      GetNavigationId("initial_navigation_id").ExtractString();
+  int initial_navigation_id =
+      GetNavigationId("initial_navigation_id").ExtractInt();
   for (int i = 0; i < num_of_loops; i++) {
     // Navigate away
     ASSERT_TRUE(NavigateToURL(shell(), url2));
@@ -436,7 +458,8 @@ IN_PROC_BROWSER_TEST_F(
     // Navigate back.
     ASSERT_TRUE(HistoryGoBack(web_contents()));
   }
-  auto result = GetBackForwardCacheRestorationEntriesByObserver().ExtractList();
+  auto result =
+      GetBackForwardCacheRestorationEntriesByObserver().TakeValue().TakeList();
   CheckEntries(std::move(result[0]).TakeList(), initial_navigation_id);
   CheckEntries(std::move(result[1]).TakeList(), initial_navigation_id);
 
@@ -506,7 +529,8 @@ IN_PROC_BROWSER_TEST_F(PerformanceEventTimingBrowserTest,
   // entries should be the size of the buffer.
   auto entry_cnt_and_dropped_entry_cnt =
       EvalJs(web_contents(), " getEntriesCntAndDroppedEntriesCnt()")
-          .ExtractList();
+          .TakeValue()
+          .TakeList();
 
   int num_event_entres = entry_cnt_and_dropped_entry_cnt[0].GetInt();
   EXPECT_EQ(num_event_entres, buffer_size);
@@ -531,14 +555,849 @@ IN_PROC_BROWSER_TEST_F(PerformanceEventTimingBrowserTest,
       ukm_entry.get(),
       ukm::builders::Responsiveness_UserInteraction::kInteractionTypeName, 1);
 
-  // The max duration and total duration is non-determinstic. We only verify
-  // they exist.
+  // The max duration is non-determinstic. We only verify it exists.
   ukm::TestUkmRecorder::EntryHasMetric(
       ukm_entry.get(),
       ukm::builders::Responsiveness_UserInteraction::kMaxEventDurationName);
-  ukm::TestUkmRecorder::EntryHasMetric(
-      ukm_entry.get(),
-      ukm::builders::Responsiveness_UserInteraction::kTotalEventDurationName);
+}
+
+class LongAnimationFrameStyleDurationBrowserTest
+    : public PerformanceTimelineBrowserTest {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PerformanceTimelineBrowserTest::SetUpCommandLine(command_line);
+    // Enable the experimental style duration feature
+    command_line->AppendSwitchASCII("enable-blink-features",
+                                    "LongAnimationFrameStyleDuration");
+  }
+
+  void StartStyleTracing() {
+    base::test::TestFuture<void> future;
+    TracingController::GetInstance()->StartTracing(
+        base::trace_event::TraceConfig(
+            "{\"included_categories\": [\"blink\", \"blink_style\", "
+            "\"devtools.timeline\", \"benchmark\"]}"),
+        future.GetCallback());
+    ASSERT_TRUE(future.Wait());
+  }
+
+  std::string StopStyleTracing() {
+    base::test::TestFuture<std::unique_ptr<std::string>> future;
+    TracingController::GetInstance()->StopTracing(
+        TracingController::CreateStringEndpoint(future.GetCallback()));
+    return std::move(*future.Get());
+  }
+
+  struct TraceStyleResult {
+    double total_duration_ms = 0.0;
+    size_t event_count = 0;
+  };
+
+  // Sum up durations of all style duration events in the trace.
+  // This gives us the ground truth for style recalculation time.
+  TraceStyleResult GetStyleDurationFromTrace(const std::string& trace_str) {
+    TraceStyleResult result;
+    std::unique_ptr<trace_analyzer::TraceAnalyzer> analyzer(
+        trace_analyzer::TraceAnalyzer::Create(trace_str));
+    if (!analyzer) {
+      result.total_duration_ms = -1.0;
+      return result;
+    }
+
+    // Associate begin and end events to get durations.
+    analyzer->AssociateBeginEndEvents();
+
+    trace_analyzer::TraceEventVector events;
+    trace_analyzer::Query query =
+        trace_analyzer::Query::EventNameIs("UpdateLayoutTree");
+    analyzer->FindEvents(query, &events);
+
+    double total_duration_us = 0.0;
+    for (const trace_analyzer::TraceEvent* event : events) {
+      total_duration_us += event->duration;
+    }
+    // Convert microseconds to milliseconds.
+    result.total_duration_ms = total_duration_us / 1000.0;
+    result.event_count = events.size();
+    return result;
+  }
+
+  struct TraceLayoutResult {
+    double total_duration_ms = 0.0;
+    size_t event_count = 0;
+  };
+
+  // Sum up durations of all Layout events in the trace.
+  // This gives us the ground truth for layout time.
+  TraceLayoutResult GetLayoutDurationFromTrace(const std::string& trace_str) {
+    TraceLayoutResult result;
+    std::unique_ptr<trace_analyzer::TraceAnalyzer> analyzer(
+        trace_analyzer::TraceAnalyzer::Create(trace_str));
+    if (!analyzer) {
+      result.total_duration_ms = -1.0;
+      return result;
+    }
+
+    // Associate begin and end events to get durations.
+    analyzer->AssociateBeginEndEvents();
+
+    trace_analyzer::TraceEventVector events;
+    // The trace event name is "LocalFrameView::layout" as emitted by
+    // LocalFrameView::UpdateLayout in the blink,benchmark category.
+    // This event has a slightly wider scope than "Layout" from
+    // devtools.timeline and more closely matches the probe::UpdateLayout scope.
+    trace_analyzer::Query query =
+        trace_analyzer::Query::EventNameIs("LocalFrameView::layout");
+    analyzer->FindEvents(query, &events);
+
+    double total_duration_us = 0.0;
+    for (const trace_analyzer::TraceEvent* event : events) {
+      total_duration_us += event->duration;
+    }
+    // Convert microseconds to milliseconds.
+    result.total_duration_ms = total_duration_us / 1000.0;
+    result.event_count = events.size();
+    return result;
+  }
+};
+
+// Test that styleDuration is properly captured during ResizeObserver callbacks.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       ResizeObserverStyleDuration) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareResizeObserverTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runResizeObserverTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  [[maybe_unused]] std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  ASSERT_TRUE(dict.FindBool("resizeObserverFired").value());
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  // On slow Android emulators, LoAF entries may not be captured reliably.
+  // Skip the test rather than fail flakily.
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error;
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasStyleDuration").value());
+
+  double style_duration = dict.FindDouble("styleDuration").value();
+  double total_forced_style_duration =
+      dict.FindDouble("totalForcedStyleDuration").value();
+  double duration = dict.FindDouble("duration").value();
+
+  EXPECT_GE(style_duration, 0.0);
+  EXPECT_GE(total_forced_style_duration, 0.0);
+  EXPECT_GT(duration, 0.0);
+  EXPECT_LE(style_duration, duration);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // On Android emulators and ChromeOS, timing discrepancies between the LoAF
+  // API and tracing may be too large to reliably compare. Skip the
+  // tolerance-based assertions on these platforms.
+  TraceStyleResult trace_result = GetStyleDurationFromTrace(trace_str);
+  double trace_style_duration = trace_result.total_duration_ms;
+  double api_total_style = style_duration + total_forced_style_duration;
+
+  double max_value = std::max(api_total_style, trace_style_duration);
+  // Use 20% tolerance to account for timing measurement differences.
+  double tolerance_ms = std::max(15.0, max_value * 0.2);
+
+  // For the lower bound, LoAF may report less than trace due to the 5ms script
+  // threshold.
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(trace_result.event_count));
+
+  EXPECT_LE(api_total_style, trace_style_duration + tolerance_ms);
+  EXPECT_GE(api_total_style, trace_style_duration - lower_tolerance_ms);
+#endif
+}
+
+// Test that styleDuration is properly captured across multiple ResizeObserver
+// iterations.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       MultipleStyleIterations) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareMultipleIterationsTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runMultipleIterationsTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  [[maybe_unused]] std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  int iteration_count = dict.FindInt("iterationCount").value();
+  ASSERT_GE(iteration_count, 1);
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  // On slow Android emulators, LoAF entries may not be captured reliably.
+  // Skip the test rather than fail flakily.
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error;
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasStyleDuration").value());
+
+  double style_duration = dict.FindDouble("styleDuration").value();
+  double total_forced_style_duration =
+      dict.FindDouble("totalForcedStyleDuration").value();
+  double duration = dict.FindDouble("duration").value();
+
+  EXPECT_GE(style_duration, 0.0);
+  EXPECT_GE(total_forced_style_duration, 0.0);
+  EXPECT_GT(duration, 0.0);
+  EXPECT_LE(style_duration, duration);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // On Android emulators and ChromeOS, timing discrepancies between the LoAF
+  // API and tracing may be too large to reliably compare. Skip the
+  // tolerance-based assertions on these platforms.
+  TraceStyleResult trace_result = GetStyleDurationFromTrace(trace_str);
+  double trace_style_duration = trace_result.total_duration_ms;
+  double api_total_style = style_duration + total_forced_style_duration;
+
+  double max_value = std::max(api_total_style, trace_style_duration);
+  // Use 20% tolerance to account for timing measurement differences.
+  double tolerance_ms = std::max(15.0, max_value * 0.2);
+
+  // For the lower bound, LoAF may report less than trace due to the 5ms script
+  // threshold.
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(trace_result.event_count));
+
+  EXPECT_LE(api_total_style, trace_style_duration + tolerance_ms);
+  EXPECT_GE(api_total_style, trace_style_duration - lower_tolerance_ms);
+#endif
+}
+
+// Test that forced style during script execution is properly captured in
+// forcedStyleDuration, separate from the entry's styleDuration.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       ForcedStyleSeparation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareForcedStyleTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runForcedStyleTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  [[maybe_unused]] std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  // On slow Android emulators, LoAF entries may not be captured reliably.
+  // Skip the test rather than fail flakily.
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error << ", hasLoafEntry: "
+                      << dict.FindBool("hasLoafEntry").value_or(false)
+                      << ", scriptCount: "
+                      << dict.FindInt("scriptCount").value_or(-1);
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasStyleDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasForcedStyleDuration").value());
+
+  double entry_style_duration = dict.FindDouble("entryStyleDuration").value();
+  EXPECT_GE(entry_style_duration, 0.0);
+
+  double script_forced_style_duration =
+      dict.FindDouble("scriptForcedStyleDuration").value();
+  EXPECT_GE(script_forced_style_duration, 0.0);
+
+  double script_forced_style_and_layout_duration =
+      dict.FindDouble("scriptForcedStyleAndLayoutDuration").value();
+  EXPECT_GE(script_forced_style_and_layout_duration,
+            script_forced_style_duration);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // The trace should capture the same style recalc events.
+  // script_forced_style_duration should be close to trace_style_duration
+  // because the test only forces style during script execution, not during
+  // render phase.
+  TraceStyleResult trace_result = GetStyleDurationFromTrace(trace_str);
+  double trace_style_duration = trace_result.total_duration_ms;
+
+  // The forced style during script should be the majority of trace style.
+  // entry_style_duration should be small since we're forcing style inside
+  // the script.
+  double max_value =
+      std::max(script_forced_style_duration, trace_style_duration);
+  double tolerance_ms = std::max(15.0, max_value * 0.2);
+
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(trace_result.event_count));
+
+  EXPECT_LE(script_forced_style_duration, trace_style_duration + tolerance_ms);
+  EXPECT_GE(script_forced_style_duration,
+            trace_style_duration - lower_tolerance_ms);
+
+  // entry_style_duration should be small since we're forcing style inside
+  // the script. Allow some tolerance for any incidental style work.
+  EXPECT_LE(entry_style_duration, 30.0)
+      << "Render-phase style should be minimal in this test";
+#else
+  (void)trace_str;
+#endif
+}
+
+// Test that layoutDuration is properly captured during ResizeObserver
+// callbacks.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       ResizeObserverLayoutDuration) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareResizeObserverLayoutTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runResizeObserverLayoutTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  ASSERT_TRUE(dict.FindBool("resizeObserverFired").value());
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  // On slow Android emulators, LoAF entries may not be captured reliably.
+  // Skip the test rather than fail flakily.
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error;
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasLayoutDuration").value());
+
+  double layout_duration = dict.FindDouble("layoutDuration").value();
+  double total_forced_layout_duration =
+      dict.FindDouble("totalForcedLayoutDuration").value();
+  double total_forced_style_duration =
+      dict.FindDouble("totalForcedStyleDuration").value();
+  double total_forced_style_and_layout_duration =
+      dict.FindDouble("totalForcedStyleAndLayoutDuration").value();
+  double duration = dict.FindDouble("duration").value();
+
+  EXPECT_GE(layout_duration, 0.0);
+  EXPECT_GE(total_forced_layout_duration, 0.0);
+  EXPECT_GT(duration, 0.0);
+  EXPECT_LE(layout_duration, duration);
+
+  // Verify that styleDuration + layoutDuration <= duration (both are subsets of
+  // the total frame time)
+  double style_duration = dict.FindDouble("styleDuration").value();
+  EXPECT_GE(style_duration, 0.0);
+  EXPECT_LE(style_duration + layout_duration, duration);
+
+  // Verify the key relationship: the sum of forced style and forced layout
+  // should approximately equal forced style+layout (within tolerance).
+  double sum_forced =
+      total_forced_style_duration + total_forced_layout_duration;
+  EXPECT_NEAR(sum_forced, total_forced_style_and_layout_duration, 1.0);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // On Android emulators and ChromeOS, timing discrepancies between the LoAF
+  // API and tracing may be too large to reliably compare. Skip the
+  // tolerance-based assertions on these platforms.
+  TraceLayoutResult trace_result = GetLayoutDurationFromTrace(trace_str);
+  double trace_layout_duration = trace_result.total_duration_ms;
+  double api_total_layout = layout_duration + total_forced_layout_duration;
+
+  // The probe::UpdateLayout scope is wider than the LocalFrameView::layout
+  // trace event. The probe includes setup work before the trace begins and
+  // cleanup work after the trace ends. This adds approximately 10ms of
+  // overhead per layout event. Account for this with a per-event tolerance.
+  constexpr double kProbeOverheadPerEventMs = 10.0;
+  double probe_overhead_ms =
+      kProbeOverheadPerEventMs * static_cast<double>(trace_result.event_count);
+
+  double max_value = std::max(api_total_layout, trace_layout_duration);
+  // Use 20% tolerance plus the per-event probe overhead.
+  double tolerance_ms = std::max(15.0, max_value * 0.2) + probe_overhead_ms;
+
+  // For the lower bound, LoAF may report less than trace due to the 5ms script
+  // threshold.
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(trace_result.event_count));
+
+  EXPECT_LE(api_total_layout, trace_layout_duration + tolerance_ms)
+      << "API layout (" << api_total_layout << "ms) vs trace ("
+      << trace_layout_duration << "ms, event_count=" << trace_result.event_count
+      << ")";
+  EXPECT_GE(api_total_layout, trace_layout_duration - lower_tolerance_ms)
+      << "API layout (" << api_total_layout << "ms) vs trace ("
+      << trace_layout_duration << "ms, event_count=" << trace_result.event_count
+      << ")";
+#else
+  // Suppress unused variable warning on platforms where we skip trace
+  // comparison.
+  (void)trace_str;
+#endif
+}
+
+// Test that forced layout during script execution is properly captured in
+// forcedLayoutDuration, separate from the entry's layoutDuration.
+// TODO(crbug.com/490039788): Disabled due to flakiness on Mac.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_ForcedLayoutSeparation DISABLED_ForcedLayoutSeparation
+#else
+#define MAYBE_ForcedLayoutSeparation ForcedLayoutSeparation
+#endif
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       MAYBE_ForcedLayoutSeparation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareForcedLayoutTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runForcedLayoutTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  // On slow Android emulators, LoAF entries may not be captured reliably.
+  // Skip the test rather than fail flakily.
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error << ", hasLoafEntry: "
+                      << dict.FindBool("hasLoafEntry").value_or(false)
+                      << ", scriptCount: "
+                      << dict.FindInt("scriptCount").value_or(-1);
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasLayoutDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasForcedLayoutDuration").value());
+
+  double entry_layout_duration = dict.FindDouble("entryLayoutDuration").value();
+  EXPECT_GE(entry_layout_duration, 0.0);
+
+  double script_forced_layout_duration =
+      dict.FindDouble("scriptForcedLayoutDuration").value();
+  EXPECT_GE(script_forced_layout_duration, 0.0);
+
+  double script_forced_style_and_layout_duration =
+      dict.FindDouble("scriptForcedStyleAndLayoutDuration").value();
+  EXPECT_GE(script_forced_style_and_layout_duration,
+            script_forced_layout_duration);
+
+  // Verify the key relationship: forcedStyleAndLayoutDuration should equal
+  // forcedStyleDuration + forcedLayoutDuration (within floating point
+  // tolerance)
+  double script_forced_style_duration =
+      dict.FindDouble("scriptForcedStyleDuration").value();
+  EXPECT_GE(script_forced_style_duration, 0.0);
+
+  // The sum of forcedStyleDuration + forcedLayoutDuration should approximately
+  // equal forcedStyleAndLayoutDuration. Use a small tolerance for floating
+  // point comparisons.
+  double sum_style_layout =
+      script_forced_style_duration + script_forced_layout_duration;
+  EXPECT_NEAR(sum_style_layout, script_forced_style_and_layout_duration, 1.0);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // For forced layout, the trace should capture the same layout events.
+  // The script_forced_layout_duration should be close to trace_layout_duration
+  // because the test only forces layout during script execution, not during
+  // render phase.
+  TraceLayoutResult trace_result = GetLayoutDurationFromTrace(trace_str);
+  double trace_layout_duration = trace_result.total_duration_ms;
+
+  // Also get the JS-measured layout time for comparison.
+  double js_measured_layout_time =
+      dict.FindDouble("measuredForcedLayoutTime").value_or(-1.0);
+
+  // Verify trace captured some layout events.
+  EXPECT_GT(trace_result.event_count, 0u)
+      << "Trace should capture at least one layout event";
+  EXPECT_GT(trace_layout_duration, 0.0)
+      << "Trace layout duration should be positive";
+
+  // The API's forcedLayoutDuration should be close to trace.
+  // Allow tolerance for timing differences between probe scope and trace event.
+  double tolerance_ms = std::max(15.0, trace_layout_duration * 0.2);
+  EXPECT_GE(script_forced_layout_duration, trace_layout_duration - tolerance_ms)
+      << "API forced layout (" << script_forced_layout_duration
+      << "ms) should be >= trace (" << trace_layout_duration
+      << "ms) minus tolerance (" << tolerance_ms
+      << "ms), js_measured=" << js_measured_layout_time << "ms";
+
+  // The API's forcedStyleAndLayoutDuration should be <= JS measurement
+  // since the JS measurement includes JavaScript overhead (forEach loops,
+  // property access, etc.) while the API only measures style/layout time.
+  EXPECT_LE(script_forced_style_and_layout_duration,
+            js_measured_layout_time + tolerance_ms)
+      << "API forcedStyleAndLayout (" << script_forced_style_and_layout_duration
+      << "ms) should be <= JS measured (" << js_measured_layout_time
+      << "ms) plus tolerance (" << tolerance_ms << "ms)"
+      << ", trace=" << trace_layout_duration << "ms";
+
+  // entry_layout_duration should be small since we're not doing layout during
+  // render phase. Allow some tolerance for any incidental layout work.
+  EXPECT_LE(entry_layout_duration, 30.0)
+      << "Render-phase layout should be minimal in this test";
+#else
+  (void)trace_str;
+#endif
+}
+
+// Test that container queries produce measurable style and layout durations.
+// Container queries cause interleaved style+layout passes: the container must
+// be laid out to determine its size, then children are re-styled based on
+// container query conditions, then re-laid out. Both styleDuration and
+// layoutDuration should capture this work.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       ContainerQueryStyleAndLayoutDuration) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareContainerQueryTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runContainerQueryTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  [[maybe_unused]] std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error;
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasStyleDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasLayoutDuration").value());
+
+  double style_duration = dict.FindDouble("styleDuration").value();
+  double layout_duration = dict.FindDouble("layoutDuration").value();
+  double duration = dict.FindDouble("duration").value();
+
+  EXPECT_GE(style_duration, 0.0);
+  EXPECT_GE(layout_duration, 0.0);
+  EXPECT_GT(duration, 0.0);
+
+  // styleDuration + layoutDuration should not exceed total frame duration.
+  EXPECT_LE(style_duration + layout_duration, duration);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // Verify that trace events for both style and layout were emitted.
+  TraceStyleResult trace_style = GetStyleDurationFromTrace(trace_str);
+  TraceLayoutResult trace_layout = GetLayoutDurationFromTrace(trace_str);
+
+  EXPECT_GT(trace_style.event_count, 0u)
+      << "Trace should capture style recalc events from container queries";
+  EXPECT_GT(trace_layout.event_count, 0u)
+      << "Trace should capture layout events from container queries";
+
+  // With container queries, the UpdateLayoutTree trace event only captures the
+  // initial style pass, while LocalFrameView::layout includes both pure layout
+  // AND interleaved container query style recalc. The API now correctly
+  // separates style from layout (subtracting container query style time from
+  // layout). So we compare the combined total (style + layout) from the API
+  // against the combined total from trace events.
+  double total_forced_style =
+      dict.FindDouble("totalForcedStyleDuration").value();
+  double total_forced_layout =
+      dict.FindDouble("totalForcedLayoutDuration").value();
+  double api_total = style_duration + layout_duration + total_forced_style +
+                     total_forced_layout;
+  double trace_total =
+      trace_style.total_duration_ms + trace_layout.total_duration_ms;
+
+  size_t total_event_count = trace_style.event_count + trace_layout.event_count;
+  constexpr double kProbeOverheadPerEventMs = 10.0;
+  double probe_overhead_ms =
+      kProbeOverheadPerEventMs * static_cast<double>(total_event_count);
+  double max_total = std::max(api_total, trace_total);
+  double tolerance_ms = std::max(15.0, max_total * 0.2) + probe_overhead_ms;
+
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(total_event_count));
+
+  EXPECT_LE(api_total, trace_total + tolerance_ms)
+      << "API total style+layout (" << api_total << "ms) vs trace total ("
+      << trace_total << "ms)";
+  EXPECT_GE(api_total, trace_total - lower_tolerance_ms)
+      << "API total style+layout (" << api_total << "ms) vs trace total ("
+      << trace_total << "ms)";
+#endif
+}
+
+// Test that forced style+layout with container queries during script execution
+// is properly captured. When script resizes a container and reads offsetHeight,
+// the browser must synchronously evaluate container queries, re-style children,
+// and re-layout. The forced durations should reflect both the style and layout
+// components separately.
+IN_PROC_BROWSER_TEST_F(LongAnimationFrameStyleDurationBrowserTest,
+                       ForcedContainerQuerySeparation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url(embedded_test_server()->GetURL(
+      "a.com",
+      "/performance_timeline/long_animation_frame_style_duration.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  // Phase 1: test setup before starting tracing.
+  auto prepare_result = EvalJs(shell(), "prepareForcedContainerQueryTest()");
+  ASSERT_TRUE(prepare_result.is_ok());
+  ASSERT_TRUE(prepare_result.is_dict());
+
+  const base::DictValue& prepare_dict = prepare_result.ExtractDict();
+  ASSERT_TRUE(prepare_dict.FindBool("ready").value());
+
+  // Phase 2: Start tracing and run the actual test.
+  StartStyleTracing();
+
+  auto result = EvalJs(shell(), "runForcedContainerQueryTest()");
+
+  // Phase 3: Stop tracing and get the trace data.
+  [[maybe_unused]] std::string trace_str = StopStyleTracing();
+
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.is_dict());
+
+  const base::DictValue& dict = result.ExtractDict();
+
+  const std::string* error = dict.FindString("error");
+#if BUILDFLAG(IS_ANDROID)
+  if (error) {
+    return;
+  }
+#else
+  ASSERT_FALSE(error) << "Test failed: " << *error << ", hasLoafEntry: "
+                      << dict.FindBool("hasLoafEntry").value_or(false)
+                      << ", scriptCount: "
+                      << dict.FindInt("scriptCount").value_or(-1);
+#endif
+
+  EXPECT_TRUE(dict.FindBool("hasStyleDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasLayoutDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasForcedStyleDuration").value());
+  EXPECT_TRUE(dict.FindBool("hasForcedLayoutDuration").value());
+
+  double entry_style_duration = dict.FindDouble("entryStyleDuration").value();
+  double entry_layout_duration = dict.FindDouble("entryLayoutDuration").value();
+  double script_forced_style =
+      dict.FindDouble("scriptForcedStyleDuration").value();
+  double script_forced_layout =
+      dict.FindDouble("scriptForcedLayoutDuration").value();
+  double script_forced_style_and_layout =
+      dict.FindDouble("scriptForcedStyleAndLayoutDuration").value();
+  double duration = dict.FindDouble("duration").value();
+
+  EXPECT_GE(entry_style_duration, 0.0);
+  EXPECT_GE(entry_layout_duration, 0.0);
+  EXPECT_GE(script_forced_style, 0.0);
+  EXPECT_GE(script_forced_layout, 0.0);
+  EXPECT_GE(script_forced_style_and_layout, 0.0);
+  EXPECT_GT(duration, 0.0);
+
+  // Container queries force both style and layout, so both forced durations
+  // should be present.
+  EXPECT_GE(script_forced_style_and_layout, script_forced_style);
+  EXPECT_GE(script_forced_style_and_layout, script_forced_layout);
+
+  // The sum of forced style + forced layout should approximately equal
+  // forcedStyleAndLayoutDuration.
+  double sum_forced = script_forced_style + script_forced_layout;
+  EXPECT_NEAR(sum_forced, script_forced_style_and_layout, 1.0)
+      << "forcedStyle (" << script_forced_style << "ms) + forcedLayout ("
+      << script_forced_layout << "ms) = " << sum_forced
+      << "ms should ≈ forcedStyleAndLayout (" << script_forced_style_and_layout
+      << "ms)";
+
+  // All durations should fit within the total frame duration.
+  EXPECT_LE(entry_style_duration + entry_layout_duration, duration);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+  // Verify trace captured interleaved style and layout events from
+  // container query evaluation.
+  TraceStyleResult trace_style = GetStyleDurationFromTrace(trace_str);
+  TraceLayoutResult trace_layout = GetLayoutDurationFromTrace(trace_str);
+
+  EXPECT_GT(trace_style.event_count, 0u)
+      << "Trace should capture style events from forced container queries";
+  EXPECT_GT(trace_layout.event_count, 0u)
+      << "Trace should capture layout events from forced container queries";
+
+  // With container queries, the trace events don't cleanly separate style from
+  // layout: UpdateLayoutTree only captures the initial style pass, while
+  // LocalFrameView::layout includes both pure layout and interleaved container
+  // query style recalc. The API correctly separates them via the
+  // probe::RecalculateStyle fired during container query style recalc.
+  //
+  // Compare the combined totals: API (style + layout) vs trace (style +
+  // layout).
+  double api_total = script_forced_style + script_forced_layout;
+  double trace_total =
+      trace_style.total_duration_ms + trace_layout.total_duration_ms;
+
+  size_t total_event_count = trace_style.event_count + trace_layout.event_count;
+  constexpr double kProbeOverheadPerEventMs = 10.0;
+  double probe_overhead_ms =
+      kProbeOverheadPerEventMs * static_cast<double>(total_event_count);
+  double max_total = std::max(api_total, trace_total);
+  double tolerance_ms = std::max(15.0, max_total * 0.2) + probe_overhead_ms;
+
+  constexpr double kLoafThresholdMs = 5.0;
+  double lower_tolerance_ms =
+      tolerance_ms +
+      (kLoafThresholdMs * static_cast<double>(total_event_count));
+
+  EXPECT_LE(api_total, trace_total + tolerance_ms)
+      << "API forced style+layout (" << api_total << "ms) vs trace total ("
+      << trace_total << "ms)";
+  EXPECT_GE(api_total, trace_total - lower_tolerance_ms)
+      << "API forced style+layout (" << api_total << "ms) vs trace total ("
+      << trace_total << "ms)";
+
+  // The JS-measured time should be >= the API's combined forced duration
+  // (since JS measurement includes overhead).
+  double js_measured = dict.FindDouble("measuredForcedTime").value_or(-1.0);
+  EXPECT_LE(script_forced_style_and_layout, js_measured + tolerance_ms)
+      << "API forcedStyleAndLayout (" << script_forced_style_and_layout
+      << "ms) should be <= JS measured (" << js_measured << "ms) + tolerance";
+#endif
 }
 
 }  // namespace content

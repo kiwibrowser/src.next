@@ -7,7 +7,8 @@
 
 #include <optional>
 
-#include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
@@ -33,18 +34,20 @@ namespace chrome {
 // If |url| is an empty URL, then the new tab-page is laoded. An |index| of -1
 // means to append it to the end of the tab strip.
 content::WebContents* AddAndReturnTabAt(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     const GURL& url,
     int index,
     bool foreground,
-    std::optional<tab_groups::TabGroupId> group = std::nullopt);
+    std::optional<tab_groups::TabGroupId> group = std::nullopt,
+    bool pinned = false);
 
 // Same as above, but eats the return value to make Bind*() easier.
-void AddTabAt(Browser* browser,
+void AddTabAt(BrowserWindowInterface* browser,
               const GURL& url,
               int index,
               bool foreground,
-              std::optional<tab_groups::TabGroupId> group = std::nullopt);
+              std::optional<tab_groups::TabGroupId> group = std::nullopt,
+              bool pinned = false);
 
 // Adds a selected tab with the specified URL and transition, returns the
 // created WebContents.
@@ -62,13 +65,15 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
 // Invariant: If `new_contents` is not nullptr, then the returned instance
 // should always match new_contents.get().
 content::WebContents* AddWebContents(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     content::WebContents* source_contents,
     std::unique_ptr<content::WebContents> new_contents,
     const GURL& target_url,
     WindowOpenDisposition disposition,
     const blink::mojom::WindowFeatures& window_features,
-    NavigateParams::WindowAction window_action = NavigateParams::SHOW_WINDOW);
+    NavigateParams::WindowAction window_action =
+        NavigateParams::WindowAction::kShowWindow,
+    bool user_gesture = true);
 
 // Closes the specified WebContents in the specified Browser. If
 // |add_to_history| is true, an entry in the historical tab database is created.

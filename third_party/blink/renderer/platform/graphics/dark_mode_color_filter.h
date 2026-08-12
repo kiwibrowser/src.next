@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -21,8 +20,7 @@ namespace blink {
 // Contains logic specific to modifying colors drawn when dark mode is active.
 class PLATFORM_EXPORT DarkModeColorFilter {
  public:
-  static std::unique_ptr<DarkModeColorFilter> FromSettings(
-      const DarkModeSettings& settings);
+  static std::unique_ptr<DarkModeColorFilter> Create();
 
   virtual ~DarkModeColorFilter();
   virtual SkColor4f InvertColor(const SkColor4f& color) const = 0;

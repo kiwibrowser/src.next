@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/layout/page_container_layout_algorithm.h"
 
 #include "third_party/blink/renderer/core/css/page_margins_style.h"
@@ -29,18 +24,6 @@ namespace blink {
 
 namespace {
 
-void PrepareMarginBoxSpaceBuilder(LogicalSize available_size,
-                                  ConstraintSpaceBuilder* builder) {
-  builder->SetAvailableSize(available_size);
-  builder->SetInlineAutoBehavior(AutoSizeBehavior::kStretchImplicit);
-  builder->SetBlockAutoBehavior(AutoSizeBehavior::kStretchImplicit);
-  builder->SetDecorationPercentageResolutionType(
-      DecorationPercentageResolutionType::kContainingBlockSize);
-
-  // Each page-margin box always establishes a stacking context.
-  builder->SetIsPaintedAtomically(true);
-}
-
 LogicalRect SnappedBorderBoxRect(const LogicalRect& rect) {
   // Some considerations here: The offset should be integers, since a
   // translation transform will be applied when printing, and everything will
@@ -55,6 +38,58 @@ LogicalRect SnappedBorderBoxRect(const LogicalRect& rect) {
                      LayoutUnit(rect.offset.block_offset.Round()),
                      LayoutUnit(rect.size.inline_size.Ceil()),
                      LayoutUnit(rect.size.block_size.Ceil()));
+}
+
+// Attempt to honor safe printable inset after auto margins have been
+// resolved. Both margin values here are assumed to originate from `auto`.
+void AttemptToEnsureSafePrintableInset(LayoutUnit safe_printable_inset,
+                                       LayoutUnit* edge_margin,
+                                       LayoutUnit* opposite_margin) {
+  LayoutUnit deficiency = safe_printable_inset - *edge_margin;
+  if (deficiency > LayoutUnit()) {
+    // The margin adjacent to the paper edge is smaller than the safe printable
+    // inset. Attempt to steal as much as we need (and can) from the opposite
+    // margin.
+    LayoutUnit stolen = std::min(deficiency, *opposite_margin);
+    *edge_margin += stolen;
+    *opposite_margin -= stolen;
+  }
+}
+
+void ResolveMarginsForPageMarginBox(Length start_length,
+                                    Length end_length,
+                                    LayoutUnit border_box_size,
+                                    LayoutUnit available_space,
+                                    LayoutUnit safe_printable_inset,
+                                    bool is_at_start_edge,
+                                    LayoutUnit* start_result,
+                                    LayoutUnit* end_result) {
+  LayoutUnit additional_space =
+      available_space - border_box_size - *start_result - *end_result;
+  ResolveAutoMargins(start_length, end_length,
+                     additional_space.ClampNegativeToZero(), start_result,
+                     end_result);
+  LayoutUnit margin_box_size = border_box_size + *start_result + *end_result;
+  LayoutUnit inequality = available_space - margin_box_size;
+  if (inequality) {
+    // Over-constrained. Solve the sizing equation by adjusting the margin
+    // facing away from the center (which will normally move the box towards the
+    // center).
+    if (is_at_start_edge) {
+      *start_result += inequality;
+    } else {
+      *end_result += inequality;
+    }
+  } else if (safe_printable_inset && start_length.IsAuto() &&
+             end_length.IsAuto()) {
+    if (is_at_start_edge) {
+      AttemptToEnsureSafePrintableInset(safe_printable_inset, start_result,
+                                        end_result);
+    } else {
+      AttemptToEnsureSafePrintableInset(safe_printable_inset, end_result,
+                                        start_result);
+    }
+  }
 }
 
 }  // anonymous namespace
@@ -135,14 +170,34 @@ const LayoutResult* PageContainerLayoutAlgorithm::Layout() {
   BoxStrut margins;
   LogicalSize containing_block_size =
       DesiredPageContainingBlockSize(document, Style());
-  ResolvePageBoxGeometry(Node(), containing_block_size, &unscaled_geometry,
-                         &margins);
+  LayoutUnit safe_printable_inset = CalculateSafePrintableInset(document);
+  LogicalRect target_page_border_box_rect;
 
-  LogicalSize source_page_margin_box_size(
-      unscaled_geometry.border_box_size.inline_size + margins.InlineSum(),
-      unscaled_geometry.border_box_size.block_size + margins.BlockSum());
-  LogicalRect target_page_border_box_rect = TargetPageBorderBoxLogicalRect(
-      document, Style(), source_page_margin_box_size, margins);
+  auto CalculateRects = [&](float* scale = nullptr) {
+    ResolvePageBorderBoxGeometry(Node(), containing_block_size,
+                                 safe_printable_inset, &unscaled_geometry,
+                                 &margins);
+    LogicalSize source_page_margin_box_size(
+        unscaled_geometry.border_box_size.inline_size + margins.InlineSum(),
+        unscaled_geometry.border_box_size.block_size + margins.BlockSum());
+    target_page_border_box_rect = TargetPageBorderBoxLogicalRect(
+        document, Style(), source_page_margin_box_size, margins, scale);
+  };
+  float fit_to_paper_scale;
+  CalculateRects(&fit_to_paper_scale);
+  if (fit_to_paper_scale < 1.0 &&
+      Style().GetPageMarginSafety() != EPageMarginSafety::kNone) {
+    // Everything will be scaled down because the page is larger than actual
+    // paper size. This means that whatever safe margins we have applied may no
+    // longer be safe when everything gets scaled down. Scale up the safe
+    // printable insets, and recalculate the rectangles, so that
+    // `target_page_border_box_rect` (which is the page border box scaled down
+    // to fit on paper) gets its right offsets (margins).
+    safe_printable_inset =
+        LayoutUnit::FromFloatCeil(safe_printable_inset / fit_to_paper_scale);
+    CalculateRects();
+  }
+
   target_page_border_box_rect =
       SnappedBorderBoxRect(target_page_border_box_rect);
 
@@ -170,7 +225,8 @@ const LayoutResult* PageContainerLayoutAlgorithm::Layout() {
 
   counters_context_.EnterObject(*Node().GetLayoutBox(), /*is_page_box=*/true);
 
-  LayoutPageBorderBox(containing_block_size, target_offset);
+  LayoutPageBorderBox(containing_block_size, target_offset,
+                      safe_printable_inset);
 
   // Paper fitting may require margins to be reduced. If contents are scaled
   // down to fit, so are the margins.
@@ -187,7 +243,8 @@ const LayoutResult* PageContainerLayoutAlgorithm::Layout() {
 
 void PageContainerLayoutAlgorithm::LayoutPageBorderBox(
     LogicalSize containing_block_size,
-    LogicalOffset target_offset) {
+    LogicalOffset target_offset,
+    LayoutUnit safe_printable_inset_in_document_coords) {
   if (existing_page_container_) {
     // A page container was created previously. But we had to come back and
     // update the total page count (counter(pages)). We can just keep the old
@@ -206,6 +263,12 @@ void PageContainerLayoutAlgorithm::LayoutPageBorderBox(
   const LayoutView& layout_view = *document.GetLayoutView();
   const ComputedStyle* content_scaled_style = &Style();
   float layout_scale = layout_view.PaginationScaleFactor();
+
+  // If the document contents are scaled (because there's wide content and/or
+  // there's a scale factor from print settings), the safe printable inset needs
+  // to follow this, since it's supposed to be in document coordinates.
+  safe_printable_inset_in_document_coords *= layout_scale;
+
   if (layout_scale != 1 && !ignore_author_page_style_) {
     // Scaling shouldn't apply to @page borders etc. Apply a zoom property to
     // cancel out the effect of layout scaling.
@@ -219,8 +282,9 @@ void PageContainerLayoutAlgorithm::LayoutPageBorderBox(
   BlockNode page_border_box_node(page_border_box);
 
   FragmentGeometry geometry;
-  ResolvePageBoxGeometry(page_border_box_node,
-                         containing_block_size * layout_scale, &geometry);
+  ResolvePageBorderBoxGeometry(
+      page_border_box_node, containing_block_size * layout_scale,
+      safe_printable_inset_in_document_coords, &geometry);
 
   ConstraintSpaceBuilder space_builder(GetConstraintSpace(),
                                        Style().GetWritingDirection(),
@@ -228,8 +292,7 @@ void PageContainerLayoutAlgorithm::LayoutPageBorderBox(
   space_builder.SetAvailableSize(GetConstraintSpace().AvailableSize());
   space_builder.SetIsPaintedAtomically(true);
   ConstraintSpace child_space = space_builder.ToConstraintSpace();
-  LayoutAlgorithmParams params(page_border_box_node, geometry, child_space,
-                               /*break_token=*/nullptr);
+  LayoutAlgorithmParams params(page_border_box_node, geometry, child_space);
   PageBorderBoxLayoutAlgorithm child_algorithm(params, content_node_,
                                                page_area_params_);
   const LayoutResult* result = child_algorithm.Layout();
@@ -263,26 +326,30 @@ void PageContainerLayoutAlgorithm::LayoutAllMarginBoxes(
                      GetConstraintSpace().GetWritingMode());
   PhysicalBoxStrut margins = logical_margins.ConvertToPhysical(
       GetConstraintSpace().GetWritingDirection());
+  LayoutUnit left_width = margins.left.ClampNegativeToZero();
+  LayoutUnit right_width = margins.right.ClampNegativeToZero();
+  LayoutUnit top_height = margins.top.ClampNegativeToZero();
+  LayoutUnit bottom_height = margins.bottom.ClampNegativeToZero();
   LayoutUnit right_edge = page_box_size.width - margins.right;
   LayoutUnit bottom_edge = page_box_size.height - margins.bottom;
 
-  PhysicalRect top_left_corner_rect(LayoutUnit(), LayoutUnit(), margins.left,
-                                    margins.top);
-  PhysicalRect top_right_corner_rect(right_edge, LayoutUnit(), margins.right,
-                                     margins.top);
-  PhysicalRect bottom_right_corner_rect(right_edge, bottom_edge, margins.right,
-                                        margins.bottom);
-  PhysicalRect bottom_left_corner_rect(LayoutUnit(), bottom_edge, margins.left,
-                                       margins.bottom);
+  PhysicalRect top_left_corner_rect(LayoutUnit(), LayoutUnit(), left_width,
+                                    top_height);
+  PhysicalRect top_right_corner_rect(right_edge, LayoutUnit(), right_width,
+                                     top_height);
+  PhysicalRect bottom_right_corner_rect(right_edge, bottom_edge, right_width,
+                                        bottom_height);
+  PhysicalRect bottom_left_corner_rect(LayoutUnit(), bottom_edge, left_width,
+                                       bottom_height);
   PhysicalRect top_edge_rect(margins.left, LayoutUnit(),
                              page_box_size.width - margins.HorizontalSum(),
-                             margins.top);
-  PhysicalRect right_edge_rect(right_edge, margins.top, margins.right,
+                             top_height);
+  PhysicalRect right_edge_rect(right_edge, margins.top, right_width,
                                page_box_size.height - margins.VerticalSum());
   PhysicalRect bottom_edge_rect(margins.left, bottom_edge,
                                 page_box_size.width - margins.HorizontalSum(),
-                                margins.bottom);
-  PhysicalRect left_edge_rect(LayoutUnit(), margins.top, margins.left,
+                                margins.bottom.ClampNegativeToZero());
+  PhysicalRect left_edge_rect(LayoutUnit(), margins.top, left_width,
                               page_box_size.height - margins.VerticalSum());
 
   // Lay out in default paint order. Start in the top left corner and go
@@ -331,7 +398,8 @@ void PageContainerLayoutAlgorithm::LayoutCornerMarginNode(
   WritingModeConverter converter(Style().GetWritingDirection(),
                                  GetConstraintSpace().AvailableSize());
   LogicalRect logical_rect = converter.ToLogical(rect);
-  PrepareMarginBoxSpaceBuilder(logical_rect.size, &space_builder);
+  PrepareMarginBoxSpaceBuilder(logical_rect.size, edge_adjacency,
+                               &space_builder);
   ConstraintSpace child_space = space_builder.ToConstraintSpace();
 
   const LayoutResult* result = corner_node.Layout(child_space);
@@ -352,10 +420,10 @@ void PageContainerLayoutAlgorithm::LayoutEdgeMarginNodes(
     const ComputedStyle* end_box_style,
     const PhysicalRect& edge_rect,
     EdgeAdjacency edge_adjacency) {
-  BlockNode nodes[3] = {CreateBlockNodeIfNeeded(start_box_style),
-                        CreateBlockNodeIfNeeded(center_box_style),
-                        CreateBlockNodeIfNeeded(end_box_style)};
-  LayoutUnit main_axis_sizes[3];
+  std::array<BlockNode, 3> nodes = {CreateBlockNodeIfNeeded(start_box_style),
+                                    CreateBlockNodeIfNeeded(center_box_style),
+                                    CreateBlockNodeIfNeeded(end_box_style)};
+  std::array<LayoutUnit, 3> main_axis_sizes;
 
   ProgressionDirection dir;
   switch (edge_adjacency) {
@@ -419,7 +487,7 @@ BlockNode PageContainerLayoutAlgorithm::CreateBlockNodeIfNeeded(
 
   int quote_depth = 0;
   for (; content; content = content->Next()) {
-    if (content->IsAltText() || content->IsNone()) {
+    if (content->IsAlt() || content->IsNone()) {
       continue;
     }
     LayoutObject* child = content->CreateLayoutObject(*margin_layout_box);
@@ -506,8 +574,8 @@ PageContainerLayoutAlgorithm::EdgeMarginNodePreferredSize(
     // Need to lay out for block-sizes.
     main_axis_is_auto = child.Style().LogicalHeight().IsAuto();
     const LayoutResult* result = child.Layout(child_space);
-    LogicalSize size = result->GetPhysicalFragment().Size().ConvertToLogical(
-        child_space.GetWritingMode());
+    LogicalSize size = ToLogicalSize(result->GetPhysicalFragment().Size(),
+                                     child_space.GetWritingMode());
     minmax.min_size = size.block_size;
     minmax.max_size = size.block_size;
     margin_sum = margins.BlockSum();
@@ -518,9 +586,9 @@ PageContainerLayoutAlgorithm::EdgeMarginNodePreferredSize(
 
 void PageContainerLayoutAlgorithm::CalculateEdgeMarginBoxSizes(
     PhysicalSize available_physical_size,
-    const BlockNode nodes[3],
+    const std::array<BlockNode, 3>& nodes,
     ProgressionDirection dir,
-    LayoutUnit final_main_axis_sizes[3]) const {
+    std::array<LayoutUnit, 3>& final_main_axis_sizes) const {
   LayoutUnit available_main_axis_size;
   if (IsHorizontal(dir)) {
     available_main_axis_size = available_physical_size.width;
@@ -529,23 +597,24 @@ void PageContainerLayoutAlgorithm::CalculateEdgeMarginBoxSizes(
   }
 
   LogicalSize available_logical_size =
-      available_physical_size.ConvertToLogical(Style().GetWritingMode());
-  PreferredSizeInfo preferred_main_axis_sizes[3];
+      ToLogicalSize(available_physical_size, Style().GetWritingMode());
+  std::array<PreferredSizeInfo, 3> preferred_main_axis_sizes;
   LayoutUnit total_max_size_for_auto;
   bool has_auto_sized_box = false;
   for (int i = 0; i < 3; i++) {
     if (!nodes[i]) {
       continue;
     }
-    preferred_main_axis_sizes[i] =
+    PreferredSizeInfo& preferred_size = preferred_main_axis_sizes[i];
+    preferred_size =
         EdgeMarginNodePreferredSize(nodes[i], available_logical_size, dir);
     // Tentatively set main sizes to the preferred ones. Any auto specified size
     // will be adjusted further below.
-    final_main_axis_sizes[i] = preferred_main_axis_sizes[i].MaxLength();
+    final_main_axis_sizes[i] = preferred_size.MaxLength();
 
-    if (preferred_main_axis_sizes[i].IsAuto()) {
+    if (preferred_size.IsAuto()) {
       has_auto_sized_box = true;
-      total_max_size_for_auto += preferred_main_axis_sizes[i].MaxLength();
+      total_max_size_for_auto += preferred_size.MaxLength();
     }
   }
 
@@ -574,10 +643,10 @@ void PageContainerLayoutAlgorithm::CalculateEdgeMarginBoxSizes(
       // should therefore not be stretched).
       //
       // See https://drafts.csswg.org/css-page-3/#variable-auto-sizing
-      PreferredSizeInfo ac_sizes_for_start[3] = {
+      std::array<PreferredSizeInfo, 3> ac_sizes_for_start = {
           preferred_main_axis_sizes[CenterMarginBox], PreferredSizeInfo(),
           preferred_main_axis_sizes[StartMarginBox].Doubled()};
-      PreferredSizeInfo ac_sizes_for_end[3] = {
+      std::array<PreferredSizeInfo, 3> ac_sizes_for_end = {
           preferred_main_axis_sizes[CenterMarginBox], PreferredSizeInfo(),
           preferred_main_axis_sizes[EndMarginBox].Doubled()};
 
@@ -622,7 +691,7 @@ void PageContainerLayoutAlgorithm::CalculateEdgeMarginBoxSizes(
 }
 
 void PageContainerLayoutAlgorithm::ResolveTwoEdgeMarginBoxLengths(
-    const PreferredSizeInfo preferred_main_axis_sizes[3],
+    const std::array<PreferredSizeInfo, 3>& preferred_main_axis_sizes,
     LayoutUnit available_main_axis_size,
     LayoutUnit* first_main_axis_size,
     LayoutUnit* second_main_axis_size) {
@@ -654,8 +723,8 @@ void PageContainerLayoutAlgorithm::ResolveTwoEdgeMarginBoxLengths(
   }
 
   LayoutUnit flex_space;  // Additional space to distribute to auto-sized boxes.
-  LayoutUnit unflexed_sizes[3];
-  LayoutUnit flex_factors[3];
+  std::array<LayoutUnit, 3> unflexed_sizes;
+  std::array<LayoutUnit, 3> flex_factors;
   if (available_main_axis_size_for_flex > total_auto_max_size) {
     flex_space = available_main_axis_size_for_flex - total_auto_max_size;
     // The sum of the max content lengths is less than available length. Each
@@ -724,7 +793,7 @@ void PageContainerLayoutAlgorithm::LayoutEdgeMarginNode(
                                        child.Style().GetWritingDirection(),
                                        /*is_new_fc=*/true);
   LogicalSize available_size =
-      edge_rect.size.ConvertToLogical(Style().GetWritingMode());
+      ToLogicalSize(edge_rect.size, Style().GetWritingMode());
   bool main_axis_is_inline =
       IsHorizontal(dir) == Style().IsHorizontalWritingMode();
   if (main_axis_is_inline) {
@@ -734,7 +803,7 @@ void PageContainerLayoutAlgorithm::LayoutEdgeMarginNode(
     available_size.block_size = main_axis_size;
     space_builder.SetIsFixedBlockSize(true);
   }
-  PrepareMarginBoxSpaceBuilder(available_size, &space_builder);
+  PrepareMarginBoxSpaceBuilder(available_size, edge_adjacency, &space_builder);
   ConstraintSpace child_space = space_builder.ToConstraintSpace();
 
   const LayoutResult* result = child.Layout(child_space);
@@ -787,50 +856,50 @@ PhysicalBoxStrut PageContainerLayoutAlgorithm::ResolveMargins(
     EdgeAdjacency edge_adjacency) const {
   PhysicalBoxStrut margins =
       ComputePhysicalMargins(child_style, available_size);
+  LayoutUnit safe_printable_inset;
+  if (child_style.GetPageMarginSafety() != EPageMarginSafety::kNone) {
+    safe_printable_inset = child_space.SafePrintableInset();
+  }
 
   // Auto margins are only considered when adjacent to one of the four edges of
   // a page. All other auto values resolve to 0.
   if (IsAtVerticalEdge(edge_adjacency)) {
-    LayoutUnit additional_space =
-        available_size.height - child_size.height - margins.VerticalSum();
-    ResolveAutoMargins(child_style.MarginTop(), child_style.MarginBottom(),
-                       additional_space.ClampNegativeToZero(), &margins.top,
-                       &margins.bottom);
-    LayoutUnit margin_box_size = child_size.height + margins.VerticalSum();
-    LayoutUnit inequality = available_size.height - margin_box_size;
-    if (inequality) {
-      // Over-constrained. Solve the sizing equation my adjusting the margin
-      // facing away from the center (which will normally move the box towards
-      // the center).
-      if (IsAtTopEdge(edge_adjacency)) {
-        margins.top += inequality;
-      } else {
-        margins.bottom += inequality;
-      }
-    }
+    ResolveMarginsForPageMarginBox(
+        child_style.MarginTop(), child_style.MarginBottom(), child_size.height,
+        available_size.height, safe_printable_inset,
+        IsAtTopEdge(edge_adjacency), &margins.top, &margins.bottom);
   }
 
   if (IsAtHorizontalEdge(edge_adjacency)) {
-    LayoutUnit additional_space =
-        available_size.width - child_size.width - margins.HorizontalSum();
-    ResolveAutoMargins(child_style.MarginLeft(), child_style.MarginRight(),
-                       additional_space.ClampNegativeToZero(), &margins.left,
-                       &margins.right);
-    LayoutUnit margin_box_size = child_size.width + margins.HorizontalSum();
-    LayoutUnit inequality = available_size.width - margin_box_size;
-    if (inequality) {
-      // Over-constrained. Solve the sizing equation my adjusting the margin
-      // facing away from the center (which will normally move the box towards
-      // the center).
-      if (IsAtLeftEdge(edge_adjacency)) {
-        margins.left += inequality;
-      } else {
-        margins.right += inequality;
-      }
-    }
+    ResolveMarginsForPageMarginBox(
+        child_style.MarginLeft(), child_style.MarginRight(), child_size.width,
+        available_size.width, safe_printable_inset,
+        IsAtLeftEdge(edge_adjacency), &margins.left, &margins.right);
   }
 
   return margins;
+}
+
+void PageContainerLayoutAlgorithm::PrepareMarginBoxSpaceBuilder(
+    LogicalSize available_size,
+    EdgeAdjacency edge_adjacency,
+    ConstraintSpaceBuilder* builder) {
+  builder->SetAvailableSize(available_size);
+  builder->SetInlineAutoBehavior(AutoSizeBehavior::kStretchImplicit);
+  builder->SetBlockAutoBehavior(AutoSizeBehavior::kStretchImplicit);
+  builder->SetDecorationPercentageResolutionType(
+      DecorationPercentageResolutionType::kContainingBlockSize);
+
+  PhysicalBoxSides box_sides(
+      IsAtTopEdge(edge_adjacency), IsAtRightEdge(edge_adjacency),
+      IsAtBottomEdge(edge_adjacency), IsAtLeftEdge(edge_adjacency));
+  builder->SetPaperEdgeAdjacentSides(
+      box_sides.ToLogical(Style().GetWritingDirection()));
+  builder->SetSafePrintableInset(
+      CalculateSafePrintableInset(Node().GetDocument()));
+
+  // Each page-margin box always establishes a stacking context.
+  builder->SetIsPaintedAtomically(true);
 }
 
 }  // namespace blink

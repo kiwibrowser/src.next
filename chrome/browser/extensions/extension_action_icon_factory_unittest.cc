@@ -15,13 +15,14 @@
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_action.h"
 #include "extensions/browser/extension_action_manager.h"
+#include "extensions/browser/extension_registrar.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/image_util.h"
 #include "extensions/grit/extensions_browser_resources.h"
@@ -43,10 +44,12 @@
 #include "components/user_manager/user_manager_impl.h"
 #endif
 
-using extensions::mojom::ManifestLocation;
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 namespace {
+
+using ::extensions::mojom::ManifestLocation;
 
 bool ImageRepsAreEqual(const gfx::ImageSkiaRep& image_rep1,
                        const gfx::ImageSkiaRep& image_rep2) {
@@ -91,14 +94,14 @@ class ExtensionActionIconFactoryTest
     : public testing::Test,
       public ExtensionActionIconFactory::Observer {
  public:
-  ExtensionActionIconFactoryTest() : quit_in_icon_updated_(false) {}
+  ExtensionActionIconFactoryTest() = default;
 
   ExtensionActionIconFactoryTest(const ExtensionActionIconFactoryTest&) =
       delete;
   ExtensionActionIconFactoryTest& operator=(
       const ExtensionActionIconFactoryTest&) = delete;
 
-  ~ExtensionActionIconFactoryTest() override {}
+  ~ExtensionActionIconFactoryTest() override = default;
 
   void WaitForIconUpdate() {
     quit_in_icon_updated_ = true;
@@ -129,12 +132,14 @@ class ExtensionActionIconFactoryTest
     if (!valid_value || !valid_value->is_dict())
       return nullptr;
 
+    std::u16string utf16_error;
     scoped_refptr<Extension> extension =
         Extension::Create(test_file, location, valid_value->GetDict(),
-                          Extension::NO_FLAGS, &error);
-    EXPECT_TRUE(extension.get()) << error;
-    if (extension.get())
-      extension_service_->AddExtension(extension.get());
+                          Extension::NO_FLAGS, &utf16_error);
+    EXPECT_TRUE(extension.get()) << utf16_error;
+    if (extension) {
+      ExtensionRegistrar::Get(profile_.get())->AddExtension(extension);
+    }
     return extension;
   }
 
@@ -142,9 +147,9 @@ class ExtensionActionIconFactoryTest
   void SetUp() override {
     profile_ = std::make_unique<TestingProfile>();
     base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-    extension_service_ = static_cast<extensions::TestExtensionSystem*>(
-        extensions::ExtensionSystem::Get(profile_.get()))->
-        CreateExtensionService(&command_line, base::FilePath(), false);
+    static_cast<extensions::TestExtensionSystem*>(
+        extensions::ExtensionSystem::Get(profile_.get()))
+        ->CreateExtensionService(&command_line, base::FilePath(), false);
   }
 
   void TearDown() override {
@@ -169,9 +174,8 @@ class ExtensionActionIconFactoryTest
 
  private:
   content::BrowserTaskEnvironment task_environment_;
-  bool quit_in_icon_updated_;
+  bool quit_in_icon_updated_ = false;
   std::unique_ptr<TestingProfile> profile_;
-  raw_ptr<ExtensionService, DanglingUntriaged> extension_service_;
   base::RunLoop loop_;
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -191,7 +195,7 @@ TEST_F(ExtensionActionIconFactoryTest, NoIcons) {
   // manifest and does not call |SetIcon| by default.
   scoped_refptr<Extension> extension(
       CreateExtension("browser_action/no_icon", ManifestLocation::kUnpacked));
-  ASSERT_TRUE(extension.get() != nullptr);
+  ASSERT_TRUE(extension);
   ExtensionAction* action = GetExtensionAction(*extension);
   ASSERT_TRUE(action);
   ASSERT_FALSE(action->default_icon());
@@ -249,7 +253,7 @@ TEST_F(ExtensionActionIconFactoryTest, AfterSetIcon) {
   // icon resource).
   scoped_refptr<Extension> extension(
       CreateExtension("browser_action/no_icon", ManifestLocation::kUnpacked));
-  ASSERT_TRUE(extension.get() != nullptr);
+  ASSERT_TRUE(extension);
   ExtensionAction* action = GetExtensionAction(*extension);
   ASSERT_TRUE(action);
   ASSERT_FALSE(action->default_icon());
@@ -286,7 +290,7 @@ TEST_F(ExtensionActionIconFactoryTest, DefaultIcon) {
   // icon resource).
   scoped_refptr<Extension> extension(
       CreateExtension("browser_action/no_icon", ManifestLocation::kUnpacked));
-  ASSERT_TRUE(extension.get() != nullptr);
+  ASSERT_TRUE(extension);
   ExtensionAction* action = GetExtensionAction(*extension);
   ASSERT_TRUE(action);
   ASSERT_FALSE(action->default_icon());

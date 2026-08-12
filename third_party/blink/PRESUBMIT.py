@@ -68,6 +68,7 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
     # the boundary between Blink and non-Blink.
     allowed_interfaces = (
         'services/network/public/mojom/cross_origin_embedder_policy',
+        'services/network/public/mojom/document_isolation_policy',
         'services/network/public/mojom/early_hints',
         'services/network/public/mojom/fetch_api',
         'services/network/public/mojom/load_timing_info',
@@ -86,7 +87,6 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
         'third_party/blink/public/mojom/loader/transferrable_url_loader',
         'third_party/blink/public/mojom/navigation/renderer_content_settings',
         'third_party/blink/public/mojom/page/prerender_page_param',
-        'third_party/blink/public/mojom/partitioned_popins/partitioned_popin_params',
         'third_party/blink/public/mojom/worker/subresource_loader_updater',
         'third_party/blink/public/mojom/worker/worklet_global_scope_creation_params',
         'media/mojo/mojom/interface_factory', 'media/mojo/mojom/audio_decoder',
@@ -129,6 +129,19 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
     return results
 
 
+def _CheckBundleData(input_api, output_api):
+    old_sys_path = input_api.sys.path[:]
+    try:
+        input_api.sys.path.append(input_api.change.RepositoryRoot())
+        from build.ios import presubmit_support
+        return presubmit_support.CheckBundleData(
+            input_api, output_api,
+            'renderer/platform/blink_platform_unittests_bundle_data',
+            'renderer/platform')
+    finally:
+        input_api.sys.path = old_sys_path
+
+
 def _CommonChecks(input_api, output_api):
     """Checks common to both upload and commit."""
     # We should figure out what license checks we actually want to use.
@@ -145,13 +158,14 @@ def _CommonChecks(input_api, output_api):
             license_header=license_header,
             global_checks=False))
     results.extend(_CheckForWrongMojomIncludes(input_api, output_api))
+    results.extend(_CheckBundleData(input_api, output_api))
     return results
 
 
 def FilterPaths(input_api):
     """Returns input files with certain paths removed."""
     files = []
-    for f in input_api.AffectedFiles():
+    for f in input_api.AffectedFiles(include_deletes=False):
         file_path = f.AbsoluteLocalPath()
         # Filter out changes in web_tests/ so they are not linted. Some files
         # are intentionally malformed for testing. Also, external WPTs may have
@@ -267,6 +281,14 @@ def _CheckForForbiddenChromiumCode(input_api, output_api):
             errors = audit_non_blink_usage.check(path, f.ChangedContents())
             if errors:
                 for error in errors:
+                    if not results:
+                        results.append(
+                            output_api.PresubmitNotifyResult(
+                                'Non-Blink usage violations detected. Please '
+                                'check if there are usable Blink equivalents; '
+                                'if none exist, please allowlist the new uses '
+                                'in third_party/blink/tools/blinkpy/presubmit/'
+                                'audit_non_blink_usage.py'))
                     msg = '%s:%d uses disallowed identifier %s' % (
                         path, error.line, error.identifier)
                     if error.advice:

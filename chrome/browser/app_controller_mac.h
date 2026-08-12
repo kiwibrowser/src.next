@@ -25,6 +25,7 @@
 #include "components/prefs/pref_change_registrar.h"
 
 class BookmarkMenuBridge;
+@class ConfirmQuitPanelController;
 class GURL;
 class HistoryMenuBridge;
 class Profile;
@@ -68,15 +69,30 @@ class ColorProvider;
 - (void)didEndMainMessageLoop;
 
 // Try to close all browser windows, and if that succeeds then quit.
-- (BOOL)tryToTerminateApplication:(NSApplication*)app;
+- (void)tryToTerminateApplication;
 
 // Stop trying to terminate the application. That is, prevent the final browser
 // window closure from causing the application to quit.
-- (void)stopTryingToTerminateApplication:(NSApplication*)app;
+- (void)stopTryingToTerminateApplication;
 
-// Run the quit confirmation panel and return whether or not to continue
-// quitting.
-- (BOOL)runConfirmQuitPanel;
+typedef NS_ENUM(NSInteger, ConfirmQuitResult) {
+  // Preconditions were not met and the quit confirmation panel was not shown
+  // (e.g., there are no visible windows, the user has disabled the
+  // confirmation, or the quit was not initiated by a keyboard shortcut).
+  // The application should proceed with the quit.
+  ConfirmQuitResultNotPrompted,
+  // The user successfully confirmed the quit action (e.g., by holding the
+  // quit accelerator or double-tapping).
+  // The application should proceed with the quit.
+  ConfirmQuitResultConfirmed,
+  // The user aborted the quit action (e.g., by letting go of the quit
+  // accelerator before the confirmation panel faded).
+  // The application should not quit.
+  ConfirmQuitResultAborted,
+};
+
+// Run the quit confirmation panel if conditions are met and return the result.
+- (ConfirmQuitResult)confirmQuitIfNeeded;
 
 // Indicate that the system is powering off or logging out.
 - (void)willPowerOff:(NSNotification*)inNotification;
@@ -131,9 +147,6 @@ class ColorProvider;
 // Returns the last active ColorProvider.
 - (const ui::ColorProvider&)lastActiveColorProvider;
 
-// This is called when the system wide light or dark mode changes.
-- (void)nativeThemeDidChange;
-
 // Certain NSMenuItems [Close Tab and Close Window] have different
 // keyEquivalents depending on context. This must be invoked in two locations:
 //   * In menuNeedsUpdate:, which is called prior to showing the NSMenu.
@@ -147,6 +160,7 @@ class ColorProvider;
 - (BOOL)windowHasBrowserTabs:(NSWindow*)window;
 
 // Testing API.
+- (ConfirmQuitPanelController*)confirmQuitPanelControllerForTesting;
 - (void)setCmdWMenuItemForTesting:(NSMenuItem*)menuItem;
 - (void)setShiftCmdWMenuItemForTesting:(NSMenuItem*)menuItem;
 

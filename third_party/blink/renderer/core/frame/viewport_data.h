@@ -19,7 +19,8 @@ class Document;
 
 class ViewportData final : public GarbageCollected<ViewportData> {
  public:
-  ViewportData(Document& document);
+  explicit ViewportData(Document& document);
+
   void Trace(Visitor* visitor) const;
   void Shutdown();
 
@@ -27,9 +28,13 @@ class ViewportData final : public GarbageCollected<ViewportData> {
   bool ShouldOverrideLegacyDescription(ViewportDescription::Type) const;
   CORE_EXPORT void SetViewportDescription(const ViewportDescription&);
   CORE_EXPORT ViewportDescription GetViewportDescription() const;
-  Length ViewportDefaultMinWidth() const { return viewport_default_min_width_; }
+  const ViewportLength& ViewportDefaultMinWidth() const {
+    return viewport_default_min_width_;
+  }
 
   void UpdateViewportDescription();
+
+  void SetHasComplexSafeAreaConstraint(bool value);
 
   // When true this will force a kCover viewport fit value which will result in
   // the document expanding into the display cutout area.
@@ -51,7 +56,7 @@ class ViewportData final : public GarbageCollected<ViewportData> {
 
   ViewportDescription viewport_description_;
   ViewportDescription legacy_viewport_description_;
-  Length viewport_default_min_width_;
+  ViewportLength viewport_default_min_width_;
 
   // Whether overlays content was set via the virtualKeyboard API.
   bool virtual_keyboard_overlays_content_ = false;
@@ -59,6 +64,9 @@ class ViewportData final : public GarbageCollected<ViewportData> {
   // Stores the current value viewport-fit value.
   mojom::ViewportFit viewport_fit_ = blink::mojom::ViewportFit::kAuto;
   bool force_expand_display_cutout_ = false;
+
+  // Stores the current complex safe area constraint value.
+  std::optional<bool> has_complex_safe_area_constraint_;
 
   HeapMojoAssociatedRemote<mojom::blink::DisplayCutoutHost>
       display_cutout_host_;

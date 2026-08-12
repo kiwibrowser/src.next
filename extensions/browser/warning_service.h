@@ -11,6 +11,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/extension_registry.h"
@@ -32,13 +33,16 @@ namespace extensions {
 // them. This class must be used on the UI thread only.
 class WarningService : public KeyedService, public ExtensionRegistryObserver {
  public:
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
     virtual void ExtensionWarningsChanged(
         const ExtensionIdSet& affected_extensions) = 0;
+
+   protected:
+    ~Observer() override = default;
   };
 
-  // |browser_context| may be NULL for testing. In this case, be sure to not
+  // `browser_context` may be NULL for testing. In this case, be sure to not
   // insert any warnings.
   explicit WarningService(content::BrowserContext* browser_context);
 
@@ -47,19 +51,19 @@ class WarningService : public KeyedService, public ExtensionRegistryObserver {
 
   ~WarningService() override;
 
-  // Get the instance of the WarningService for |browser_context|.
+  // Get the instance of the WarningService for `browser_context`.
   // Redirected in incognito.
   static WarningService* Get(content::BrowserContext* browser_context);
 
-  // Clears all warnings of types contained in |types| and notifies observers
+  // Clears all warnings of types contained in `types` and notifies observers
   // of the changed warnings.
   void ClearWarnings(const std::set<Warning::WarningType>& types);
 
-  // Returns all types of warnings effecting extension |extension_id|.
+  // Returns all types of warnings effecting extension `extension_id`.
   std::set<Warning::WarningType> GetWarningTypesAffectingExtension(
       const ExtensionId& extension_id) const;
 
-  // Returns all localized warnings for extension |extension_id| in |result|.
+  // Returns all localized warnings for extension `extension_id` in `result`.
   std::vector<std::string> GetWarningMessagesForExtension(
       const ExtensionId& extension_id) const;
 
@@ -68,8 +72,8 @@ class WarningService : public KeyedService, public ExtensionRegistryObserver {
   // Adds a set of warnings and notifies observers if any warning is new.
   void AddWarnings(const WarningSet& warnings);
 
-  // Notifies the WarningService of browser_context |browser_context_id| that
-  // new |warnings| occurred and triggers a warning badge.
+  // Notifies the WarningService of browser_context `browser_context_id` that
+  // new `warnings` occurred and triggers a warning badge.
   static void NotifyWarningsOnUI(void* browser_context_id,
                                  const WarningSet& warnings);
 
@@ -93,7 +97,7 @@ class WarningService : public KeyedService, public ExtensionRegistryObserver {
   base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observation_{this};
 
-  base::ObserverList<Observer>::Unchecked observer_list_;
+  base::ObserverList<Observer> observer_list_;
 };
 
 }  // namespace extensions

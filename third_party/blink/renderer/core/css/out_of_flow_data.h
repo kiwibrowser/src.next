@@ -5,22 +5,90 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_OUT_OF_FLOW_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_OUT_OF_FLOW_DATA_H_
 
+#include <optional>
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/successful_position_fallback.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/core/style/position_try_fallbacks.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
+enum class RememberedScrollOffsetType { kLayout, kRangeAdjustment };
+
 class CSSPropertyValueSet;
+class Element;
+class LayoutBox;
 class LayoutObject;
 
-class CORE_EXPORT OutOfFlowData final
-    : public GarbageCollected<OutOfFlowData>,
-      public ElementRareDataField {
+class CORE_EXPORT OutOfFlowData final : public GarbageCollected<OutOfFlowData>,
+                                        public NodeRareDataField {
  public:
+  struct ScrollOffsetPair {
+    PhysicalOffset scroll_offset_for_layout;
+    PhysicalOffset scroll_offset_for_range_adjustment;
+
+    bool operator==(const ScrollOffsetPair& other) const {
+      return scroll_offset_for_layout == other.scroll_offset_for_layout &&
+             scroll_offset_for_range_adjustment ==
+                 other.scroll_offset_for_range_adjustment;
+    }
+  };
+
+  class RememberedScrollOffsets
+      : public GarbageCollected<RememberedScrollOffsets> {
+   public:
+    RememberedScrollOffsets() = default;
+
+    std::optional<ScrollOffsetPair> GetOffsetsForAnchor(
+        const Element* anchor) const {
+      if (!anchor) {
+        return std::nullopt;
+      }
+      auto it = offsets_.find(anchor);
+      return it != offsets_.end() ? std::make_optional(it->value)
+                                  : std::nullopt;
+    }
+    std::optional<PhysicalOffset> GetOffset(const Element* anchor,
+                                            RememberedScrollOffsetType type,
+                                            bool needs_x,
+                                            bool needs_y) const {
+      if (const auto& offsets = GetOffsetsForAnchor(anchor)) {
+        PhysicalOffset result =
+            type == RememberedScrollOffsetType::kLayout
+                ? offsets->scroll_offset_for_layout
+                : offsets->scroll_offset_for_range_adjustment;
+        if (!needs_x) {
+          result.left = LayoutUnit();
+        }
+        if (!needs_y) {
+          result.top = LayoutUnit();
+        }
+        return result;
+      }
+      return std::nullopt;
+    }
+    void SetOffsetsForAnchor(const Element* anchor,
+                             const ScrollOffsetPair& offsets) {
+      offsets_.Set(anchor, offsets);
+    }
+
+    bool operator==(const RememberedScrollOffsets& other) const {
+      return offsets_ == other.offsets_;
+    }
+
+    void Trace(Visitor* visitor) const { visitor->Trace(offsets_); }
+
+    String ToString() const;
+
+   private:
+    HeapHashMap<WeakMember<const Element>, ScrollOffsetPair> offsets_;
+  };
+
   // For each layout of an OOF that ever had a successful try fallback, register
   // the current fallback. When ApplyPendingSuccessfulPositionFallback() is
   // called, update the last successful one.
@@ -37,7 +105,8 @@ class CORE_EXPORT OutOfFlowData final
 
   // At resize observer timing, update the last successful try fallback.
   // Returns true if last successful fallback was cleared.
-  bool ApplyPendingSuccessfulPositionFallback(LayoutObject* layout_object);
+  bool ApplyPendingSuccessfulPositionFallbackAndAnchorScrollShift(
+      LayoutObject* layout_object);
 
   bool HasLastSuccessfulPositionFallback() const {
     return last_successful_position_fallback_.position_try_fallbacks_ !=
@@ -57,6 +126,10 @@ class CORE_EXPORT OutOfFlowData final
     return last_successful_position_fallback_.try_tactics_;
   }
 
+  std::optional<size_t> GetLastSuccessfulIndex() const {
+    return last_successful_position_fallback_.index_;
+  }
+
   std::optional<size_t> GetNewSuccessfulPositionFallbackIndex() const {
     if (new_successful_position_fallback_.index_ != std::nullopt) {
       return new_successful_position_fallback_.index_;
@@ -64,16 +137,32 @@ class CORE_EXPORT OutOfFlowData final
     return last_successful_position_fallback_.index_;
   }
 
+  // Return true if there's any stale successful position fallback data (if
+  // `position-try-fallbacks` has changed).
+  bool HasStaleFallbackData(const LayoutBox&) const;
+
+  const RememberedScrollOffsets* GetRememberedScrollOffsets() const;
+  const RememberedScrollOffsets* GetSpeculativeRememberedScrollOffsets() const;
+  bool SetPendingRememberedScrollOffsets(const RememberedScrollOffsets*);
+
+  void ClearRememberedScrollOffsets() {
+    remembered_scroll_offsets_ = nullptr;
+    pending_remembered_scroll_offsets_ = nullptr;
+  }
+
   void Trace(Visitor*) const override;
 
  private:
-  void ClearLastSuccessfulPositionFallback();
+  void ResetAnchorData();
 
   SuccessfulPositionFallback last_successful_position_fallback_;
   // If the previous layout had a successful position fallback, it is stored
   // here. Will be copied to the last_successful_position_fallback_ at next
   // resize observer update.
   SuccessfulPositionFallback new_successful_position_fallback_;
+
+  Member<const RememberedScrollOffsets> remembered_scroll_offsets_;
+  Member<const RememberedScrollOffsets> pending_remembered_scroll_offsets_;
 };
 
 }  // namespace blink

@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_UI_BUBBLE_ANCHOR_UTIL_H_
 
 #include "build/build_config.h"
-#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/native_ui_types.h"
 
 namespace gfx {
 class Rect;
 }
 
-class Browser;
+class BrowserWindowInterface;
 
 namespace bubble_anchor_util {
 
@@ -27,14 +27,14 @@ enum class Anchor {
 // Offset from the window edge to show bubbles when there is no location bar.
 // E.g., when in fullscreen or in a Hosted App window. Don't center, since that
 // could obscure a fullscreen bubble.
-constexpr int kNoToolbarLeftOffset = 40;
+inline constexpr int kNoToolbarLeftOffset = 40;
 
 // Returns the Rect appropriate for anchoring a bubble to |browser|'s Page Info
 // icon, or an appropriate fallback when that is not visible. This is used only
 // when the platform-specific GetPageInfoAnchorView() is unable to return an
 // actual View. This function has separate implementations for Views- and Cocoa-
 // based browsers. The anchor rect is in screen coordinates.
-gfx::Rect GetPageInfoAnchorRect(Browser* browser);
+gfx::Rect GetPageInfoAnchorRect(BrowserWindowInterface* browser);
 
 }  // namespace bubble_anchor_util
 

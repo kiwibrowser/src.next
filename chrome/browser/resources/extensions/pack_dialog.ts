@@ -85,21 +85,21 @@ export class ExtensionsPackDialogElement extends CrLitElement {
     };
   }
 
-  delegate: PackDialogDelegate = new DummyPackDialogDelegate();
-  protected packDirectory_: string = '';
-  protected keyFile_: string = '';
-  protected lastResponse_: chrome.developerPrivate.PackDirectoryResponse|null =
-      null;
+  accessor delegate: PackDialogDelegate = new DummyPackDialogDelegate();
+  protected accessor packDirectory_: string = '';
+  protected accessor keyFile_: string = '';
+  protected accessor lastResponse_:
+      chrome.developerPrivate.PackDirectoryResponse|null = null;
 
-  protected onKeyFileChanged_(e: CustomEvent<{value: string}>) {
+  protected onKeyFileValueChanged_(e: CustomEvent<{value: string}>) {
     this.keyFile_ = e.detail.value;
   }
 
-  protected onPackDirectoryChanged_(e: CustomEvent<{value: string}>) {
+  protected onPackDirectoryValueChanged_(e: CustomEvent<{value: string}>) {
     this.packDirectory_ = e.detail.value;
   }
 
-  protected onRootBrowse_() {
+  protected onRootBrowseClick_() {
     this.delegate.choosePackRootDirectory().then(path => {
       if (path) {
         this.packDirectory_ = path;
@@ -107,7 +107,7 @@ export class ExtensionsPackDialogElement extends CrLitElement {
     });
   }
 
-  protected onKeyBrowse_() {
+  protected onKeyBrowseClick_() {
     this.delegate.choosePrivateKeyPath().then(path => {
       if (path) {
         this.keyFile_ = path;
@@ -148,8 +148,8 @@ export class ExtensionsPackDialogElement extends CrLitElement {
     }
 
     // This is only possible for a warning dialog.
-    if (this.shadowRoot!.querySelector(
-                            'extensions-pack-dialog-alert')!.returnValue ===
+    if (this.shadowRoot.querySelector(
+                           'extensions-pack-dialog-alert')!.returnValue ===
         'success') {
       this.delegate
           .packExtension(

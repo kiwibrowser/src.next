@@ -32,7 +32,6 @@ class PLATFORM_EXPORT SurfaceLayerBridge
  public:
   SurfaceLayerBridge(
       viz::FrameSinkId parent_frame_sink_id,
-      ContainsVideo contains_video,
       WebSurfaceLayerBridgeObserver*,
       cc::UpdateSubmissionStateCB update_submission_state_callback);
   ~SurfaceLayerBridge() override;
@@ -62,6 +61,8 @@ class PLATFORM_EXPORT SurfaceLayerBridge
 
   void RegisterFrameSinkHierarchy() override;
   void UnregisterFrameSinkHierarchy() override;
+  void ReparentFrameSinkHierarchy(
+      const viz::FrameSinkId& new_parent_frame_sink_id) override;
 
   // Update the opacity of `surface_layer_` based on what the embedder expects
   // and what the embeddee has actually sent to the frame sink.  The idea is
@@ -109,9 +110,8 @@ class PLATFORM_EXPORT SurfaceLayerBridge
       embedded_frame_sink_provider_;
 
   const viz::FrameSinkId frame_sink_id_;
-  const ContainsVideo contains_video_;
   viz::SurfaceId current_surface_id_;
-  const viz::FrameSinkId parent_frame_sink_id_;
+  viz::FrameSinkId parent_frame_sink_id_;
   // Does the embedder expect our content to be fully opaque?  This is presumed
   // to lead the frames that are sent by the embedee.
   bool embedder_expects_opaque_ = false;

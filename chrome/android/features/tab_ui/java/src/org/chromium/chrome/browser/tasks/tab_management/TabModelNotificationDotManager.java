@@ -1,0 +1,224 @@
+// Copyright 2024 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+package org.chromium.chrome.browser.tasks.tab_management;
+
+import static org.chromium.build.NullUtil.assumeNonNull;
+
+import android.content.Context;
+
+import org.chromium.base.CallbackController;
+import org.chromium.base.lifetime.Destroyable;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
+import org.chromium.build.annotations.MonotonicNonNull;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.collaboration.CollaborationServiceFactory;
+import org.chromium.chrome.browser.collaboration.messaging.MessagingBackendServiceFactory;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab_ui.TabModelDotInfo;
+import org.chromium.chrome.browser.tabmodel.TabClosingSource;
+import org.chromium.chrome.browser.tabmodel.TabGroupObserver;
+import org.chromium.chrome.browser.tabmodel.TabGroupTitleUtils;
+import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelType;
+import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.components.collaboration.CollaborationService;
+import org.chromium.components.collaboration.messaging.MessageUtils;
+import org.chromium.components.collaboration.messaging.MessagingBackendService;
+import org.chromium.components.collaboration.messaging.MessagingBackendService.PersistentMessageObserver;
+import org.chromium.components.collaboration.messaging.PersistentMessage;
+import org.chromium.components.collaboration.messaging.PersistentNotificationType;
+
+import java.util.List;
+
+/** Pushes whether a notification dot should be shown for a tab model. */
+@NullMarked
+public class TabModelNotificationDotManager implements Destroyable {
+    private final PersistentMessageObserver mPersistentMessageObserver =
+            new PersistentMessageObserver() {
+                @Override
+                public void onMessagingBackendServiceInitialized() {
+                    mMessagingBackendServiceInitialized = true;
+                    computeUpdate();
+                }
+
+                @Override
+                public void displayPersistentMessage(PersistentMessage message) {
+                    if (message.type != PersistentNotificationType.DIRTY_TAB) return;
+
+                    if (mNotificationDotObservableSupplier.get().showDot) {
+                        return;
+                    }
+
+                    computeUpdate();
+                }
+
+                @Override
+                public void hidePersistentMessage(PersistentMessage message) {
+                    if (message.type != PersistentNotificationType.DIRTY_TAB) return;
+
+                    if (!mNotificationDotObservableSupplier.get().showDot) {
+                        return;
+                    }
+
+                    computeUpdate();
+                }
+            };
+
+    // Any operation aside from grouping a tab for restoring from TabGroupSyncService should "just
+    // work" via the MessagingBackendService so no need to observe anything else.
+    private final TabGroupObserver mTabGroupObserver =
+            new TabGroupObserver() {
+                @Override
+                public void didMergeTabToGroup(Tab movedTab, boolean isDestinationTab) {
+                    maybeUpdateForTab(movedTab, /* mayAddDot= */ true);
+                }
+            };
+
+    // MessagingBackendService and TabGroupSyncService see tabs moving between the hidden and open
+    // states as essentially no-ops. This observer is necessary to ensure dots are updated
+    // correctly.
+    private final TabModelObserver mTabModelObserver =
+            new TabModelObserver() {
+                @Override
+                public void willCloseTab(Tab tab, boolean didCloseAlone) {
+                    maybeUpdateForTab(tab, /* mayAddDot= */ false);
+                }
+
+                @Override
+                public void onFinishingTabClosure(Tab tab, @TabClosingSource int closingSource) {
+                    maybeUpdateForTab(tab, /* mayAddDot= */ false);
+                }
+
+                @Override
+                public void tabRemoved(Tab tab) {
+                    maybeUpdateForTab(tab, /* mayAddDot= */ false);
+                }
+
+                @Override
+                public void tabClosureUndone(Tab tab) {
+                    maybeUpdateForTab(tab, /* mayAddDot= */ true);
+                }
+
+                @Override
+                public void didAddTab(
+                        Tab tab,
+                        @TabLaunchType int type,
+                        @TabCreationState int creationState,
+                        boolean markedForSelection) {
+                    maybeUpdateForTab(tab, /* mayAddDot= */ true);
+                }
+            };
+
+    private final SettableNonNullObservableSupplier<TabModelDotInfo>
+            mNotificationDotObservableSupplier =
+                    ObservableSuppliers.createNonNull(TabModelDotInfo.HIDE);
+    private final CallbackController mCallbackController = new CallbackController();
+    private final Context mContext;
+    private @Nullable MessagingBackendService mMessagingBackendService;
+    private @MonotonicNonNull TabModel mTabModel;
+    private boolean mTabModelSelectorInitialized;
+    private boolean mMessagingBackendServiceInitialized;
+
+    /**
+     * @param context Used to load resources.
+     */
+    public TabModelNotificationDotManager(Context context) {
+        mContext = context;
+    }
+
+    /**
+     * Initializes native dependencies of the notification dot manager for the regular tab model.
+     *
+     * @param tabModelSelector The tab model selector to use. Only the regular tab model is
+     *     observed. However, the selector is needed to know when the tab model is initialized.
+     */
+    public void initWithNative(TabModelSelector tabModelSelector) {
+        mTabModel = tabModelSelector.getModel(/* incognito= */ false);
+        assert mTabModel.getTabModelType() != TabModelType.EMPTY
+                : "TabModel & native should be initialized.";
+
+        Profile profile = assumeNonNull(mTabModel.getProfile());
+        CollaborationService collaborationService =
+                CollaborationServiceFactory.getForProfile(profile);
+        if (!collaborationService.getServiceStatus().isAllowedToJoin()) return;
+
+        mMessagingBackendService = MessagingBackendServiceFactory.getForProfile(profile);
+        mMessagingBackendService.addPersistentMessageObserver(mPersistentMessageObserver);
+        TabModelUtils.runOnTabStateInitialized(
+                tabModelSelector,
+                mCallbackController.makeCancelable(
+                        unused -> {
+                            mTabModelSelectorInitialized = true;
+                            mTabModel.addTabGroupObserver(mTabGroupObserver);
+                            mTabModel.addObserver(mTabModelObserver);
+
+                            computeUpdate();
+                        }));
+    }
+
+    /**
+     * Returns an {@link NonNullObservableSupplier} that contains true when the notification dot
+     * should be shown.
+     */
+    public NonNullObservableSupplier<TabModelDotInfo> getNotificationDotObservableSupplier() {
+        return mNotificationDotObservableSupplier;
+    }
+
+    @Override
+    public void destroy() {
+        mCallbackController.destroy();
+        if (mMessagingBackendService != null) {
+            mMessagingBackendService.removePersistentMessageObserver(mPersistentMessageObserver);
+        }
+        if (mTabModel != null) {
+            mTabModel.removeTabGroupObserver(mTabGroupObserver);
+            mTabModel.removeObserver(mTabModelObserver);
+        }
+    }
+
+    private void maybeUpdateForTab(Tab tab, boolean mayAddDot) {
+        TabModelDotInfo info = mNotificationDotObservableSupplier.get();
+        boolean stateWillBeUnchanged = info.showDot == mayAddDot;
+        if (tab.getTabGroupId() == null || stateWillBeUnchanged) {
+            return;
+        }
+        computeUpdate();
+    }
+
+    private void computeUpdate() {
+        if (!mMessagingBackendServiceInitialized || !mTabModelSelectorInitialized) return;
+        mNotificationDotObservableSupplier.set(computeTabModelDotInfo());
+    }
+
+    private TabModelDotInfo computeTabModelDotInfo() {
+        assert mTabModel != null
+                && mTabModel.getTabModelType() != TabModelType.EMPTY
+                && mMessagingBackendService != null;
+
+        List<PersistentMessage> messages =
+                mMessagingBackendService.getMessages(PersistentNotificationType.DIRTY_TAB);
+        for (PersistentMessage message : messages) {
+            int tabId = MessageUtils.extractTabId(message);
+            if (tabId == Tab.INVALID_TAB_ID) continue;
+
+            Tab tab = mTabModel.getTabById(tabId);
+            if (tab != null && !tab.isClosing()) {
+                String title =
+                        TabGroupTitleUtils.getDisplayableTitle(
+                                mContext, mTabModel, tab.getTabGroupId());
+                return new TabModelDotInfo(true, title);
+            }
+        }
+        return TabModelDotInfo.HIDE;
+    }
+}

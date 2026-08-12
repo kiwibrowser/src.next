@@ -30,14 +30,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ATTRIBUTE_COLLECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ATTRIBUTE_COLLECTION_H_
 
+#include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
@@ -50,24 +47,30 @@ class AttributeCollectionGeneric {
   STACK_ALLOCATED();
 
  public:
-  using ValueType = typename Container::ValueType;
-  using iterator = ValueType*;
+  using iterator = typename Container::pointer;
 
   AttributeCollectionGeneric(Container& attributes) : attributes_(attributes) {}
 
-  ValueType& operator[](unsigned index) const { return at(index); }
-  ValueType& at(unsigned index) const {
+  Container::reference operator[](unsigned index) const { return at(index); }
+  Container::reference at(unsigned index) const {
     CHECK_LT(index, size());
-    return begin()[index];
+    // SAFETY: Check above.
+    return UNSAFE_BUFFERS(begin()[index]);
   }
 
-  ValueType* data() { return attributes_.data(); }
-  const ValueType* data() const { return attributes_.data(); }
+  Container::pointer data() { return attributes_.data(); }
+  Container::const_pointer data() const { return attributes_.data(); }
 
-  iterator begin() const { return attributes_.data(); }
-  iterator end() const { return begin() + size(); }
+  Container::pointer begin() const { return attributes_.data(); }
+  Container::pointer end() const {
+    // SAFETY: size() describes the number of elements at data().
+    // This form is used in place of end() to avoid a conflict
+    // between the pointer type used as an iterator for this class,
+    // and an iterator type used by containers.
+    return UNSAFE_BUFFERS(begin() + size());
+  }
 
-  unsigned size() const { return attributes_.size(); }
+  unsigned size() const { return static_cast<unsigned>(attributes_.size()); }
   bool IsEmpty() const { return !size(); }
 
   // Find() returns nullptr if the specified name is not found.
@@ -100,9 +103,9 @@ class AttributeCollectionGeneric {
   //
   // A concrete example of a valid usage pattern is:
   //
-  // WTF::AtomicStringTable::WeakResult hint =
-  //     WTF::AtomicStringTable::WeakFindLowercased(name);
-  //   .... Mutate |WTF::AtomicStringTable| but not |collection| ....
+  // AtomicStringTable::WeakResult hint =
+  //     AtomicStringTable::WeakFindLowercased(name);
+  //   .... Mutate |AtomicStringTable| but not |collection| ....
   // collection.FindHinted(name, hint);
   //
   // Because FindHinted() is an existence check, as long as collection is not
@@ -119,10 +122,10 @@ class AttributeCollectionGeneric {
   //      corresponding to the him can  be reallocated to a different string
   //      making the |hint| semantically invalid. However, because the
   //      |collection| is not mutated, |hint| will not match anything.
-  iterator FindHinted(const StringView& name,
-                      WTF::AtomicStringTable::WeakResult hint) const;
+  Container::pointer FindHinted(const StringView& name,
+                                AtomicStringTable::WeakResult hint) const;
   wtf_size_t FindIndexHinted(const StringView& name,
-                             WTF::AtomicStringTable::WeakResult hint) const;
+                             AtomicStringTable::WeakResult hint) const;
 
  protected:
   iterator FindWithPrefix(const StringView& name) const;
@@ -130,33 +133,16 @@ class AttributeCollectionGeneric {
   ContainerMemberType attributes_;
 };
 
-class AttributeArray {
-  DISALLOW_NEW();
-
- public:
-  using ValueType = const Attribute;
-
-  AttributeArray(const Attribute* array, unsigned size)
-      : array_(array), size_(size) {}
-
-  const Attribute* data() const { return array_; }
-  unsigned size() const { return size_; }
-
- private:
-  const Attribute* array_;
-  unsigned size_;
-};
+using AttributeArray = base::span<const Attribute>;
 
 class AttributeCollection
     : public AttributeCollectionGeneric<const AttributeArray> {
  public:
   AttributeCollection()
-      : AttributeCollectionGeneric<const AttributeArray>(
-            AttributeArray(nullptr, 0)) {}
+      : AttributeCollectionGeneric<const AttributeArray>(AttributeArray()) {}
 
-  AttributeCollection(const Attribute* array, unsigned size)
-      : AttributeCollectionGeneric<const AttributeArray>(
-            AttributeArray(array, size)) {}
+  explicit AttributeCollection(base::span<const Attribute> attributes)
+      : AttributeCollectionGeneric<const AttributeArray>(attributes) {}
 };
 
 using AttributeVector = Vector<Attribute, 4>;
@@ -186,14 +172,14 @@ inline typename AttributeCollectionGeneric<Container,
                                            ContainerMemberType>::iterator
 AttributeCollectionGeneric<Container, ContainerMemberType>::Find(
     const AtomicString& name) const {
-  return FindHinted(name, WTF::AtomicStringTable::WeakResult(name.Impl()));
+  return FindHinted(name, AtomicStringTable::WeakResult(name.Impl()));
 }
 
 template <typename Container, typename ContainerMemberType>
 inline wtf_size_t
 AttributeCollectionGeneric<Container, ContainerMemberType>::FindIndexHinted(
     const StringView& name,
-    WTF::AtomicStringTable::WeakResult hint) const {
+    AtomicStringTable::WeakResult hint) const {
   iterator it = FindHinted(name, hint);
   return it ? wtf_size_t(it - begin()) : kNotFound;
 }
@@ -202,11 +188,10 @@ template <typename Container, typename ContainerMemberType>
 inline wtf_size_t
 AttributeCollectionGeneric<Container, ContainerMemberType>::FindIndex(
     const QualifiedName& name) const {
-  iterator end = this->end();
-  wtf_size_t index = 0;
-  for (iterator it = begin(); it != end; ++it, ++index) {
-    if (it->GetName().Matches(name))
+  for (wtf_size_t index = 0; index < size(); ++index) {
+    if (at(index).GetName().Matches(name)) {
       return index;
+    }
   }
   return kNotFound;
 }
@@ -215,7 +200,7 @@ template <typename Container, typename ContainerMemberType>
 inline wtf_size_t
 AttributeCollectionGeneric<Container, ContainerMemberType>::FindIndex(
     const AtomicString& name) const {
-  return FindIndexHinted(name, WTF::AtomicStringTable::WeakResult(name.Impl()));
+  return FindIndexHinted(name, AtomicStringTable::WeakResult(name.Impl()));
 }
 
 template <typename Container, typename ContainerMemberType>
@@ -223,20 +208,20 @@ inline typename AttributeCollectionGeneric<Container,
                                            ContainerMemberType>::iterator
 AttributeCollectionGeneric<Container, ContainerMemberType>::FindHinted(
     const StringView& name,
-    WTF::AtomicStringTable::WeakResult hint) const {
+    AtomicStringTable::WeakResult hint) const {
   // A slow check is required if there are any attributes with prefixes
   // and no unprefixed name matches.
   bool has_attributes_with_prefixes = false;
 
   // Optimize for the case where the attribute exists and its name exactly
   // matches.
-  iterator end = this->end();
-  for (iterator it = begin(); it != end; ++it) {
+  for (unsigned index = 0; index < size(); ++index) {
     // FIXME: Why check the prefix? Namespaces should be all that matter.
     // Most attributes (all of HTML and CSS) have no namespace.
-    if (!it->GetName().HasPrefix()) {
-      if (hint == it->LocalName()) {
-        return it;
+    auto& item = at(index);
+    if (!item.GetName().HasPrefix()) {
+      if (hint == item.LocalName()) {
+        return &item;
       }
     } else {
       has_attributes_with_prefixes = true;
@@ -255,10 +240,11 @@ inline typename AttributeCollectionGeneric<Container,
                                            ContainerMemberType>::iterator
 AttributeCollectionGeneric<Container, ContainerMemberType>::Find(
     const QualifiedName& name) const {
-  iterator end = this->end();
-  for (iterator it = begin(); it != end; ++it) {
-    if (it->GetName().Matches(name))
-      return it;
+  for (unsigned index = 0; index < size(); ++index) {
+    auto& item = at(index);
+    if (item.GetName().Matches(name)) {
+      return &item;
+    }
   }
   return nullptr;
 }
@@ -270,18 +256,22 @@ AttributeCollectionGeneric<Container, ContainerMemberType>::FindWithPrefix(
   // Check all attributes with prefixes. This is a case sensitive check.
   // Attributes with empty prefixes are expected to be handled outside this
   // function.
-  iterator end = this->end();
-  for (iterator it = begin(); it != end; ++it) {
-    if (!it->GetName().HasPrefix()) {
+  for (unsigned index = 0; index < size(); ++index) {
+    auto& item = at(index);
+    if (!item.GetName().HasPrefix()) {
       // Skip attributes with no prefixes because they must be checked in
       // FindIndex(const AtomicString&).
-      DCHECK(!(name == it->LocalName()));
+      DCHECK(!(name == item.LocalName()));
     } else {
-      // FIXME: Would be faster to do this comparison without calling ToString,
-      // which generates a temporary string by concatenation. But this branch is
-      // only reached if the attribute name has a prefix, which is rare in HTML.
-      if (name == it->GetName().ToString()) {
-        return it;
+      // `name` equals "prefix:localName"; compare it piece by piece instead of
+      // building that temporary string via QualifiedName::ToString().
+      const AtomicString& prefix = item.Prefix();
+      const AtomicString& local_name = item.LocalName();
+      if (name.length() == prefix.length() + 1 + local_name.length() &&
+          name.substr(0, prefix.length()) == prefix &&
+          name.substr(prefix.length()).starts_with(':') &&
+          name.substr(prefix.length() + 1) == local_name) {
+        return &item;
       }
     }
   }

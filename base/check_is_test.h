@@ -9,10 +9,6 @@
 #include "base/check.h"
 #include "base/not_fatal_until.h"
 
-namespace web_app {
-class OsIntegrationTestOverride;
-}
-
 // Code paths taken in tests are sometimes different from those taken in
 // production. This might be because the respective tests do not initialize some
 // objects that would be required for the "normal" code path.
@@ -38,30 +34,28 @@ class OsIntegrationTestOverride;
 //     return;
 //   }
 //
+// `CHECK_IS_TEST` should not be used within trivial accessors such as
+// `member_name_for_testing()`.
+//
+// There is a presubmit check which warns against calling `*ForTesting` or
+// `*ForTests` functions in production code, however `CHECK_IS_TEST` may be used
+// in those functions to ensure correctness at runtime.
+//
 // `CHECK_IS_TEST` is thread safe.
 //
 // An optional base::NotFatalUntil argument can be provided to make the
 // instance non-fatal (dumps without crashing) before a provided milestone.
 // See base/check.h for details.
 
-#define CHECK_IS_TEST(...) base::internal::check_is_test_impl(__VA_ARGS__)
-
 namespace base::internal {
-BASE_EXPORT void check_is_test_impl(
-    base::NotFatalUntil fatal_milestone =
-        base::NotFatalUntil::NoSpecifiedMilestoneInternal);
-
-// This class facilitates an allow-list for GetIsInTest(), helping prevent
-// possible misuse.
-class BASE_EXPORT IsInTest {
- private:
-  friend class web_app::OsIntegrationTestOverride;
-  static bool Get();
-};
+BASE_EXPORT bool get_is_test_impl();
 }  // namespace base::internal
 
-// In special cases, code should not execute in a test. This functionality is
-// protected by the list of friends in `IsInTest`.
-#define CHECK_IS_NOT_TEST() CHECK(!base::internal::IsInTest::Get())
+#define CHECK_IS_TEST(...) \
+  CHECK(base::internal::get_is_test_impl() __VA_OPT__(, ) __VA_ARGS__)
+
+// In special cases, code should not execute in a test.
+#define CHECK_IS_NOT_TEST(...) \
+  CHECK(!base::internal::get_is_test_impl(), __VA_ARGS__)
 
 #endif  // BASE_CHECK_IS_TEST_H_

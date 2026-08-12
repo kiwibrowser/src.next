@@ -12,12 +12,12 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/mojom/context_type.mojom-forward.h"
 #include "extensions/common/mojom/frame.mojom.h"
 #include "extensions/common/mojom/service_worker_host.mojom.h"
-#include "ipc/ipc_sender.h"
 
 namespace content {
 class BrowserContext;
@@ -41,8 +41,8 @@ class WindowController;
 // This class should also implement ExtensionFunctionDispatcher::Delegate.
 //
 // Note that a single ExtensionFunctionDispatcher does *not* correspond to a
-// single RVH, a single extension, or a single URL. This is by design so that
-// we can gracefully handle cases like WebContents, where the RVH, extension,
+// single RFH, a single extension, or a single URL. This is by design so that
+// we can gracefully handle cases like WebContents, where the RFH, extension,
 // and URL can all change over the lifetime of the tab. Instead, these items
 // are all passed into each request.
 class ExtensionFunctionDispatcher {
@@ -51,18 +51,7 @@ class ExtensionFunctionDispatcher {
    public:
     // Returns the WindowController associated with this delegate, or NULL if no
     // window is associated with the delegate.
-    virtual WindowController* GetExtensionWindowController() const;
-
-    // Asks the delegate for any relevant WebContents associated with this
-    // context. For example, the WebContents in which an infobar or
-    // chrome-extension://<id> URL are being shown. Callers must check for a
-    // NULL return value (as in the case of a background page).
-    virtual content::WebContents* GetAssociatedWebContents() const;
-
-    // If the associated web contents is not null, returns that. Otherwise,
-    // returns the next most relevant visible web contents. Callers must check
-    // for a NULL return value (as in the case of a background page).
-    virtual content::WebContents* GetVisibleWebContents() const;
+    virtual WindowController* GetExtensionWindowController();
 
    protected:
     virtual ~Delegate() {}
@@ -75,14 +64,14 @@ class ExtensionFunctionDispatcher {
       content::BrowserContext* browser_context);
   ~ExtensionFunctionDispatcher();
 
-  // Dispatches a request and the response is sent in |callback| that is a reply
+  // Dispatches a request and the response is sent in `callback` that is a reply
   // of mojom::LocalFrameHost::Request.
   void Dispatch(mojom::RequestParamsPtr params,
                 content::RenderFrameHost& frame,
                 mojom::LocalFrameHost::RequestCallback callback);
 
   // Message handlers.
-  // Dispatches a request for service woker and the response is sent to the
+  // Dispatches a request for service worker and the response is sent to the
   // corresponding render process in an ExtensionMsg_ResponseWorker message.
   void DispatchForServiceWorker(
       mojom::RequestParamsPtr params,
@@ -96,9 +85,7 @@ class ExtensionFunctionDispatcher {
   // See the Delegate class for documentation on these methods.
   // TODO(devlin): None of these belong here. We should kill
   // ExtensionFunctionDispatcher::Delegate.
-  WindowController* GetExtensionWindowController() const;
-  content::WebContents* GetAssociatedWebContents() const;
-  content::WebContents* GetVisibleWebContents() const;
+  WindowController* GetExtensionWindowController();
 
   // The BrowserContext that this dispatcher is associated with.
   content::BrowserContext* browser_context() { return browser_context_; }
@@ -118,10 +105,11 @@ class ExtensionFunctionDispatcher {
 
  private:
   // Helper to create an ExtensionFunction to handle the function given by
-  // |params|.
+  // `params`.
   // Does not set subclass properties, or include_incognito.
   scoped_refptr<ExtensionFunction> CreateExtensionFunction(
-      const mojom::RequestParams& params,
+      const mojom::RequestParams& params_without_args,
+      base::ListValue arguments,
       const Extension* extension,
       int requesting_process_id,
       bool is_worker_request,
@@ -132,7 +120,7 @@ class ExtensionFunctionDispatcher {
       content::RenderFrameHost* render_frame_host);
 
   void DispatchWithCallbackInternal(
-      const mojom::RequestParams& params,
+      mojom::RequestParamsPtr params,
       content::RenderFrameHost* render_frame_host,
       content::RenderProcessHost& render_process_host,
       ExtensionFunction::ResponseCallback callback);

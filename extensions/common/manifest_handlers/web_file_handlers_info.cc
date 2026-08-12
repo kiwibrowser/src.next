@@ -6,9 +6,9 @@
 
 #include <string_view>
 
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/chromeos_buildflags.h"
 #include "extensions/common/api/file_handlers.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension_features.h"
@@ -50,15 +50,16 @@ std::unique_ptr<WebFileHandlers> ParseFromList(const Extension& extension,
 
   auto info = std::make_unique<WebFileHandlers>();
 
+  CHECK(manifest_keys.file_handlers.has_value());
   // file_handlers: array. can't be empty
-  if (manifest_keys.file_handlers.empty()) {
+  if (manifest_keys.file_handlers->empty()) {
     *error = get_error(0, "At least one File Handler must be present.");
     return nullptr;
   }
 
-  for (size_t i = 0; i < manifest_keys.file_handlers.size(); i++) {
+  for (size_t i = 0; i < manifest_keys.file_handlers->size(); i++) {
     WebFileHandler web_file_handler;
-    auto& manifest_file_handler = manifest_keys.file_handlers[i];
+    auto& manifest_file_handler = (*manifest_keys.file_handlers)[i];
 
     // `name` is a string that can't be empty.
     if (manifest_file_handler.name.empty()) {
@@ -87,7 +88,7 @@ std::unique_ptr<WebFileHandlers> ParseFromList(const Extension& extension,
     }
 
     // Mime type keyed by string or array of strings of file extensions.
-    base::Value::Dict accept;
+    base::DictValue accept;
     for (const auto [mime_type, file_extensions] :
          manifest_file_handler.accept.additional_properties) {
       // Verify that mime type only has one slash.
@@ -103,7 +104,7 @@ std::unique_ptr<WebFileHandlers> ParseFromList(const Extension& extension,
       }
 
       // Verify that file extension has a leading dot.
-      base::Value::List file_extension_list;
+      base::ListValue file_extension_list;
       if (file_extensions.is_string()) {
         file_extension_list.Append(file_extensions.GetString());
       } else if (file_extensions.is_list()) {
@@ -231,7 +232,7 @@ const WebFileHandlersInfo* WebFileHandlers::GetFileHandlers(
     return nullptr;
   }
 
-  WebFileHandlers* info = static_cast<WebFileHandlers*>(
+  const WebFileHandlers* info = static_cast<const WebFileHandlers*>(
       extension.GetManifestData(manifest_keys::kFileHandlers));
   return info ? &info->file_handlers : nullptr;
 }
@@ -257,8 +258,7 @@ bool WebFileHandlersParser::Parse(Extension* extension, std::u16string* error) {
     return false;
   }
 
-  extension->SetManifestData(FileHandlersManifestKeys::kFileHandlers,
-                             std::move(info));
+  extension->SetManifestData(manifest_keys::kFileHandlers, std::move(info));
   return true;
 }
 
@@ -269,7 +269,7 @@ base::span<const char* const> WebFileHandlersParser::Keys() const {
 }
 
 bool WebFileHandlersParser::Validate(
-    const Extension* extension,
+    const Extension& extension,
     std::string* error,
     std::vector<InstallWarning>* warnings) const {
   // TODO(crbug.com/40832486): Verify that icons exist.
@@ -278,13 +278,7 @@ bool WebFileHandlersParser::Validate(
 
 // static
 bool WebFileHandlers::SupportsWebFileHandlers(const Extension& extension) {
-  // An MV3+ extension is required.
-  if (extension.manifest_version() < 3 || !extension.is_extension()) {
-    return false;
-  }
-
-  return base::FeatureList::IsEnabled(
-      extensions_features::kExtensionWebFileHandlers);
+  return extension.manifest_version() >= 3 && extension.is_extension();
 }
 
 // static

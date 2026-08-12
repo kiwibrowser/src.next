@@ -80,7 +80,6 @@ TEST_F(ChildFrameCompositingHelperTest, ChildFrameGoneClearsFallback) {
   const viz::SurfaceId surface_id = MakeSurfaceId(viz::FrameSinkId(1, 1), 1);
   compositing_helper()->SetSurfaceId(
       surface_id,
-      ChildFrameCompositingHelper::CaptureSequenceNumberChanged::kNo,
       ChildFrameCompositingHelper::AllowPaintHolding::kNo);
   EXPECT_EQ(surface_id, compositing_helper()->surface_id());
 
@@ -98,7 +97,6 @@ TEST_F(ChildFrameCompositingHelperTest, PaintHoldingTimeout) {
   const viz::SurfaceId surface_id = MakeSurfaceId(viz::FrameSinkId(1, 1), 1);
   compositing_helper()->SetSurfaceId(
       surface_id,
-      ChildFrameCompositingHelper::CaptureSequenceNumberChanged::kNo,
       ChildFrameCompositingHelper::AllowPaintHolding::kNo);
   EXPECT_EQ(surface_id, GetSurfaceLayer().surface_id());
   EXPECT_FALSE(GetSurfaceLayer().oldest_acceptable_fallback());
@@ -107,7 +105,6 @@ TEST_F(ChildFrameCompositingHelperTest, PaintHoldingTimeout) {
       MakeSurfaceId(viz::FrameSinkId(1, 1), 2);
   compositing_helper()->SetSurfaceId(
       new_surface_id,
-      ChildFrameCompositingHelper::CaptureSequenceNumberChanged::kNo,
       ChildFrameCompositingHelper::AllowPaintHolding::kYes);
   EXPECT_EQ(new_surface_id, GetSurfaceLayer().surface_id());
   ASSERT_TRUE(GetSurfaceLayer().oldest_acceptable_fallback());

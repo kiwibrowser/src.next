@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/update_install_gate.h"
+#include "extensions/browser/update_install_gate.h"
 
 #include <memory>
 
@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -53,14 +54,14 @@ scoped_refptr<const Extension> CreateApp(const std::string& extension_id,
   scoped_refptr<const Extension> app =
       ExtensionBuilder()
           .SetManifest(
-              base::Value::Dict()
+              base::DictValue()
                   .Set("name", "Test app")
                   .Set("version", version)
                   .Set("manifest_version", 2)
-                  .Set("app", base::Value::Dict().Set(
+                  .Set("app", base::DictValue().Set(
                                   "background",
-                                  base::Value::Dict().Set(
-                                      "scripts", base::Value::List().Append(
+                                  base::DictValue().Set(
+                                      "scripts", base::ListValue().Append(
                                                      "background.js")))))
           .SetID(extension_id)
           .Build();
@@ -73,11 +74,11 @@ scoped_refptr<const Extension> CreateExtension(const std::string& extension_id,
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
           .SetManifest(
-              base::Value::Dict()
+              base::DictValue()
                   .Set("name", "Test extension")
                   .Set("version", version)
                   .Set("manifest_version", 2)
-                  .Set("background", base::Value::Dict()
+                  .Set("background", base::DictValue()
                                          .Set("page", "background.html")
                                          .Set("persistent", persistent)))
           .SetID(extension_id)
@@ -236,6 +237,12 @@ class UpdateInstallGateTest : public testing::Test {
   scoped_refptr<const Extension> new_app_;
   scoped_refptr<const Extension> new_persistent_;
   scoped_refptr<const Extension> new_none_persistent_;
+
+  // This test relies on legacy MV2 extensions with persistent and non-
+  // persistent background pages.
+  // TODO(https://crbug.com/40804030): Migrate this to only rely on MV3
+  // extensions.
+  ScopedTestMV2Enabler mv2_enabler_;
 };
 
 TEST_F(UpdateInstallGateTest, InstallOnServiceNotReady) {

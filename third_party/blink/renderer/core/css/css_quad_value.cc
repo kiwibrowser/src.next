@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/css_quad_value.h"
 
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -15,7 +16,7 @@ String CSSQuadValue::CustomCSSText() const {
   String left = left_->CssText();
 
   if (serialization_type_ == TypeForSerialization::kSerializeAsRect) {
-    return "rect(" + top + ", " + right + ", " + bottom + ", " + left + ')';
+    return StrCat({"rect(", top, ", ", right, ", ", bottom, ", ", left, ")"});
   }
 
   StringBuilder result;
@@ -36,6 +37,13 @@ String CSSQuadValue::CustomCSSText() const {
     }
   }
   return result.ReleaseString();
+}
+
+bool CSSQuadValue::HasRandomFunctions() const {
+  return (top_ && top_->HasRandomFunctions()) ||
+         (right_ && right_->HasRandomFunctions()) ||
+         (bottom_ && bottom_->HasRandomFunctions()) ||
+         (left_ && left_->HasRandomFunctions());
 }
 
 void CSSQuadValue::TraceAfterDispatch(blink::Visitor* visitor) const {

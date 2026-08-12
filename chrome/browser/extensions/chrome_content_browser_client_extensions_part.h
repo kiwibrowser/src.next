@@ -6,20 +6,22 @@
 #define CHROME_BROWSER_EXTENSIONS_CHROME_CONTENT_BROWSER_CLIENT_EXTENSIONS_PART_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/auto_reset.h"
-#include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
-#include "components/download/public/common/quarantine_connection.h"
-#include "content/public/browser/browser_or_resource_context.h"
+#include "extensions/buildflags/buildflags.h"
 #include "services/network/public/mojom/network_context.mojom-forward.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "ui/base/page_transition_types.h"
 
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
 namespace content {
 class RenderFrameHost;
 class RenderProcessHost;
+class SecurityPrincipal;
 class VpnServiceProxy;
 class WebContents;
 }
@@ -56,14 +58,16 @@ class ChromeContentBrowserClientExtensionsPart
   ~ChromeContentBrowserClientExtensionsPart() override;
 
   // Corresponds to the ChromeContentBrowserClient function of the same name.
-  static GURL GetEffectiveURL(Profile* profile, const GURL& url);
+  static std::optional<GURL> GetEffectiveURL(Profile* profile, const GURL& url);
   static bool ShouldCompareEffectiveURLsForSiteInstanceSelection(
       content::BrowserContext* browser_context,
       content::SiteInstance* candidate_site_instance,
       bool is_outermost_main_frame,
       const GURL& candidate_url,
       const GURL& destination_url);
-  static bool ShouldUseProcessPerSite(Profile* profile, const GURL& site_url);
+  static bool ShouldUseProcessPerSite(
+      Profile* profile,
+      const content::SecurityPrincipal& security_principal);
   static bool ShouldUseSpareRenderProcessHost(Profile* profile,
                                               const GURL& site_url);
   static bool DoesSiteRequireDedicatedProcess(
@@ -75,9 +79,10 @@ class ChromeContentBrowserClientExtensionsPart
       const GURL& url);
   static bool CanCommitURL(content::RenderProcessHost* process_host,
                            const GURL& url);
-  static bool IsSuitableHost(Profile* profile,
-                             content::RenderProcessHost* process_host,
-                             const GURL& site_url);
+  static bool IsSuitableHost(
+      Profile* profile,
+      content::RenderProcessHost* process_host,
+      const content::SecurityPrincipal& security_principal);
   static size_t GetProcessCountToIgnoreForLimit();
   static bool ShouldEmbeddedFramesTryToReuseExistingProcess(
       content::RenderFrameHost* outermost_main_frame);
@@ -109,6 +114,7 @@ class ChromeContentBrowserClientExtensionsPart
       content::BrowserContext* browser_context,
       const url::Origin& origin,
       bool is_for_isolated_world,
+      bool is_for_service_worker,
       network::mojom::URLLoaderFactoryParams* factory_params);
 
   // Checks if the component is a loaded component extension or the ODFS
@@ -133,10 +139,13 @@ class ChromeContentBrowserClientExtensionsPart
   // ChromeContentBrowserClientParts:
   void SiteInstanceGotProcessAndSite(
       content::SiteInstance* site_instance) override;
-  void OverrideWebkitPrefs(content::WebContents* web_contents,
-                           blink::web_pref::WebPreferences* web_prefs) override;
+  void OverrideWebPreferences(
+      content::WebContents* web_contents,
+      content::SiteInstance& main_frame_site,
+      blink::web_pref::WebPreferences* web_prefs) override;
   bool OverrideWebPreferencesAfterNavigation(
       content::WebContents* web_contents,
+      content::SiteInstance& main_frame_site,
       blink::web_pref::WebPreferences* web_prefs) override;
   void BrowserURLHandlerCreated(content::BrowserURLHandler* handler) override;
   void GetAdditionalAllowedSchemesForFileSystem(
@@ -146,7 +155,6 @@ class ChromeContentBrowserClientExtensionsPart
   void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      download::QuarantineConnectionCallback quarantine_connection_callback,
       std::vector<std::unique_ptr<storage::FileSystemBackend>>*
           additional_backends) override;
   void AppendExtraRendererCommandLineSwitches(

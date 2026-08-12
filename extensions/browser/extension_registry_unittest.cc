@@ -259,13 +259,13 @@ TEST_F(ExtensionRegistryTest, Observer) {
   registry.RemoveObserver(&observer);
 }
 
-// Regression test for https://crbug.com/724563.
+// Regression test for https://crbug.com/40521729.
 TEST_F(ExtensionRegistryTest, TerminatedExtensionStoredVersion) {
   const std::string kVersionString = "1.2.3.4";
   ExtensionRegistry registry(nullptr);
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(base::Value::Dict()
+          .SetManifest(base::DictValue()
                            .Set("name", "Test")
                            .Set("version", kVersionString)
                            .Set("manifest_version", 2))

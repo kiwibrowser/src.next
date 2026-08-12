@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "extensions/browser/user_script_loader.h"
 
 #include <stddef.h>
@@ -35,6 +30,10 @@
 #include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 
+#if DCHECK_IS_ON()
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
+#endif
+
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 #endif
@@ -58,11 +57,11 @@ const char kNoScriptChangesErrorMsg[] =
 
 #if DCHECK_IS_ON()
 bool AreScriptsUnique(const UserScriptList& scripts) {
-  std::set<std::string> script_ids;
+  absl::flat_hash_set<std::string> script_ids;
   for (const std::unique_ptr<UserScript>& script : scripts) {
-    if (script_ids.count(script->id()))
+    if (!script_ids.insert(script->id()).second) {
       return false;
-    script_ids.insert(script->id());
+    }
   }
   return true;
 }
@@ -77,11 +76,12 @@ bool GetDeclarationValue(std::string_view line,
     return false;
   }
 
-  std::string temp(line.data() + index + prefix.length(),
-                   line.length() - index - prefix.length());
+  std::string_view temp = line.substr(index + prefix.length(),
+                                      line.length() - index - prefix.length());
 
-  if (temp.empty() || !base::IsAsciiWhitespace(temp[0]))
+  if (temp.empty() || !base::IsAsciiWhitespace(temp[0])) {
     return false;
+  }
 
   base::TrimWhitespaceASCII(temp, base::TRIM_ALL, value);
   return true;
@@ -90,8 +90,9 @@ bool GetDeclarationValue(std::string_view line,
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
 bool CanExecuteScriptEverywhere(BrowserContext* browser_context,
                                 const mojom::HostID& host_id) {
-  if (host_id.type == mojom::HostID::HostType::kWebUi)
+  if (host_id.type == mojom::HostID::HostType::kWebUi) {
     return true;
+  }
 
   const Extension* extension = ExtensionRegistry::Get(browser_context)
                                    ->enabled_extensions()
@@ -113,36 +114,40 @@ bool UserScriptLoader::ParseMetadataHeader(std::string_view script_text,
   size_t line_end = line_start;
   bool in_metadata = false;
 
-  static const std::string_view kUserScriptBegin("// ==UserScript==");
-  static const std::string_view kUserScriptEng("// ==/UserScript==");
-  static const std::string_view kNamespaceDeclaration("// @namespace");
-  static const std::string_view kNameDeclaration("// @name");
-  static const std::string_view kVersionDeclaration("// @version");
-  static const std::string_view kDescriptionDeclaration("// @description");
-  static const std::string_view kIncludeDeclaration("// @include");
-  static const std::string_view kExcludeDeclaration("// @exclude");
-  static const std::string_view kMatchDeclaration("// @match");
-  static const std::string_view kExcludeMatchDeclaration("// @exclude_match");
-  static const std::string_view kRunAtDeclaration("// @run-at");
-  static const std::string_view kRunAtDocumentStartValue("document-start");
-  static const std::string_view kRunAtDocumentEndValue("document-end");
-  static const std::string_view kRunAtDocumentIdleValue("document-idle");
+  static constexpr std::string_view kUserScriptBegin("// ==UserScript==");
+  static constexpr std::string_view kUserScriptEng("// ==/UserScript==");
+  static constexpr std::string_view kNamespaceDeclaration("// @namespace");
+  static constexpr std::string_view kNameDeclaration("// @name");
+  static constexpr std::string_view kVersionDeclaration("// @version");
+  static constexpr std::string_view kDescriptionDeclaration("// @description");
+  static constexpr std::string_view kIncludeDeclaration("// @include");
+  static constexpr std::string_view kExcludeDeclaration("// @exclude");
+  static constexpr std::string_view kMatchDeclaration("// @match");
+  static constexpr std::string_view kExcludeMatchDeclaration(
+      "// @exclude_match");
+  static constexpr std::string_view kRunAtDeclaration("// @run-at");
+  static constexpr std::string_view kRunAtDocumentStartValue("document-start");
+  static constexpr std::string_view kRunAtDocumentEndValue("document-end");
+  static constexpr std::string_view kRunAtDocumentIdleValue("document-idle");
 
   while (line_start < script_text.length()) {
     line_end = script_text.find('\n', line_start);
 
     // Handle the case where there is no trailing newline in the file.
-    if (line_end == std::string::npos)
+    if (line_end == std::string::npos) {
       line_end = script_text.length() - 1;
+    }
 
     line = script_text.substr(line_start, line_end - line_start);
 
     if (!in_metadata) {
-      if (base::StartsWith(line, kUserScriptBegin))
+      if (base::StartsWith(line, kUserScriptBegin)) {
         in_metadata = true;
+      }
     } else {
-      if (base::StartsWith(line, kUserScriptEng))
+      if (base::StartsWith(line, kUserScriptEng)) {
         break;
+      }
 
       std::string value;
       if (GetDeclarationValue(line, kIncludeDeclaration, &value)) {
@@ -160,29 +165,33 @@ bool UserScriptLoader::ParseMetadataHeader(std::string_view script_text,
         script->set_name(value);
       } else if (GetDeclarationValue(line, kVersionDeclaration, &value)) {
         base::Version version(value);
-        if (version.IsValid())
+        if (version.IsValid()) {
           script->set_version(version.GetString());
+        }
       } else if (GetDeclarationValue(line, kDescriptionDeclaration, &value)) {
         script->set_description(value);
       } else if (GetDeclarationValue(line, kMatchDeclaration, &value)) {
         URLPattern pattern(UserScript::ValidUserScriptSchemes());
-        if (URLPattern::ParseResult::kSuccess != pattern.Parse(value))
+        if (URLPattern::ParseResult::kSuccess != pattern.Parse(value)) {
           return false;
+        }
         script->add_url_pattern(pattern);
       } else if (GetDeclarationValue(line, kExcludeMatchDeclaration, &value)) {
         URLPattern exclude(UserScript::ValidUserScriptSchemes());
-        if (URLPattern::ParseResult::kSuccess != exclude.Parse(value))
+        if (URLPattern::ParseResult::kSuccess != exclude.Parse(value)) {
           return false;
+        }
         script->add_exclude_url_pattern(exclude);
       } else if (GetDeclarationValue(line, kRunAtDeclaration, &value)) {
-        if (value == kRunAtDocumentStartValue)
+        if (value == kRunAtDocumentStartValue) {
           script->set_run_location(mojom::RunLocation::kDocumentStart);
-        else if (value == kRunAtDocumentEndValue)
+        } else if (value == kRunAtDocumentEndValue) {
           script->set_run_location(mojom::RunLocation::kDocumentEnd);
-        else if (value == kRunAtDocumentIdleValue)
+        } else if (value == kRunAtDocumentIdleValue) {
           script->set_run_location(mojom::RunLocation::kDocumentIdle);
-        else
+        } else {
           return false;
+        }
       }
 
       // TODO(aa): Handle more types of metadata.
@@ -193,8 +202,9 @@ bool UserScriptLoader::ParseMetadataHeader(std::string_view script_text,
 
   // If no patterns were specified, default to @include *. This is what
   // Greasemonkey does.
-  if (script->globs().empty() && script->url_patterns().is_empty())
+  if (script->globs().empty() && script->url_patterns().is_empty()) {
     script->add_glob("*");
+  }
 
   return true;
 }
@@ -235,8 +245,7 @@ void UserScriptLoader::AddScripts(UserScriptList scripts,
   for (std::unique_ptr<UserScript>& user_script : scripts) {
     const std::string& id = user_script->id();
     removed_script_ids_.erase(id);
-    if (added_scripts_map_.count(id) == 0)
-      added_scripts_map_[id] = std::move(user_script);
+    added_scripts_map_.try_emplace(id, std::move(user_script));
   }
 
   AttemptLoad(std::move(callback));
@@ -264,9 +273,31 @@ void UserScriptLoader::RemoveScripts(const std::set<std::string>& script_ids,
 
 void UserScriptLoader::OnRenderProcessHostCreated(
     content::RenderProcessHost* process_host) {
-  if (!ExtensionsBrowserClient::Get()->IsSameContext(
-          browser_context_, process_host->GetBrowserContext()))
+  if (process_host->IsForGuestsOnly()) {
+    // GuestView script updates are done from `OnRenderProcessLaunched()`
+    // instead, because WebViewRendererState setup is not yet done at this
+    // point.
     return;
+  }
+  SendUpdateIfNeeded(process_host);
+}
+
+void UserScriptLoader::OnRenderProcessLaunched(
+    content::RenderProcessHost* process_host) {
+  if (!process_host->IsForGuestsOnly()) {
+    // Non-GuestView script updates are done from
+    // `OnRenderProcessHostCreated()`.
+    return;
+  }
+  SendUpdateIfNeeded(process_host);
+}
+
+void UserScriptLoader::SendUpdateIfNeeded(
+    content::RenderProcessHost* process_host) {
+  if (!ExtensionsBrowserClient::Get()->IsSameContext(
+          browser_context_, process_host->GetBrowserContext())) {
+    return;
+  }
   if (initial_load_complete()) {
     SendUpdateResult update_result = SendUpdate(process_host, shared_memory_);
     if (update_result == SendUpdateResult::kRendererHasBeenNotified) {
@@ -372,23 +403,24 @@ base::ReadOnlySharedMemoryRegion UserScriptLoader::Serialize(
     for (const std::unique_ptr<UserScript::Content>& js_file :
          script->js_scripts()) {
       std::string_view contents = js_file->GetContent();
-      pickle.WriteData(contents.data(), contents.length());
+      pickle.WriteData(contents);
     }
     for (const std::unique_ptr<UserScript::Content>& css_file :
          script->css_scripts()) {
       std::string_view contents = css_file->GetContent();
-      pickle.WriteData(contents.data(), contents.length());
+      pickle.WriteData(contents);
     }
   }
 
   // Create the shared memory object.
   base::MappedReadOnlyRegion shared_memory =
       base::ReadOnlySharedMemoryRegion::Create(pickle.size());
-  if (!shared_memory.IsValid())
+  if (!shared_memory.IsValid()) {
     return {};
+  }
 
   // Copy the pickle to shared memory.
-  memcpy(shared_memory.mapping.memory(), pickle.data(), pickle.size());
+  shared_memory.mapping.GetMemoryAsSpan<uint8_t>().copy_prefix_from(pickle);
   return std::move(shared_memory.region);
 }
 
@@ -401,8 +433,9 @@ void UserScriptLoader::RemoveObserver(Observer* observer) {
 }
 
 void UserScriptLoader::StartLoadForTesting(ScriptsLoadedCallback callback) {
-  if (!callback.is_null())
+  if (!callback.is_null()) {
     queued_load_callbacks_.push_back(std::move(callback));
+  }
   if (is_loading()) {
     queued_load_ = true;
   } else {
@@ -413,8 +446,9 @@ void UserScriptLoader::StartLoadForTesting(ScriptsLoadedCallback callback) {
 void UserScriptLoader::SetReady(bool ready) {
   bool was_ready = ready_;
   ready_ = ready;
-  if (ready_ && !was_ready)
+  if (ready_ && !was_ready) {
     AttemptLoad(UserScriptLoader::ScriptsLoadedCallback());
+  }
 }
 
 void UserScriptLoader::OnScriptsLoaded(
@@ -452,7 +486,7 @@ void UserScriptLoader::OnScriptsLoaded(
     content::RenderProcessHost* process = i.GetCurrentValue();
     SendUpdateResult update_result = SendUpdate(process, shared_memory_);
     if (update_result == SendUpdateResult::kRendererHasBeenNotified) {
-      ids_of_newly_notified_processes.push_back(process->GetID());
+      ids_of_newly_notified_processes.push_back(process->GetDeprecatedID());
     }
   }
 
@@ -491,11 +525,29 @@ UserScriptLoader::SendUpdateResult UserScriptLoader::SendUpdate(
     return SendUpdateResult::kNoActionTaken;
   }
 
-  // If the process is being started asynchronously, early return.  We'll end up
-  // calling InitUserScripts when it's created which will call this again.
-  base::ProcessHandle handle = process->GetProcess().Handle();
-  if (!handle) {
+  mojom::Renderer* renderer =
+      RendererStartupHelperFactory::GetForBrowserContext(browser_context())
+          ->GetRenderer(process);
+  if (!renderer) {
+    // If the renderer connection hasn't been set up yet, early return.  We'll
+    // end up here again when it's ready.
     return SendUpdateResult::kNoActionTaken;
+  }
+
+  switch (host_id().type) {
+    case mojom::HostID::HostType::kExtensions:
+      break;
+    case mojom::HostID::HostType::kWebUi:
+    case mojom::HostID::HostType::kControlledFrameEmbedder:
+      // Embedder content scripts are only ever injected into the embedder's
+      // own guest views and never into ordinary web frames, so they only need
+      // to be sent to guest renderers.
+      if (!process->IsForGuestsOnly()) {
+        return SendUpdateResult::kNoActionTaken;
+      }
+      break;
+    default:
+      NOTREACHED();
   }
 
   base::ReadOnlySharedMemoryRegion region_for_process =
@@ -512,11 +564,22 @@ UserScriptLoader::SendUpdateResult UserScriptLoader::SendUpdate(
   // other extensions are injected into webviews.
   if (process->IsForGuestsOnly() &&
       !CanExecuteScriptEverywhere(browser_context_, host_id())) {
-    DCHECK(WebViewRendererState::GetInstance()->IsGuest(process->GetID()));
+    // There is a race condition by which WebViewRendererState does not yet know
+    // about the newly created process. Rather than crashing, do nothing.
+    // TODO(crbug.com/40864752): Fix race condition.
+    if (!WebViewRendererState::GetInstance()->IsGuest(
+            process->GetDeprecatedID())) {
+      return SendUpdateResult::kNoActionTaken;
+    }
+
+    // TODO(crbug.com/40864752): Fix race condition and replace this with a
+    // CHECK:
+    // CHECK(WebViewRendererState::GetInstance()->IsGuest(
+    //     process->GetDeprecatedID()));
 
     std::string owner_host;
     bool found_owner = WebViewRendererState::GetInstance()->GetOwnerInfo(
-        process->GetID(), /*owner_process_id=*/nullptr, &owner_host);
+        process->GetDeprecatedID(), /*owner_process_id=*/nullptr, &owner_host);
     DCHECK(found_owner);
 
     // Keep this check in sync with the approach and formatting in:
@@ -543,9 +606,6 @@ UserScriptLoader::SendUpdateResult UserScriptLoader::SendUpdate(
   }
 #endif
 
-  mojom::Renderer* renderer =
-      RendererStartupHelperFactory::GetForBrowserContext(browser_context())
-          ->GetRenderer(process);
   renderer->UpdateUserScripts(std::move(region_for_process),
                               mojom::HostID::New(host_id().type, host_id().id));
   return SendUpdateResult::kRendererHasBeenNotified;

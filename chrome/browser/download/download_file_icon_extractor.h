@@ -9,7 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
-#include "chrome/browser/icon_loader.h"
+#include "chrome/browser/icon_loader.h"  // nogncheck crbug.com/40147906
 
 // Helper class for DownloadsGetFileIconFunction. Only used for a single icon
 // extraction.
@@ -20,7 +20,7 @@ class DownloadFileIconExtractor {
   // determined.
   typedef base::OnceCallback<void(const std::string&)> IconURLCallback;
 
-  virtual ~DownloadFileIconExtractor() {}
+  virtual ~DownloadFileIconExtractor() = default;
 
   // Should return false if the request was invalid.  If the return value is
   // true, then |callback| should be called with the result.

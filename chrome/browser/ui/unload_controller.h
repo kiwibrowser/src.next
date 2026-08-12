@@ -7,14 +7,15 @@
 
 #include <memory>
 #include <set>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/tab_contents/web_contents_collection.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-
-enum class BrowserClosingStatus;
+#include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 
 class Browser;
 class TabStripModel;
@@ -26,7 +27,44 @@ class WebContents;
 class UnloadController : public WebContentsCollection::Observer,
                          public TabStripModelObserver {
  public:
-  explicit UnloadController(Browser* browser);
+  DECLARE_USER_DATA(UnloadController);
+
+  // Interface for custom handlers that intercept tab close events. This allows
+  // background task systems (such as active automated agents or tools) to warn
+  // the user before a tab actively running a task is unloaded.
+  class TabUnloadHandler {
+   public:
+    virtual ~TabUnloadHandler() = default;
+
+    // Returns true if standard beforeunload handling should be skipped for this
+    // tab (e.g., when a custom confirmation dialog or background task manages
+    // it).
+    virtual bool ShouldSkipBeforeUnload(content::WebContents* contents) = 0;
+
+    // Returns true if a custom confirmation dialog should be displayed before
+    // unloading this tab.
+    virtual bool ShouldShowCustomConfirmation(
+        content::WebContents* contents) = 0;
+
+    // Displays the custom confirmation dialog. Returns true if the confirmation
+    // dialog was shown and will intercept unload.
+    // `on_closed` is invoked with true if the user confirmed closing the tab.
+    virtual bool ShowCustomConfirmation(
+        content::WebContents* contents,
+        base::OnceCallback<void(bool /* confirmed */)> on_closed) = 0;
+  };
+
+  explicit UnloadController(BrowserWindowInterface* browser);
+
+  void AddTabUnloadHandler(std::unique_ptr<TabUnloadHandler> handler);
+  bool HasTabUnloadHandlers() const { return !tab_unload_handlers_.empty(); }
+  const std::vector<std::unique_ptr<TabUnloadHandler>>&
+  tab_unload_handlers_for_testing() const {
+    return tab_unload_handlers_;
+  }
+
+  static UnloadController* From(BrowserWindowInterface* browser);
+  static const UnloadController* From(const BrowserWindowInterface* browser);
 
   UnloadController(const UnloadController&) = delete;
   UnloadController& operator=(const UnloadController&) = delete;
@@ -59,10 +97,11 @@ class UnloadController : public WebContentsCollection::Observer,
     return is_attempting_to_close_browser_;
   }
 
-  // Called in response to a request to close |browser_|'s window. Returns
-  // `BrowserClosingStatus::kPermitted` if the window can be closed (or other
-  // enum values if closure is not permitted for a given reason).
-  BrowserClosingStatus GetBrowserClosingStatus();
+  // Called in response to a request to close `browser_`'s window. Returns
+  // `BrowserWindowInterface::ClosingStatus::kPermitted` if the window can be
+  // closed (or other enum values if closure is not permitted for a given
+  // reason).
+  BrowserWindowInterface::ClosingStatus GetBrowserClosingStatus();
 
   // Begins the process of confirming whether the associated browser can be
   // closed. Beforeunload events won't be fired if |skip_beforeunload|
@@ -87,6 +126,22 @@ class UnloadController : public WebContentsCollection::Observer,
   // Clears all the state associated with processing tabs' beforeunload/unload
   // events since the user cancelled closing the window.
   void CancelWindowClose();
+
+  bool ShouldRunUnloadListenerBeforeClosing(content::WebContents* web_contents);
+
+  bool RunUnloadListenerBeforeClosing(content::WebContents* web_contents);
+
+  void BeforeUnloadFired(content::WebContents* web_contents,
+                         bool proceed,
+                         bool* proceed_to_fire_unload);
+
+  void set_force_skip_warning_user_on_close(
+      bool force_skip_warning_user_on_close) {
+    force_skip_warning_user_on_close_ = force_skip_warning_user_on_close;
+  }
+  bool force_skip_warning_user_on_close() const {
+    return force_skip_warning_user_on_close_;
+  }
 
  private:
   typedef std::set<raw_ptr<content::WebContents, SetExperimental>>
@@ -130,6 +185,10 @@ class UnloadController : public WebContentsCollection::Observer,
   // the state of the stack), pass in false.
   void ClearUnloadState(content::WebContents* web_contents, bool process_now);
 
+  void OnCustomConfirmationClosed(
+      base::WeakPtr<content::WebContents> web_contents,
+      bool confirmed);
+
   bool IsUnclosableApp() const;
 
   bool is_calling_before_unload_handlers() {
@@ -137,6 +196,8 @@ class UnloadController : public WebContentsCollection::Observer,
   }
 
   const raw_ptr<Browser> browser_;
+
+  ui::ScopedUnownedUserData<UnloadController> scoped_unowned_user_data_;
 
   WebContentsCollection web_contents_collection_;
 
@@ -163,6 +224,12 @@ class UnloadController : public WebContentsCollection::Observer,
   // multiple browser windows are being closed together. See
   // BrowserList::TryToCloseBrowserList.
   base::RepeatingCallback<void(bool)> on_close_confirmed_;
+
+  // Tells if the browser should skip warning the user when closing the window.
+  bool force_skip_warning_user_on_close_ = false;
+
+  // Registered handlers that can intercept and confirm tab unload events.
+  std::vector<std::unique_ptr<TabUnloadHandler>> tab_unload_handlers_;
 
   base::WeakPtrFactory<UnloadController> weak_factory_{this};
 };

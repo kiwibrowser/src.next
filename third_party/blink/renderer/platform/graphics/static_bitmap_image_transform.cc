@@ -2,39 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(https://crbug.com/40773069): The function FlipSkPixmapInPlace triggers
-// unsafe buffer access warnings that were suppressed in the path it was moved
-// from. Update the function to fix this issue.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image_transform.h"
 
 #include <utility>
 
+#include "base/compiler_specific.h"
+#include "cc/paint/skia_paint_canvas.h"
+#include "components/viz/common/resources/shared_image_format_utils.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
+#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace blink {
 
 namespace {
 
 // Transformations of StaticBitmapImages have historically also converted them
-// to kN32_SkColorType. This function very cautiously only lifts this
-// restriction for StaticBitmapImages that are already kRGBA_F16_SkColorType.
-// This caution is a response to issues such as the one described in
+// to N32 format. This function very cautiously only lifts this restriction for
+// StaticBitmapImages that are already viz::SinglePlaneFormat::kRGBA_F16. This
+// caution is a response to issues such as the one described in
 // https://crrev.com/1364046.
-SkColorType GetDestColorType(SkColorType source_color_type) {
-  if (source_color_type == kRGBA_F16_SkColorType) {
-    return kRGBA_F16_SkColorType;
+viz::SharedImageFormat GetDestSharedImageFormat(
+    viz::SharedImageFormat source_format) {
+  if (source_format == viz::SinglePlaneFormat::kRGBA_F16) {
+    return viz::SinglePlaneFormat::kRGBA_F16;
   }
-  return kN32_SkColorType;
+  return GetN32FormatForCanvas();
 }
 
 void FlipSkPixmapInPlace(SkPixmap& pm, bool horizontal) {
@@ -47,8 +46,8 @@ void FlipSkPixmapInPlace(SkPixmap& pm, bool horizontal) {
         size_t first_element = i * row_bytes + j * pixel_bytes;
         size_t last_element = i * row_bytes + (j + 1) * pixel_bytes;
         size_t bottom_element = (i + 1) * row_bytes - (j + 1) * pixel_bytes;
-        std::swap_ranges(&data[first_element], &data[last_element],
-                         &data[bottom_element]);
+        UNSAFE_TODO(std::swap_ranges(&data[first_element], &data[last_element],
+                                     &data[bottom_element]));
       }
     }
   } else {
@@ -56,8 +55,9 @@ void FlipSkPixmapInPlace(SkPixmap& pm, bool horizontal) {
       size_t top_first_element = i * row_bytes;
       size_t top_last_element = (i + 1) * row_bytes;
       size_t bottom_first_element = (pm.height() - 1 - i) * row_bytes;
-      std::swap_ranges(&data[top_first_element], &data[top_last_element],
-                       &data[bottom_first_element]);
+      UNSAFE_TODO(std::swap_ranges(&data[top_first_element],
+                                   &data[top_last_element],
+                                   &data[bottom_first_element]));
     }
   }
 }
@@ -70,18 +70,42 @@ ImageOrientation GetSourceOrientation(
   if (!params.orientation_from_image) {
     return ImageOrientationEnum::kOriginTopLeft;
   }
-  return source->CurrentFrameOrientation();
+  return source->Orientation();
 }
 
 // Return the oriented size of `source`.
 gfx::Size GetSourceSize(scoped_refptr<StaticBitmapImage> source,
                         const StaticBitmapImageTransform::Params& params) {
-  const auto source_info = source->GetSkImageInfo();
+  gfx::Size source_size = source->GetSize();
   const auto source_orientation = GetSourceOrientation(source, params);
 
   return source_orientation.UsesWidthAsHeight()
-             ? gfx::Size(source_info.height(), source_info.width())
-             : gfx::Size(source_info.width(), source_info.height());
+             ? gfx::TransposeSize(source_size)
+             : source_size;
+}
+
+void BlitToCanvas(cc::PaintCanvas& canvas,
+                  cc::PaintImage& source_paint_image,
+                  ImageOrientation source_orientation,
+                  SkRect source_rect,
+                  SkISize dest_size,
+                  const StaticBitmapImageTransform::Params& options) {
+  cc::PaintFlags paint;
+  paint.setTargetedHdrHeadroom(
+      cc::PaintFlags::TargetedHdrHeadroom::kDisableEverything);
+  paint.setBlendMode(SkBlendMode::kSrc);
+  if (options.flip_y) {
+    if (source_orientation.UsesWidthAsHeight()) {
+      canvas.translate(dest_size.width(), 0);
+      canvas.scale(-1, 1);
+    } else {
+      canvas.translate(0, dest_size.height());
+      canvas.scale(1, -1);
+    }
+  }
+  canvas.drawImageRect(source_paint_image, source_rect, SkRect::Make(dest_size),
+                       options.sampling, &paint,
+                       SkCanvas::kStrict_SrcRectConstraint);
 }
 
 void ComputeSubsetParameters(scoped_refptr<StaticBitmapImage> source,
@@ -118,7 +142,6 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyUsingPixmap(
     scoped_refptr<StaticBitmapImage> source,
     const StaticBitmapImageTransform::Params& options) {
   auto source_paint_image = source->PaintImageForCurrentFrame();
-  auto source_info = source->GetSkImageInfo();
   const auto source_orientation = GetSourceOrientation(source, options);
 
   // Compute the unoriented source and dest rects and sizes.
@@ -133,7 +156,7 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyUsingPixmap(
 
   // Allocate the cropped source image.
   {
-    SkAlphaType bm_alpha_type = source_info.alphaType();
+    SkAlphaType bm_alpha_type = source->GetAlphaType();
     if (bm_alpha_type != kOpaque_SkAlphaType) {
       if (options.premultiply_alpha) {
         bm_alpha_type = kPremul_SkAlphaType;
@@ -141,14 +164,13 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyUsingPixmap(
         bm_alpha_type = kUnpremul_SkAlphaType;
       }
     }
-    const auto bm_color_space = options.dest_color_space
-                                    ? options.dest_color_space
-                                    : source_info.refColorSpace();
-    const auto bm_info =
-        source_info.makeDimensions(source_rect.size())
-            .makeAlphaType(bm_alpha_type)
-            .makeColorType(GetDestColorType(source_info.colorType()))
-            .makeColorSpace(bm_color_space);
+    const auto bm_color_space =
+        options.dest_color_space.value_or(source->GetColorSpace());
+    const auto bm_info = SkImageInfo::Make(
+        source_rect.size(),
+        ToClosestSkColorType(
+            GetDestSharedImageFormat(source->GetSharedImageFormat())),
+        bm_alpha_type, bm_color_space.ToSkColorSpace());
     if (!bm.tryAllocPixels(bm_info)) {
       return nullptr;
     }
@@ -215,76 +237,71 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyUsingPixmap(
 // Perform all transformations using a blit, which will result in a new
 // premultiplied-alpha result.
 scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyWithBlit(
-    FlushReason flush_reason,
     scoped_refptr<StaticBitmapImage> source,
     const StaticBitmapImageTransform::Params& options) {
   // This path will necessarily premultiply alpha.
   CHECK(options.premultiply_alpha);
 
-  auto source_paint_image = source->PaintImageForCurrentFrame();
-  const auto source_info = source_paint_image.GetSkImageInfo();
-  const auto source_orientation = GetSourceOrientation(source, options);
-
   // Compute the parameters for the blit.
-  const SkColorType dest_color_type = GetDestColorType(source_info.colorType());
-  const SkAlphaType dest_alpha_type =
-      source_info.alphaType() == kOpaque_SkAlphaType ? kOpaque_SkAlphaType
-                                                     : kPremul_SkAlphaType;
-  const auto dest_color_space = options.dest_color_space
-                                    ? options.dest_color_space
-                                    : source_info.refColorSpace();
+  const auto dest_format =
+      GetDestSharedImageFormat(source->GetSharedImageFormat());
+
+  // The spec requires that any pixels not copied from the source be transparent
+  // black in the destination image. Thus, it is necessary that the destination
+  // here be premul (i.e., preserve the initial transparency of the destination
+  // image before the copy from the source), regardless of whether the source is
+  // premul or opaque.
+  const SkAlphaType dest_alpha_type = kPremul_SkAlphaType;
+  const auto dest_color_space =
+      options.dest_color_space.value_or(source->GetColorSpace());
   SkIRect source_rect;
   SkIRect source_rect_valid;
   SkISize dest_size;
+  gfx::HDRMetadata dest_hdr_metadata = options.reinterpret_as_srgb
+                                           ? gfx::HDRMetadata()
+                                           : source->GetHdrMetadata();
   ComputeSubsetParameters(source, options, source_rect, source_rect_valid,
                           dest_size);
 
-  // Create the resource provider for the target for the blit.
-  std::unique_ptr<CanvasResourceProvider> resource_provider;
-  {
-    SkImageInfo dest_info = SkImageInfo::Make(
-        dest_size, dest_color_type, dest_alpha_type, dest_color_space);
-    constexpr auto kFilterQuality = cc::PaintFlags::FilterQuality::kLow;
-    constexpr auto kShouldInitialize =
-        CanvasResourceProvider::ShouldInitialize::kNo;
-    // If `source` is accelerated, then use a SharedImage provider.
-    if (source_paint_image.IsTextureBacked()) {
-      base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider =
-          source->ContextProviderWrapper();
-      if (context_provider) {
-        const gpu::SharedImageUsageSet shared_image_usage_flags =
-            context_provider->ContextProvider()
-                ->SharedImageInterface()
-                ->UsageForMailbox(source->GetMailboxHolder().mailbox);
-        resource_provider = CanvasResourceProvider::CreateSharedImageProvider(
-            dest_info, kFilterQuality, kShouldInitialize, context_provider,
-            RasterMode::kGPU, shared_image_usage_flags);
-      }
-    }
-    // If not (or if the SharedImage provider fails), fall back to software.
-    if (!resource_provider) {
-      resource_provider = CanvasResourceProvider::CreateBitmapProvider(
-          dest_info, kFilterQuality, kShouldInitialize);
+  // If `source` is accelerated and there is a context provider, try to use an
+  // accelerated SharedImage provider.
+  auto source_paint_image = source->PaintImageForCurrentFrame();
+  const auto source_orientation = GetSourceOrientation(source, options);
+  if (source_paint_image.IsTextureBacked() &&
+      source->ContextProviderWrapper()) {
+    auto resource_provider = CanvasNon2DResourceProviderSharedImage::Create(
+        gfx::Size(dest_size.width(), dest_size.height()), dest_format,
+        dest_alpha_type, dest_color_space, dest_hdr_metadata,
+        source->ContextProviderWrapper(), source->GetSharedImage()->usage());
+
+    if (resource_provider) {
+      // Perform the blit and return the drawn resource.
+      return resource_provider->DoExternalOverdrawAndSnapshot(
+          [&](cc::PaintCanvas& canvas) {
+            BlitToCanvas(canvas, source_paint_image, source_orientation,
+                         SkRect::Make(source_rect), dest_size, options);
+          },
+          source_orientation);
     }
   }
 
-  // Perform the blit and return the drawn resource.
-  cc::PaintFlags paint;
-  paint.setBlendMode(SkBlendMode::kSrc);
-  cc::PaintCanvas& canvas = resource_provider->Canvas();
-  if (options.flip_y) {
-    if (source_orientation.UsesWidthAsHeight()) {
-      canvas.translate(dest_size.width(), 0);
-      canvas.scale(-1, 1);
-    } else {
-      canvas.translate(0, dest_size.height());
-      canvas.scale(1, -1);
-    }
+  // If unable to create an accelerated snapshot, fall back to software.
+  SkSurfaceProps surface_props;
+  sk_sp<SkSurface> surface = SkSurfaces::Raster(
+      SkImageInfo::Make(dest_size.width(), dest_size.height(),
+                        ToClosestSkColorType(dest_format), dest_alpha_type,
+                        dest_color_space.ToSkColorSpace()),
+      &surface_props);
+  if (!surface) {
+    return nullptr;
   }
-  canvas.drawImageRect(source_paint_image, SkRect::Make(source_rect),
-                       SkRect::Make(dest_size), options.sampling, &paint,
-                       SkCanvas::kStrict_SrcRectConstraint);
-  return resource_provider->Snapshot(flush_reason, source_orientation);
+
+  // Perform the blit and return the drawn resource.
+  cc::SkiaPaintCanvas canvas(surface->getCanvas());
+  BlitToCanvas(canvas, source_paint_image, source_orientation,
+               SkRect::Make(source_rect), dest_size, options);
+  return UnacceleratedStaticBitmapImage::Create(surface->makeImageSnapshot(),
+                                                source_orientation);
 }
 
 // Apply the transformations indicated in `options` on `source`, and return the
@@ -292,7 +309,6 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::ApplyWithBlit(
 // unless `force_copy` is specified, in which case it will always create a new
 // object and backing.
 scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::Apply(
-    FlushReason flush_reason,
     scoped_refptr<StaticBitmapImage> source,
     const StaticBitmapImageTransform::Params& options) {
   // It's not obvious what `reinterpret_as_srgb` should mean if we also specify
@@ -306,7 +322,7 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::Apply(
     return nullptr;
   }
 
-  const auto source_info = source->GetSkImageInfo();
+  const auto source_color_space = source->GetColorSpace();
   const bool needs_flip = options.flip_y;
   const bool needs_crop =
       options.source_rect != gfx::Rect(GetSourceSize(source, options));
@@ -315,12 +331,9 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::Apply(
   const bool needs_strip_color_space = options.reinterpret_as_srgb;
   const bool needs_convert_color_space =
       options.dest_color_space &&
-      !SkColorSpace::Equals(options.dest_color_space.get(),
-                            source_info.colorSpace()
-                                ? source_info.colorSpace()
-                                : SkColorSpace::MakeSRGB().get());
+      options.dest_color_space.value() != source_color_space;
   const bool needs_alpha_change =
-      (source->GetSkImageInfo().alphaType() == kUnpremul_SkAlphaType) !=
+      (source->GetAlphaType() == kUnpremul_SkAlphaType) !=
       (!options.premultiply_alpha);
 
   // If we aren't doing anything (and this wasn't a forced copy), just return
@@ -339,59 +352,32 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::Apply(
   if (!options.premultiply_alpha) {
     return ApplyUsingPixmap(source, options);
   }
-  return ApplyWithBlit(flush_reason, source, options);
+  return ApplyWithBlit(source, options);
 }
 
 scoped_refptr<StaticBitmapImage> StaticBitmapImageTransform::Clone(
-    FlushReason flush_reason,
     scoped_refptr<StaticBitmapImage> source) {
   if (!source) {
     return nullptr;
   }
-  const auto info = source->GetSkImageInfo();
   StaticBitmapImageTransform::Params options;
   options.source_rect = gfx::Rect(GetSourceSize(source, options));
   options.dest_size = GetSourceSize(source, options);
-  options.premultiply_alpha = info.alphaType() != kUnpremul_SkAlphaType;
+  options.premultiply_alpha = source->GetAlphaType() != kUnpremul_SkAlphaType;
   options.force_copy = true;
-  return Apply(flush_reason, source, options);
-}
-
-scoped_refptr<StaticBitmapImage>
-StaticBitmapImageTransform::GetWithAlphaDisposition(
-    FlushReason flush_reason,
-    scoped_refptr<StaticBitmapImage> source,
-    AlphaDisposition alpha_disposition) {
-  if (!source) {
-    return nullptr;
-  }
-  switch (alpha_disposition) {
-    case kPremultiplyAlpha:
-      break;
-    case kDontChangeAlpha:
-      return source;
-  }
-  const auto info = source->GetSkImageInfo();
-  StaticBitmapImageTransform::Params options;
-  options.source_rect = gfx::Rect(GetSourceSize(source, options));
-  options.dest_size = GetSourceSize(source, options);
-  options.premultiply_alpha = true;
-  return Apply(flush_reason, source, options);
+  return Apply(source, options);
 }
 
 scoped_refptr<StaticBitmapImage>
 StaticBitmapImageTransform::ConvertToColorSpace(
-    FlushReason flush_reason,
     scoped_refptr<StaticBitmapImage> source,
-    sk_sp<SkColorSpace> color_space) {
-  const auto info = source->GetSkImageInfo();
+    const gfx::ColorSpace& color_space) {
   StaticBitmapImageTransform::Params options;
   options.source_rect = gfx::Rect(GetSourceSize(source, options));
   options.dest_size = GetSourceSize(source, options);
-  options.premultiply_alpha = info.alphaType() != kUnpremul_SkAlphaType;
-  options.force_copy = true;
+  options.premultiply_alpha = source->GetAlphaType() != kUnpremul_SkAlphaType;
   options.dest_color_space = color_space;
-  return Apply(flush_reason, source, options);
+  return Apply(source, options);
 }
 
 }  // namespace blink

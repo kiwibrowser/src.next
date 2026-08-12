@@ -7,10 +7,10 @@
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/task/single_thread_task_runner.h"
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 #include "components/download/public/common/base_file.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item_utils.h"
@@ -18,9 +18,9 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_WIN)
-#include "chrome/browser/ui/browser_list.h"
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "ui/aura/window.h"
 #endif
 
@@ -82,12 +82,11 @@ DownloadFilePicker::DownloadFilePicker(download::DownloadItem* item,
   // could be null, then it will cause the select file dialog is not modal
   // dialog in Linux (See SelectFileImpl() in select_file_dialog_linux_gtk.cc).
   // and windows.Here we make owning_window host to browser current active
-  // window if it is null. https://crbug.com/1301898
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_WIN)
+  // window if it is null. https://crbug.com/40825014
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
   if (!owning_window || !owning_window->GetHost()) {
-    owning_window = BrowserList::GetInstance()
-                        ->GetLastActive()
-                        ->window()
+    owning_window = GetLastActiveBrowserWindowInterfaceWithAnyProfile()
+                        ->GetWindow()
                         ->GetNativeWindow();
   }
 #endif

@@ -7,47 +7,19 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/containers/checked_iterators.h"
 #include "base/containers/span.h"
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 
 namespace net {
 
-struct NET_EXPORT SHA256HashValue {
-  unsigned char data[32];
-};
-
-inline bool operator==(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) == 0;
-}
-
-inline bool operator!=(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) != 0;
-}
-
-inline bool operator<(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) < 0;
-}
-
-inline bool operator>(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) > 0;
-}
-
-inline bool operator<=(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) <= 0;
-}
-
-inline bool operator>=(const SHA256HashValue& lhs, const SHA256HashValue& rhs) {
-  return memcmp(lhs.data, rhs.data, sizeof(lhs.data)) >= 0;
-}
+using SHA256HashValue = std::array<uint8_t, 32>;
 
 enum HashValueTag {
   HASH_VALUE_SHA256,
@@ -55,12 +27,10 @@ enum HashValueTag {
 
 class NET_EXPORT HashValue {
  public:
-  using iterator = base::CheckedContiguousIterator<unsigned char>;
-  using const_iterator = base::CheckedContiguousIterator<const unsigned char>;
+  using iterator = base::span<uint8_t>::iterator;
+  using const_iterator = base::span<const uint8_t>::iterator;
 
-  explicit HashValue(const SHA256HashValue& hash);
-  explicit HashValue(HashValueTag tag) : tag_(tag) {}
-  HashValue() : tag_(HASH_VALUE_SHA256) {}
+  HashValue(HashValueTag tag, base::span<const uint8_t> hash);
 
   // Serializes/Deserializes hashes in the form of
   // <hash-name>"/"<base64-hash-value>
@@ -73,48 +43,29 @@ class NET_EXPORT HashValue {
   //   - logging public-key pins
   //   - serializing public-key pins
 
-  // Deserializes a HashValue from a string. Returns false if the input is not
-  // valid.
-  bool FromString(std::string_view input);
+  // Deserializes a HashValue from a string. Returns nullopt if the input is
+  // not valid.
+  static std::optional<HashValue> FromString(std::string_view input);
 
   // Serializes the HashValue to a string.
   std::string ToString() const;
 
-  size_t size() const;
-  unsigned char* data();
-  const unsigned char* data() const;
+  // This returns the bytes of the contained hash value.
+  base::span<const uint8_t> span() const;
 
-  // Iterate memory as bytes up to the end of its logical size.
-  iterator begin() {
-    // SAFETY: `data()` points to at least `size()` contiguous elements, so this
-    // value must be no further than just-past-the-end of the allocation.
-    return UNSAFE_BUFFERS(iterator(data(), data() + size()));
-  }
-  const_iterator begin() const {
-    // SAFETY: As in the non-const version above.
-    return UNSAFE_BUFFERS(const_iterator(data(), data() + size()));
-  }
-  iterator end() {
-    // SAFETY: As in `begin()` above.
-    return UNSAFE_BUFFERS(iterator(data(), data() + size(), data() + size()));
-  }
-  const_iterator end() const {
-    // SAFETY: As in `begin()` above.
-    return UNSAFE_BUFFERS(
-        const_iterator(data(), data() + size(), data() + size()));
-  }
+  // Returns the SHA256 byte array. CHECK-fails if tag() != HASH_VALUE_SHA256;
+  const SHA256HashValue& sha256hashvalue() const;
 
   HashValueTag tag() const { return tag_; }
 
   NET_EXPORT friend bool operator==(const HashValue& lhs, const HashValue& rhs);
-  NET_EXPORT friend bool operator!=(const HashValue& lhs, const HashValue& rhs);
   NET_EXPORT friend bool operator<(const HashValue& lhs, const HashValue& rhs);
   NET_EXPORT friend bool operator>(const HashValue& lhs, const HashValue& rhs);
   NET_EXPORT friend bool operator<=(const HashValue& lhs, const HashValue& rhs);
   NET_EXPORT friend bool operator>=(const HashValue& lhs, const HashValue& rhs);
 
  private:
-  HashValueTag tag_;
+  const HashValueTag tag_;
 
   union {
     SHA256HashValue sha256;
@@ -122,17 +73,6 @@ class NET_EXPORT HashValue {
 };
 
 typedef std::vector<HashValue> HashValueVector;
-
-
-// IsSHA256HashInSortedArray returns true iff |hash| is in |array|, a sorted
-// array of SHA256 hashes.
-bool IsSHA256HashInSortedArray(const HashValue& hash,
-                               base::span<const SHA256HashValue> array);
-
-// IsAnySHA256HashInSortedArray returns true iff any value in |hashes| is in
-// |array|, a sorted array of SHA256 hashes.
-bool IsAnySHA256HashInSortedArray(base::span<const HashValue> hashes,
-                                  base::span<const SHA256HashValue> array);
 
 }  // namespace net
 

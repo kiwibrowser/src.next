@@ -13,16 +13,17 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.RemoteViews;
 
-import androidx.annotation.Nullable;
-
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 /**
  * Performs inflation of {@link RemoteViews} taking into account the local night mode.
  * {@link RemoteViews#apply} always uses resource configuration corresponding to system
  *  settings, see https://buganizer.corp.google.com/issues/133424086, http://crbug.com/1626864.
  */
+@NullMarked
 public class RemoteViewsWithNightModeInflater {
     private static final String TAG = "RemoteViewsInflater";
 
@@ -53,7 +54,8 @@ public class RemoteViewsWithNightModeInflater {
         return view;
     }
 
-    private static @Nullable View inflateNormally(RemoteViews remoteViews, ViewGroup parent) {
+    private static @Nullable View inflateNormally(
+            RemoteViews remoteViews, @Nullable ViewGroup parent) {
         try {
             return remoteViews.apply(ContextUtils.getApplicationContext(), parent);
         } catch (RuntimeException e) {
@@ -64,8 +66,10 @@ public class RemoteViewsWithNightModeInflater {
         }
     }
 
+    // LayoutInflater.Filter.onLoadClass takes a raw Class parameter (framework API).
+    @SuppressWarnings("unchecked")
     private static @Nullable View inflateWithEnforcedDarkMode(
-            RemoteViews remoteViews, ViewGroup parent, boolean isInLocalNightMode) {
+            RemoteViews remoteViews, @Nullable ViewGroup parent, boolean isInLocalNightMode) {
         // This is a modified version of RemoteViews#apply. RemoteViews#apply performs two steps:
         // 1. Inflate the View using the context of the remote app.
         // 2. Apply the Actions to the inflated View (actions are requested by remote app using
@@ -81,13 +85,14 @@ public class RemoteViewsWithNightModeInflater {
             final Context contextForResources =
                     getContextForResources(remoteViews, isInLocalNightMode);
             // App context must be used instead of activity context to avoid the support library
-            // bug, see https://crbug.com/783834
+            // bug, see https://crbug.com/40549339
             Context appContext = ContextUtils.getApplicationContext();
             Context contextForRemoteViews =
                     new RemoteViewsContextWrapper(appContext, contextForResources);
 
             LayoutInflater inflater =
                     LayoutInflater.from(appContext).cloneInContext(contextForRemoteViews);
+            inflater.setFilter(clazz -> clazz.isAnnotationPresent(RemoteViews.RemoteView.class));
             View view = inflater.inflate(remoteViews.getLayoutId(), parent, false);
 
             remoteViews.reapply(appContext, view);

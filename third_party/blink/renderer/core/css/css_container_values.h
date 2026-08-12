@@ -7,6 +7,7 @@
 
 #include <optional>
 
+#include "third_party/blink/renderer/core/css/container_state.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/media_values_dynamic.h"
 
@@ -14,15 +15,20 @@ namespace blink {
 
 class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
  public:
-  explicit CSSContainerValues(Document& document,
-                              Element& container,
-                              std::optional<double> width,
-                              std::optional<double> height,
-                              ContainerStuckPhysical stuck_horizontal,
-                              ContainerStuckPhysical stuck_vertical,
-                              ContainerSnappedFlags snapped,
-                              ContainerOverflowingFlags overflowing_horizontal,
-                              ContainerOverflowingFlags overflowing_vertical);
+  explicit CSSContainerValues(
+      Document& document,
+      Element& container,
+      std::optional<double> width,
+      std::optional<double> height,
+      ContainerStuckPhysical stuck_horizontal,
+      ContainerStuckPhysical stuck_vertical,
+      ContainerSnappedFlags snapped,
+      ContainerScrollableFlags scrollable_horizontal,
+      ContainerScrollableFlags scrollable_vertical,
+      ContainerScrolled scrolled_horizontal,
+      ContainerScrolled scrolled_vertical,
+      WritingDirectionMode abs_container_writing_direction,
+      const PositionTryFallback& fallback);
 
   // Returns std::nullopt if queries on the relevant axis is not
   // supported.
@@ -44,6 +50,7 @@ class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
   float RootLineHeight(float zoom) const override;
   float CapFontSize(float zoom) const override;
   float RcapFontSize(float zoom) const override;
+  Element* GetElement() const override { return element_.Get(); }
   // Note that ContainerWidth/ContainerHeight are used to resolve
   // container *units*. See `container_sizes_`.
   Element* ContainerElement() const override { return element_.Get(); }
@@ -51,6 +58,9 @@ class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
   double ContainerHeight() const override;
   WritingMode GetWritingMode() const override {
     return writing_direction_.GetWritingMode();
+  }
+  WritingDirectionMode GetWritingDirection() const override {
+    return writing_direction_;
   }
   ContainerStuckPhysical StuckHorizontal() const override {
     return stuck_horizontal_;
@@ -61,14 +71,29 @@ class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
   ContainerStuckLogical StuckInline() const override;
   ContainerStuckLogical StuckBlock() const override;
   ContainerSnappedFlags SnappedFlags() const override { return snapped_; }
-  ContainerOverflowingFlags OverflowingHorizontal() const override {
-    return overflowing_horizontal_;
+  ContainerScrollableFlags ScrollableHorizontal() const override {
+    return scrollable_horizontal_;
   }
-  ContainerOverflowingFlags OverflowingVertical() const override {
-    return overflowing_vertical_;
+  ContainerScrollableFlags ScrollableVertical() const override {
+    return scrollable_vertical_;
   }
-  ContainerOverflowingFlags OverflowingInline() const override;
-  ContainerOverflowingFlags OverflowingBlock() const override;
+  ContainerScrollableFlags ScrollableInline() const override;
+  ContainerScrollableFlags ScrollableBlock() const override;
+  ContainerScrolled ScrolledHorizontal() const override {
+    return scrolled_horizontal_;
+  }
+  ContainerScrolled ScrolledVertical() const override {
+    return scrolled_vertical_;
+  }
+  ContainerScrolled ScrolledInline() const override;
+  ContainerScrolled ScrolledBlock() const override;
+
+  WritingDirectionMode AbsContainerWritingDirection() const override {
+    return abs_container_writing_direction_;
+  }
+  const PositionTryFallback& AnchoredFallback() const override {
+    return anchored_fallback_;
+  }
 
  private:
   // The current computed style for the container.
@@ -77,8 +102,11 @@ class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
   std::optional<double> width_;
   // Container height in CSS pixels.
   std::optional<double> height_;
-  // The writing-mode of the container.
+  // The writing-mode and direction of the container.
   WritingDirectionMode writing_direction_;
+  // The writing-mode and direction of the absolute positioned containing block
+  // for an anchored container.
+  WritingDirectionMode abs_container_writing_direction_;
   // Whether a sticky container is horizontally stuck and to which edge.
   ContainerStuckPhysical stuck_horizontal_ = ContainerStuckPhysical::kNo;
   // Whether a sticky container is vertically stuck and against which edge.
@@ -89,22 +117,20 @@ class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
   ContainerSnappedFlags snapped_ =
       static_cast<ContainerSnappedFlags>(ContainerSnapped::kNone);
   // Whether a scroll-state container has horizontally scrollable overflow.
-  ContainerOverflowingFlags overflowing_horizontal_ =
-      static_cast<ContainerOverflowingFlags>(ContainerOverflowing::kNone);
+  ContainerScrollableFlags scrollable_horizontal_ =
+      static_cast<ContainerScrollableFlags>(ContainerScrollable::kNone);
   // Whether a scroll-state container has vertically scrollable overflow.
-  ContainerOverflowingFlags overflowing_vertical_ =
-      static_cast<ContainerOverflowingFlags>(ContainerOverflowing::kNone);
+  ContainerScrollableFlags scrollable_vertical_ =
+      static_cast<ContainerScrollableFlags>(ContainerScrollable::kNone);
+  ContainerScrolled scrolled_horizontal_ = ContainerScrolled::kNone;
+  ContainerScrolled scrolled_vertical_ = ContainerScrolled::kNone;
+  // The option from position-try-fallbacks applied to anchored() container.
+  // If no fallback is applied, PositionTryFallback::IsNone() returns true.
+  PositionTryFallback anchored_fallback_;
   // Container font sizes for resolving relative lengths.
   CSSToLengthConversionData::FontSizes font_sizes_;
   // LineHeightSize of the container element.
   CSSToLengthConversionData::LineHeightSize line_height_size_;
-
-  // Both `font_sizes_`, and `line_height_size_` have a pointer to a `Font`
-  // from the computed-style objects. Explicitly own the computed-style objects
-  // here so the underlying `Font` object doesn't get destroyed.
-  Member<const ComputedStyle> font_style_;
-  Member<const ComputedStyle> root_font_style_;
-
   // Used to resolve container-relative units found in the @container prelude.
   // Such units refer to container sizes of *ancestor* containers, and must
   // not be confused with the size of the *current* container (which is stored

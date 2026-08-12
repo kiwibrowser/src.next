@@ -22,9 +22,11 @@ import './site_permissions/site_permissions.js';
 import './site_permissions/site_permissions_by_site.js';
 import './toolbar.js';
 
-import {CrContainerShadowMixinLit} from 'chrome://resources/cr_elements/cr_container_shadow_mixin_lit.js';
+import {ColorChangeUpdater, COLORS_CSS_SELECTOR} from 'chrome://resources/cr_components/color_change_listener/colors_css_updater.js';
+import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
 import type {CrViewManagerElement} from 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
+import {I18nMixinLit} from 'chrome://resources/cr_elements/i18n_mixin_lit.js';
+import {assert, assertNotReached, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
@@ -33,6 +35,7 @@ import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {ActivityLogExtensionPlaceholder} from './activity_log/activity_log.js';
 import type {ExtensionsDetailViewElement} from './detail_view.js';
 import type {ExtensionsItemListElement} from './item_list.js';
+import {TOAST_DURATION_MS} from './item_util.js';
 import {getCss} from './manager.css.js';
 import {getHtml} from './manager.html.js';
 import type {PageState} from './navigation_helper.js';
@@ -77,15 +80,14 @@ declare global {
 
 export interface ExtensionsManagerElement {
   $: {
+    scrollableShadow: HTMLElement,
     toolbar: ExtensionsToolbarElement,
     viewManager: CrViewManagerElement,
-    'items-list': ExtensionsItemListElement,
+    itemsList: ExtensionsItemListElement,
   };
 }
 
-// TODO(crbug.com/40270029): Always show a top shadow for the DETAILS, ERRORS and
-// SITE_PERMISSIONS_ALL_SITES pages.
-const ExtensionsManagerElementBase = CrContainerShadowMixinLit(CrLitElement);
+const ExtensionsManagerElementBase = I18nMixinLit(CrLitElement);
 
 export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
   static get is() {
@@ -158,32 +160,35 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     };
   }
 
-  canLoadUnpacked: boolean = false;
-  delegate: ServiceInterface = Service.getInstance();
-  inDevMode: boolean = loadTimeData.getBoolean('inDevMode');
-  isMv2DeprecationNoticeDismissed: boolean =
+  accessor canLoadUnpacked: boolean = false;
+  accessor delegate: ServiceInterface = Service.getInstance();
+  accessor inDevMode: boolean = loadTimeData.getBoolean('inDevMode');
+  accessor isMv2DeprecationNoticeDismissed: boolean =
       loadTimeData.getBoolean('MV2DeprecationNoticeDismissed');
-  showActivityLog: boolean = loadTimeData.getBoolean('showActivityLog');
-  enableEnhancedSiteControls: boolean =
+  accessor showActivityLog: boolean =
+      loadTimeData.getBoolean('showActivityLog');
+  accessor enableEnhancedSiteControls: boolean =
       loadTimeData.getBoolean('enableEnhancedSiteControls');
-  devModeControlledByPolicy: boolean = false;
-  protected isChildAccount_: boolean = false;
-  protected incognitoAvailable_: boolean = false;
-  filter: string = '';
-  protected errorPageItem_?: chrome.developerPrivate.ExtensionInfo;
-  protected detailViewItem_?: chrome.developerPrivate.ExtensionInfo;
-  protected activityLogItem_?: chrome.developerPrivate.ExtensionInfo|
-      ActivityLogExtensionPlaceholder;
-  protected extensions_: chrome.developerPrivate.ExtensionInfo[] = [];
-  protected apps_: chrome.developerPrivate.ExtensionInfo[] = [];
-  protected didInitPage_: boolean = false;
-  protected narrow_: boolean = false;
-  protected showDrawer_: boolean = false;
-  protected showLoadErrorDialog_: boolean = false;
-  protected showInstallWarningsDialog_: boolean = false;
-  protected installWarnings_: string[]|null = null;
-  protected showOptionsDialog_: boolean = false;
-  protected fromActivityLog_: boolean = false;
+  accessor devModeControlledByPolicy: boolean = false;
+  protected accessor isChildAccount_: boolean = false;
+  protected accessor incognitoAvailable_: boolean = false;
+  accessor filter: string = '';
+  protected accessor errorPageItem_: chrome.developerPrivate.ExtensionInfo|
+      undefined;
+  protected accessor detailViewItem_: chrome.developerPrivate.ExtensionInfo|
+      undefined;
+  protected accessor activityLogItem_: chrome.developerPrivate.ExtensionInfo|
+      ActivityLogExtensionPlaceholder|undefined;
+  protected accessor extensions_: chrome.developerPrivate.ExtensionInfo[] = [];
+  protected accessor apps_: chrome.developerPrivate.ExtensionInfo[] = [];
+  protected accessor didInitPage_: boolean = false;
+  protected accessor narrow_: boolean = false;
+  protected accessor showDrawer_: boolean = false;
+  protected accessor showLoadErrorDialog_: boolean = false;
+  protected accessor showInstallWarningsDialog_: boolean = false;
+  protected accessor installWarnings_: string[]|null = null;
+  protected accessor showOptionsDialog_: boolean = false;
+  protected accessor fromActivityLog_: boolean = false;
 
   /**
    * A promise resolver for any external files waiting for initPage_ to be
@@ -203,6 +208,31 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
    * listener can be removed when this element is detached (happens in tests).
    */
   private navigationListener_: number|null = null;
+
+  override connectedCallback() {
+    super.connectedCallback();
+
+    const enableWebuiRefresh2026 =
+        loadTimeData.getString('webuiRefresh2026') !== '';
+    if (enableWebuiRefresh2026) {
+      this.addThemedColors_();
+      ColorChangeUpdater.forDocument().start();
+    }
+
+    document.documentElement.classList.remove('loading');
+    document.fonts.load('bold 12px Roboto');
+
+    this.navigationListener_ = navigation.addListener(newPage => {
+      this.changePage_(newPage);
+    });
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    assert(this.navigationListener_);
+    assert(navigation.removeListener(this.navigationListener_));
+    this.navigationListener_ = null;
+  }
 
   override firstUpdated(changedProperties: PropertyValues<this>) {
     super.firstUpdated(changedProperties);
@@ -243,7 +273,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     const changedPrivateProperties =
         changedProperties as Map<PropertyKey, unknown>;
     if (changedPrivateProperties.has('narrow_')) {
-      const drawer = this.shadowRoot!.querySelector('cr-drawer');
+      const drawer = this.shadowRoot.querySelector('cr-drawer');
       if (!this.narrow_ && drawer?.open) {
         drawer.close();
       }
@@ -252,25 +282,6 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
       // sidebar or menu when it's about to disappear when `this.narrow_`
       // changes.
     }
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-
-    document.documentElement.classList.remove('loading');
-    // https://github.com/microsoft/TypeScript/issues/13569
-    (document as any).fonts.load('bold 12px Roboto');
-
-    this.navigationListener_ = navigation.addListener(newPage => {
-      this.changePage_(newPage);
-    });
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    assert(this.navigationListener_);
-    assert(navigation.removeListener(this.navigationListener_));
-    this.navigationListener_ = null;
   }
 
   /**
@@ -332,8 +343,19 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
         if (currentIndex >= 0) {
           this.updateItem_(listId, currentIndex, eventData.extensionInfo);
-        } else {
+        } else if (eventData.event_type === EventType.INSTALLED) {
           this.addItem_(listId, eventData.extensionInfo);
+        }
+
+        // This is likely to trigger multiple times (one for each extension
+        // that's disabled. That's fine; we'll only show the toast for the first
+        // one, since we check first if it's open.
+        const toastManager = getToastManager();
+        if (this.showUnsupportedDeveloperExtensionDisabledToast_(
+                eventData.event_type, eventData.extensionInfo) &&
+            !toastManager.isToastOpen) {
+          toastManager.duration = TOAST_DURATION_MS;
+          toastManager.show(this.i18n('itemUnsupportedDeveloperModeToast'));
         }
         break;
       case EventType.UNINSTALLED:
@@ -344,8 +366,6 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
         this.updateItem_(
             'extensions_', index,
             Object.assign({}, this.getData_(eventData.item_id), {
-              didAcknowledgeMV2DeprecationNotice:
-                  eventData.extensionInfo?.didAcknowledgeMV2DeprecationNotice,
               safetyCheckText: eventData.extensionInfo?.safetyCheckText,
             }));
         break;
@@ -354,17 +374,17 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     }
   }
 
-  protected onFilterChanged_(event: CustomEvent<string>) {
+  protected onSearchChanged_(event: CustomEvent<string>) {
     if (this.currentPage_!.page !== Page.LIST) {
       navigation.navigateTo({page: Page.LIST});
     }
     this.filter = event.detail;
   }
 
-  protected onMenuButtonClick_() {
+  protected onCrToolbarMenuClick_() {
     this.showDrawer_ = true;
     setTimeout(() => {
-      this.shadowRoot!.querySelector('cr-drawer')!.openDrawer();
+      this.shadowRoot.querySelector('cr-drawer')!.openDrawer();
     }, 0);
   }
 
@@ -384,7 +404,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
       case ExtensionType.THEME:
         assertNotReached('Don\'t send themes to the chrome://extensions page');
       default:
-        assertNotReached();
+        assertNotReachedCase(item.type);
     }
   }
 
@@ -497,7 +517,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
   // When an item is removed while on the 'item list' page, move focus to the
   // next item in the list with `listId` if available. If no items are in that
   // list, focus to the search bar as a fallback.
-  // This is a fix for crbug.com/1416324 which causes focus to linger on a
+  // This is a fix for crbug.com/40063067 which causes focus to linger on a
   // deleted element, which is then read by the screen reader.
   private focusAfterItemRemoved_(listId: string, index: number) {
     // A timeout is used so elements are focused after the DOM is updated.
@@ -509,7 +529,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
         // In the rare case where the item cannot be focused despite existing,
         // focus the search bar.
-        if (!this.$['items-list'].focusItemButton(itemToFocusId)) {
+        if (!this.$.itemsList.focusItemButton(itemToFocusId)) {
           this.$.toolbar.focusSearchInput();
         }
       } else {
@@ -537,7 +557,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     if (this.currentPage_!.page === Page.LIST) {
       // Wait for the items list to be updated with the new value before trying
       // to focus an item.
-      this.$['items-list'].updateComplete.then(() => {
+      this.$.itemsList.updateComplete.then(() => {
         this.focusAfterItemRemoved_(listId, index);
       });
     } else if (
@@ -554,7 +574,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
       e: CustomEvent<Error|chrome.developerPrivate.LoadError>) {
     this.showLoadErrorDialog_ = true;
     setTimeout(() => {
-      const dialog = this.shadowRoot!.querySelector('extensions-load-error')!;
+      const dialog = this.shadowRoot.querySelector('extensions-load-error')!;
       dialog.loadError = e.detail;
       dialog.show();
     }, 0);
@@ -567,7 +587,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     this.onCloseDrawer_();
 
     const optionsDialog =
-        this.shadowRoot!.querySelector('extensions-options-dialog');
+        this.shadowRoot.querySelector('extensions-options-dialog');
     if (optionsDialog && optionsDialog.open) {
       this.showOptionsDialog_ = false;
     }
@@ -633,7 +653,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
       assert(newPage.extensionId);
       this.showOptionsDialog_ = true;
       setTimeout(() => {
-        this.shadowRoot!.querySelector('extensions-options-dialog')!.show(
+        this.shadowRoot.querySelector('extensions-options-dialog')!.show(
             data!,
         );
       }, 0);
@@ -643,6 +663,11 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
         `${loadTimeData.getString('title')} - ${this.detailViewItem_!.name}` :
         loadTimeData.getString('title');
     this.currentPage_ = newPage;
+
+    this.$.scrollableShadow.classList.toggle(
+        'force-on',
+        toPage === Page.DETAILS || toPage === Page.ERRORS ||
+            toPage === Page.SITE_PERMISSIONS_ALL_SITES);
   }
 
   /**
@@ -657,7 +682,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
    * This method animates the closing of the drawer.
    */
   protected onCloseDrawer_() {
-    const drawer = this.shadowRoot!.querySelector('cr-drawer');
+    const drawer = this.shadowRoot.querySelector('cr-drawer');
     if (drawer && drawer.open) {
       drawer.close();
     }
@@ -669,8 +694,8 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
   protected onOptionsDialogClose_() {
     this.showOptionsDialog_ = false;
-    this.shadowRoot!.querySelector(
-                        'extensions-detail-view')!.focusOptionsButton();
+    this.shadowRoot.querySelector(
+                       'extensions-detail-view')!.focusOptionsButton();
   }
 
   private onViewEnterStart_() {
@@ -694,7 +719,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
     const extensionId =
         (e.composedPath()[0] as ExtensionsDetailViewElement).data.id;
-    const list = this.shadowRoot!.querySelector('extensions-item-list')!;
+    const list = this.shadowRoot.querySelector('extensions-item-list')!;
     const button = viewType === 'EXTENSIONS-DETAIL-VIEW' ?
         list.getDetailsButton(extensionId) :
         list.getErrorsButton(extensionId);
@@ -717,6 +742,33 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
   protected onInstallWarningsDialogClose_() {
     this.installWarnings_ = null;
     this.showInstallWarningsDialog_ = false;
+  }
+
+  /**
+   * Show a toast when an unpacked extension becomes disabled when the user is
+   * not in developer mode.
+   */
+  private showUnsupportedDeveloperExtensionDisabledToast_(
+      eventType: chrome.developerPrivate.EventType,
+      extensionInfo: chrome.developerPrivate.ExtensionInfo): boolean {
+    if (eventType !== chrome.developerPrivate.EventType.UNLOADED) {
+      return false;
+    }
+
+    return !this.inDevMode &&
+        extensionInfo.state ===
+        chrome.developerPrivate.ExtensionState.DISABLED &&
+        extensionInfo.location === chrome.developerPrivate.Location.UNPACKED &&
+        extensionInfo.disableReasons.unsupportedDeveloperExtension;
+  }
+
+  // TODO(crub.com/509908129): Add static stylesheet in extensions.html
+  private addThemedColors_() {
+    assert(document.body.querySelector(COLORS_CSS_SELECTOR) === null);
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'chrome://theme/colors.css?sets=ui,chrome';
+    document.body.appendChild(link);
   }
 }
 

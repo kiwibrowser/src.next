@@ -101,8 +101,8 @@ DeferredImageDecoder::DeferredImageDecoder(
       can_yuv_decode_(false),
       has_hot_spot_(false),
       image_is_high_bit_depth_(false),
-      complete_frame_content_id_(PaintImage::GetNextContentId()) {
-}
+      has_c2pa_manifest_(false),
+      complete_frame_content_id_(PaintImage::GetNextContentId()) {}
 
 DeferredImageDecoder::~DeferredImageDecoder() {
 }
@@ -137,7 +137,7 @@ sk_sp<PaintImageGenerator> DeferredImageDecoder::CreateGenerator() {
   if (image_is_high_bit_depth_)
     info = info.makeColorType(kRGBA_F16_SkColorType);
 
-  WebVector<FrameMetadata> frames(frame_data_.size());
+  std::vector<FrameMetadata> frames(frame_data_.size());
   for (wtf_size_t i = 0; i < frame_data_.size(); ++i) {
     frames[i].complete = frame_data_[i].is_received_;
     frames[i].duration = FrameDurationAtIndex(i);
@@ -164,9 +164,9 @@ sk_sp<PaintImageGenerator> DeferredImageDecoder::CreateGenerator() {
       !incremental_decode_needed_.value();
 
   auto generator = DecodingImageGenerator::Create(
-      frame_generator_, info, std::move(segment_reader), std::move(frames),
-      complete_frame_content_id_, all_data_received_, can_yuv_decode_,
-      *image_metadata_);
+      frame_generator_, info, hdr_metadata_, std::move(segment_reader),
+      std::move(frames), complete_frame_content_id_, all_data_received_,
+      can_yuv_decode_, *image_metadata_);
   first_decoding_generator_created_ = true;
 
   return generator;
@@ -178,15 +178,15 @@ bool DeferredImageDecoder::CreateGainmapGenerator(
   if (!gainmap_) {
     return false;
   }
-  WebVector<FrameMetadata> frames;
+  std::vector<FrameMetadata> frames;
 
   SkImageInfo gainmap_image_info =
       SkImageInfo::Make(gainmap_->frame_generator->GetFullSize(),
                         kN32_SkColorType, kOpaque_SkAlphaType);
   gainmap_generator = DecodingImageGenerator::Create(
-      gainmap_->frame_generator, gainmap_image_info, gainmap_->data, frames,
-      complete_frame_content_id_, all_data_received_, gainmap_->can_decode_yuv,
-      gainmap_->image_metadata);
+      gainmap_->frame_generator, gainmap_image_info, gfx::HDRMetadata(),
+      gainmap_->data, frames, complete_frame_content_id_, all_data_received_,
+      gainmap_->can_decode_yuv, gainmap_->image_metadata);
   gainmap_info = gainmap_->info;
   return true;
 }
@@ -256,6 +256,11 @@ gfx::Size DeferredImageDecoder::FrameSizeAtIndex(wtf_size_t index) const {
 wtf_size_t DeferredImageDecoder::FrameCount() {
   return metadata_decoder_ ? metadata_decoder_->FrameCount()
                            : frame_data_.size();
+}
+
+bool DeferredImageDecoder::HasC2PAManifest() const {
+  return metadata_decoder_ ? metadata_decoder_->HasC2PAManifest()
+                           : has_c2pa_manifest_;
 }
 
 int DeferredImageDecoder::RepetitionCount() const {
@@ -332,11 +337,13 @@ void DeferredImageDecoder::ActivateLazyDecoding() {
 
   size_ = metadata_decoder_->Size();
   image_is_high_bit_depth_ = metadata_decoder_->ImageIsHighBitDepth();
+  has_c2pa_manifest_ = metadata_decoder_->HasC2PAManifest();
   has_hot_spot_ = metadata_decoder_->HotSpot(hot_spot_);
   filename_extension_ = metadata_decoder_->FilenameExtension();
   mime_type_ = metadata_decoder_->MimeType();
   has_embedded_color_profile_ = metadata_decoder_->HasEmbeddedColorProfile();
   color_space_for_sk_images_ = metadata_decoder_->ColorSpaceForSkImages();
+  hdr_metadata_ = metadata_decoder_->GetHDRMetadata();
 
   const bool is_single_frame =
       metadata_decoder_->RepetitionCount() == kAnimationNone ||
@@ -470,14 +477,12 @@ bool DeferredImageDecoder::HotSpot(gfx::Point& hot_spot) const {
   return has_hot_spot_;
 }
 
-}  // namespace blink
-
-namespace WTF {
 template <>
-struct VectorTraits<blink::DeferredFrameData>
-    : public SimpleClassVectorTraits<blink::DeferredFrameData> {
+struct VectorTraits<DeferredFrameData>
+    : public SimpleClassVectorTraits<DeferredFrameData> {
   STATIC_ONLY(VectorTraits);
-  static const bool kCanInitializeWithMemset =
-      false;  // Not all DeferredFrameData members initialize to 0.
+  // Not all DeferredFrameData members initialize to 0.
+  static const bool kCanInitializeWithMemset = false;
 };
-}  // namespace WTF
+
+}  // namespace blink

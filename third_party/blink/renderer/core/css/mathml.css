@@ -147,3 +147,26 @@ munderover[accent="true" i] > :first-child {
 mmultiscripts > mprescripts ~ :nth-child(even) {
   math-shift: inherit;
 }
+
+@supports blink-feature(MathMLAnchorElement) {
+  /*
+   * The default styling for MathML anchor elements.
+   *
+   * Note on 'cursor: pointer': It's borrowed from the link style in html.css
+   *
+   * Note on 'text-decoration: none;': Underlining links inside mathematical formulas
+   * breaks the rendering layout (causing weird spacing and fragmented underlines under
+   * radicals/fractions). To keep math formulas readable, we follow Microsoft Office and
+   * Firefox behavior by making math links blue without an underline.
+   * See https://github.com/w3c/mathml-core/issues/128
+   *
+   * Note on 'color: -webkit-link;': This is non-standardized yet. It is borrowed from
+   * the HTML User Agent stylesheet (html.css). The goal of the issue above is finding
+   * a consistent set of UA rules for links shared by all web engines.
+   */
+  a:-webkit-any-link {
+    cursor: pointer;
+    text-decoration: none;
+    color: -webkit-link;
+  }
+}

@@ -12,11 +12,13 @@
 #include "base/task/current_thread.h"
 #include "base/task/thread_pool.h"
 #include "base/trace_event/trace_event.h"
+#include "chrome/browser/android/metrics/android_atoms_logger.h"
 #include "chrome/browser/android/mojo/chrome_interface_registrar_android.h"
 #include "chrome/browser/android/preferences/clipboard_android.h"
 #include "chrome/browser/android/seccomp_support_detector.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/data_saver/data_saver.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/webauthn/android/cable_module_android.h"
 #include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/crash/content/browser/child_process_crash_observer_android.h"
@@ -24,7 +26,7 @@
 #include "content/public/browser/android/compositor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
-#include "device/fido/features.h"
+#include "device/fido/public/features.h"
 #include "net/base/network_change_notifier.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_bundle_android.h"
@@ -38,8 +40,7 @@ ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
     StartupData* startup_data)
     : ChromeBrowserMainParts(is_integration_test, startup_data) {}
 
-ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {
-}
+ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() = default;
 
 int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
   TRACE_EVENT0("startup", "ChromeBrowserMainPartsAndroid::PreCreateThreads");
@@ -76,7 +77,7 @@ void ChromeBrowserMainPartsAndroid::PostProfileInit(Profile* profile,
   // Android backup, so that we create a new backup if they change.
   base::android::ScopedJavaGlobalRef<jobject> watcher;
   watcher.Reset(android::Java_ChromeBackupWatcher_Constructor(
-      base::android::AttachCurrentThread()));
+      base::android::AttachCurrentThread(), profile));
   backup_watcher_runner_.ReplaceClosure(
       base::BindOnce(&android::Java_ChromeBackupWatcher_destroy,
                      base::android::AttachCurrentThread(), watcher));
@@ -101,6 +102,12 @@ int ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
 void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
+  // Initializes the logger that forwards allowed UMA histograms to Android
+  // Statsd (Westworld) as atoms.
+  // TODO: crbug.com/512252292 - Add link to the readme doc for more background
+  // and context after it's created.
+  chrome::android::westworld::AndroidAtomsLogger::Initialize();
+
   base::ThreadPool::PostDelayedTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&ReportSeccompSupport), base::Minutes(1));
@@ -111,3 +118,5 @@ void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
 void ChromeBrowserMainPartsAndroid::ShowMissingLocaleMessageBox() {
   NOTREACHED();
 }
+
+DEFINE_JNI(ChromeBackupWatcher)

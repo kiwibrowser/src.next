@@ -8,6 +8,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
@@ -42,15 +43,15 @@ namespace extensions {
 // The default icon doesn't need to be supplied, but in that case, icon image
 // representation will be left blank if the resource loading fails.
 // If default icon is supplied, it is assumed that it contains or can
-// synchronously create (when |GetRepresentation| is called on it)
+// synchronously create (when `GetRepresentation` is called on it)
 // representations for all the scale factors supported by the current platform.
-// Note that |IconImage| is not thread safe.
+// Note that `IconImage` is not thread safe.
 class IconImage : public ExtensionRegistryObserver {
  public:
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
     // Invoked when a new image rep for an additional scale factor
-    // is loaded and added to |image|.
+    // is loaded and added to `image`.
     virtual void OnExtensionIconImageChanged(IconImage* image) = 0;
 
     // Called when this object is deleted. Objects should observe this if there
@@ -58,14 +59,14 @@ class IconImage : public ExtensionRegistryObserver {
     virtual void OnExtensionIconImageDestroyed(IconImage* image) {}
 
    protected:
-    virtual ~Observer() {}
+    ~Observer() override = default;
   };
 
-  // |context| is required by the underlying implementation to retrieve the
-  // |ImageLoader| instance associated with the given context. |ImageLoader| is
+  // `context` is required by the underlying implementation to retrieve the
+  // `ImageLoader` instance associated with the given context. `ImageLoader` is
   // used to perform the asynchronous image load work.
-  // Set |keep_original_size| to true to load the icon at the original size
-  // without resizing. In this case |resource_size_in_dip| will still be used to
+  // Set `keep_original_size` to true to load the icon at the original size
+  // without resizing. In this case `resource_size_in_dip` will still be used to
   // pick the correct icon representation. This is useful if the client code
   // performs its own resizing.
   IconImage(content::BrowserContext* context,
@@ -126,15 +127,20 @@ class IconImage : public ExtensionRegistryObserver {
   // asynchronous from creation).
   bool did_complete_initial_load_;
 
-  base::ObserverList<Observer>::Unchecked observers_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      Observer,
+      /*check_empty=*/false,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observers_;
 
   raw_ptr<Source, DanglingUntriaged> source_;  // Owned by ImageSkia storage.
   gfx::ImageSkia image_skia_;
-  // The icon with whose representation |image_skia_| should be updated if
+  // The icon with whose representation `image_skia_` should be updated if
   // its own representation load fails.
   gfx::ImageSkia default_icon_;
 
-  // The image wrapper around |image_skia_|.
+  // The image wrapper around `image_skia_`.
   // Note: this is reset each time a new representation is loaded.
   gfx::Image image_;
 

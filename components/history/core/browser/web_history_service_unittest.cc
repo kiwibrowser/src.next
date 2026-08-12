@@ -5,14 +5,21 @@
 #include "components/history/core/browser/web_history_service.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/task/single_thread_task_runner.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
+#include "components/history/core/browser/features.h"
+#include "components/history/core/browser/history_types.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -20,12 +27,53 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using ::testing::Return;
 
 namespace history {
 
 namespace {
+
+// A testing request class that allows expected values to be filled in.
+class TestRequest : public WebHistoryService::Request {
+ public:
+  TestRequest(WebHistoryService::CompletionCallback callback,
+              int response_code,
+              const std::string& response_body)
+      : callback_(std::move(callback)),
+        response_code_(response_code),
+        response_body_(response_body) {}
+
+  TestRequest(const TestRequest&) = delete;
+  TestRequest& operator=(const TestRequest&) = delete;
+
+  ~TestRequest() override = default;
+
+  // WebHistoryService::Request overrides
+  bool IsPending() const override { return false; }
+  int GetResponseCode() const override { return response_code_; }
+  const std::string& GetResponseBody() const override { return response_body_; }
+  void SetPostData(const std::string& post_data) override {
+    post_data_ = post_data;
+  }
+  void SetPostDataAndType(const std::string& post_data,
+                          const std::string& mime_type) override {
+    SetPostData(post_data);
+  }
+  void SetUserAgent(const std::string&) override {}
+  void Start() override {
+    bool success = response_code_ < 400;
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback_), this, success));
+  }
+
+ private:
+  WebHistoryService::CompletionCallback callback_;
+  const int response_code_;
+  const std::string response_body_;
+  std::string post_data_;
+};
 
 // A testing web history service that does extra checks and creates a
 // TestRequest instead of a normal request.
@@ -37,357 +85,389 @@ class TestingWebHistoryService : public WebHistoryService {
       // only usage of this object is to fetch access tokens via RequestImpl,
       // and TestWebHistoryService deliberately replaces this flow with
       // TestRequest.
-      : WebHistoryService(nullptr, url_loader_factory),
-        expected_url_(GURL()),
-        expected_audio_history_value_(false),
-        current_expected_post_data_("") {}
+      : WebHistoryService(nullptr, url_loader_factory) {}
 
   TestingWebHistoryService(const TestingWebHistoryService&) = delete;
   TestingWebHistoryService& operator=(const TestingWebHistoryService&) = delete;
 
   ~TestingWebHistoryService() override = default;
 
-  WebHistoryService::Request* CreateRequest(
+  void SetResponse(int response_code, const std::string& response_body) {
+    response_code_ = response_code;
+    response_body_ = response_body;
+  }
+
+  const GURL& last_request_url() const { return last_request_url_; }
+
+  using WebHistoryService::server_version_info_for_test;
+
+ protected:
+  std::unique_ptr<Request> CreateRequest(
       const GURL& url,
       CompletionCallback callback,
       const net::PartialNetworkTrafficAnnotationTag& partial_traffic_annotation)
-      override;
-
-  // This is sorta an override but override and static don't mix.
-  // This function just calls WebHistoryService::ReadResponse.
-  static std::optional<base::Value::Dict> ReadResponse(Request* request);
-
-  const std::string& GetExpectedPostData(WebHistoryService::Request* request);
-
-  std::string GetExpectedAudioHistoryValue();
-
-  void SetAudioHistoryCallback(bool success, bool new_enabled_value);
-
-  void GetAudioHistoryCallback(bool success, bool new_enabled_value);
-
-  void MultipleRequestsCallback(bool success, bool new_enabled_value);
-
-  void SetExpectedURL(const GURL& expected_url) {
-    expected_url_ = expected_url;
-  }
-
-  void SetExpectedAudioHistoryValue(bool expected_value) {
-    expected_audio_history_value_ = expected_value;
-  }
-
-  void SetExpectedPostData(const std::string& expected_data) {
-    current_expected_post_data_ = expected_data;
-  }
-
-  void EnsureNoPendingRequestsRemain() {
-    EXPECT_EQ(0u, GetNumberOfPendingAudioHistoryRequests());
+      override {
+    last_request_url_ = url;
+    return std::make_unique<TestRequest>(std::move(callback), response_code_,
+                                         response_body_);
   }
 
  private:
-  GURL expected_url_;
-  bool expected_audio_history_value_;
-  std::string current_expected_post_data_;
-  std::map<Request*, std::string> expected_post_data_;
-};
-
-// A testing request class that allows expected values to be filled in.
-class TestRequest : public WebHistoryService::Request {
- public:
-  TestRequest(const GURL& url,
-              WebHistoryService::CompletionCallback callback,
-              int response_code,
-              const std::string& response_body)
-      : web_history_service_(nullptr),
-        url_(url),
-        callback_(std::move(callback)),
-        response_code_(response_code),
-        response_body_(response_body),
-        post_data_(""),
-        is_pending_(false) {}
-
-  TestRequest(const GURL& url,
-              WebHistoryService::CompletionCallback callback,
-              TestingWebHistoryService* web_history_service)
-      : web_history_service_(web_history_service),
-        url_(url),
-        callback_(std::move(callback)),
-        response_code_(net::HTTP_OK),
-        response_body_(""),
-        post_data_(""),
-        is_pending_(false) {
-    response_body_ = std::string("{\"history_recording_enabled\":") +
-                     web_history_service->GetExpectedAudioHistoryValue() +
-                     ("}");
-  }
-
-  TestRequest(const TestRequest&) = delete;
-  TestRequest& operator=(const TestRequest&) = delete;
-
-  ~TestRequest() override = default;
-
-  // history::Request overrides
-  bool IsPending() override { return is_pending_; }
-  int GetResponseCode() override { return response_code_; }
-  const std::string& GetResponseBody() override { return response_body_; }
-  void SetPostData(const std::string& post_data) override {
-    post_data_ = post_data;
-  }
-  void SetPostDataAndType(const std::string& post_data,
-                          const std::string& mime_type) override {
-    SetPostData(post_data);
-  }
-  void SetUserAgent(const std::string& post_data) override {}
-
-  void Start() override {
-    is_pending_ = true;
-    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE, base::BindOnce(&TestRequest::MimicReturnFromFetch,
-                                  base::Unretained(this)));
-  }
-
-  void MimicReturnFromFetch() {
-    // Mimic a successful fetch and return. We don't actually send out a request
-    // in unittests.
-    EXPECT_EQ(web_history_service_->GetExpectedPostData(this), post_data_);
-    std::move(callback_).Run(this, true);
-  }
-
- private:
-  raw_ptr<TestingWebHistoryService> web_history_service_;
-  GURL url_;
-  WebHistoryService::CompletionCallback callback_;
-  int response_code_;
+  int response_code_ = net::HTTP_OK;
   std::string response_body_;
-  std::string post_data_;
-  bool is_pending_;
+  GURL last_request_url_;
 };
-
-WebHistoryService::Request* TestingWebHistoryService::CreateRequest(
-    const GURL& url,
-    CompletionCallback callback,
-    const net::PartialNetworkTrafficAnnotationTag& partial_traffic_annotation) {
-  EXPECT_EQ(expected_url_, url);
-  WebHistoryService::Request* request =
-      new TestRequest(url, std::move(callback), this);
-  expected_post_data_[request] = current_expected_post_data_;
-  return request;
-}
-
-std::optional<base::Value::Dict> TestingWebHistoryService::ReadResponse(
-    Request* request) {
-  return WebHistoryService::ReadResponse(request);
-}
-
-void TestingWebHistoryService::SetAudioHistoryCallback(
-    bool success, bool new_enabled_value) {
-  EXPECT_TRUE(success);
-  // `new_enabled_value` should be equal to whatever the audio history value
-  // was just set to.
-  EXPECT_EQ(expected_audio_history_value_, new_enabled_value);
-}
-
-void TestingWebHistoryService::GetAudioHistoryCallback(
-  bool success, bool new_enabled_value) {
-  EXPECT_TRUE(success);
-  EXPECT_EQ(expected_audio_history_value_, new_enabled_value);
-}
-
-void TestingWebHistoryService::MultipleRequestsCallback(
-  bool success, bool new_enabled_value) {
-  EXPECT_TRUE(success);
-  EXPECT_EQ(expected_audio_history_value_, new_enabled_value);
-}
-
-const std::string& TestingWebHistoryService::GetExpectedPostData(
-    Request* request) {
-  return expected_post_data_[request];
-}
-
-std::string TestingWebHistoryService::GetExpectedAudioHistoryValue() {
-  if (expected_audio_history_value_)
-    return "true";
-  return "false";
-}
 
 }  // namespace
 
 // A test class used for testing the WebHistoryService class.
-class WebHistoryServiceTest : public testing::Test {
+class WebHistoryServiceTest : public testing::TestWithParam<bool> {
  public:
   WebHistoryServiceTest()
       : test_shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)),
-        web_history_service_(test_shared_loader_factory_) {}
+        web_history_service_(test_shared_loader_factory_) {
+    features_.InitWithFeatureState(kWebHistoryUseNewApi, IsNewAPIEnabled());
+  }
 
   WebHistoryServiceTest(const WebHistoryServiceTest&) = delete;
   WebHistoryServiceTest& operator=(const WebHistoryServiceTest&) = delete;
 
   ~WebHistoryServiceTest() override = default;
 
-  void TearDown() override {
+  bool IsNewAPIEnabled() const { return GetParam(); }
+
+  std::optional<WebHistoryService::QueryHistoryResult> QueryHistorySynchronous(
+      std::string_view query,
+      const QueryOptions& options) {
     base::RunLoop run_loop;
-    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE, run_loop.QuitClosure());
+    std::optional<WebHistoryService::QueryHistoryResult> result;
+    std::unique_ptr<WebHistoryService::Request> request =
+        web_history_service_.QueryHistory(
+            base::UTF8ToUTF16(query), options,
+            base::BindLambdaForTesting(
+                [&](WebHistoryService::Request*,
+                    base::optional_ref<
+                        const WebHistoryService::QueryHistoryResult>
+                        query_result) {
+                  if (query_result) {
+                    result.emplace(*query_result);
+                  }
+                  run_loop.Quit();
+                }),
+            PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
     run_loop.Run();
+    return result;
   }
 
-  TestingWebHistoryService* web_history_service() {
-    return &web_history_service_;
+  bool QueryWebAndAppActivitySynchronous() {
+    base::RunLoop run_loop;
+    bool result = false;
+    web_history_service_.QueryWebAndAppActivity(
+        base::BindLambdaForTesting([&](bool success) {
+          result = success;
+          run_loop.Quit();
+        }),
+        PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
+    run_loop.Run();
+    return result;
   }
 
- private:
+  bool ExpireHistorySynchronous(
+      const std::vector<ExpireHistoryArgs>& expire_list) {
+    base::RunLoop run_loop;
+    bool result = false;
+    web_history_service_.ExpireHistory(
+        expire_list, base::BindLambdaForTesting([&](bool success) {
+          result = success;
+          run_loop.Quit();
+        }),
+        PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
+    run_loop.Run();
+    return result;
+  }
+
+ protected:
+  base::test::ScopedFeatureList features_;
   base::test::SingleThreadTaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   TestingWebHistoryService web_history_service_;
 };
 
-TEST_F(WebHistoryServiceTest, GetAudioHistoryEnabled) {
-  web_history_service()->SetExpectedURL(
-      GURL("https://history.google.com/history/api/lookup?client=audio"));
-  web_history_service()->SetExpectedAudioHistoryValue(true);
-  web_history_service()->GetAudioHistoryEnabled(
-      base::BindOnce(&TestingWebHistoryService::GetAudioHistoryCallback,
-                     base::Unretained(web_history_service())),
-      PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                     base::Unretained(web_history_service())));
-}
+INSTANTIATE_TEST_SUITE_P(,
+                         WebHistoryServiceTest,
+                         testing::Bool(),
+                         [](const testing::TestParamInfo<bool>& info) {
+                           return info.param ? "NewAPI" : "OldAPI";
+                         });
 
-TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledTrue) {
-  web_history_service()->SetExpectedURL(
-      GURL("https://history.google.com/history/api/change"));
-  web_history_service()->SetExpectedAudioHistoryValue(true);
-  web_history_service()->SetExpectedPostData(
-      "{\"client\":\"audio\",\"enable_history_recording\":true}");
-  web_history_service()->SetAudioHistoryEnabled(
-      true,
-      base::BindOnce(&TestingWebHistoryService::SetAudioHistoryCallback,
-                     base::Unretained(web_history_service())),
-      PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                     base::Unretained(web_history_service())));
-}
-
-TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledFalse) {
-  web_history_service()->SetExpectedURL(
-      GURL("https://history.google.com/history/api/change"));
-  web_history_service()->SetExpectedAudioHistoryValue(false);
-  web_history_service()->SetExpectedPostData(
-      "{\"client\":\"audio\",\"enable_history_recording\":false}");
-  web_history_service()->SetAudioHistoryEnabled(
-      false,
-      base::BindOnce(&TestingWebHistoryService::SetAudioHistoryCallback,
-                     base::Unretained(web_history_service())),
-      PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                     base::Unretained(web_history_service())));
-}
-
-TEST_F(WebHistoryServiceTest, MultipleRequests) {
-  web_history_service()->SetExpectedURL(
-      GURL("https://history.google.com/history/api/change"));
-  web_history_service()->SetExpectedAudioHistoryValue(false);
-  web_history_service()->SetExpectedPostData(
-      "{\"client\":\"audio\",\"enable_history_recording\":false}");
-  web_history_service()->SetAudioHistoryEnabled(
-      false,
-      base::BindOnce(&TestingWebHistoryService::MultipleRequestsCallback,
-                     base::Unretained(web_history_service())),
-      PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
-
-  web_history_service()->SetExpectedURL(
-      GURL("https://history.google.com/history/api/lookup?client=audio"));
-  web_history_service()->SetExpectedPostData("");
-  web_history_service()->GetAudioHistoryEnabled(
-      base::BindOnce(&TestingWebHistoryService::MultipleRequestsCallback,
-                     base::Unretained(web_history_service())),
-      PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
-
-  // Check that both requests are no longer pending.
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                     base::Unretained(web_history_service())));
-}
-
-TEST_F(WebHistoryServiceTest, VerifyReadResponse) {
-  // Test that properly formatted response with good response code returns true
-  // as expected.
-  std::unique_ptr<WebHistoryService::Request> request(
-      new TestRequest(GURL("http://history.google.com/"), base::DoNothing(),
-                      net::HTTP_OK, /* response code */
-                      "{\n"         /* response body */
-                      "  \"history_recording_enabled\": true\n"
-                      "}"));
-  // ReadResponse deletes the request
-  auto response_value = TestingWebHistoryService::ReadResponse(request.get());
-  ASSERT_TRUE(response_value);
-  bool enabled_value = false;
-  if (std::optional<bool> enabled =
-          response_value->FindBool("history_recording_enabled")) {
-    enabled_value = *enabled;
+TEST_P(WebHistoryServiceTest, QueryHistoryValid) {
+  // Test a valid response.
+  if (IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"lookup":[{"chromeHistory":[{
+  "url":"https://www.google.com/",
+  "timestamp":"12345",
+  "title":"Google",
+  "faviconUrl":"https://www.google.com/favicon.ico",
+  "clientId":"id1"
+}]}]})");
+  } else {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"event":[{"result":[{
+  "url":"https://www.google.com/",
+  "title":"Google",
+  "favicon_url":"https://www.google.com/favicon.ico",
+  "id":[{"timestamp_usec":"12345", "client_id":"id1"}]
+}]}]})");
   }
-  EXPECT_TRUE(enabled_value);
 
-  // Test that properly formatted response with good response code returns false
-  // as expected.
-  std::unique_ptr<WebHistoryService::Request> request2(new TestRequest(
-      GURL("http://history.google.com/"), base::DoNothing(), net::HTTP_OK,
-      "{\n"
-      "  \"history_recording_enabled\": false\n"
-      "}"));
-  // ReadResponse deletes the request
-  auto response_value2 = TestingWebHistoryService::ReadResponse(request2.get());
-  ASSERT_TRUE(response_value2);
-  enabled_value = true;
-  if (std::optional<bool> enabled =
-          response_value2->FindBool("history_recording_enabled")) {
-    enabled_value = *enabled;
+  std::optional<WebHistoryService::QueryHistoryResult> result =
+      QueryHistorySynchronous("google", QueryOptions());
+
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(1u, result->visits.size());
+  EXPECT_EQ("https://www.google.com/", result->visits[0].url.spec());
+  EXPECT_EQ("Google", result->visits[0].title);
+  EXPECT_EQ("https://www.google.com/favicon.ico",
+            result->visits[0].favicon_url.spec());
+  EXPECT_EQ(base::Time::FromMillisecondsSinceUnixEpoch(12.345),
+            result->visits[0].timestamp);
+  EXPECT_EQ("id1", result->visits[0].client_id);
+}
+
+TEST_P(WebHistoryServiceTest, QueryHistoryError) {
+  web_history_service_.SetResponse(net::HTTP_INTERNAL_SERVER_ERROR, "");
+
+  std::optional<WebHistoryService::QueryHistoryResult> result =
+      QueryHistorySynchronous("", QueryOptions());
+
+  EXPECT_FALSE(result.has_value());
+}
+
+TEST_P(WebHistoryServiceTest, QueryHistoryMalformedResponse) {
+  web_history_service_.SetResponse(net::HTTP_OK, "this is not json");
+
+  std::optional<WebHistoryService::QueryHistoryResult> result =
+      QueryHistorySynchronous("", QueryOptions());
+
+  EXPECT_FALSE(result.has_value());
+}
+
+TEST_P(WebHistoryServiceTest, QueryHistoryInvalidOrMissingFields) {
+  // A response with no "event"/"lookup" list.
+  {
+    web_history_service_.SetResponse(net::HTTP_OK, R"({})");
+
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
   }
-  EXPECT_FALSE(enabled_value);
 
-  // Test that a bad response code returns false.
-  std::unique_ptr<WebHistoryService::Request> request3(
-      new TestRequest(GURL("http://history.google.com/"), base::DoNothing(),
-                      net::HTTP_UNAUTHORIZED,
-                      "{\n"
-                      "  \"history_recording_enabled\": true\n"
-                      "}"));
-  // ReadResponse deletes the request
-  auto response_value3 = TestingWebHistoryService::ReadResponse(request3.get());
-  EXPECT_FALSE(response_value3);
+  // An event with no "result"/"chromeHistory" list.
+  {
+    if (IsNewAPIEnabled()) {
+      web_history_service_.SetResponse(net::HTTP_OK, R"({"lookup":[{}]})");
+    } else {
+      web_history_service_.SetResponse(net::HTTP_OK, R"({"event":[{}]})");
+    }
 
-  // Test that improperly formatted response returns false.
-  // Note: we expect to see a warning when running this test similar to
-  //   "Non-JSON response received from history server".
-  // This test tests how that situation is handled.
-  std::unique_ptr<WebHistoryService::Request> request4(new TestRequest(
-      GURL("http://history.google.com/"), base::DoNothing(), net::HTTP_OK,
-      "{\n"
-      "  \"history_recording_enabled\": not true\n"
-      "}"));
-  // ReadResponse deletes the request
-  auto response_value4 = TestingWebHistoryService::ReadResponse(request4.get());
-  EXPECT_FALSE(response_value4);
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
 
-  // Test that improperly formatted response returns false.
-  std::unique_ptr<WebHistoryService::Request> request5(new TestRequest(
-      GURL("http://history.google.com/"), base::DoNothing(), net::HTTP_OK,
-      "{\n"
-      "  \"history_recording\": true\n"
-      "}"));
-  // ReadResponse deletes the request
-  auto response_value5 = TestingWebHistoryService::ReadResponse(request5.get());
-  ASSERT_TRUE(response_value5);
-  EXPECT_FALSE(response_value5->FindBool("history_recording_enabled"));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
+  }
+
+  // An empty result.
+  {
+    if (IsNewAPIEnabled()) {
+      web_history_service_.SetResponse(
+          net::HTTP_OK, R"({"lookup":[{"chromeHistory":[{}]}]})");
+    } else {
+      web_history_service_.SetResponse(net::HTTP_OK,
+                                       R"({"event":[{"result":[{}]}]})");
+    }
+
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
+  }
+
+  // A result with no "id" (visit) list.
+  if (!IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(
+        net::HTTP_OK,
+        R"({"event":[{"result":[{"url":"https://www.google.com/"}]}]})");
+
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
+  }
+
+  // A visit with no timestamp.
+  {
+    if (IsNewAPIEnabled()) {
+      web_history_service_.SetResponse(net::HTTP_OK,
+                                       R"({"lookup":[{"chromeHistory":[{
+  "url":"https://www.google.com/",
+  "not_a_timestamp":"12345"
+}]}]})");
+    } else {
+      web_history_service_.SetResponse(net::HTTP_OK,
+                                       R"({"event":[{"result":[{
+  "url":"https://www.google.com/",
+  "id":[{"not_a_timestamp":"12345"}]
+}]}]})");
+    }
+
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
+  }
+
+  // A visit with an invalid timestamp.
+  {
+    if (IsNewAPIEnabled()) {
+      web_history_service_.SetResponse(net::HTTP_OK,
+                                       R"({"event":[{"result":[{
+  "url":"https://www.google.com/",
+  "timestamp":"not a number"
+}]}]})");
+    } else {
+      web_history_service_.SetResponse(net::HTTP_OK,
+                                       R"({"event":[{"result":[{
+  "url":"https://www.google.com/",
+  "id":[{"timestamp_usec":"not a number"}]
+}]}]})");
+    }
+
+    std::optional<WebHistoryService::QueryHistoryResult> result =
+        QueryHistorySynchronous("", QueryOptions());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->visits.empty());
+  }
+}
+
+TEST_P(WebHistoryServiceTest, QueryHistoryUrlConstruction) {
+  QueryOptions options;
+  options.begin_time = base::Time::FromMillisecondsSinceUnixEpoch(12345000);
+  options.end_time = base::Time::FromMillisecondsSinceUnixEpoch(67890000);
+  options.max_count = 50;
+
+  QueryHistorySynchronous("search term", options);
+
+  const GURL& url = web_history_service_.last_request_url();
+  if (IsNewAPIEnabled()) {
+    EXPECT_TRUE(url.query().empty());
+  } else {
+    EXPECT_NE(std::string::npos, url.query().find("min=12345000000"));
+    // end_time is inclusive, so 1us is subtracted.
+    EXPECT_NE(std::string::npos, url.query().find("max=67889999999"));
+    EXPECT_NE(std::string::npos, url.query().find("num=50"));
+    EXPECT_NE(std::string::npos, url.query().find("q=search+term"));
+  }
+}
+
+TEST_P(WebHistoryServiceTest, QueryWebAndAppActivityEnabled) {
+  // Test a valid response that says WAA is enabled.
+  if (IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"facsSetting":[{
+  "dataRecordingEnabled": true
+}]})");
+  } else {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"history_recording_enabled": true})");
+  }
+
+  EXPECT_TRUE(QueryWebAndAppActivitySynchronous());
+}
+
+TEST_P(WebHistoryServiceTest, QueryWebAndAppActivityDisabled) {
+  // Test a valid response that says WAA is disabled.
+  if (IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"facsSetting":[{
+  "dataRecordingEnabled": false
+}]})");
+  } else {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"history_recording_enabled": false})");
+  }
+
+  EXPECT_FALSE(QueryWebAndAppActivitySynchronous());
+}
+
+TEST_P(WebHistoryServiceTest, QueryWebAndAppActivityError) {
+  web_history_service_.SetResponse(net::HTTP_INTERNAL_SERVER_ERROR, "");
+
+  EXPECT_FALSE(QueryWebAndAppActivitySynchronous());
+}
+
+TEST_P(WebHistoryServiceTest, QueryWebAndAppActivityMalformedResponse) {
+  web_history_service_.SetResponse(net::HTTP_OK, "this is not json");
+
+  EXPECT_FALSE(QueryWebAndAppActivitySynchronous());
+}
+
+TEST_P(WebHistoryServiceTest, QueryWebAndAppActivityMisnamedField) {
+  // Test a response that contains differently-named response fields.
+  if (IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"facsSetting":[{
+  "dataRecording": true
+}]})");
+  } else {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"history_recording": true})");
+  }
+
+  EXPECT_FALSE(QueryWebAndAppActivitySynchronous());
+}
+
+TEST_P(WebHistoryServiceTest, ExpireHistoryValid) {
+  if (IsNewAPIEnabled()) {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"versionInfo": "some_token"})");
+  } else {
+    web_history_service_.SetResponse(net::HTTP_OK,
+                                     R"({"version_info": "some_token"})");
+  }
+
+  EXPECT_TRUE(ExpireHistorySynchronous({}));
+  EXPECT_EQ(web_history_service_.server_version_info_for_test(), "some_token");
+}
+
+TEST_P(WebHistoryServiceTest, ExpireHistoryValidNoVersionInfo) {
+  web_history_service_.SetResponse(net::HTTP_OK, R"({})");
+
+  // Version info in the response is optional, so this should still succeed.
+  EXPECT_TRUE(ExpireHistorySynchronous({}));
+  EXPECT_TRUE(web_history_service_.server_version_info_for_test().empty());
+}
+
+TEST_P(WebHistoryServiceTest, ExpireHistoryError) {
+  web_history_service_.SetResponse(net::HTTP_INTERNAL_SERVER_ERROR, "");
+
+  EXPECT_FALSE(ExpireHistorySynchronous({}));
+}
+
+TEST_P(WebHistoryServiceTest, ExpireHistoryMalformedResponse) {
+  web_history_service_.SetResponse(net::HTTP_OK, "this is not json");
+
+  EXPECT_FALSE(ExpireHistorySynchronous({}));
 }
 
 }  // namespace history

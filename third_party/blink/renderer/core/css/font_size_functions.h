@@ -91,8 +91,7 @@ class CORE_EXPORT FontSizeFunctions {
   // metric divided by the font size.
   // https://www.w3.org/TR/css-fonts-5/#font-size-adjust-aspect-value
   static std::optional<float> FontAspectValue(const SimpleFontData*,
-                                              FontSizeAdjust::Metric,
-                                              float computed_size);
+                                              FontSizeAdjust::Metric);
 
   // Given font data, this function returns a font size adjusted by
   // font-size-adjust, scaling the font size to achieve the desired aspect
@@ -100,6 +99,10 @@ class CORE_EXPORT FontSizeFunctions {
   static std::optional<float> MetricsMultiplierAdjustedFontSize(
       const SimpleFontData*,
       const FontDescription&);
+
+  // Snaps the given text scale factor to the nearest value in a fixed set of
+  // buckets (e.g. 0.85, 1.0, 1.15, ...).
+  static double SnapToClosestFontScaleBucket(double raw_font_scale);
 };
 
 }  // namespace blink

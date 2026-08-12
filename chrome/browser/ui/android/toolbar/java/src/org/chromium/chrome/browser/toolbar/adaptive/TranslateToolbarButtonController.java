@@ -4,15 +4,18 @@
 
 package org.chromium.chrome.browser.toolbar.adaptive;
 
-import android.content.res.Resources;
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.graphics.drawable.Drawable;
 import android.view.View;
 
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.Supplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.toolbar.BaseButtonDataProvider;
 import org.chromium.chrome.browser.toolbar.R;
+import org.chromium.chrome.browser.toolbar.optional_button.BaseButtonDataProvider;
+import org.chromium.chrome.browser.toolbar.optional_button.ButtonData.ButtonSpec;
 import org.chromium.chrome.browser.translate.TranslateBridge;
 import org.chromium.chrome.browser.user_education.IphCommandBuilder;
 import org.chromium.components.embedder_support.util.UrlUtilities;
@@ -20,9 +23,12 @@ import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.components.feature_engagement.Tracker;
 
+import java.util.function.Supplier;
+
 /** Handles the translate button on the toolbar. */
+@NullMarked
 public class TranslateToolbarButtonController extends BaseButtonDataProvider {
-    private final Supplier<Tracker> mTrackerSupplier;
+    private final Supplier<@Nullable Tracker> mTrackerSupplier;
 
     /**
      * Creates a new instance of {@code TranslateButtonController}.
@@ -33,21 +39,17 @@ public class TranslateToolbarButtonController extends BaseButtonDataProvider {
      * @param trackerSupplier  Supplier for the current profile tracker, used for IPH.
      */
     public TranslateToolbarButtonController(
-            Supplier<Tab> activeTabSupplier,
+            Supplier<@Nullable Tab> activeTabSupplier,
             Drawable buttonDrawable,
             String contentDescription,
-            Supplier<Tracker> trackerSupplier) {
+            Supplier<@Nullable Tracker> trackerSupplier) {
         super(
                 activeTabSupplier,
                 /* modalDialogManager= */ null,
-                buttonDrawable,
-                contentDescription,
-                Resources.ID_NULL,
-                /* supportsTinting= */ true,
-                null,
-                AdaptiveToolbarButtonVariant.TRANSLATE,
-                /* tooltipTextResId= */ Resources.ID_NULL,
-                /* showHoverHighlight= */ true);
+                new ButtonSpec.Builder(
+                                buttonDrawable, contentDescription, /* supportsTinting= */ true)
+                        .setButtonVariant(AdaptiveToolbarButtonVariant.TRANSLATE)
+                        .build());
         mTrackerSupplier = trackerSupplier;
     }
 
@@ -62,22 +64,24 @@ public class TranslateToolbarButtonController extends BaseButtonDataProvider {
 
     @Override
     public void onClick(View view) {
-        if (!mActiveTabSupplier.hasValue()) return;
+        Tab tab = mActiveTabSupplier.get();
+        if (tab == null) return;
 
         RecordUserAction.record("MobileTopToolbarTranslateButton");
-        if (mTrackerSupplier.hasValue()) {
-            mTrackerSupplier
-                    .get()
-                    .notifyEvent(EventConstants.ADAPTIVE_TOOLBAR_CUSTOMIZATION_TRANSLATE_OPENED);
+        Tracker tracker = mTrackerSupplier.get();
+        if (tracker != null) {
+            tracker.notifyEvent(EventConstants.ADAPTIVE_TOOLBAR_CUSTOMIZATION_TRANSLATE_OPENED);
         }
 
-        TranslateBridge.translateTabWhenReady(mActiveTabSupplier.get());
+        TranslateBridge.translateTabWhenReady(tab);
     }
 
     @Override
-    protected boolean shouldShowButton(Tab tab) {
+    protected boolean shouldShowButton(@Nullable Tab tab) {
+        if (tab == null) return false;
         if (!super.shouldShowButton(tab)) return false;
-        if (tab.isNativePage() && tab.getNativePage().isPdf()) return false;
+        if (!AdaptiveToolbarFeatures.isTranslateEnabled(tab.getProfile())) return false;
+        if (tab.isNativePage() && assumeNonNull(tab.getNativePage()).isPdf()) return false;
         return UrlUtilities.isHttpOrHttps(tab.getUrl());
     }
 }

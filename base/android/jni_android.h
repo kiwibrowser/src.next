@@ -16,14 +16,14 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/debug/debugging_buildflags.h"
-#include "base/debug/stack_trace.h"
+#include "build/robolectric_buildflags.h"
 #include "third_party/jni_zero/jni_zero.h"
 
 namespace base {
 namespace android {
 
 // Used to mark symbols to be exported in a shared library's symbol table.
-#define JNI_EXPORT __attribute__ ((visibility("default")))
+#define JNI_EXPORT __attribute__((visibility("default")))
 
 // Contains the registration method information for initializing JNI bindings.
 struct RegistrationMethod {
@@ -63,8 +63,10 @@ inline void DetachFromVM() {
 // Initializes the global JVM.
 BASE_EXPORT void InitVM(JavaVM* vm);
 
-// Returns true if the global JVM has been initialized.
-inline bool IsVMInitialized() {
+// Returns true if the global JVM has been initialized. This happens
+// immediately on native library load, so this is still correct even very
+// early in startup.
+inline bool IsJavaAvailable() {
   return jni_zero::IsVMInitialized();
 }
 
@@ -91,7 +93,6 @@ inline ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env,
   return jni_zero::GetClass(env, class_name);
 }
 
-
 // Returns true if an exception is pending in the provided JNIEnv*.
 inline bool HasException(JNIEnv* env) {
   return jni_zero::HasException(env);
@@ -112,6 +113,12 @@ BASE_EXPORT std::string GetJavaExceptionInfo(
     const JavaRef<jthrowable>& throwable);
 // This returns a string representation of the java stack trace.
 BASE_EXPORT std::string GetJavaStackTraceIfPresent();
+
+BASE_EXPORT void HookJniFindClass(JNIEnv* env);
+BASE_EXPORT void UnhookJniFindClassForTesting(JNIEnv* env);
+#if !BUILDFLAG(IS_ROBOLECTRIC)
+BASE_EXPORT const JNINativeInterface* GetOriginalJniFunctionsForTesting();
+#endif
 
 using MethodID = jni_zero::MethodID;
 }  // namespace android

@@ -10,12 +10,17 @@
 #include <ostream>
 #include <string_view>
 
+#include "base/check.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/hash/hash.h"
+#include "base/numerics/byte_conversions.h"
 #include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/types/pass_key.h"
+#include "third_party/abseil-cpp/absl/numeric/int128.h"
 
 namespace base {
 
@@ -74,45 +79,32 @@ Uuid Uuid::GenerateRandomV4() {
 }
 
 // static
-Uuid Uuid::FormatRandomDataAsV4(
-    base::span<const uint8_t, 16> input,
-    base::PassKey<content::FileSystemAccessManagerImpl> /*pass_key*/) {
-  return FormatRandomDataAsV4Impl(input);
-}
-
-// static
-Uuid Uuid::FormatRandomDataAsV4ForTesting(base::span<const uint8_t, 16> input) {
-  return FormatRandomDataAsV4Impl(input);
-}
-
-// static
 Uuid Uuid::FormatRandomDataAsV4Impl(base::span<const uint8_t, 16> input) {
   DCHECK_EQ(input.size_bytes(), kGuidV4InputLength);
 
-  uint64_t sixteen_bytes[2];
-  memcpy(&sixteen_bytes, input.data(), sizeof(sixteen_bytes));
+  uint64_t first_u64 = U64FromLittleEndian(input.first<8>());
+  uint64_t second_u64 = U64FromLittleEndian(input.last<8>());
 
   // Set the Uuid to version 4 as described in RFC 4122, section 4.4.
   // The format of Uuid version 4 must be xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx,
   // where y is one of [8, 9, a, b].
 
   // Clear the version bits and set the version to 4:
-  sixteen_bytes[0] &= 0xffffffff'ffff0fffULL;
-  sixteen_bytes[0] |= 0x00000000'00004000ULL;
+  first_u64 &= 0xffffffff'ffff0fffULL;
+  first_u64 |= 0x00000000'00004000ULL;
 
-  // Set the two most significant bits (bits 6 and 7) of the
-  // clock_seq_hi_and_reserved to zero and one, respectively:
-  sixteen_bytes[1] &= 0x3fffffff'ffffffffULL;
-  sixteen_bytes[1] |= 0x80000000'00000000ULL;
+  // Clear bit 65 and set bit 64, to set the 'var' field to 0b10 per RFC 9562
+  // section 5.4.
+  second_u64 &= 0x3fffffff'ffffffffULL;
+  second_u64 |= 0x80000000'00000000ULL;
 
   Uuid uuid;
-  uuid.lowercase_ =
-      StringPrintf("%08x-%04x-%04x-%04x-%012llx",
-                   static_cast<uint32_t>(sixteen_bytes[0] >> 32),
-                   static_cast<uint32_t>((sixteen_bytes[0] >> 16) & 0x0000ffff),
-                   static_cast<uint32_t>(sixteen_bytes[0] & 0x0000ffff),
-                   static_cast<uint32_t>(sixteen_bytes[1] >> 48),
-                   sixteen_bytes[1] & 0x0000ffff'ffffffffULL);
+  uuid.lowercase_ = StringPrintf(
+      "%08x-%04x-%04x-%04x-%012llx", static_cast<uint32_t>(first_u64 >> 32),
+      static_cast<uint32_t>((first_u64 >> 16) & 0x0000ffff),
+      static_cast<uint32_t>(first_u64 & 0x0000ffff),
+      static_cast<uint32_t>(second_u64 >> 48),
+      second_u64 & 0x0000ffff'ffffffffULL);
   return uuid;
 }
 
@@ -156,6 +148,25 @@ Uuid& Uuid::operator=(Uuid&& other) = default;
 
 const std::string& Uuid::AsLowercaseString() const {
   return lowercase_;
+}
+
+absl::uint128 Uuid::AsInteger() const {
+  if (!is_valid()) {
+    return 0;
+  }
+  // Valid Uuids have the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, where x is
+  // a hexadecimal digit.
+  // Convert each dash-separated part into an integer and combine the results.
+  std::string_view uuid = lowercase_;
+  uint64_t p0, p1, p2, p3, p4;
+  CHECK(base::HexStringToUInt64(uuid.substr(0, 8), &p0));
+  CHECK(base::HexStringToUInt64(uuid.substr(9, 4), &p1));
+  CHECK(base::HexStringToUInt64(uuid.substr(14, 4), &p2));
+  CHECK(base::HexStringToUInt64(uuid.substr(19, 4), &p3));
+  CHECK(base::HexStringToUInt64(uuid.substr(24, 12), &p4));
+  uint64_t most_significant_bits = (p0 << 32) | (p1 << 16) | p2;
+  uint64_t least_significant_bits = (p3 << 48) | p4;
+  return absl::MakeUint128(most_significant_bits, least_significant_bits);
 }
 
 std::ostream& operator<<(std::ostream& out, const Uuid& uuid) {

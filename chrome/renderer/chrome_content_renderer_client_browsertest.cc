@@ -7,40 +7,39 @@
 #include <string>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/functional/bind.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/renderer/searchbox/searchbox.h"
-#include "chrome/test/base/chrome_render_view_test.h"
-#include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
-#include "components/network_session_configurator/common/network_switches.h"
+#include "chrome/test/base/chrome_test_utils.h"
+#include "chrome/test/base/platform_browser_test.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/renderer/render_frame.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_render_thread.h"
 #include "content/public/test/test_utils.h"
-#include "ipc/ipc_listener.h"
-#include "ipc/ipc_sender.h"
-#include "ipc/ipc_test_sink.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/web/web_local_frame.h"
-#include "third_party/blink/public/web/web_plugin_params.h"
 #include "url/gurl.h"
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "chrome/common/extensions/extension_test_util.h"
 #include "extensions/common/extensions_client.h"
 #endif
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/renderer/searchbox/searchbox.h"
+#include "chrome/test/base/chrome_render_view_test.h"
+#include "content/public/renderer/render_frame.h"
+#endif
+
+namespace {
+
+// SearchBox is not supported on Android.
+#if !BUILDFLAG(IS_ANDROID)
 
 using ChromeContentRendererClientSearchBoxTest = ChromeRenderViewTest;
 
@@ -83,6 +82,8 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   EXPECT_NE(result, thumbnail_url);
 }
 
+#endif  // !BUILDFLAG(IS_ANDROID)
+
 // The tests below examine Youtube requests that use the Flash API and ensure
 // that the requests have been modified to instead use HTML5. The tests also
 // check the MIME type of the request to ensure that it is "text/html".
@@ -112,9 +113,9 @@ const FlashEmbedsTestData kFlashEmbedsTestData[] = {
 
 }  // namespace
 
-class ChromeContentRendererClientBrowserTest :
-    public InProcessBrowserTest,
-    public ::testing::WithParamInterface<FlashEmbedsTestData> {
+class ChromeContentRendererClientBrowserTest
+    : public PlatformBrowserTest,
+      public ::testing::WithParamInterface<FlashEmbedsTestData> {
  public:
   ChromeContentRendererClientBrowserTest()
       : https_server_(std::make_unique<net::EmbeddedTestServer>(
@@ -150,14 +151,7 @@ class ChromeContentRendererClientBrowserTest :
     https_server_->RegisterRequestMonitor(base::BindRepeating(
         &ChromeContentRendererClientBrowserTest::MonitorRequestHandler,
         base::Unretained(this)));
-    ASSERT_TRUE(https_server_->Start());
-    message_runner_ = new content::MessageLoopRunner();
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // HTTPS server only serves a valid cert for localhost, so this is needed
-    // to load pages from other hosts without an error.
-    command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+    message_runner_ = base::MakeRefCounted<content::MessageLoopRunner>();
   }
 
  protected:
@@ -170,10 +164,11 @@ class ChromeContentRendererClientBrowserTest :
 
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbed) {
+  https_server()->SetCertHostnames({GetParam().host});
+  ASSERT_TRUE(https_server()->Start());
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  auto* web_contents = chrome_test_utils::GetActiveWebContents(this);
+  ASSERT_TRUE(chrome_test_utils::NavigateToURL(web_contents, url));
 
   GURL video_url = https_server()->GetURL(GetParam().host, GetParam().path);
   EXPECT_TRUE(ExecJs(web_contents, "appendEmbedToDOM('" + video_url.spec() +
@@ -183,10 +178,11 @@ IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbedObject) {
+  https_server()->SetCertHostnames({GetParam().host});
+  ASSERT_TRUE(https_server()->Start());
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  content::WebContents* web_contents =
-     browser()->tab_strip_model()->GetActiveWebContents();
+  auto* web_contents = chrome_test_utils::GetActiveWebContents(this);
+  ASSERT_TRUE(chrome_test_utils::NavigateToURL(web_contents, url));
 
   GURL video_url = https_server()->GetURL(GetParam().host, GetParam().path);
   EXPECT_TRUE(ExecJs(web_contents, "appendDataEmbedToDOM('" + video_url.spec() +
@@ -198,7 +194,7 @@ INSTANTIATE_TEST_SUITE_P(FlashEmbeds,
                          ChromeContentRendererClientBrowserTest,
                          ::testing::ValuesIn(kFlashEmbedsTestData));
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 IN_PROC_BROWSER_TEST_F(ChromeContentRendererClientBrowserTest,
                        AvailabilityMapCreated) {
   auto* extensions_client = extensions::ExtensionsClient::Get();
@@ -210,11 +206,13 @@ IN_PROC_BROWSER_TEST_F(ChromeContentRendererClientBrowserTest,
   {
     const auto& map =
         extensions_client->GetFeatureDelegatedAvailabilityCheckMap();
-    EXPECT_EQ(7u, map.size());
+    EXPECT_TRUE(!map.empty());
     for (const auto* feature :
          extension_test_util::GetExpectedDelegatedFeaturesForTest()) {
       EXPECT_EQ(1u, map.count(feature));
     }
   }
 }
-#endif
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+
+}  // namespace

@@ -10,17 +10,14 @@
     <message name="IDS_SYNC_DATATYPE_BOOKMARKS" desc="Bookmarks, one of the data types that we allow syncing.">
       Bookmarks
     </message>
-    <message name="IDS_SYNC_DATATYPE_PASSWORDS" desc="Saved passwords, one of the data types that we allow syncing.">
-      Passwords
+    <message name="IDS_SYNC_DATATYPE_PASSWORDS_AND_PASSKEYS" desc="Saved passwords and passkeys, one of the data types that we allow syncing.">
+      Passwords and passkeys
     </message>
     <message name="IDS_SYNC_DATATYPE_PREFERENCES" desc="Settings, one of the data types that we allow syncing.">
       Settings
     </message>
     <message name="IDS_SYNC_DATATYPE_TABS" desc="Open Tabs, one of the data types that we allow syncing.">
       Open Tabs
-    </message>
-    <message name="IDS_SYNC_DATATYPE_TYPED_URLS" desc="History, one of the data types that we allow syncing.">
-      History
     </message>
     <message name="IDS_SYNC_DATATYPE_HISTORY_AND_TABS" desc="History and tabs, one of the data types that we allow syncing.">
       History and Tabs
@@ -30,9 +27,6 @@
     </message>
     <message name="IDS_SYNC_EMPTY_PASSPHRASE_ERROR" desc="Error message when the passphrase is empty.">
       Empty passphrase is not allowed.
-    </message>
-    <message name="IDS_SYNC_ENCRYPTION_SECTION_TITLE" desc="Title of the section containing sync encryption preferences.">
-      Encryption options
     </message>
     <message name="IDS_SYNC_FULL_ENCRYPTION_DATA" desc="Text of the radio that when selected enables full encryption.">
       Encrypt synced data with your own sync passphrase
@@ -60,5 +54,33 @@
       =2 {{website_1}, {website_2}}
       =3 {{website_1}, {website_2}, and 1 more}
       other {{website_1}, {website_2}, and {more_count} more}}
+    </message>
+    <message name="IDS_BULK_UPLOAD_BOOKMARK_FOLDER_SUBTITLE" desc="Item listed in the Bookmarks section in the Batch Upload dialog. This dialog appears when the user clicks on an informational message about items saved only to their device. The title of the dialog is ‘Save items in account’. The list of items has three sections: Passwords, Bookmarks, and Addresses. This string is one of the items in the Bookmarks list: it lists the name of a bookmark folder and shows the number of bookmarks in that folder.">
+    {count, plural,
+      =0 {# bookmarks}
+      =1 {# bookmark}
+      other {# bookmarks}
+    }
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_COMPUTER_FORMAT" desc="Format for device name when it is a computer, combining manufacturer and 'Computer' (e.g. 'Google Computer').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Computer
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_PHONE_FORMAT" desc="Format for device name when it is a phone, combining manufacturer and 'Phone' (e.g. 'Google Phone').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Phone
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_TABLET_FORMAT" desc="Format for device name when it is a tablet, combining manufacturer and 'Tablet' (e.g. 'Google Tablet').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Tablet
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_DEVICE_FORMAT" desc="Format for device name when it is an unknown device, combining manufacturer and 'Device' (e.g. 'Google Device').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Device
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_DESKTOP_FORMAT" desc="Format for device name when it is a desktop computer, combining manufacturer and 'Desktop' (e.g. 'Google Desktop').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Desktop
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_LAPTOP_FORMAT" desc="Format for device name when it is a laptop computer, combining manufacturer and 'Laptop' (e.g. 'Google Laptop').">
+      <ph name="MANUFACTURER">$1<ex>Google</ex></ph> Laptop
+    </message>
+    <message name="IDS_SYNC_DEVICE_NAME_WITH_MODEL_FORMAT" desc="Format for device name with model, combining the preferred device name and the model (e.g. 'Google Phone Pixel 2').">
+      <ph name="DEVICE_NAME">$1<ex>Google Phone</ex></ph> <ph name="MODEL">$2<ex>Pixel 2</ex></ph>
     </message>
 </grit-part>

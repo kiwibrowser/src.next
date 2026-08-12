@@ -7,6 +7,7 @@
 
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
+#include "base/memory/self_deleting.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
 #include "build/build_config.h"
@@ -19,7 +20,7 @@
 // thread. Returns the icon in the form of an ImageSkia.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class IconLoader {
+class IconLoader : public base::SelfDeleting {
  public:
   // An IconGroup is a class of files that all share the same icon.
 #if BUILDFLAG(IS_MAC)
@@ -57,15 +58,16 @@ class IconLoader {
                        float scale,
                        IconLoadedCallback callback);
 
+  IconLoader(const base::FilePath& file_path,
+             IconSize size,
+             float scale,
+             IconLoadedCallback callback,
+             base::SelfDeletingPassKey key);
+
   IconLoader(const IconLoader&) = delete;
   IconLoader& operator=(const IconLoader&) = delete;
 
  private:
-  IconLoader(const base::FilePath& file_path,
-             IconSize size,
-             float scale,
-             IconLoadedCallback callback);
-
   ~IconLoader();
 
   void Start();

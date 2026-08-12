@@ -6,17 +6,18 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_SCROLL_BUTTON_PSEUDO_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
+#include "third_party/blink/renderer/core/frame/post_layout_snapshot_client.h"
 
 namespace blink {
 
-class ScrollMarkerGroupPseudoElement;
-
-class ScrollButtonPseudoElement : public PseudoElement {
+class ScrollButtonPseudoElement : public PseudoElement,
+                                  public PostLayoutSnapshotClient {
  public:
-  ScrollButtonPseudoElement(Element* originating_element, PseudoId pseudo_id)
-      : PseudoElement(originating_element, pseudo_id) {
-    SetTabIndexExplicitly();
-  }
+  static PseudoId PseudoIdFromScrollButtonArgument(
+      const AtomicString& argument,
+      const ComputedStyle& originating_element_style);
+
+  ScrollButtonPseudoElement(Element* originating_element, PseudoId pseudo_id);
 
   bool IsScrollButtonPseudoElement() const final { return true; }
 
@@ -24,19 +25,26 @@ class ScrollButtonPseudoElement : public PseudoElement {
   void DefaultEventHandler(Event&) override;
   bool HasActivationBehavior() const final { return true; }
   bool WillRespondToMouseClickEvents() override { return true; }
-  Node* InnerNodeForHitTesting() final { return this; }
-  void SetScrollMarkerGroup(
-      ScrollMarkerGroupPseudoElement* scroll_marker_group) {
-    scroll_marker_group_ = scroll_marker_group;
-  }
-  ScrollMarkerGroupPseudoElement* ScrollMarkerGroup() const {
-    return scroll_marker_group_;
-  }
+
+  bool IsEnabled() const { return enabled_; }
+  bool IsDisabledFormControl() const final { return !IsEnabled(); }
+  bool MatchesDisabledPseudoClass() const final { return !IsEnabled(); }
+  bool MatchesEnabledPseudoClass() const final { return IsEnabled(); }
+
+  FocusableState SupportsFocus(UpdateBehavior update_behavior) const final;
+
+  // PostLayoutSnapshotClient:
+  bool UpdateSnapshot() override;
+  bool ShouldScheduleNextService() override;
 
   void Trace(Visitor* v) const final;
 
  private:
-  WeakMember<ScrollMarkerGroupPseudoElement> scroll_marker_group_;
+  // Returns true if activation behavior was performed and the event should be
+  // considered handled.
+  bool HandleButtonActivation();
+
+  bool enabled_ = true;
 };
 
 template <>

@@ -26,50 +26,105 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/css/css_markup.h"
 
+#include "third_party/blink/renderer/core/css/css_url_data.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_idioms.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_family.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
+#include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
 // "ident" from the CSS tokenizer, minus backslash-escape sequences
-static bool IsCSSTokenizerIdentifier(const StringView& string) {
+bool IsCSSTokenizerIdentifier(const StringView& string) {
   unsigned length = string.length();
 
   if (!length) {
     return false;
   }
 
-  return WTF::VisitCharacters(string, [](auto chars) {
-    const auto* p = chars.data();
-    const auto* end = p + chars.size();
+  return VisitCharacters(string, [](auto chars) {
+    size_t index{0};
 
     // -?
-    if (p != end && p[0] == '-') {
-      ++p;
+    if (chars[index] == '-') {
+      ++index;
     }
 
     // {nmstart}
-    if (p == end || !IsNameStartCodePoint(p[0])) {
+    if (index == chars.size() || !IsNameStartCodePoint(chars[index])) {
       return false;
     }
-    ++p;
+    ++index;
 
     // {nmchar}*
-    for (; p != end; ++p) {
-      if (!IsNameCodePoint(p[0])) {
+    for (; index < chars.size(); ++index) {
+      if (!IsNameCodePoint(chars[index])) {
         return false;
+      }
+    }
+    return true;
+  });
+}
+
+// Validates whether a string is a sequence of one or more space-separated CSS
+// ident tokens (without backslash-escape sequences). This is used to determine
+// whether a <family-name> can be serialized as unquoted space-separated idents
+// per the CSSWG resolution. See
+// https://github.com/w3c/csswg-drafts/issues/5846.
+//
+// Grammar: ident ( ' ' ident )*
+// Each ident: -? {nmstart} {nmchar}*
+bool IsCSSTokenizerIdentSequence(const StringView& string) {
+  unsigned length = string.length();
+  if (!length) {
+    return false;
+  }
+
+  return VisitCharacters(string, [](auto chars) {
+    size_t index = 0;
+
+    // Reject leading space.
+    if (chars[0] == ' ') {
+      return false;
+    }
+
+    while (index < chars.size()) {
+      // Parse one ident: -? {nmstart} {nmchar}*
+
+      // Optional leading hyphen.
+      if (chars[index] == '-') {
+        ++index;
+      }
+
+      // {nmstart} is required.
+      if (index >= chars.size() || !IsNameStartCodePoint(chars[index])) {
+        return false;
+      }
+      ++index;
+
+      // {nmchar}*
+      while (index < chars.size() && IsNameCodePoint(chars[index])) {
+        ++index;
+      }
+
+      // After an ident, we expect either end-of-string or a single space
+      // followed by another ident.
+      if (index < chars.size()) {
+        if (chars[index] != ' ') {
+          return false;  // Non-space, non-ident character.
+        }
+        ++index;
+        // Reject trailing space or consecutive spaces (next char must start
+        // a new ident, not be a space or end-of-string).
+        if (index >= chars.size() || chars[index] == ' ') {
+          return false;
+        }
       }
     }
 
@@ -94,9 +149,9 @@ void SerializeIdentifier(const String& identifier,
   bool is_first_char_hyphen = false;
   unsigned index = 0;
   while (index < identifier.length()) {
-    UChar32 c = identifier.CharacterStartingAt(index);
+    UChar32 c = identifier.CodePointAtOrZero(index);
     if (c == 0) {
-      // Check for lone surrogate which characterStartingAt does not return.
+      // Check for lone surrogate which CodePointAtOrZero() does not return.
       c = identifier[index];
     }
 
@@ -133,7 +188,7 @@ void SerializeString(const String& string, StringBuilder& append_to) {
 
   unsigned index = 0;
   while (index < string.length()) {
-    UChar32 c = string.CharacterStartingAt(index);
+    UChar32 c = string.CodePointAtOrZero(index);
     index += U16_LENGTH(c);
 
     if (c <= 0x1f || c == 0x7f) {
@@ -154,18 +209,22 @@ String SerializeString(const String& string) {
   return builder.ReleaseString();
 }
 
-String SerializeURI(const String& string) {
-  return "url(" + SerializeString(string) + ")";
+String SerializeURI(const String& url,
+                    const CSSUrlRequestModifiers& modifiers) {
+  StringBuilder builder;
+  builder.Append("url(");
+  SerializeString(url, builder);
+  if (!modifiers.IsEmpty()) {
+    modifiers.AppendCssText(builder);
+  }
+  builder.Append(')');
+  return builder.ReleaseString();
 }
 
 String SerializeFontFamily(const AtomicString& string) {
   // Some <font-family> values are serialized without quotes.
   // See https://github.com/w3c/csswg-drafts/issues/5846
-  return (css_parsing_utils::IsCSSWideKeyword(string) ||
-          css_parsing_utils::IsDefaultKeyword(string) ||
-          FontFamily::InferredTypeFor(string) ==
-              FontFamily::Type::kGenericFamily ||
-          !IsCSSTokenizerIdentifier(string))
+  return css_parsing_utils::FontFamilyNeedsQuoting(string)
              ? SerializeString(string)
              : string;
 }

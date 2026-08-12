@@ -5,26 +5,32 @@
 #include "extensions/browser/extension_navigation_throttle.h"
 
 #include <memory>
+
 #include "base/command_line.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/navigation_throttle_registry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/test/mock_navigation_handle.h"
+#include "content/public/test/mock_navigation_throttle_registry.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
+#include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 using content::NavigationThrottle;
 
@@ -39,25 +45,22 @@ const char kAccessibleDirResource[] = "accessible_dir/foo.html";
 
 class MockBrowserClient : public content::ContentBrowserClient {
  public:
-  MockBrowserClient() {}
-  ~MockBrowserClient() override {}
+  MockBrowserClient() = default;
+  ~MockBrowserClient() override = default;
 
   // Only construct an ExtensionNavigationThrottle so that we can test it in
   // isolation.
-  std::vector<std::unique_ptr<NavigationThrottle>> CreateThrottlesForNavigation(
-      content::NavigationHandle* handle) override {
-    std::vector<std::unique_ptr<NavigationThrottle>> throttles;
-    throttles.push_back(std::make_unique<ExtensionNavigationThrottle>(handle));
-    return throttles;
+  void CreateThrottlesForNavigation(
+      content::NavigationThrottleRegistry& registry) override {
+    registry.AddThrottle(
+        std::make_unique<ExtensionNavigationThrottle>(registry));
   }
 };
-
-}  // namespace
 
 class ExtensionNavigationThrottleUnitTest
     : public ChromeRenderViewHostTestHarness {
  public:
-  ExtensionNavigationThrottleUnitTest() {}
+  ExtensionNavigationThrottleUnitTest() = default;
 
   ExtensionNavigationThrottleUnitTest(
       const ExtensionNavigationThrottleUnitTest&) = delete;
@@ -71,14 +74,18 @@ class ExtensionNavigationThrottleUnitTest
     // Constructs an extension with accessible.html and accessible_dir/* as
     // accessible resources.
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set("name", "ext")
             .Set("description", "something")
             .Set("version", "0.1")
-            .Set("manifest_version", 2)
-            .Set(
-                "web_accessible_resources",
-                base::Value::List().Append(kAccessible).Append(kAccessibleDir));
+            .Set("manifest_version", 3)
+            .Set("web_accessible_resources",
+                 base::ListValue().Append(
+                     base::DictValue()
+                         .Set("resources", base::ListValue()
+                                               .Append(kAccessible)
+                                               .Append(kAccessibleDir))
+                         .Set("matches", base::ListValue().Append("*://*/*"))));
     extension_ = ExtensionBuilder()
                      .SetManifest(std::move(manifest))
                      .SetID(crx_file::id_util::GenerateId("foo"))
@@ -88,10 +95,9 @@ class ExtensionNavigationThrottleUnitTest
     // Simulate installing/adding the extension.
     TestExtensionSystem* extension_system =
         static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile()));
-    ExtensionService* extension_service =
-        extension_system->CreateExtensionService(
-            base::CommandLine::ForCurrentProcess(), base::FilePath(), false);
-    extension_service->AddExtension(extension_.get());
+    extension_system->CreateExtensionService(
+        base::CommandLine::ForCurrentProcess(), base::FilePath(), false);
+    ExtensionRegistrar::Get(profile())->AddExtension(extension_);
   }
 
   void TearDown() override {
@@ -110,7 +116,9 @@ class ExtensionNavigationThrottleUnitTest
     content::MockNavigationHandle test_handle(extension_url, host);
     test_handle.set_initiator_origin(host->GetLastCommittedOrigin());
     test_handle.set_starting_site_instance(host->GetSiteInstance());
-    auto throttle = std::make_unique<ExtensionNavigationThrottle>(&test_handle);
+    content::MockNavigationThrottleRegistry test_registry(&test_handle);
+    auto throttle =
+        std::make_unique<ExtensionNavigationThrottle>(test_registry);
 
     EXPECT_EQ(expected_will_start_result, throttle->WillStartRequest().action())
         << extension_url;
@@ -270,4 +278,5 @@ TEST_F(ExtensionNavigationThrottleUnitTest, DisabledExtensionMainFrame) {
                 NavigationThrottle::BLOCK_REQUEST);
 }
 
+}  // namespace
 }  // namespace extensions

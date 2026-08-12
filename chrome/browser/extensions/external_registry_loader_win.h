@@ -25,14 +25,14 @@ class ExternalRegistryLoader : public ExternalLoader {
   void StartLoading() override;
 
   // Overridden to mock registry reading in unit tests.
-  virtual base::Value::Dict LoadPrefsOnBlockingThread();
+  virtual base::DictValue LoadPrefsOnBlockingThread();
 
  private:
   friend class base::RefCountedThreadSafe<ExternalLoader>;
 
   void LoadOnBlockingThread();
-  void CompleteLoadAndStartWatchingRegistry(base::Value::Dict prefs);
-  void UpatePrefsOnBlockingThread();
+  void CompleteLoadAndStartWatchingRegistry(base::DictValue prefs);
+  void UpdatePrefsOnBlockingThread();
   void OnRegistryKeyChanged(base::win::RegKey* key);
 
   scoped_refptr<base::SequencedTaskRunner> GetOrCreateTaskRunner();

@@ -5,9 +5,10 @@
 #include "third_party/blink/renderer/core/css/css_image_value.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/web/web_script_source.h"
+#include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -35,16 +36,204 @@ TEST_F(CSSImageValueTest, BlockPotentiallyDanglingMarkup) {
   Compositor().BeginFrame();
 
   auto* t1 = GetDocument().getElementById(AtomicString("t1"));
-  ImageResourceContent* content1 =
-      t1->ComputedStyleRef().BackgroundLayers().GetImage()->CachedImage();
-  ASSERT_TRUE(content1);
-  EXPECT_TRUE(content1->ErrorOccurred());
+  const StyleImage* image1 =
+      t1->ComputedStyleRef().BackgroundLayers().GetImage();
+  ASSERT_TRUE(image1);
+  EXPECT_TRUE(image1->ErrorOccurred());
 
   auto* t2 = GetDocument().getElementById(AtomicString("t2"));
-  ImageResourceContent* content2 =
-      t2->ComputedStyleRef().BackgroundLayers().GetImage()->CachedImage();
-  ASSERT_TRUE(content2);
-  EXPECT_TRUE(content2->ErrorOccurred());
+  const StyleImage* image2 =
+      t2->ComputedStyleRef().BackgroundLayers().GetImage();
+  ASSERT_TRUE(image2);
+  EXPECT_TRUE(image2->ErrorOccurred());
+}
+
+// Ensure that CSSImageValue preserves the potentially_dangling_markup flag
+// when cloned or used via CSS Typed OM.
+// Canonicalization of the URL string removes the newlines that trigger the
+// dangling markup flag, so we must ensure it is manually propagated during
+// these operations.
+TEST_F(CSSImageValueTest, PreserveDanglingMarkupFlagInTypedOM) {
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  // If the bug were present, the dangling markup flag would be dropped and
+  // this URL would be requested successfully. We mock it to allow the fetch
+  // to proceed in the failure case, so we can verify ErrorOccurred().
+  SimRequest dangling_resource("https://example.com/exfil%3Csecret",
+                               "image/png");
+
+  LoadURL("https://example.com/index.html");
+
+  // Step 1: Set a dangling-markup URL on a hidden carrier element.
+  main_resource.Complete(R"HTML(
+    <!doctype html>
+    <table id="carrier" style="display:none" background="/exfil
+<secret"></table>
+    <div id="target" style="width:100px; height:100px"></div>
+  )HTML");
+
+  test::RunPendingTasks();
+
+  // Force style recalc for carrier.
+  GetDocument().UpdateStyleAndLayoutTree();
+
+  // 2. Round-trip the value through CSS Typed OM via JS.
+  // This triggers internal cloning and conversion logic.
+  MainFrame().ExecuteScript(WebScriptSource(R"JS(
+    {
+      const carrier = document.getElementById('carrier');
+      const target = document.getElementById('target');
+      // Retrieve the value (triggers cloning/resolution).
+      const val = carrier.computedStyleMap().get('background-image');
+      // Apply the value to another element.
+      target.attributeStyleMap.set('background-image', val);
+    }
+  )JS"));
+
+  // 3. Force style recalc and resource load for the target element.
+  GetDocument().UpdateStyleAndLayoutTree();
+  if (Compositor().NeedsBeginFrame()) {
+    Compositor().BeginFrame();
+  }
+
+  // 4. Verify that the fetch was correctly BLOCKED (ErrorOccurred() == true).
+  auto* target = GetDocument().getElementById(AtomicString("target"));
+  ASSERT_TRUE(target);
+  const StyleImage* target_image =
+      target->ComputedStyleRef().BackgroundLayers().GetImage();
+  ASSERT_TRUE(target_image) << "target_image should not be null";
+  EXPECT_TRUE(target_image->ErrorOccurred());
+}
+
+// Ensure that routing a dangling-markup URL through a registered custom
+// property with syntax "<url>" does not launder away the
+// potentially_dangling_markup flag via canonicalization in MakeResolved().
+TEST_F(CSSImageValueTest, RegisteredPropertyDoesNotLaunderDanglingMarkup) {
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+
+  LoadURL("https://example.com/index.html");
+
+  // The URL contains a newline and a '<', which triggers the dangling
+  // markup mitigation.  In CSS, \a is the hex escape for U+000A (newline);
+  // the trailing space is consumed as part of the escape.  Routing through
+  // @property --m with syntax "<url>" would previously canonicalize the
+  // string and strip those characters, bypassing the block.
+  main_resource.Complete(R"HTML(
+    <!doctype html>
+    <style>
+      @property --m {
+        syntax: "<url>";
+        inherits: false;
+        initial-value: url(about:blank);
+      }
+      #target {
+        --m: url('/exfil?\a <secret');
+        background-image: var(--m);
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  test::RunPendingTasks();
+  GetDocument().UpdateStyleAndLayoutTree();
+  Compositor().BeginFrame();
+
+  auto* target = GetDocument().getElementById(AtomicString("target"));
+  ASSERT_TRUE(target);
+  const StyleImage* image =
+      target->ComputedStyleRef().BackgroundLayers().GetImage();
+  // The fetch should be blocked due to dangling markup, resulting in either
+  // no image or an error.
+  if (image) {
+    EXPECT_TRUE(image->ErrorOccurred());
+  }
+}
+
+// Ensure that CSSUrlData::MakeComputed() does not launder the dangling markup
+// flag by overwriting relative_url_ with the canonicalized absolute URL.
+// The attack vector: style resolution creates a computed value via
+// MakeComputed(), then commitStyles() serializes it (via CssText(), which
+// uses relative_url_) and re-parses it on the element's inline style. If
+// relative_url_ was overwritten with the canonical form, the re-parsed URL
+// lacks newlines and the dangling markup flag is lost.
+TEST_F(CSSImageValueTest, MakeComputedDoesNotLaunderDanglingMarkup) {
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+
+  LoadURL("https://example.com/index.html");
+
+  main_resource.Complete(R"HTML(
+    <!doctype html>
+    <style>
+      @keyframes anim {
+        from { background-image: url('/exfil?\a <secret'); }
+        to   { background-image: url('/exfil?\a <secret'); }
+      }
+      #target {
+        animation: anim 1s paused;
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  test::RunPendingTasks();
+  GetDocument().UpdateStyleAndLayoutTree();
+  Compositor().BeginFrame();
+
+  // commitStyles() serializes the computed animation style (which goes
+  // through MakeComputed()) and sets it on the inline style. If the fix
+  // is missing, the re-parsed URL loses the dangling markup flag.
+  MainFrame().ExecuteScript(WebScriptSource(R"JS(
+    const target = document.getElementById('target');
+    target.getAnimations()[0].commitStyles();
+  )JS"));
+
+  GetDocument().UpdateStyleAndLayoutTree();
+  Compositor().BeginFrame();
+
+  auto* target = GetDocument().getElementById(AtomicString("target"));
+  ASSERT_TRUE(target);
+  const StyleImage* image =
+      target->ComputedStyleRef().BackgroundLayers().GetImage();
+  if (image) {
+    EXPECT_TRUE(image->ErrorOccurred());
+  }
+}
+
+// Verifies that serializing a `filter: url(...)` computed value does not
+// strip the potentially_dangling_markup flag from the URL. The serializer
+// path (ComputedStyleUtils::ValueForFilter) builds a fresh CSSUrlData from
+// CSSUrlData::ValueForSerialization(), which must return the raw relative
+// URL when the flag is set so that re-parsing the serialized form does not
+// launder it.
+TEST_F(CSSImageValueTest, FilterUrlDoesNotLaunderDanglingMarkup) {
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+
+  LoadURL("https://example.com/index.html");
+
+  main_resource.Complete(R"HTML(
+    <!doctype html>
+    <style>
+      #victim { filter: url('/exfil?\a <secret#x'); }
+    </style>
+    <div id="victim"></div>
+  )HTML");
+
+  test::RunPendingTasks();
+  GetDocument().UpdateStyleAndLayoutTree();
+  Compositor().BeginFrame();
+
+  auto* victim = GetDocument().getElementById(AtomicString("victim"));
+  ASSERT_TRUE(victim);
+  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(victim);
+  String serialized = computed->GetPropertyValue(CSSPropertyID::kFilter);
+  // The serialized value must use the raw relative URL form rather than the
+  // canonicalized absolute URL with whitespace stripped. The latter would
+  // launder the dangling markup flag when re-parsed.
+  EXPECT_EQ(serialized.find("example.com"), kNotFound) << serialized;
+  EXPECT_NE(serialized.find("/exfil"), kNotFound) << serialized;
 }
 
 }  // namespace blink

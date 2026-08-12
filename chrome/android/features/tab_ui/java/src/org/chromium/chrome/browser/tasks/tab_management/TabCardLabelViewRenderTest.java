@@ -35,9 +35,10 @@ import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.R;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
-import org.chromium.chrome.test.R;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
+import org.chromium.components.browser_ui.util.TextResolver;
 import org.chromium.components.browser_ui.widget.async_image.AsyncImageView;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.test.util.BlankUiTestActivity;
@@ -51,14 +52,14 @@ import java.util.List;
 @Batch(Batch.PER_CLASS)
 public class TabCardLabelViewRenderTest {
     @ClassParameter
-    private static List<ParameterSet> sClassParams =
+    private static final List<ParameterSet> sClassParams =
             new NightModeTestUtils.NightModeParams().getParameters();
 
     @Rule
     public ChromeRenderTestRule mRenderTestRule =
             ChromeRenderTestRule.Builder.withPublicCorpus()
                     .setBugComponent(Component.UI_BROWSER_MOBILE_TAB_SWITCHER_GRID)
-                    .setRevision(1)
+                    .setRevision(2)
                     .build();
 
     @Rule
@@ -66,7 +67,7 @@ public class TabCardLabelViewRenderTest {
             new BaseActivityTestRule<>(BlankUiTestActivity.class);
 
     private TabCardLabelView mTabCardLabelView;
-    private Runnable mCancelRunnable = CallbackUtils.emptyRunnable();
+    private final Runnable mCancelRunnable = CallbackUtils.emptyRunnable();
 
     public TabCardLabelViewRenderTest(boolean nightModeEnabled) {
         NightModeTestUtils.setUpNightModeForBlankUiTestActivity(nightModeEnabled);

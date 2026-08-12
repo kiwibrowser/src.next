@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
@@ -27,11 +27,19 @@
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/outline_utils.h"
+#include "third_party/blink/renderer/core/layout/pagination_utils.h"
 #include "third_party/blink/renderer/core/layout/relative_utils.h"
 #include "third_party/blink/renderer/core/layout/table/layout_table_cell.h"
+#include "third_party/blink/renderer/core/overscroll/overscroll_area_tracker.h"
+#include "third_party/blink/renderer/core/paint/border_shape_painter.h"
+#include "third_party/blink/renderer/core/paint/border_shape_utils.h"
 #include "third_party/blink/renderer/core/paint/inline_paint_context.h"
 #include "third_party/blink/renderer/core/paint/outline_painter.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/platform/geometry/length_functions.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
+#include "ui/gfx/geometry/vector2d.h"
 
 namespace blink {
 
@@ -57,15 +65,34 @@ bool HasControlClip(const PhysicalBoxFragment& self) {
   return box && box->HasControlClip();
 }
 
+bool IsFlexibleBoxWithSingleChildElement(const LayoutObject& layout_object) {
+  if (!RuntimeEnabledFeatures::
+          UsePositionForPointInFlexibleBoxWithSingleChildElementEnabled()) {
+    return false;
+  }
+  auto* node = layout_object.GetNode();
+  if (!node || !layout_object.IsFlexibleBox()) {
+    return false;
+  }
+  return ElementTraversal::FirstChild(*node) ==
+         ElementTraversal::LastChild(*node);
+}
+
 bool ShouldUsePositionForPointInBlockFlowDirection(
     const LayoutObject& layout_object) {
   const LayoutBlockFlow* const layout_block_flow =
       DynamicTo<LayoutBlockFlow>(layout_object);
-  if (!layout_block_flow) {
-    // For <tr>, see editing/selection/click-before-and-after-table.html
+  // If it is not a layout block flow,  it should return false to prevent table
+  // elements like `<tr>` from being included. See
+  // editing/selection/click-before-and-after-table.html for more details.
+  // Additionally, if it is a flex block and it has only one child element, it
+  // should also return false. See https://issues.chromium.org/issues/40889098
+  // for more details.
+  if (!layout_block_flow &&
+      !IsFlexibleBoxWithSingleChildElement(layout_object)) {
     return false;
   }
-  if (layout_block_flow->StyleRef().SpecifiesColumns()) {
+  if (layout_object.StyleRef().SpecifiesColumns()) {
     // Columns are laid out in inline direction.
     return false;
   }
@@ -94,6 +121,64 @@ void ApplyOverflowClip(OverflowClipAxes overflow_clip_axes,
   }
 }
 
+int MaxGapDecorationsWidth(const GapDataList<int>& width_value) {
+  const auto widths = width_value.GetGapDataList();
+  CHECK(!widths.empty());
+
+  const auto& first_width = widths[0];
+  int max_width =
+      !first_width.IsRepeaterData()
+          ? first_width.GetValue()
+          : first_width.GetValueRepeater()->RepeatedValues().front();
+
+  for (const auto& width : widths) {
+    if (!width.IsRepeaterData()) {
+      max_width = std::max(max_width, width.GetValue());
+    } else {
+      const auto& repeated_values = width.GetValueRepeater()->RepeatedValues();
+      for (const auto& value : repeated_values) {
+        max_width = std::max(max_width, value);
+      }
+    }
+  }
+
+  return max_width;
+}
+
+// Returns the maximum outward extension that a negative inset can produce
+// beyond the content box edge for a given side (start or end). Compares the
+// cap inset with the junction inset, and returns the larger of the two as
+// a positive outset. `overlap-join` insets are excluded since their
+// extension is bounded by thickness inflation.
+LayoutUnit MaxGapDecorationInsetOutset(const Length& cap_inset,
+                                       const Length& junction_inset,
+                                       LayoutUnit cross_gap_width) {
+  LayoutUnit max_outset;
+
+  if (!cap_inset.IsOverlapJoin()) {
+    // Cap insets are almost always only at the container's exterior edge,
+    // where there is no crossing decoration. Caps can also be interior
+    // "dangling" endpoints produced by rule visibility (see
+    // https://github.com/w3c/csswg-drafts/issues/13697); for those, the real
+    // percentage basis would be the cross gap width, so a negative percentage
+    // cap inset less than -100% would extend further than we compute here.
+    // We don't have per-intersection context at this layer to distinguish
+    // exterior from interior caps, so we conservatively resolve against 0 and
+    // accept a potential under-approximation of ink overflow in that narrow
+    // edge case.
+    LayoutUnit cap_resolved = ValueForLength(cap_inset, LayoutUnit());
+    max_outset = std::max(max_outset, -cap_resolved);
+  }
+
+  if (!junction_inset.IsOverlapJoin()) {
+    LayoutUnit junction_resolved =
+        ValueForLength(junction_inset, cross_gap_width);
+    max_outset = std::max(max_outset, -junction_resolved);
+  }
+
+  return max_outset;
+}
+
 }  // namespace
 
 // static
@@ -110,11 +195,12 @@ const PhysicalBoxFragment* PhysicalBoxFragment::Create(
 
   const PhysicalSize physical_size =
       ToPhysicalSize(builder->Size(), builder->GetWritingMode());
-  WritingModeConverter converter(writing_direction, physical_size);
 
   std::optional<PhysicalRect> inflow_bounds;
-  if (builder->inflow_bounds_)
+  if (builder->inflow_bounds_) {
+    WritingModeConverter converter(writing_direction, physical_size);
     inflow_bounds = converter.ToPhysical(*builder->inflow_bounds_);
+  }
 
 #if DCHECK_IS_ON()
   if (builder->needs_inflow_bounds_explicitly_set_ && builder->node_ &&
@@ -160,11 +246,8 @@ const PhysicalBoxFragment* PhysicalBoxFragment::Create(
       scrollable_overflow != PhysicalRect({}, physical_size);
 
   // Omit |FragmentItems| if there were no items; e.g., display-lock.
-  bool has_fragment_items = false;
-  if (FragmentItemsBuilder* items_builder = builder->ItemsBuilder()) {
-    if (items_builder->Size())
-      has_fragment_items = true;
-  }
+  FragmentItemsBuilder* items_builder = builder->ItemsBuilder();
+  bool has_fragment_items = items_builder && items_builder->Size();
 
   size_t byte_size = AdditionalByteSize(has_fragment_items);
 
@@ -215,16 +298,26 @@ const PhysicalBoxFragment* PhysicalBoxFragment::CloneWithPostLayoutFragments(
     child.fragment = child->PostLayout();
     DCHECK(child.fragment);
 
-    if (!child->IsFragmentainerBox())
+    const auto* child_fragment = DynamicTo<PhysicalBoxFragment>(child.get());
+    if (!child_fragment) {
       continue;
+    }
+    // See if there's a fragmentainer here. A column fragmentainer is a direct
+    // child of a multicol container fragment. A page fragmentainer is wrapped
+    // inside a page border box, which is wrapped inside a page container box.
+    if (child_fragment->GetBoxType() == kPageContainer) {
+      child_fragment = &GetPageArea(GetPageBorderBox(*child_fragment));
+    }
+    if (!child_fragment->IsFragmentainerBox()) {
+      continue;
+    }
 
     // Fragmentainers don't have the concept of post-layout fragments, so if
     // this is a fragmentation context root (such as a multicol container), we
     // need to not only update its children, but also the children of the
     // children that are fragmentainers.
-    auto& fragmentainer = *To<PhysicalBoxFragment>(child.fragment.Get());
     for (PhysicalFragmentLink& fragmentainer_child :
-         fragmentainer.GetMutableForCloning().Children()) {
+         child_fragment->GetMutableForCloning().Children()) {
       auto& old_child =
           *To<PhysicalBoxFragment>(fragmentainer_child.fragment.Get());
       fragmentainer_child.fragment = old_child.PostLayout();
@@ -280,30 +373,25 @@ PhysicalBoxFragment::PhysicalBoxFragment(
                        kFragmentBox,
                        builder->GetBoxType()),
       bit_field_(ConstHasFragmentItemsFlag::encode(has_fragment_items) |
-                 HasDescendantsForTablePartFlag::encode(false) |
                  IsFragmentationContextRootFlag::encode(
                      builder->is_fragmentation_context_root_) |
                  IsMonolithicFlag::encode(builder->is_monolithic_) |
                  IsMonolithicOverflowPropagationDisabledFlag::encode(
                      builder->GetConstraintSpace()
                          .IsMonolithicOverflowPropagationDisabled()) |
-                 HasMovedChildrenInBlockDirectionFlag::encode(
-                     builder->has_moved_children_in_block_direction_)) {
+                 HasMovedChildrenFlag::encode(builder->has_moved_children_)) {
   DCHECK(layout_object_);
   DCHECK(layout_object_->IsBoxModelObject());
   DCHECK(!builder->break_token_ || builder->break_token_->IsBlockType());
 
-  children_.resize(builder->children_.size());
-  PhysicalSize size = Size();
   const WritingModeConverter converter(
-      {block_or_line_writing_mode, builder->Direction()}, size);
-  wtf_size_t i = 0;
+      {block_or_line_writing_mode, builder->Direction()}, Size());
+
+  children_.ReserveInitialCapacity(builder->children_.size());
   for (auto& child : builder->children_) {
-    children_[i].offset =
-        converter.ToPhysical(child.offset, child.fragment->Size());
-    // Fragments in |builder| are not used after |this| was constructed.
-    children_[i].fragment = child.fragment.Release();
-    ++i;
+    children_.emplace_back(
+        std::move(child.fragment),
+        converter.ToPhysical(child.offset, child.fragment->Size()));
   }
 
   if (HasItems()) {
@@ -330,7 +418,7 @@ PhysicalBoxFragment::PhysicalBoxFragment(
       inflow_bounds.has_value() + !!builder->Style().MayHaveMargin();
 
   if (rare_fields_size > 0 || !builder->table_column_geometries_.empty() ||
-      !builder->reading_flow_elements_.empty()) {
+      !builder->reading_flow_nodes_.empty() || builder->gap_geometry_) {
     rare_data_ = MakeGarbageCollected<PhysicalFragmentRareData>(
         has_scrollable_overflow ? &scrollable_overflow : nullptr, borders,
         scrollbar, padding, inflow_bounds, *builder, rare_fields_size);
@@ -369,9 +457,6 @@ PhysicalBoxFragment::PhysicalBoxFragment(
   }
   use_last_baseline_for_inline_baseline_ =
       builder->use_last_baseline_for_inline_baseline_;
-
-  bit_field_.set<HasDescendantsForTablePartFlag>(
-      children_.size() || NeedsOOFPositionedInfoPropagation());
 
 #if DCHECK_IS_ON()
   CheckIntegrity();
@@ -541,10 +626,21 @@ const PhysicalBoxFragment* PhysicalBoxFragment::PostLayout() const {
 
 // TODO(crbug.com/1241721): Revert https://crrev.com/c/3108806 to re-enable this
 // DCHECK on CrOS.
-#if DCHECK_IS_ON() && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if DCHECK_IS_ON() && !BUILDFLAG(IS_CHROMEOS)
   DCHECK(AllowPostLayoutScope::IsAllowed());
 #endif
   return post_layout;
+}
+
+void PhysicalBoxFragment::SetChildrenInvalid() const {
+  if (!children_valid_) {
+    return;
+  }
+
+  for (const PhysicalFragmentLink& child : Children()) {
+    const_cast<PhysicalFragmentLink&>(child).fragment = nullptr;
+  }
+  children_valid_ = false;
 }
 
 PhysicalRect PhysicalBoxFragment::SelfInkOverflowRect() const {
@@ -633,7 +729,7 @@ PhysicalRect PhysicalBoxFragment::OverflowClipRect(
   // rectangle like this.
   auto writing_direction = Style().GetWritingDirection();
   const LayoutBox* box = To<LayoutBox>(GetLayoutObject());
-  WritingModeConverter converter(writing_direction, PhysicalSize(box->Size()));
+  WritingModeConverter converter(writing_direction, box->StitchedSize());
   // Make the clip rectangle relative to the layout box.
   clip_rect.offset -= location;
   LogicalOffset stitched_offset;
@@ -641,7 +737,7 @@ PhysicalRect PhysicalBoxFragment::OverflowClipRect(
     stitched_offset.block_offset = incoming_break_token->ConsumedBlockSize();
   LogicalRect logical_fragment_rect(
       stitched_offset,
-      Size().ConvertToLogical(writing_direction.GetWritingMode()));
+      ToLogicalSize(Size(), writing_direction.GetWritingMode()));
   PhysicalRect physical_fragment_rect =
       converter.ToPhysical(logical_fragment_rect);
 
@@ -696,9 +792,33 @@ bool PhysicalBoxFragment::MayIntersect(
   return true;
 }
 
+gfx::Vector2d PhysicalBoxFragment::PixelSnappedOverscrollContentOffset() const {
+  DCHECK(GetLayoutObject());
+  if (!IsNonOverlayOverscrollScrollContainer()) {
+    // This intentionally skips the ::-internal-overscroll-area-parents as they
+    // are self painting layers so we rely on the layer position to account
+    // for their overscroll offset.
+    return gfx::Vector2d();
+  }
+  gfx::Vector2d offset;
+  if (auto* tracker = To<Element>(GetLayoutObject()->GetNode())
+                          ->GetOverscrollAreaTracker()) {
+    for (const Element* element : tracker->DOMSortedElements()) {
+      PseudoElement* pseudo =
+          element->GetPseudoElement(kPseudoIdOverscrollAreaParent);
+      if (LayoutBox* layout_box = pseudo->GetLayoutBox()) {
+        offset += layout_box->PixelSnappedScrolledContentOffset();
+      }
+    }
+  }
+  return offset;
+}
+
 gfx::Vector2d PhysicalBoxFragment::PixelSnappedScrolledContentOffset() const {
   DCHECK(GetLayoutObject());
-  return To<LayoutBox>(*GetLayoutObject()).PixelSnappedScrolledContentOffset();
+  return IsScrollContainer() ? To<LayoutBox>(*GetLayoutObject())
+                                   .PixelSnappedScrolledContentOffset()
+                             : gfx::Vector2d();
 }
 
 PhysicalSize PhysicalBoxFragment::ScrollSize() const {
@@ -787,11 +907,35 @@ void PhysicalBoxFragment::MutableForContainerLayout::SetMargins(
   fragment_.EnsureRareField(FieldId::kMargins).margins = margins;
 }
 
+void PhysicalBoxFragment::MutableForContainerLayout::
+    SetOffsetFromRootFragmentationContext(PhysicalOffset offset) {
+  const auto id =
+      PhysicalFragmentRareData::FieldId::kOffsetFromRootFragmentationContext;
+  if (offset.IsZero() && !fragment_.GetRareField(id)) {
+    return;
+  }
+  fragment_.EnsureRareField(id).offset_from_root_fragmentation_context = offset;
+}
+
 PhysicalBoxFragment::MutableForContainerLayout
 PhysicalBoxFragment::GetMutableForContainerLayout() const {
   DCHECK(layout_object_->GetFrameView()->IsInPerformLayout());
   return MutableForContainerLayout(base::PassKey<PhysicalBoxFragment>(),
                                    const_cast<PhysicalBoxFragment&>(*this));
+}
+
+void PhysicalBoxFragment::MutableForCloning::ReplaceChildren(
+    const PhysicalBoxFragment& new_fragment) {
+  // Replacing children that establish an inline formatting context is not
+  // supported. An anonymous wrapper block should have been created.
+  DCHECK(!new_fragment.HasItems());
+  DCHECK(!fragment_.HasItems());
+
+  fragment_.children_.clear();
+  fragment_.children_.append_range(new_fragment.children_);
+
+  // Replace propagated data.
+  fragment_.propagated_data_ = new_fragment.propagated_data_;
 }
 
 void PhysicalBoxFragment::MutableForOofFragmentation::AddChildFragmentainer(
@@ -833,14 +977,15 @@ void PhysicalBoxFragment::MutableForOofFragmentation::Merge(
     }
   }
 
-  // Copy over any additional anchor queries.
-  if (const PhysicalAnchorQuery* query =
-          placeholder_fragmentainer.AnchorQuery()) {
+  // Copy over any additional anchors.
+  if (const AnchorMap* new_anchor_map =
+          placeholder_fragmentainer.GetAnchorMap()) {
     if (!fragment_.oof_data_) {
       fragment_.oof_data_ = MakeGarbageCollected<OofData>();
     }
-    for (auto entry : *query) {
-      fragment_.oof_data_->AnchorQuery().insert(entry.key, entry.value);
+    AnchorMap& anchor_map = fragment_.oof_data_->EnsureAnchorMap();
+    for (auto entry : *new_anchor_map) {
+      anchor_map.Set(entry.key, entry.value);
     }
   }
 
@@ -953,13 +1098,6 @@ PhysicalRect PhysicalBoxFragment::RecalcContentsInkOverflow() {
       DCHECK(child_layout_object);
       DCHECK(!child_layout_object->CanUseFragmentsForVisualOverflow());
       child_layout_object->RecalcVisualOverflow();
-      // TODO(crbug.com/1144203): Reconsider this when fragment-based ink
-      // overflow supports block fragmentation. Never allow flow threads to
-      // propagate overflow up to a parent.
-      DCHECK_EQ(child_fragment->IsColumnBox(),
-                child_layout_object->IsLayoutFlowThread());
-      if (child_fragment->IsColumnBox())
-        continue;
       child_rect = child_layout_object->VisualOverflowRect();
     }
     child_rect.offset += child.offset;
@@ -1000,6 +1138,27 @@ PhysicalRect PhysicalBoxFragment::ComputeSelfInkOverflow() const {
 
   ink_overflow.Expand(style.BoxDecorationOutsets());
 
+  if (style.HasBorderShape()) {
+    PhysicalRect rect{LocalRect()};
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        GetLayoutObject()
+            ? ComputeBorderShapeReferenceRects(rect, style, *GetLayoutObject())
+            : std::nullopt;
+    const PhysicalRect outer_reference_rect =
+        border_shape_rects ? border_shape_rects->outer : rect;
+    const PhysicalRect inner_reference_rect =
+        border_shape_rects ? border_shape_rects->inner : rect;
+    // VisualOutsets() returns the complete border-shape overflow: both the
+    // border path's visual extent and the precise box-shadow extent. Use
+    // Unite (not Expand) starting from |rect| so outsets are measured from
+    // the border box, not the already-expanded ink_overflow, which prevents
+    // double-accumulation with BoxDecorationOutsets().
+    PhysicalRect border_shape_visual_rect = rect;
+    border_shape_visual_rect.Expand(BorderShapePainter::VisualOutsets(
+        style, rect, outer_reference_rect, inner_reference_rect));
+    ink_overflow.Unite(border_shape_visual_rect);
+  }
+
   if (style.HasOutline() && IsOutlineOwner()) {
     UnionOutlineRectCollector collector;
     LayoutObject::OutlineInfo info;
@@ -1008,9 +1167,47 @@ PhysicalRect PhysicalBoxFragment::ComputeSelfInkOverflow() const {
                         style.OutlineRectsShouldIncludeBlockInkOverflow(),
                         collector, &info);
     PhysicalRect rect = collector.Rect();
-    rect.Inflate(LayoutUnit(OutlinePainter::OutlineOutsetExtent(style, info)));
+    if (!style.HasBorderShape() || style.OutlineStyleIsAuto()) {
+      rect.Inflate(
+          LayoutUnit(OutlinePainter::OutlineOutsetExtent(style, info)));
+    }
     ink_overflow.Unite(rect);
   }
+
+  if (const GapGeometry* gap_geometry = GetGapGeometry()) {
+    LayoutUnit inline_thickness =
+        LayoutUnit(MaxGapDecorationsWidth(style.ColumnRuleWidth()));
+    LayoutUnit block_thickness =
+        LayoutUnit(MaxGapDecorationsWidth(style.RowRuleWidth()));
+
+    GapGeometry::GapDecorationInkOutsets outsets;
+
+    // Column rule insets extend the block axis.
+    const LayoutUnit col_crossing_gap_size =
+        gap_geometry->GetCrossingGapSize(kForColumns);
+    outsets.block_start = MaxGapDecorationInsetOutset(
+        style.ColumnRuleInsetCapStart(), style.ColumnRuleInsetJunctionStart(),
+        col_crossing_gap_size);
+    outsets.block_end = MaxGapDecorationInsetOutset(
+        style.ColumnRuleInsetCapEnd(), style.ColumnRuleInsetJunctionEnd(),
+        col_crossing_gap_size);
+
+    // Row rule insets extend the inline axis.
+    const LayoutUnit row_crossing_gap_size =
+        gap_geometry->GetCrossingGapSize(kForRows);
+    outsets.inline_start = MaxGapDecorationInsetOutset(
+        style.RowRuleInsetCapStart(), style.RowRuleInsetJunctionStart(),
+        row_crossing_gap_size);
+    outsets.inline_end = MaxGapDecorationInsetOutset(
+        style.RowRuleInsetCapEnd(), style.RowRuleInsetJunctionEnd(),
+        row_crossing_gap_size);
+
+    PhysicalRect rect = gap_geometry->ComputeInkOverflowForGaps(
+        Style().GetWritingDirection(), Size(), inline_thickness,
+        block_thickness, outsets);
+    ink_overflow.Unite(rect);
+  }
+
   return ink_overflow;
 }
 
@@ -1064,7 +1261,7 @@ void PhysicalBoxFragment::AddOutlineRects(
   DCHECK(IsOutlineOwner());
 
   // For anonymous blocks, the children add outline rects.
-  if (!IsAnonymousBlock() || GetBoxType() == kPageBorderBox) {
+  if (!IsAnonymousBlockFlow() || GetBoxType() == kPageBorderBox) {
     if (IsSvgText()) {
       if (Items()) {
         collector.AddRect(PhysicalRect::EnclosingRect(
@@ -1188,13 +1385,158 @@ void PhysicalBoxFragment::AddOutlineRectsForInlineBox(
   }
 }
 
-PositionWithAffinity PhysicalBoxFragment::PositionForPoint(
-    PhysicalOffset point) const {
-  if (layout_object_->IsBox() && !layout_object_->IsLayoutNGObject()) {
-    // Layout engine boundary. Enter legacy PositionForPoint().
-    return layout_object_->PositionForPoint(point);
+void PhysicalBoxFragment::AddOutlineRectsForNormalChildren(
+    OutlineRectCollector& collector,
+    PhysicalOffset additional_offset,
+    OutlineType outline_type,
+    const LayoutBoxModelObject* containing_block) const {
+  DCHECK_EQ(PostLayout(), this);
+  if (const FragmentItems* items = Items()) {
+    InlineCursor cursor(*this, *items);
+    AddOutlineRectsForCursor(collector, additional_offset, outline_type,
+                             containing_block, &cursor);
+    // Don't add |Children()|. If |this| has |FragmentItems|, children are
+    // either line box, which we already handled in items, or OOF, which we
+    // should ignore.
+    DCHECK(std::ranges::all_of(
+        PostLayoutChildren(), [](const PhysicalFragmentLink& child) {
+          return child->IsLineBox() || child->IsOutOfFlowPositioned();
+        }));
+    return;
   }
 
+  for (const auto& child : PostLayoutChildren()) {
+    // Outlines of out-of-flow positioned descendants are handled in
+    // PhysicalBoxFragment::AddSelfOutlineRects().
+    if (child->IsOutOfFlowPositioned()) {
+      continue;
+    }
+    AddOutlineRectsForDescendant(child, collector, additional_offset,
+                                 outline_type, containing_block);
+  }
+}
+
+void PhysicalBoxFragment::AddOutlineRectsForCursor(
+    OutlineRectCollector& collector,
+    PhysicalOffset additional_offset,
+    OutlineType outline_type,
+    const LayoutBoxModelObject* containing_block,
+    InlineCursor* cursor) const {
+  const auto* text_combine = DynamicTo<LayoutTextCombine>(containing_block);
+  while (*cursor) {
+    DCHECK(cursor->Current().Item());
+    const FragmentItem& item = *cursor->Current().Item();
+    if (item.IsLayoutObjectDestroyedOrMoved()) [[unlikely]] {
+      cursor->MoveToNext();
+      continue;
+    }
+    switch (item.Type()) {
+      case FragmentItem::kLine: {
+        if (item.LineBoxFragment()) {
+          AddOutlineRectsForDescendant(
+              {item.LineBoxFragment(), item.OffsetInContainerFragment()},
+              collector, additional_offset, outline_type, containing_block);
+        }
+        break;
+      }
+      case FragmentItem::kGeneratedText:
+      case FragmentItem::kText: {
+        if (!item.IsSvgText() && !ShouldIncludeBlockInkOverflow(outline_type)) {
+          break;
+        }
+        PhysicalRect rect =
+            item.IsSvgText() ? PhysicalRect::EnclosingRect(
+                                   cursor->Current().ObjectBoundingBox(*cursor))
+                             : item.RectInContainerFragment();
+        if (text_combine) [[unlikely]] {
+          rect = text_combine->AdjustRectForBoundingBox(rect);
+        }
+        rect.Move(additional_offset);
+        collector.AddRect(rect);
+        break;
+      }
+      case FragmentItem::kBox: {
+        if (const PhysicalBoxFragment* child_box =
+                item.PostLayoutBoxFragment()) {
+          DCHECK(!child_box->IsOutOfFlowPositioned());
+          AddOutlineRectsForDescendant(
+              {child_box, item.OffsetInContainerFragment()}, collector,
+              additional_offset, outline_type, containing_block);
+          // Skip descendants as they were already added.
+          DCHECK(item.IsInlineBox() || item.DescendantsCount() == 1);
+          cursor->MoveToNextSkippingChildren();
+          continue;
+        }
+        break;
+      }
+      case FragmentItem::kInvalid:
+        NOTREACHED();
+    }
+    cursor->MoveToNext();
+  }
+}
+
+void PhysicalBoxFragment::AddOutlineRectsForDescendant(
+    const PhysicalFragmentLink& descendant,
+    OutlineRectCollector& collector,
+    PhysicalOffset additional_offset,
+    OutlineType outline_type,
+    const LayoutBoxModelObject* containing_block) const {
+  DCHECK(!descendant->IsLayoutObjectDestroyedOrMoved());
+  if (descendant->IsListMarker()) {
+    return;
+  }
+
+  const auto* descendant_box = DynamicTo<PhysicalBoxFragment>(descendant.get());
+  if (!descendant_box) {
+    return;
+  }
+
+  DCHECK_EQ(descendant_box->PostLayout(), descendant_box);
+  const LayoutObject* descendant_layout_object =
+      descendant_box->GetLayoutObject();
+
+  // TODO(layoutng): Explain this check. I assume we need it because layers
+  // may have transforms and so we have to go through LocalToAncestorRects?
+  if (descendant_box->HasLayer()) {
+    DCHECK(descendant_layout_object);
+    std::unique_ptr<OutlineRectCollector> descendant_collector =
+        collector.ForDescendantCollector();
+    descendant_box->AddOutlineRects(PhysicalOffset(), outline_type,
+                                    *descendant_collector);
+    collector.Combine(descendant_collector.get(), *descendant_layout_object,
+                      containing_block, additional_offset);
+    return;
+  }
+
+  if (!descendant_box->IsInlineBox()) {
+    descendant_box->AddSelfOutlineRects(additional_offset + descendant.Offset(),
+                                        outline_type, collector, nullptr);
+    return;
+  }
+
+  DCHECK(descendant_layout_object);
+  const auto* descendant_layout_inline =
+      To<LayoutInline>(descendant_layout_object);
+  // As an optimization, an ancestor has added rects for its line boxes covering
+  // descendants' line boxes, so descendants don't need to add line boxes
+  // again. For example, if the parent is a LayoutBlock, it adds rects for its
+  // line box which cover the line boxes of this LayoutInline. So the
+  // LayoutInline needs to add rects for children and continuations only.
+  if (descendant_box->IsOutlineOwner()) {
+    // We don't pass additional_offset here because the function requires
+    // additional_offset to be the offset from the containing block.
+    descendant_layout_inline->AddOutlineRectsForNormalChildren(
+        collector, PhysicalOffset(), outline_type);
+  }
+}
+
+PositionWithAffinity PhysicalBoxFragment::PositionForPoint(
+    PhysicalOffset point) const {
+  if (layout_object_->IsLayoutReplaced()) {
+    // TODO(layout-dev): Would be better if the fragment code could handle this.
+    return layout_object_->PositionForPoint(point);
+  }
   const PhysicalOffset point_in_contents =
       IsScrollContainer()
           ? point + PhysicalOffset(PixelSnappedScrolledContentOffset())
@@ -1211,7 +1553,8 @@ PositionWithAffinity PhysicalBoxFragment::PositionForPoint(
     }
   }
 
-  if (IsA<LayoutBlockFlow>(*layout_object_) &&
+  if (!RuntimeEnabledFeatures::PreventTextSelectionJumpEnabled() &&
+      IsA<LayoutBlockFlow>(*layout_object_) &&
       layout_object_->ChildrenInline()) {
     // Here |this| may have out-of-flow children without inline children, we
     // don't find closest child of |point| for out-of-flow children.
@@ -1461,16 +1804,9 @@ PhysicalBoxFragment::AllowPostLayoutScope::~AllowPostLayoutScope() {
 
 void PhysicalBoxFragment::CheckSameForSimplifiedLayout(
     const PhysicalBoxFragment& other,
-    bool check_same_block_size,
     bool check_no_fragmentation) const {
   DCHECK_EQ(layout_object_, other.layout_object_);
-
-  LogicalSize size = size_.ConvertToLogical(Style().GetWritingMode());
-  LogicalSize other_size =
-      other.size_.ConvertToLogical(Style().GetWritingMode());
-  DCHECK_EQ(size.inline_size, other_size.inline_size);
-  if (check_same_block_size)
-    DCHECK_EQ(size.block_size, other_size.block_size);
+  DCHECK_EQ(size_, other.size_);
 
   if (check_no_fragmentation) {
     // "simplified" layout doesn't work within a fragmentation context.
@@ -1491,8 +1827,6 @@ void PhysicalBoxFragment::CheckSameForSimplifiedLayout(
             other.has_adjoining_object_descendants_);
   DCHECK_EQ(may_have_descendant_above_block_start_,
             other.may_have_descendant_above_block_start_);
-  DCHECK_EQ(bit_field_.get<HasDescendantsForTablePartFlag>(),
-            other.bit_field_.get<HasDescendantsForTablePartFlag>());
   DCHECK_EQ(IsFragmentationContextRoot(), other.IsFragmentationContextRoot());
 
   // `depends_on_percentage_block_size_` can change within out-of-flow
@@ -1600,6 +1934,7 @@ void PhysicalBoxFragment::CheckIntegrity() const {
   }
 }
 
+#if EXPENSIVE_DCHECKS_ARE_ON()
 void PhysicalBoxFragment::AssertFragmentTreeSelf() const {
   DCHECK(!IsInlineBox());
   DCHECK(OwnerLayoutBox());
@@ -1634,7 +1969,8 @@ void PhysicalBoxFragment::AssertFragmentTreeChildren(
     }
   }
 }
-#endif
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
+#endif  // DCHECK_IS_ON()
 
 void PhysicalBoxFragment::TraceAfterDispatch(Visitor* visitor) const {
   visitor->Trace(children_);

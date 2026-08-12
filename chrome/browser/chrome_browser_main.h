@@ -6,22 +6,23 @@
 #define CHROME_BROWSER_CHROME_BROWSER_MAIN_H_
 
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "base/auto_reset.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/buildflags.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/policy/messaging_layer/public/report_client.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/buildflags.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/result_codes.h"
 
 #if BUILDFLAG(ENABLE_DOWNGRADE_PROCESSING)
-#include "chrome/browser/downgrade/downgrade_manager.h"
+#include "chrome/browser/downgrade/downgrade_manager.h"  // nogncheck
 #endif
 
 class BrowserProcessImpl;
@@ -32,6 +33,10 @@ class StartupBrowserCreator;
 class ShutdownWatcherHelper;
 class WebUsbDetector;
 
+namespace apps {
+class PublisherHostFactory;
+}  // namespace apps
+
 namespace base {
 class CommandLine;
 class RunLoop;
@@ -41,8 +46,17 @@ namespace content {
 class SyntheticTrialSyncer;
 }
 
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+class PlatformAuthPolicyObserver;
+#endif
+
 class ChromeBrowserMainParts : public content::BrowserMainParts {
  public:
+  static std::unique_ptr<content::BrowserMainParts> Create(
+      bool is_integration_test,
+      StartupData* startup_data,
+      base::OnceClosure threads_ready_closure);
+
   ChromeBrowserMainParts(const ChromeBrowserMainParts&) = delete;
   ChromeBrowserMainParts& operator=(const ChromeBrowserMainParts&) = delete;
   ~ChromeBrowserMainParts() override;
@@ -58,14 +72,9 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_PROCESS_SINGLETON)
-  // Handles notifications from other processes. The function receives the
-  // command line and directory with which the other Chrome process was
-  // launched. Return true if the command line will be handled within the
-  // current browser instance or false if the remote process should handle it
-  // (i.e., because the current process is shutting down).
-  static bool ProcessSingletonNotificationCallback(
-      base::CommandLine command_line,
-      const base::FilePath& current_directory);
+  // See ProcessSingletonNotificationCallback() for details.
+  static bool ProcessSingletonNotificationForTesting(
+      base::CommandLine command_line);
 #endif  // BUILDFLAG(ENABLE_PROCESS_SINGLETON)
 
  protected:
@@ -173,10 +182,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   std::unique_ptr<content::SyntheticTrialSyncer> synthetic_trial_syncer_;
 
-  // ERP client instance, serving all reporting needs in the browser.
-  reporting::ReportQueueProvider::SmartPtr<reporting::ReportingClient>
-      reporting_client_{nullptr, base::OnTaskRunnerDeleter(nullptr)};
-
   // Members initialized after / released before main_message_loop_ ------------
 
   std::unique_ptr<BrowserProcessImpl> browser_process_;
@@ -188,14 +193,20 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
 #if !BUILDFLAG(IS_ANDROID)
   // Members needed across shutdown methods.
-  bool restart_last_session_ = false;
+  browser_shutdown::RestartMode restart_mode_ =
+      browser_shutdown::RestartMode::kNoRestart;
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_ANDROID)
+  std::optional<base::AutoReset<std::unique_ptr<apps::PublisherHostFactory>>>
+      publisher_host_factory_resetter_;
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_DOWNGRADE_PROCESSING)
   downgrade::DowngradeManager downgrade_manager_;
 #endif
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
   // Android's first run is done in Java instead of native. Chrome OS does not
   // use master preferences.
   std::unique_ptr<first_run::MasterPrefs> master_prefs_;
@@ -211,6 +222,11 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // created.
   // Must be deleted before `browser_process_`.
   std::unique_ptr<ProfileInitManager> profile_init_manager_;
+
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+  // Applies enterprise policies for platform auth SSO.
+  std::unique_ptr<PlatformAuthPolicyObserver> platform_auth_policy_observer_;
+#endif
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_H_

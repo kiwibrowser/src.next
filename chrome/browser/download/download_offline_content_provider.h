@@ -21,7 +21,7 @@
 #include "components/offline_items_collection/core/offline_item.h"
 
 #if BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/download/android/open_download_dialog_bridge_delegate.h"
+#include "chrome/browser/download/android/open_download_dialog_bridge_delegate.h"  // nogncheck crbug.com/40147906
 #endif
 
 // TODO(xingliu): Remove using in the header files.
@@ -91,6 +91,7 @@ class DownloadOfflineContentProvider
   void CancelDownload(const ContentId& id) override;
   void PauseDownload(const ContentId& id) override;
   void ResumeDownload(const ContentId& id) override;
+  void ValidateDangerousDownload(const ContentId& id) override;
 
   // Entry point for associating this class with a download item. Must be called
   // for all new and in-progress downloads, after which this class will start

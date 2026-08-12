@@ -20,16 +20,19 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "base/containers/flat_set.h"
 #include "base/containers/lru_cache.h"
 #include "base/containers/span.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/hash/sha1.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -37,14 +40,25 @@
 #include "build/build_config.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/does_url_match_filter.h"
+#include "net/base/hash_value.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/disk_cache/cache_encryption_delegate.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/http/no_vary_search_cache.h"
+#include "net/http/no_vary_search_cache_storage.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 class GURL;
+
+namespace base {
+class Time;
+}
 
 namespace url {
 class Origin;
@@ -52,10 +66,13 @@ class Origin;
 
 namespace net {
 
+NET_EXPORT BASE_DECLARE_FEATURE(kHttpCacheInitializeDiskCacheBackendEarly);
+
 class HttpNetworkSession;
 class HttpResponseInfo;
 class NetLog;
 class NetworkIsolationKey;
+class NoVarySearchCacheStorageFileOperations;
 struct HttpRequestInfo;
 
 class NET_EXPORT HttpCache : public HttpTransactionFactory {
@@ -68,6 +85,23 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
     // Equivalent to setting LOAD_DISABLE_CACHE on every request.
     DISABLE
   };
+
+  // LINT.IfChange(InvalidationFilterLoadResult)
+  enum class InvalidationFilterLoadResult {
+    kSuccess = 0,
+    kFileNotFound = 1,
+    kCorrupt = 2,
+    kMaxValue = kCorrupt,
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/net/enums.xml:NetHttpCacheLogicalInvalidationLoadResult)
+
+  // LINT.IfChange(InvalidationFilterClearContext)
+  enum class InvalidationFilterClearContext {
+    kSameSession = 0,
+    kRecoveredAfterCrash = 1,
+    kMaxValue = kRecoveredAfterCrash,
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/net/enums.xml:NetHttpCacheLogicalInvalidationClearContext)
 
   // A BackendFactory creates a backend object to be used by the HttpCache.
   class NET_EXPORT BackendFactory {
@@ -88,6 +122,16 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
         disk_cache::ApplicationStatusListenerGetter
             app_status_listener_getter) {}
 #endif
+
+    virtual std::optional<CacheType> GetCacheType() const;
+
+    // Returns true via `callback` if existing cache files are found, indicating
+    // that early initialization of the backend is appropriate.
+    virtual void HasExistingFileToLoad(base::OnceCallback<void(bool)> callback);
+
+    // Updates the max bytes that backends will be created with (if applicable
+    // for this factory).
+    virtual void SetMaxBytes(int max_bytes);
   };
 
   // A default backend factory for the common use cases.
@@ -97,13 +141,17 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
     // TrivialFileOperationsFactory is used. `path` is the destination for any
     // files used by the backend. If `max_bytes` is  zero, a default value
     // will be calculated automatically.
+    // `cache_encryption_delegate` can be null, in which case the cache will
+    // not be encrypted. The caller must ensure that the delegate outlives the
+    // backend.
     DefaultBackend(CacheType type,
                    BackendType backend_type,
                    scoped_refptr<disk_cache::BackendFileOperationsFactory>
                        file_operations_factory,
                    const base::FilePath& path,
                    int max_bytes,
-                   bool hard_reset);
+                   bool hard_reset,
+                   net::CacheEncryptionDelegate* cache_encryption_delegate);
     ~DefaultBackend() override;
 
     // Returns a factory for an in-memory cache.
@@ -119,6 +167,11 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
                                         app_status_listener_getter) override;
 #endif
 
+    std::optional<CacheType> GetCacheType() const override;
+    void HasExistingFileToLoad(
+        base::OnceCallback<void(bool)> callback) override;
+    void SetMaxBytes(int max_bytes) override;
+
    private:
     CacheType type_;
     BackendType backend_type_;
@@ -127,6 +180,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
     const base::FilePath path_;
     int max_bytes_;
     bool hard_reset_;
+    raw_ptr<net::CacheEncryptionDelegate> cache_encryption_delegate_;
 #if BUILDFLAG(IS_ANDROID)
     disk_cache::ApplicationStatusListenerGetter app_status_listener_getter_;
 #endif
@@ -170,8 +224,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
   // Initialize the cache from its component parts. |network_layer| and
   // |backend_factory| will be destroyed when the HttpCache is.
-  HttpCache(std::unique_ptr<HttpTransactionFactory> network_layer,
-            std::unique_ptr<BackendFactory> backend_factory);
+  HttpCache(
+      std::unique_ptr<HttpTransactionFactory> network_layer,
+      std::unique_ptr<BackendFactory> backend_factory,
+      std::unique_ptr<NoVarySearchCacheStorageFileOperations> file_operations);
 
   HttpCache(const HttpCache&) = delete;
   HttpCache& operator=(const HttpCache&) = delete;
@@ -182,6 +238,41 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
   using GetBackendResult = std::pair<int, raw_ptr<disk_cache::Backend>>;
   using GetBackendCallback = base::OnceCallback<void(GetBackendResult)>;
+
+  // InvalidationFilter represents a request to logically clear parts of the
+  // cache. Instead of waiting for slow disk deletion, any entry matching
+  // these criteria is treated as a cache miss.
+  struct NET_EXPORT InvalidationFilter {
+    InvalidationFilter();
+    ~InvalidationFilter();
+    InvalidationFilter(const InvalidationFilter&);
+    InvalidationFilter& operator=(const InvalidationFilter&);
+
+    // Checks if the given cache entry matches this filter's criteria
+    // (time bounds and URL).
+    bool Matches(const GURL& url, const disk_cache::Entry* entry) const;
+
+    // The time range of entries to invalidate based on their 'LastUsed' time.
+    base::Time begin_time;
+    base::Time end_time;
+
+    // Filter type (e.g., exclude vs include) and the specific origins/domains.
+    UrlFilterType filter_type;
+    base::flat_set<url::Origin> origins;
+    base::flat_set<std::string> domains;
+
+    // Runtime only, not serialized.
+    bool was_loaded_from_disk = false;
+
+    bool operator==(const InvalidationFilter& other) const {
+      // `was_loaded_from_disk` is a transient runtime property used to track
+      // metrics and is not part of the logical filter identity.
+      return begin_time == other.begin_time && end_time == other.end_time &&
+             filter_type == other.filter_type && origins == other.origins &&
+             domains == other.domains;
+    }
+  };
+
   // Retrieves the cache backend for this HttpCache instance. If the backend
   // is not initialized yet, this method will initialize it. The integer portion
   // of the return value is a network error code, and it could be
@@ -222,9 +313,56 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
                           const NetworkIsolationKey& network_isolation_key,
                           bool include_credentials);
 
+  // Delete entries matching the criteria `filter_type`, `origins`, `domains`,
+  // `delete_begin` and `delete_end` from the NoVarySearchCache and refresh the
+  // on-disk cache snapshot to reflect the removals if necessary. See
+  // no_vary_search_cache.h for the definition of the parameters.
+  void ClearNoVarySearchCache(UrlFilterType filter_type,
+                              const base::flat_set<url::Origin>& origins,
+                              const base::flat_set<std::string>& domains,
+                              base::Time delete_begin,
+                              base::Time delete_end);
+
+
+
+  // Adds a filter to the logical invalidation list. Any subsequent access
+  // to an entry matching this filter will result in a cache miss.
+  void AddInvalidationFilter(InvalidationFilter filter);
+
+  // Removes a filter from the logical invalidation list.
+  void RemoveInvalidationFilter(const InvalidationFilter& filter);
+
+  size_t GetInvalidationFilterCountForTesting() const {
+    return invalidation_filters_.size();
+  }
+
+  // Orchestrator for invalidation checks. This provides a fast-path bailout
+  // when no filters are active, decodes the URL from the cache key exactly once,
+  // and iterates over all active filters to see if any match the given entry.
+  bool IsInvalidated(disk_cache::Entry* entry);
+
+  // Updates the cache quota (max bytes) that backends should use.
+  // This can be used before, after, or during backend initialization, and
+  // the new value will be used for both subsequent backend creation and will
+  // be used to resize any existing backends.
+  // Note that zero is not a special value for |max_bytes| and does not select
+  // a default.
+  // If |force_initialization| is true, the backend will be initialized,
+  // allowing evictions to occur even if it had not already been initialized.
+  void SetMaxBytes(base::ByteSize max_bytes, bool force_initialization);
+
   // Causes all transactions created after this point to simulate lock timeout
   // and effectively bypass the cache lock whenever there is lock contention.
   void SimulateCacheLockTimeoutForTesting() { bypass_lock_for_test_ = true; }
+
+  // Causes CacheBodyCompressor to fail after `max_size` uncompressed bytes.
+  // Used by tests to exercise compression error paths in Writers.
+  void set_compression_max_size_for_testing(int64_t max_size) {
+    compression_max_size_for_testing_ = max_size;
+  }
+  std::optional<int64_t> compression_max_size_for_testing() const {
+    return compression_max_size_for_testing_;
+  }
 
   // Causes all transactions created after this point to simulate lock timeout
   // and effectively bypass the cache lock whenever there is lock contention
@@ -244,8 +382,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   }
 
   // HttpTransactionFactory implementation:
-  int CreateTransaction(RequestPriority priority,
-                        std::unique_ptr<HttpTransaction>* transaction) override;
+  std::unique_ptr<HttpTransaction> CreateTransaction(
+      RequestPriority priority) override;
   HttpCache* GetCache() override;
   HttpNetworkSession* GetSession() override;
 
@@ -260,42 +398,17 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
       std::unique_ptr<HttpTransactionFactory> new_network_layer);
 
   // Get the URL from the entry's cache key.
-  static std::string GetResourceURLFromHttpCacheKey(const std::string& key);
+  static std::string_view GetResourceURLFromHttpCacheKey(
+      const std::string_view key);
 
   // Generates the cache key for a request.
   static std::optional<std::string> GenerateCacheKeyForRequest(
       const HttpRequestInfo* request);
 
-  enum class ExperimentMode {
-    // No additional partitioning is done for top-level navigations.
-    kStandard,
-    // A boolean is incorporated into the cache key that is true for
-    // renderer-initiated main frame navigations when the request initiator site
-    // is cross-site to the URL being navigated to.
-    kCrossSiteInitiatorBoolean,
-    // The request initiator site is incorporated into the cache key for
-    // renderer-initiated main frame navigations when the request initiator site
-    // is cross-site to the URL being navigated to. If the request initiator
-    // site is opaque, then no caching is performed of the navigated-to
-    // document.
-    kMainFrameNavigationInitiator,
-    // The request initiator site is incorporated into the cache key for all
-    // renderer-initiated navigations (including subframe navigations) when the
-    // request initiator site is cross-site to the URL being navigated to. If
-    // the request initiator site is opaque, then no caching is performed of the
-    // navigated-to document. When this scheme is used, the
-    // `is-subframe-document-resource` boolean is not incorporated into the
-    // cache key, since incorporating the initiator site for subframe
-    // navigations
-    // should be sufficient for mitigating the attacks that the
-    // `is-subframe-document-resource` mitigates.
-    kNavigationInitiator,
-  };
-
-  // Returns the HTTP Cache partitioning experiment mode currently in use. Only
-  // one experiment mode feature flag should be enabled at a time, but if
-  // multiple are enabled then `ExperimentMode::kStandard` will be returned.
-  static ExperimentMode GetExperimentMode();
+  // Generates the cache partition key, which is the cache key not including the
+  // URL. This does include the upload data identifier when needed.
+  static std::optional<std::string> GenerateCachePartitionKeyForRequest(
+      const HttpRequestInfo& request);
 
   // Enable split cache feature if not already overridden in the feature list.
   // Should only be invoked during process initialization before the HTTP
@@ -461,6 +574,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
                                             bool is_partial,
                                             bool is_match) const;
 
+    // Returns the priority-based task runner, considering request priority
+    // among all transactions.
+    const scoped_refptr<base::SingleThreadTaskRunner>& GetTaskRunner() const;
+
    private:
     friend class base::RefCounted<ActiveEntry>;
 
@@ -527,7 +644,13 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // (when network state partitioning is enabled) or requests with an opaque
   // initiator (for HTTP cache experiment partition schemes that incorporate the
   // initiator into the cache key).
-  static bool CanGenerateCacheKeyForRequest(const HttpRequestInfo* request);
+  static bool CanGenerateCacheKeyForRequest(const HttpRequestInfo& request);
+
+  // Returns the result of GenerateCacheKey() provided that
+  // CanGenerateCacheKeyForRequest() returned true. Otherwise returns nullopt.
+  static std::optional<std::string> GenerateCacheKeyInternal(
+      const HttpRequestInfo& request,
+      bool include_url);
 
   // Generates a cache key given the various pieces used to construct the key.
   // Must not be called if a corresponding `CanGenerateCacheKeyForRequest`
@@ -539,7 +662,13 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
       int64_t upload_data_identifier,
       bool is_subframe_document_resource,
       bool is_mainframe_navigation,
-      std::optional<url::Origin> initiator);
+      bool is_shared_resource,
+      std::optional<url::Origin> initiator,
+      bool include_url);
+
+  // Generates a cache key for `request_info` and informs the backend it should
+  // consider it used if it exists.
+  void OnExternalCacheHitForRequest(const HttpRequestInfo& request_info);
 
   // Creates a WorkItem and sets it as the |pending_op|'s writer, or adds it to
   // the queue if a writer already exists.
@@ -728,6 +857,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // to avoid attempting creating cache entries uselessly.
   bool DidKeyLeadToNoStoreResponse(const std::string& key);
 
+  // Calls NoVarySearchCacheStorage::Load() if `file_operations_` is set. Since
+  // this gives away `file_operations_`, it will only call it once.
+  void MaybeLoadNoVarySearchCacheFromDisk();
+
   // Events (called via PostTask) ---------------------------------------------
 
   void OnProcessQueuedTransactions(scoped_refptr<ActiveEntry> entry);
@@ -759,12 +892,17 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Processes the backend creation notification.
   void OnBackendCreated(int result, PendingOp* pending_op);
 
+  // Starts using the loaded cache if loading was successful.
+  void OnNoVarySearchCacheLoadComplete(
+      NoVarySearchCacheStorage::LoadResult result);
+
   // Constants ----------------------------------------------------------------
 
   // Used when generating and accessing keys if cache is split.
   static const char kDoubleKeyPrefix[];
   static const char kDoubleKeySeparator[];
   static const char kSubframeDocumentResourcePrefix[];
+  static const char kCrossSiteMainFrameNavigationPrefix[];
 
   // Used for single-keyed entries if the cache is split.
   static const char kSingleKeyPrefix[];
@@ -773,6 +911,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Variables ----------------------------------------------------------------
 
   raw_ptr<NetLog> net_log_;
+  raw_ptr<net::CacheEncryptionDelegate> cache_encryption_delegate_;
 
   // Used when lazily constructing the disk_cache_.
   std::unique_ptr<BackendFactory> backend_factory_;
@@ -791,6 +930,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // The set of active entries indexed by cache key.
   ActiveEntriesMap active_entries_;
 
+  // The set of invalidation filters.
+  std::vector<InvalidationFilter> invalidation_filters_;
+
   // The set of doomed entries.
   ActiveEntriesSet doomed_entries_;
 
@@ -800,8 +942,26 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // A clock that can be swapped out for testing.
   raw_ptr<base::Clock> clock_;
 
+  std::optional<int64_t> compression_max_size_for_testing_;
+
   // Used to track which keys led to a no-store response.
-  base::LRUCacheSet<base::SHA1Digest> keys_marked_no_store_;
+  base::LRUCacheSet<SHA256HashValue> keys_marked_no_store_;
+
+  // Set if the kHttpCacheNoVarySearch feature is enabled. Translates the URL in
+  // the request into the URL of a previous response that is equivalent
+  // according to the rules of the No-Vary-Search header in the response.
+  std::unique_ptr<NoVarySearchCache> no_vary_search_cache_;
+
+  // Implements persistence for `no_vary_search_cache_`. Only used when the
+  // cache is stored on disk. Holds a raw_ptr to `no_vary_search_cache_` so must
+  // be destroyed before it.
+  NoVarySearchCacheStorage no_vary_search_cache_storage_;
+
+  // Implementation of file operations for No-Vary-Search cache persistence.
+  // Only non-null if the backend is on-disk, and only until a backend has been
+  // created. After that ownership is transferred to
+  // `no_vary_search_cache_storage_`.
+  std::unique_ptr<NoVarySearchCacheStorageFileOperations> file_operations_;
 
   THREAD_CHECKER(thread_checker_);
 

@@ -4,9 +4,7 @@
 
 #include "chrome/browser/extensions/extension_api_unittest.h"
 
-#include <array>
-
-#include "chrome/browser/ui/browser.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/extension.h"
@@ -18,11 +16,15 @@ namespace utils = extensions::api_test_utils;
 
 namespace extensions {
 
-ExtensionApiUnittest::~ExtensionApiUnittest() {
-}
+ExtensionApiUnittest::ExtensionApiUnittest()
+    : ExtensionServiceTestBase(
+          std::make_unique<content::BrowserTaskEnvironment>(
+              base::test::TaskEnvironment::MainThreadType::UI)) {}
+ExtensionApiUnittest::~ExtensionApiUnittest() = default;
 
 void ExtensionApiUnittest::SetUp() {
-  BrowserWithTestWindowTest::SetUp();
+  ExtensionServiceTestBase::SetUp();
+  InitializeEmptyExtensionService();
   extension_ = ExtensionBuilder("Test").Build();
 }
 
@@ -31,10 +33,10 @@ std::optional<base::Value> ExtensionApiUnittest::RunFunctionAndReturnValue(
     const std::string& args) {
   function->set_extension(extension());
   return utils::RunFunctionAndReturnSingleResult(std::move(function), args,
-                                                 browser()->profile());
+                                                 profile());
 }
 
-std::optional<base::Value::Dict>
+std::optional<base::DictValue>
 ExtensionApiUnittest::RunFunctionAndReturnDictionary(
     scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
@@ -51,7 +53,7 @@ ExtensionApiUnittest::RunFunctionAndReturnDictionary(
   return std::move(*value).TakeDict();
 }
 
-std::optional<base::Value::List> ExtensionApiUnittest::RunFunctionAndReturnList(
+std::optional<base::ListValue> ExtensionApiUnittest::RunFunctionAndReturnList(
     scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
   std::optional<base::Value> value =
@@ -71,8 +73,7 @@ std::string ExtensionApiUnittest::RunFunctionAndReturnError(
     scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
   function->set_extension(extension());
-  return utils::RunFunctionAndReturnError(std::move(function), args,
-                                          browser()->profile());
+  return utils::RunFunctionAndReturnError(std::move(function), args, profile());
 }
 
 void ExtensionApiUnittest::RunFunction(

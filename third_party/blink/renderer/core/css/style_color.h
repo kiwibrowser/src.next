@@ -51,6 +51,7 @@ class ColorProvider;
 
 namespace blink {
 class CalculationValue;
+class CSSLengthResolver;
 class CSSValue;
 
 class CORE_EXPORT StyleColor {
@@ -111,7 +112,7 @@ class CORE_EXPORT StyleColor {
     // function.
     virtual Color Resolve(const Color& current_color) const = 0;
 
-    enum class Type { kColorMix, kRelativeColor };
+    enum class Type { kColorMix, kRelativeColor, kContrastColor, kAlphaColor };
     Type GetType() const { return type_; }
 
     bool operator==(const UnresolvedColorFunction& other) const;
@@ -155,10 +156,6 @@ class CORE_EXPORT StyleColor {
                                                     color2_type_);
     }
 
-    bool operator!=(const UnresolvedColorMix& other) const {
-      return !(*this == other);
-    }
-
    private:
     Color::ColorSpace color_interpolation_space_ = Color::ColorSpace::kNone;
     Color::HueInterpolationMethod hue_interpolation_method_ =
@@ -178,7 +175,8 @@ class CORE_EXPORT StyleColor {
                             const CSSValue& channel0,
                             const CSSValue& channel1,
                             const CSSValue& channel2,
-                            const CSSValue* alpha);
+                            const CSSValue* alpha,
+                            const CSSLengthResolver& length_resolver);
     virtual ~UnresolvedRelativeColor() = default;
     void Trace(Visitor* visitor) const override;
     CSSValue* ToCSSValue() const override;
@@ -194,10 +192,42 @@ class CORE_EXPORT StyleColor {
     bool alpha_was_specified_ = false;
 
     // nullptr on any of these fields represents `none`.
-    scoped_refptr<const CalculationValue> channel0_;
-    scoped_refptr<const CalculationValue> channel1_;
-    scoped_refptr<const CalculationValue> channel2_;
-    scoped_refptr<const CalculationValue> alpha_;
+    Member<const CalculationValue> channel0_;
+    Member<const CalculationValue> channel1_;
+    Member<const CalculationValue> channel2_;
+    Member<const CalculationValue> alpha_;
+  };
+
+  class CORE_EXPORT UnresolvedContrastColor : public UnresolvedColorFunction {
+   public:
+    explicit UnresolvedContrastColor(const StyleColor& param_color);
+    virtual ~UnresolvedContrastColor() = default;
+    CSSValue* ToCSSValue() const override;
+    Color Resolve(const Color& current_color) const override;
+    bool operator==(const UnresolvedContrastColor& other) const;
+    void Trace(Visitor* visitor) const override;
+
+   private:
+    ColorOrUnresolvedColorFunction param_color_;
+    UnderlyingColorType param_color_type_ = UnderlyingColorType::kColor;
+  };
+
+  class CORE_EXPORT UnresolvedAlphaColor : public UnresolvedColorFunction {
+   public:
+    UnresolvedAlphaColor(const StyleColor& origin_color,
+                         const CSSValue* alpha,
+                         const CSSLengthResolver& length_resolver);
+    virtual ~UnresolvedAlphaColor() = default;
+    CSSValue* ToCSSValue() const override;
+    Color Resolve(const Color& current_color) const override;
+    bool operator==(const UnresolvedAlphaColor& other) const;
+    void Trace(Visitor* visitor) const override;
+
+   private:
+    ColorOrUnresolvedColorFunction origin_color_;
+    UnderlyingColorType origin_color_type_ = UnderlyingColorType::kColor;
+    bool alpha_was_specified_ = false;
+    Member<const CalculationValue> alpha_;
   };
 
   StyleColor() = default;
@@ -227,6 +257,9 @@ class CORE_EXPORT StyleColor {
     return color_or_unresolved_color_function_.unresolved_color_function !=
            nullptr;
   }
+  bool DependsOnCurrentColor() const {
+    return IsCurrentColor() || IsUnresolvedColorFunction();
+  }
   bool IsSystemColorIncludingDeprecated() const {
     return IsSystemColorIncludingDeprecated(color_keyword_);
   }
@@ -249,20 +282,13 @@ class CORE_EXPORT StyleColor {
                 mojom::blink::ColorScheme color_scheme,
                 bool* is_current_color = nullptr) const;
 
-  // Resolve and override the resolved color's alpha channel as specified by
-  // |alpha|.
-  Color ResolveWithAlpha(Color current_color,
-                         mojom::blink::ColorScheme color_scheme,
-                         int alpha,
-                         bool* is_current_color = nullptr) const;
-
   // Re-resolve the current system color keyword. This is needed in cases such
   // as forced colors mode because initial values for some internal forced
   // colors properties are system colors so we need to re-resolve them to ensure
   // they pick up the correct color on theme change.
   StyleColor ResolveSystemColor(mojom::blink::ColorScheme color_scheme,
                                 const ui::ColorProvider* color_provider,
-                                bool is_in_web_app_scope) const;
+                                bool can_expose_accent_color) const;
 
   const CSSValue* ToCSSValue() const;
 
@@ -273,7 +299,7 @@ class CORE_EXPORT StyleColor {
   static Color ColorFromKeyword(CSSValueID,
                                 mojom::blink::ColorScheme color_scheme,
                                 const ui::ColorProvider* color_provider,
-                                bool is_in_web_app_scope);
+                                bool can_expose_accent_color);
   static bool IsColorKeyword(CSSValueID);
   static bool IsSystemColorIncludingDeprecated(CSSValueID);
   static bool IsSystemColor(CSSValueID);
@@ -291,10 +317,6 @@ class CORE_EXPORT StyleColor {
 
     return color_or_unresolved_color_function_.color ==
            other.color_or_unresolved_color_function_.color;
-  }
-
-  inline bool operator!=(const StyleColor& other) const {
-    return !(*this == other);
   }
 
  protected:
@@ -333,6 +355,22 @@ struct DowncastTraits<StyleColor::UnresolvedRelativeColor> {
   static bool AllowFrom(const StyleColor::UnresolvedColorFunction& value) {
     return value.GetType() ==
            StyleColor::UnresolvedColorFunction::Type::kRelativeColor;
+  }
+};
+
+template <>
+struct DowncastTraits<StyleColor::UnresolvedContrastColor> {
+  static bool AllowFrom(const StyleColor::UnresolvedColorFunction& value) {
+    return value.GetType() ==
+           StyleColor::UnresolvedColorFunction::Type::kContrastColor;
+  }
+};
+
+template <>
+struct DowncastTraits<StyleColor::UnresolvedAlphaColor> {
+  static bool AllowFrom(const StyleColor::UnresolvedColorFunction& value) {
+    return value.GetType() ==
+           StyleColor::UnresolvedColorFunction::Type::kAlphaColor;
   }
 };
 

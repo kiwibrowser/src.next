@@ -66,6 +66,7 @@ class CORE_EXPORT FontBuilder {
 
   void SetStretch(FontSelectionValue);
   void SetStyle(FontSelectionValue);
+  void SetStyleSyntax(FontDescription::StyleSyntax);
   void SetWeight(FontSelectionValue);
 
   void SetFamilyDescription(const FontDescription::FamilyDescription&);
@@ -88,6 +89,7 @@ class CORE_EXPORT FontBuilder {
   void SetFontOpticalSizing(OpticalSizing);
   void SetFontSmoothing(FontSmoothingMode);
   void SetVariationSettings(scoped_refptr<const FontVariationSettings>);
+  void SetFontLanguageOverride(const AtomicString&);
   void SetVariantPosition(FontDescription::FontVariantPosition);
   void SetVariantEmoji(FontVariantEmoji);
 
@@ -107,6 +109,7 @@ class CORE_EXPORT FontBuilder {
   static FontFeatureSettings* InitialFeatureSettings() { return nullptr; }
   static FontVariationSettings* InitialVariationSettings() { return nullptr; }
   static FontPalette* InitialFontPalette() { return nullptr; }
+  static AtomicString InitialFontLanguageOverride() { return g_null_atom; }
   static FontVariantAlternates* InitialFontVariantAlternates() {
     return nullptr;
   }
@@ -204,6 +207,7 @@ class CORE_EXPORT FontBuilder {
     kVariantEmoji,
     kVariantPosition,
     kVariationSettings,
+    kFontLanguageOverride,
     kTextRendering,
     kKerning,
     kTextSpacingTrim,

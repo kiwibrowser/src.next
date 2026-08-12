@@ -12,11 +12,11 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment_engine.h"
+#include "third_party/blink/renderer/core/dom/slot_assignment_recalc_forbidden_scope.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -266,7 +266,7 @@ TEST_F(NodeTest, AttachContext_PreviousInFlow_Slotted) {
       GetDocument()
           .getElementById(AtomicString("host"))
           ->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML(
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(
       "<div id=root style='display:contents'><span></span><slot></slot></div>");
   UpdateAllLifecyclePhasesForTest();
 
@@ -334,7 +334,8 @@ TEST_F(NodeTest, SkipStyleDirtyHostChild) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML("<div style='display:none'><slot></slot></div>");
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(
+      "<div style='display:none'><slot></slot></div>");
   UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
 
@@ -374,7 +375,7 @@ TEST_F(NodeTest, SkipForceReattachDisplayNone) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML("<slot name='target'></slot>");
+  shadow_root.SetInnerHTMLWithoutTrustedTypes("<slot name='target'></slot>");
   UpdateAllLifecyclePhasesForTest();
 
   Element* span = To<Element>(host->firstChild());
@@ -393,7 +394,7 @@ TEST_F(NodeTest, UpdateChildDirtyAncestorsOnSlotAssignment) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML(
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(
       "<div><slot></slot></div><div id='child-dirty'><slot "
       "name='target'></slot></div>");
   UpdateAllLifecyclePhasesForTest();
@@ -419,7 +420,7 @@ TEST_F(NodeTest, UpdateChildDirtySlotAfterRemoval) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML("<slot></slot>");
+  shadow_root.SetInnerHTMLWithoutTrustedTypes("<slot></slot>");
   UpdateAllLifecyclePhasesForTest();
 
   auto* span = To<Element>(host->firstChild());
@@ -451,7 +452,7 @@ TEST_F(NodeTest, UpdateChildDirtyAfterSlotRemoval) {
   Element* host = GetDocument().getElementById(AtomicString("host"));
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML("<div><slot></slot></div>");
+  shadow_root.SetInnerHTMLWithoutTrustedTypes("<div><slot></slot></div>");
   UpdateAllLifecyclePhasesForTest();
 
   auto* span = To<Element>(host->firstChild());
@@ -487,7 +488,8 @@ TEST_F(NodeTest, UpdateChildDirtyAfterSlottingDirtyNode) {
 
   ShadowRoot& shadow_root =
       host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML("<div><slot name=x></slot></div>");
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(
+      "<div><slot name=x></slot></div>");
   UpdateAllLifecyclePhasesForTest();
 
   // Make sure the span is style dirty.
@@ -509,7 +511,7 @@ TEST_F(NodeTest, UpdateChildDirtyAfterSlottingDirtyNode) {
 }
 
 TEST_F(NodeTest, ReassignStyleDirtyElementIntoSlotOutsideFlatTree) {
-  GetDocument().body()->setHTMLUnsafe(R"HTML(
+  GetDocument().body()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
     <div>
       <template shadowrootmode="open">
         <div>
@@ -550,7 +552,7 @@ TEST_F(NodeTest, ReassignStyleDirtyElementIntoSlotOutsideFlatTree) {
 }
 
 TEST_F(NodeTest, FlatTreeParentForChildDirty) {
-  GetDocument().body()->setHTMLUnsafe(R"HTML(
+  GetDocument().body()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
     <div id="host">
       <template shadowrootmode="open">
         <slot id="slot1">
@@ -585,6 +587,126 @@ TEST_F(NodeTest, FlatTreeParentForChildDirty) {
   EXPECT_EQ(not_slotted->FlatTreeParentForChildDirty(), nullptr);
   EXPECT_EQ(fallback1->FlatTreeParentForChildDirty(), nullptr);
   EXPECT_EQ(fallback2->FlatTreeParentForChildDirty(), slot2);
+}
+
+TEST_F(NodeTest, moveBefore_DetachAfterSlotReassignment) {
+  GetDocument().body()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
+    <!DOCTYPE html>
+    <div id="host">
+      <template shadowRootMode="open"><slot></slot></template>
+    </div>
+    <span id="span" slot="foo"></span>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* host = GetDocument().getElementById(AtomicString("host"));
+  Element* span = GetDocument().getElementById(AtomicString("span"));
+
+  host->moveBefore(span, nullptr, ASSERT_NO_EXCEPTION);
+  EXPECT_TRUE(span->GetComputedStyle());
+
+  GetDocument().GetSlotAssignmentEngine().RecalcSlotAssignments();
+  EXPECT_FALSE(span->GetComputedStyle());
+}
+
+#if DCHECK_IS_ON()
+TEST_F(NodeTest, ToStringDisallowedAssignmentRecalc) {
+  GetDocument().body()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
+    <div id=host>
+      <template shadowrootmode=open>
+        <div contenteditable>
+          <slot name=slot></slot>
+        </div>
+      </template>
+      <div id=element>element</div>
+    </div>
+  )HTML");
+
+  Element* element = GetDocument().getElementById(AtomicString("element"));
+  element->setAttribute(html_names::kSlotAttr, AtomicString("slot"));
+
+  SlotAssignmentRecalcForbiddenScope forbidden_scope(GetDocument());
+  element->ToString();
+}
+#endif
+
+// Note: This test does not include view transition pseudos due to missing setup
+// in NodeTest. For view transition pseudo traversal, see
+// ViewTransitionTest.IncludingPseudoTraversal in view_transition_test.cc.
+TEST_F(NodeTest, PseudoAwareSiblingTraversalAllPseudos) {
+  // Overall tree order: marker, before, child, after, interest_button
+  // But we can only observe ::marker on a list item, not a button, so
+  // we do this in two phases:
+  // host 1: before, child, after, interest_button
+  // host 2: marker, before, child, after
+
+  SetBodyContent(R"HTML(
+    <style>
+      .host::before { content: 'before'; }
+      .host::after { content: 'after'; }
+      .host::interest-button { content: 'interest'; }
+      .host::marker { content: 'marker'; }
+    </style>
+    <button id=host1 class=host interestfor=target><span id="child">child</span></button>
+    <div popover id="target">Target</div>
+    <li id=host2 class=host><span id="child2">child2</span></li>
+  )HTML");
+
+  Element* host1 = GetDocument().getElementById(AtomicString("host1"));
+  ASSERT_TRUE(host1);
+  Element* host2 = GetDocument().getElementById(AtomicString("host2"));
+  ASSERT_TRUE(host2);
+  UpdateAllLifecyclePhasesForTest();
+
+  PseudoElement* before = host1->GetPseudoElement(kPseudoIdBefore);
+  Element* child = host1->QuerySelector(AtomicString("#child"));
+  PseudoElement* after = host1->GetPseudoElement(kPseudoIdAfter);
+  PseudoElement* interest_button =
+      host1->GetPseudoElement(kPseudoIdInterestButton);
+
+  ASSERT_TRUE(before);
+  ASSERT_TRUE(child);
+  ASSERT_TRUE(after);
+  ASSERT_TRUE(interest_button);
+
+  // Phase 1: host 1 (before, child, after, interest_button)
+  EXPECT_EQ(host1->PseudoAwareFirstChild(), before);
+  EXPECT_EQ(host1->PseudoAwareLastChild(), interest_button);
+
+  EXPECT_EQ(before->PseudoAwareNextSibling(), child);
+  EXPECT_EQ(child->PseudoAwareNextSibling(), after);
+  EXPECT_EQ(after->PseudoAwareNextSibling(), interest_button);
+  EXPECT_FALSE(interest_button->PseudoAwareNextSibling());
+
+  EXPECT_FALSE(before->PseudoAwarePreviousSibling());
+  EXPECT_EQ(child->PseudoAwarePreviousSibling(), before);
+  EXPECT_EQ(after->PseudoAwarePreviousSibling(), child);
+  EXPECT_EQ(interest_button->PseudoAwarePreviousSibling(), after);
+
+  // Phase 2: host 2 (marker, before, child, after)
+  PseudoElement* marker = host2->GetPseudoElement(kPseudoIdMarker);
+  PseudoElement* before2 = host2->GetPseudoElement(kPseudoIdBefore);
+  Element* child2 = host2->QuerySelector(AtomicString("#child2"));
+  PseudoElement* after2 = host2->GetPseudoElement(kPseudoIdAfter);
+
+  ASSERT_TRUE(marker);
+  ASSERT_TRUE(before2);
+  ASSERT_TRUE(child2);
+  ASSERT_TRUE(after2);
+
+  EXPECT_EQ(host2->PseudoAwareFirstChild(), marker);
+  EXPECT_EQ(host2->PseudoAwareLastChild(), after2);
+
+  EXPECT_EQ(marker->PseudoAwareNextSibling(), before2);
+  EXPECT_EQ(before2->PseudoAwareNextSibling(), child2);
+  EXPECT_EQ(child2->PseudoAwareNextSibling(), after2);
+  EXPECT_FALSE(after2->PseudoAwareNextSibling());
+
+  EXPECT_FALSE(marker->PseudoAwarePreviousSibling());
+  EXPECT_EQ(before2->PseudoAwarePreviousSibling(), marker);
+  EXPECT_EQ(child2->PseudoAwarePreviousSibling(), before2);
+  EXPECT_EQ(after2->PseudoAwarePreviousSibling(), child2);
 }
 
 }  // namespace blink

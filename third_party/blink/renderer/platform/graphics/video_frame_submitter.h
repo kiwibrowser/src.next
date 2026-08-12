@@ -16,9 +16,7 @@
 #include "cc/metrics/frame_sequence_tracker_collection.h"
 #include "cc/metrics/frame_sorter.h"
 #include "cc/metrics/video_playback_roughness_reporter.h"
-#include "components/viz/client/shared_bitmap_reporter.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
-#include "components/viz/common/resources/shared_bitmap.h"
 #include "components/viz/common/surfaces/child_local_surface_id_allocator.h"
 #include "gpu/ipc/client/gpu_channel_observer.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -32,6 +30,10 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
+namespace gpu {
+class SharedImageInterface;
+}
+
 namespace blink {
 
 // This single-threaded class facilitates the communication between the media
@@ -43,7 +45,6 @@ namespace blink {
 class PLATFORM_EXPORT VideoFrameSubmitter
     : public WebVideoFrameSubmitter,
       public viz::ContextLostObserver,
-      public viz::SharedBitmapReporter,
       public gpu::GpuChannelLostObserver,
       public viz::mojom::blink::CompositorFrameSinkClient {
  public:
@@ -69,6 +70,7 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   void SetIsPageVisible(bool is_visible) override;
   void SetForceBeginFrames(bool force_begin_frames) override;
   void SetForceSubmit(bool) override;
+  std::optional<base::TimeTicks> GetExpectedDisplayTime() const override;
 
   // viz::ContextLostObserver implementation.
   void OnContextLost() override;
@@ -78,38 +80,54 @@ class PLATFORM_EXPORT VideoFrameSubmitter
 
   // cc::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
-      WTF::Vector<viz::ReturnedResource> resources) override;
+      Vector<viz::ReturnedResource> resources) override;
   void OnBeginFrame(const viz::BeginFrameArgs&,
-                    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&,
-                    bool frame_ack,
-                    WTF::Vector<viz::ReturnedResource> resources) override;
+                    const HashMap<uint32_t, viz::FrameTimingDetails>&,
+                    Vector<viz::ReturnedResource> resources) override;
   void OnBeginFramePausedChanged(bool paused) override {}
-  void ReclaimResources(WTF::Vector<viz::ReturnedResource> resources) override;
+  void ReclaimResources(Vector<viz::ReturnedResource> resources) override;
   void OnCompositorFrameTransitionDirectiveProcessed(
       uint32_t sequence_id) override {}
   void OnSurfaceEvicted(const viz::LocalSurfaceId& local_surface_id) override {}
 
-  // viz::SharedBitmapReporter implementation.
-  void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion,
-                               const viz::SharedBitmapId&) override;
-  void DidDeleteSharedBitmap(const viz::SharedBitmapId&) override;
+  void SetNextFrameTokenForTesting(uint32_t token) {
+    next_frame_token_.SetValueForTesting(token);
+  }
 
  private:
   friend class VideoFrameSubmitterTest;
+  friend class VideoFrameSubmitterMockTimeTest;
   class FrameSinkBundleProxy;
+  struct PendingFrameInfo {
+    std::optional<base::TimeTicks> capture_begin_time;
+    std::optional<uint32_t> rtp_timestamp;
+    viz::BeginFrameArgs begin_frame_args;
+    bool was_decoded_with_end_time = false;
+    bool is_manual_source = false;
+  };
 
   // Called during Initialize() and OnContextLost() after a new ContextGL is
   // requested.
   void OnReceivedContextProvider(
       bool use_gpu_compositing,
       scoped_refptr<viz::RasterContextProvider> context_provider,
-      scoped_refptr<gpu::ClientSharedImageInterface> shared_image_interface);
+      scoped_refptr<gpu::SharedImageInterface> shared_image_interface);
 
   // Adopts `context_provider` if it's non-null and in a usable state. Returns
   // true on success and false on failure, implying that a new ContextProvider
   // should be requested.
   bool MaybeAcceptContextProvider(
       scoped_refptr<viz::RasterContextProvider> context_provider);
+
+  // Snaps |estimate| to the nearest VSync tick relative to the current phase.
+  // Logic: result = frame_time + (n * interval), where n is the nearest
+  // integer.
+  //
+  // Note: This is relative to the compositor's |frame_time| anchor, not the
+  // system epoch. We use std::llround to snap to the closest boundary (halfway
+  // cases round away from zero). If no valid BeginFrame exists, returns
+  // |estimate|.
+  base::TimeTicks SnapToNearestVsync(base::TimeTicks estimate) const;
 
   // Starts submission and calls UpdateSubmissionState(); which may submit.
   void StartSubmitting();
@@ -167,10 +185,12 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // has changed.
   void NotifyOpacityIfNeeded(Opacity new_opacity);
 
+  void ClearFrameResources();
+
   raw_ptr<cc::VideoFrameProvider> video_frame_provider_ = nullptr;
   bool is_media_stream_ = false;
   scoped_refptr<viz::RasterContextProvider> context_provider_;
-  scoped_refptr<gpu::ClientSharedImageInterface> shared_image_interface_;
+  scoped_refptr<gpu::SharedImageInterface> shared_image_interface_;
   mojo::Remote<viz::mojom::blink::CompositorFrameSink> remote_frame_sink_;
   mojo::Remote<mojom::blink::SurfaceEmbedder> surface_embedder_;
   mojo::Receiver<viz::mojom::blink::CompositorFrameSinkClient> receiver_{this};
@@ -238,18 +258,16 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // Instead they are a specialized variant of compositor-only frames, submitted
   // via a batch. So track the mapping of FrameToken to viz::BeginFrameArgs in
   // `pending_frames_`, and denote their completion directly to `frame_sorter_`.
-  base::flat_map<uint32_t, viz::BeginFrameArgs> pending_frames_;
+  //
+  // Contains metadata of all submitted video frames, including those that
+  // `pending_frames_` does not store (manual source video frames)
+  base::flat_map<uint32_t, PendingFrameInfo> pending_frames_;
   cc::FrameSequenceTrackerCollection frame_trackers_;
   cc::FrameSorter frame_sorter_;
 
   // The BeginFrameArgs passed to the most recent call of OnBeginFrame().
   // Required for FrameSequenceTrackerCollection::NotifySubmitFrame
   viz::BeginFrameArgs last_begin_frame_args_;
-
-  // The token of the frames that are submitted outside OnBeginFrame(). These
-  // frames should be ignored by the video tracker even if they are reported as
-  // presented.
-  base::flat_set<uint32_t> ignorable_submitted_frames_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 

@@ -13,7 +13,6 @@
 #include "chrome/browser/download/offline_item_utils.h"
 #include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/download/public/common/download_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item_utils.h"
@@ -26,30 +25,28 @@
 // offline_items_collection::FailState.
 #include "chrome/android/chrome_jni_headers/DownloadUtils_jni.h"
 
-using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
 namespace {
 // If received bytes is more than the size limit and resumption will restart
 // from the beginning, throttle it.
-int kDefaultAutoResumptionSizeLimit = 10 * 1024 * 1024;  // 10 MB
-const char kAutoResumptionSizeLimitParamName[] = "AutoResumptionSizeLimit";
+constexpr int kDefaultAutoResumptionSizeLimit = 10 * 1024 * 1024;  // 10 MB
 }  // namespace
 
-static jint JNI_DownloadUtils_GetResumeMode(
+static int32_t JNI_DownloadUtils_GetResumeMode(
     JNIEnv* env,
-    std::string& url,
+    const std::string& url,
     offline_items_collection::FailState failState) {
   auto reason =
       OfflineItemUtils::ConvertFailStateToDownloadInterruptReason(failState);
-  return static_cast<jint>(download::GetDownloadResumeMode(
+  return static_cast<int32_t>(download::GetDownloadResumeMode(
       GURL(std::move(url)), reason, false /* restart_required */,
       true /* user_action_required */));
 }
 
-static jboolean JNI_DownloadUtils_IsDownloadRestrictedByPolicy(
-    JNIEnv* env,
-    Profile* profile) {
+static bool JNI_DownloadUtils_IsDownloadRestrictedByPolicy(JNIEnv* env,
+                                                           Profile* profile) {
   content::DownloadManager* manager = profile->GetDownloadManager();
   if (manager) {
     return manager->GetDelegate()->IsDownloadRestrictedByPolicy();
@@ -68,13 +65,7 @@ base::FilePath DownloadUtils::GetUriStringForPath(
 
 // static
 int DownloadUtils::GetAutoResumptionSizeLimit() {
-  std::string value = base::GetFieldTrialParamValueByFeature(
-      chrome::android::kDownloadAutoResumptionThrottling,
-      kAutoResumptionSizeLimitParamName);
-  int size_limit;
-  return base::StringToInt(value, &size_limit)
-             ? size_limit
-             : kDefaultAutoResumptionSizeLimit;
+  return kDefaultAutoResumptionSizeLimit;
 }
 
 // static
@@ -95,7 +86,9 @@ void DownloadUtils::OpenDownload(download::DownloadItem* item,
   Java_DownloadUtils_openDownload(
       env, item->GetTargetFilePath().value(), item->GetMimeType(),
       item->GetGuid(), otr_profile_id, original_url,
-      item->GetReferrerUrl().spec(), static_cast<jint>(open_source));
+      item->GetReferrerUrl().spec(), static_cast<int32_t>(open_source),
+      base::android::ConvertUTF8ToJavaString(
+          env, item->GetFileNameToReportUser().value()));
 }
 
 // static
@@ -111,22 +104,7 @@ std::string DownloadUtils::RemapGenericMimeType(const std::string& mime_type,
 bool DownloadUtils::ShouldAutoOpenDownload(download::DownloadItem* item) {
   JNIEnv* env = base::android::AttachCurrentThread();
   return Java_MimeUtils_canAutoOpenMimeType(env, item->GetMimeType()) &&
-         IsDownloadUserInitiated(item);
-}
-
-// static
-bool DownloadUtils::IsOmaDownloadDescription(const std::string& mime_type) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_MimeUtils_isOMADownloadDescription(env, mime_type);
-}
-
-// static
-void DownloadUtils::ShowDownloadManager(bool show_prefetched_content,
-                                        DownloadOpenSource open_source) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_DownloadUtils_showDownloadManager(
-      env, nullptr, nullptr, nullptr, static_cast<jint>(open_source),
-      static_cast<jboolean>(show_prefetched_content));
+         IsDownloadUserInitiated(item) && item->AllowAutoOpenAfterCompletion();
 }
 
 bool DownloadUtils::IsDownloadUserInitiated(download::DownloadItem* download) {
@@ -142,3 +120,6 @@ bool DownloadUtils::IsDownloadUserInitiated(download::DownloadItem* download) {
                                   ui::PAGE_TRANSITION_RELOAD) ||
          PageTransitionCoreTypeIs(page_transition, ui::PAGE_TRANSITION_KEYWORD);
 }
+
+DEFINE_JNI(MimeUtils)
+DEFINE_JNI(DownloadUtils)

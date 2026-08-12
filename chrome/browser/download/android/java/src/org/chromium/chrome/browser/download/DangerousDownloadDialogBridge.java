@@ -7,17 +7,17 @@ package org.chromium.chrome.browser.download;
 import android.app.Activity;
 
 import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.download.dialogs.DangerousDownloadDialog;
 import org.chromium.chrome.browser.download.interstitial.NewDownloadTab;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
-/**
- * Glues dangerous download dialogs UI code and handles the communication to download native
- * backend.
- */
+/** Glues download dialogs UI code and handles the communication to download native backend. */
+@NullMarked
 public class DangerousDownloadDialogBridge {
     private long mNativeDangerousDownloadDialogBridge;
 
@@ -36,22 +36,27 @@ public class DangerousDownloadDialogBridge {
     }
 
     /**
-     * Called to show a warning dialog for dangerous download.
+     * Called to show a warning dialog for download.
+     *
      * @param windowAndroid Window to show the dialog.
      * @param guid GUID of the download.
      * @param fileName Name of the download file.
      * @param totalBytes Total bytes of the file.
+     * @param downloadDomain Domain name to associate with the downloaded file.
      * @param iconId The icon resource for the warning dialog.
+     * @param isDangerous The danger status of the download file.
      */
     @CalledByNative
     public void showDialog(
             WindowAndroid windowAndroid,
-            String guid,
-            String fileName,
+            @JniType("std::string") String guid,
+            @JniType("std::u16string") String fileName,
             long totalBytes,
-            int iconId) {
+            String downloadDomain,
+            int iconId,
+            boolean isDangerous) {
         Activity activity = windowAndroid.getActivity().get();
-        if (activity == null) {
+        if (!(activity instanceof ModalDialogManagerHolder)) {
             onCancel(guid, windowAndroid);
             return;
         }
@@ -62,6 +67,7 @@ public class DangerousDownloadDialogBridge {
                         ((ModalDialogManagerHolder) activity).getModalDialogManager(),
                         fileName,
                         totalBytes,
+                        downloadDomain,
                         iconId,
                         (accepted) -> {
                             if (accepted) {
@@ -69,7 +75,8 @@ public class DangerousDownloadDialogBridge {
                             } else {
                                 onCancel(guid, windowAndroid);
                             }
-                        });
+                        },
+                        isDangerous);
     }
 
     @CalledByNative
@@ -89,8 +96,10 @@ public class DangerousDownloadDialogBridge {
 
     @NativeMethods
     interface Natives {
-        void accepted(long nativeDangerousDownloadDialogBridge, String guid);
+        void accepted(
+                long nativeDangerousDownloadDialogBridge, @JniType("std::string") String guid);
 
-        void cancelled(long nativeDangerousDownloadDialogBridge, String guid);
+        void cancelled(
+                long nativeDangerousDownloadDialogBridge, @JniType("std::string") String guid);
     }
 }

@@ -7,6 +7,8 @@
 
 #include <string_view>
 
+#include "base/containers/lru_cache.h"
+#include "base/no_destructor.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/cross_origin_embedder_policy.mojom-forward.h"
@@ -26,7 +28,6 @@ class SharedDictionaryAccessObserver;
 }  // namespace network
 
 namespace content {
-
 class NavigationRequest;
 class RenderFrameHostImpl;
 class RenderProcessHost;
@@ -60,12 +61,15 @@ class URLLoaderFactoryParamsHelper {
       network::mojom::ClientSecurityStatePtr client_security_state,
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
+      mojo::PendingRemote<network::mojom::DocumentIsolationPolicyReporter>
+          dip_reporter,
       RenderProcessHost* process,
       network::mojom::TrustTokenOperationPolicyVerdict
           trust_token_issuance_policy,
       network::mojom::TrustTokenOperationPolicyVerdict
           trust_token_redemption_policy,
       net::CookieSettingOverrides cookie_setting_overrides,
+      const base::UnguessableToken& network_restrictions_id,
       std::string_view debug_tag);
 
   // Creates URLLoaderFactoryParams to be used by |isolated_world_origin| hosted
@@ -88,7 +92,8 @@ class URLLoaderFactoryParamsHelper {
   static network::mojom::URLLoaderFactoryParamsPtr CreateForPrefetch(
       RenderFrameHostImpl* frame,
       network::mojom::ClientSecurityStatePtr client_security_state,
-      net::CookieSettingOverrides cookie_setting_overrides);
+      net::CookieSettingOverrides cookie_setting_overrides,
+      const base::UnguessableToken& network_restrictions_id);
 
   // Creates URLLoaderFactoryParams for either fetching the worker script or for
   // fetches initiated from a worker.
@@ -98,12 +103,16 @@ class URLLoaderFactoryParamsHelper {
       const net::IsolationInfo& isolation_info,
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
+      mojo::PendingRemote<network::mojom::DocumentIsolationPolicyReporter>
+          dip_reporter,
       mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
           url_loader_network_observer,
       mojo::PendingRemote<network::mojom::DevToolsObserver> devtools_observer,
       network::mojom::ClientSecurityStatePtr client_security_state,
+      const base::UnguessableToken& network_restrictions_id,
       std::string_view debug_tag,
-      bool require_cross_site_request_for_cookies);
+      bool require_cross_site_request_for_cookies,
+      bool is_for_service_worker);
 
   // Creates URLLoaderFactoryParams for Early Hints preload.
   // When a redirect happens, a URLLoaderFactory created from the
@@ -118,7 +127,33 @@ class URLLoaderFactoryParamsHelper {
       mojo::PendingRemote<network::mojom::TrustTokenAccessObserver>
           trust_token_observer,
       mojo::PendingRemote<network::mojom::SharedDictionaryAccessObserver>
-          shared_dictionary_observer);
+          shared_dictionary_observer,
+      mojo::PendingRemote<network::mojom::DeviceBoundSessionAccessObserver>
+          device_bound_session_observer);
+
+  // Called when the main frame navigation finishes, this should update the
+  // recently accessed origin set.
+  static CONTENT_EXPORT void OnMainFrameNavigation(url::Origin origin);
+
+  // Returns if the main frame origin from the `IsolationInfo` is recently
+  // accessed from any tab in the current BrowserContext.
+  static CONTENT_EXPORT bool IsMainFrameOriginRecentlyAccessed(
+      const net::IsolationInfo& isolation_info);
+
+  // Returns whether the network service should prefer the factory's
+  // `isolation_info.site_for_cookies()` over the renderer-provided
+  // `ResourceRequest::site_for_cookies` for this factory. Set the
+  // corresponding `URLLoaderFactoryParams` flag when this returns true.
+  //
+  // Scoped to frames whose effective top frame for storage partitioning
+  // differs from the actual top frame. In that arrangement the renderer
+  // sees a cross-site top-level and computes a null `site_for_cookies`,
+  // while `RenderFrameHostImpl::ComputeIsolationInfoInternal()` has
+  // already overridden the browser-side SFC. Outside that subtree the
+  // renderer's value is already correct and the flag is redundant.
+  static CONTENT_EXPORT bool ShouldPreferFactorySiteForCookies(
+      bool has_effective_top_frame_for_storage_partitioning,
+      const net::IsolationInfo& isolation_info);
 
  private:
   // Only static methods.

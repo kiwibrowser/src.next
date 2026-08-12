@@ -58,21 +58,22 @@ class PartitionItem {
 WebviewInfo::WebviewInfo(const ExtensionId& extension_id)
     : extension_id_(extension_id) {}
 
-WebviewInfo::~WebviewInfo() {
-}
+WebviewInfo::~WebviewInfo() = default;
 
 // static
 bool WebviewInfo::IsResourceWebviewAccessible(
     const Extension* extension,
     const std::string& partition_id,
     const std::string& relative_path) {
-  if (!extension)
+  if (!extension) {
     return false;
+  }
 
   const WebviewInfo* webview_info = static_cast<const WebviewInfo*>(
       extension->GetManifestData(keys::kWebviewAccessibleResources));
-  if (!webview_info)
+  if (!webview_info) {
     return false;
+  }
 
   for (const auto& item : webview_info->partition_items_) {
     if (item->Matches(partition_id) &&
@@ -91,12 +92,14 @@ bool WebviewInfo::HasWebviewAccessibleResources(
     const std::string& partition_id) {
   const WebviewInfo* webview_info = static_cast<const WebviewInfo*>(
       extension.GetManifestData(keys::kWebviewAccessibleResources));
-  if (!webview_info)
+  if (!webview_info) {
     return false;
+  }
 
   for (const auto& item : webview_info->partition_items_) {
-    if (item->Matches(partition_id))
+    if (item->Matches(partition_id)) {
       return true;
+    }
   }
   return false;
 }
@@ -112,14 +115,14 @@ WebviewHandler::~WebviewHandler() = default;
 bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
   std::unique_ptr<WebviewInfo> info(new WebviewInfo(extension->id()));
 
-  const base::Value::Dict* dict =
+  const base::DictValue* dict =
       extension->manifest()->available_values().FindDict(keys::kWebview);
   if (!dict) {
     *error = errors::kInvalidWebview;
     return false;
   }
 
-  const base::Value::List* partition_list =
+  const base::ListValue* partition_list =
       dict->FindList(keys::kWebviewPartitions);
   if (partition_list == nullptr) {
     *error = errors::kInvalidWebviewPartitionsList;
@@ -139,7 +142,7 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
       return false;
     }
 
-    const base::Value::Dict& item_dict = (*partition_list)[i].GetDict();
+    const base::DictValue& item_dict = (*partition_list)[i].GetDict();
 
     const std::string* partition_pattern =
         item_dict.FindString(keys::kWebviewName);
@@ -149,7 +152,7 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
       return false;
     }
 
-    const base::Value::List* url_list =
+    const base::ListValue* url_list =
         item_dict.FindList(keys::kWebviewAccessibleResources);
     // The URL list should have at least one entry.
     if (url_list == nullptr || url_list->empty()) {
@@ -166,16 +169,13 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
         return false;
       }
 
-      GURL pattern_url =
-          Extension::GetResourceURL(extension->url(), item.GetString());
+      GURL pattern_url = extension->ResolveExtensionURL(item.GetString());
       // If passed a non-relative URL (like http://example.com),
-      // Extension::GetResourceURL() will return that URL directly. (See
-      // https://crbug.com/1135236). Check if this happened by comparing the
-      // host.
-      if (pattern_url.host_piece() != extension->id()) {
+      // Extension::ResolveExtensionURL() will return an invalid URL.
+      if (!pattern_url.is_valid()) {
         // NOTE: Warning instead of error because there are existing apps that
         // have this bug, and we don't want to hard-error on them.
-        // https://crbug.com/856948.
+        // https://crbug.com/40582582.
         std::string warning = ErrorUtils::FormatErrorMessage(
             errors::kInvalidWebviewAccessibleResource, base::NumberToString(i));
         extension->AddInstallWarning(
@@ -187,7 +187,7 @@ bool WebviewHandler::Parse(Extension* extension, std::u16string* error) {
           URLPattern::ParseResult::kSuccess) {
         // NOTE: Warning instead of error because there are existing apps that
         // have this bug, and we don't want to hard-error on them.
-        // https://crbug.com/856948.
+        // https://crbug.com/40582582.
         std::string warning = ErrorUtils::FormatErrorMessage(
             errors::kInvalidWebviewAccessibleResource, base::NumberToString(i));
         extension->AddInstallWarning(

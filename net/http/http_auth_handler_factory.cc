@@ -4,11 +4,12 @@
 
 #include "net/http/http_auth_handler_factory.h"
 
+#include <algorithm>
+#include <array>
 #include <optional>
 #include <set>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
@@ -34,14 +35,14 @@ namespace net {
 
 namespace {
 
-base::Value::Dict NetLogParamsForCreateAuth(
+base::DictValue NetLogParamsForCreateAuth(
     std::string_view scheme,
     std::string_view challenge,
     const int net_error,
     const url::SchemeHostPort& scheme_host_port,
     const std::optional<bool>& allows_default_credentials,
     NetLogCaptureMode capture_mode) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("scheme", NetLogStringValue(scheme));
   if (NetLogCaptureIncludesSensitive(capture_mode)) {
     dict.Set("challenge", NetLogStringValue(challenge));
@@ -53,6 +54,15 @@ base::Value::Dict NetLogParamsForCreateAuth(
     dict.Set("net_error", net_error);
   return dict;
 }
+
+// Since there are at most 4 schemes, a linear search is faster than a binary
+// search because it can cheaply discard strings when the length doesn't match.
+constexpr auto kDefaultAuthSchemes =
+    std::to_array<std::string_view>({kBasicAuthScheme, kDigestAuthScheme,
+#if BUILDFLAG(USE_KERBEROS) && !BUILDFLAG(IS_ANDROID)
+                                     kNegotiateAuthScheme,
+#endif
+                                     kNtlmAuthScheme});
 
 }  // namespace
 
@@ -249,11 +259,10 @@ bool HttpAuthHandlerRegistryFactory::IsSchemeAllowedForTesting(
 
 bool HttpAuthHandlerRegistryFactory::IsSchemeAllowed(
     const std::string& scheme) const {
-  const std::set<std::string>& allowed_schemes =
-      http_auth_preferences() && http_auth_preferences()->allowed_schemes()
-          ? *http_auth_preferences()->allowed_schemes()
-          : default_auth_schemes_;
-  return allowed_schemes.find(scheme) != allowed_schemes.end();
+  if (http_auth_preferences() && http_auth_preferences()->allowed_schemes()) {
+    return http_auth_preferences()->allowed_schemes()->contains(scheme);
+  }
+  return std::ranges::contains(kDefaultAuthSchemes, scheme);
 }
 
 #if BUILDFLAG(USE_KERBEROS) && !BUILDFLAG(IS_ANDROID) && BUILDFLAG(IS_POSIX)

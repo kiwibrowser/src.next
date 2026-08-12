@@ -6,15 +6,14 @@ nidhijaju@chromium.org
 ricea@chromium.org
 
 # Secondary
-agl@chromium.org
+horo@chromium.org
 davidben@chromium.org
 dschinazi@chromium.org
 ericorth@chromium.org
 mattm@chromium.org
 mmenke@chromium.org
 morlovich@chromium.org
-nharper@chromium.org
-pauljensen@chromium.org
 rch@chromium.org
+stefanoduo@google.com
 
 per-file BUILD.gn=file://net/websockets/OWNERS

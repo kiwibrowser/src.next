@@ -12,17 +12,18 @@
 #include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registrar.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/test/extension_state_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace extensions {
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
+namespace extensions {
 namespace {
 
 // Extension ids used during testing.
 constexpr char kTestExtensionId[] = "behllobkkfkfnphdnhnkndlbkcpglgmj";
-
-}  // namespace
 
 // Test suite to test Omaha attribute handler.
 using OmahaAttributesHandlerUnitTest = ExtensionServiceTestBase;
@@ -31,7 +32,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, LogPolicyViolationUWSMetrics) {
   base::HistogramTester histograms;
   InitializeGoodInstalledExtensionService();
   service()->Init();
-  base::Value::Dict attributes;
+  base::DictValue attributes;
   attributes.Set("_policy_violation", true);
   attributes.Set("_potentially_uws", true);
 
@@ -60,7 +61,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, LogMalwareMetrics) {
   InitializeGoodInstalledExtensionService();
   service()->Init();
 
-  base::Value::Dict attributes;
+  base::DictValue attributes;
 
   attributes.Set("_malware", false);
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
@@ -101,7 +102,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, DisableRemotelyForPolicyViolation) {
 
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
-  base::Value::Dict attributes;
+  base::DictValue attributes;
   attributes.Set("_policy_violation", true);
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
 
@@ -140,7 +141,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, DisableRemotelyForPotentiallyUws) {
 
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
-  base::Value::Dict attributes;
+  base::DictValue attributes;
   attributes.Set("_potentially_uws", true);
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
 
@@ -178,7 +179,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, MultipleGreylistStates) {
 
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
-  base::Value::Dict attributes;
+  base::DictValue attributes;
   attributes.Set("_policy_violation", true);
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
 
@@ -186,7 +187,7 @@ TEST_F(OmahaAttributesHandlerUnitTest, MultipleGreylistStates) {
       kTestExtensionId, disable_reason::DISABLE_GREYLIST));
 
   // Now user enables kTestExtensionId.
-  service()->EnableExtension(kTestExtensionId);
+  registrar()->EnableExtension(kTestExtensionId);
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
   // Another greylist state is added to Omaha attribute.
@@ -232,15 +233,15 @@ TEST_F(OmahaAttributesHandlerUnitTest, KeepDisabledWhenMalwareRemoved) {
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
   auto attributes =
-      base::Value::Dict().Set("_malware", true).Set("_policy_violation", true);
+      base::DictValue().Set("_malware", true).Set("_policy_violation", true);
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
 
   ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
   EXPECT_TRUE(state_tester.ExpectBlocklisted(kTestExtensionId));
   EXPECT_TRUE(blocklist_prefs::HasOmahaBlocklistState(
       kTestExtensionId, BitMapBlocklistState::BLOCKLISTED_MALWARE, prefs));
-  EXPECT_EQ(disable_reason::DISABLE_GREYLIST,
-            prefs->GetDisableReasons(kTestExtensionId));
+  EXPECT_THAT(prefs->GetDisableReasons(kTestExtensionId),
+              testing::UnorderedElementsAre(disable_reason::DISABLE_GREYLIST));
 
   // Remove malware.
   attributes.Set("_malware", false);
@@ -260,13 +261,14 @@ TEST_F(OmahaAttributesHandlerUnitTest, ExtensionUninstalledBeforeNotified) {
 
   EXPECT_TRUE(state_tester.ExpectEnabled(kTestExtensionId));
 
-  service()->UninstallExtension(kTestExtensionId, UNINSTALL_REASON_FOR_TESTING,
-                                nullptr);
+  registrar()->UninstallExtension(kTestExtensionId,
+                                  UNINSTALL_REASON_FOR_TESTING, nullptr);
 
-  auto attributes = base::Value::Dict().Set("_malware", true);
+  auto attributes = base::DictValue().Set("_malware", true);
   // kTestExtensionId is already uninstalled. Performing action on it should
-  // not crash. Regression test for https://crbug.com/1305490.
+  // not crash. Regression test for https://crbug.com/40827106.
   service()->PerformActionBasedOnOmahaAttributes(kTestExtensionId, attributes);
 }
 
+}  // namespace
 }  // namespace extensions

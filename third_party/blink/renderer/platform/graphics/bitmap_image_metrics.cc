@@ -4,13 +4,16 @@
 
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 
+#include "base/feature_list.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/buildflags.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/webdx_feature.mojom-blink.h"
 #include "third_party/blink/renderer/platform/graphics/color_space_gamut.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -34,9 +37,15 @@ BitmapImageMetrics::StringToDecodedImageType(const String& type) {
     return BitmapImageMetrics::DecodedImageType::kICO;
   if (type == "bmp")
     return BitmapImageMetrics::DecodedImageType::kBMP;
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
   if (type == "avif")
     return BitmapImageMetrics::DecodedImageType::kAVIF;
+#endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  if (type == "jxl" &&
+      base::FeatureList::IsEnabled(features::kJXLImageFormat)) {
+    return BitmapImageMetrics::DecodedImageType::kJXL;
+  }
 #endif
   return BitmapImageMetrics::DecodedImageType::kUnknown;
 }
@@ -51,11 +60,22 @@ void BitmapImageMetrics::CountDecodedImageType(const String& type,
   if (use_counter) {
     if (type == "webp") {
       use_counter->CountUse(WebFeature::kWebPImage);
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
     } else if (type == "avif") {
       use_counter->CountUse(WebFeature::kAVIFImage);
 #endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+    } else if (type == "jxl" &&
+               base::FeatureList::IsEnabled(features::kJXLImageFormat)) {
+      use_counter->CountWebDXFeature(WebDXFeature::kJpegxl);
+#endif
     }
+  }
+}
+
+void BitmapImageMetrics::CountDecodedImageC2PA(UseCounter* use_counter) {
+  if (use_counter) {
+    use_counter->CountUse(WebFeature::kC2PAManifest);
   }
 }
 
@@ -81,7 +101,7 @@ void BitmapImageMetrics::CountDecodedImageDensity(const String& type,
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       CustomCountHistogram, webp_density_histogram,
       ("Blink.DecodedImage.WebPDensity.KiBWeighted2", 1, 1000, 100));
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       CustomCountHistogram, avif_density_histogram,
       ("Blink.DecodedImage.AvifDensity.KiBWeighted2", 1, 1000, 100));
@@ -97,7 +117,7 @@ void BitmapImageMetrics::CountDecodedImageDensity(const String& type,
     case BitmapImageMetrics::DecodedImageType::kWebP:
       density_histogram = &webp_density_histogram;
       break;
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
     case BitmapImageMetrics::DecodedImageType::kAVIF:
       density_histogram = &avif_density_histogram;
       break;
@@ -108,7 +128,7 @@ void BitmapImageMetrics::CountDecodedImageDensity(const String& type,
   }
 
   density_histogram->CountMany(
-      base::saturated_cast<base::Histogram::Sample>(density_centi_bpp),
+      base::saturated_cast<base::Histogram::Sample32>(density_centi_bpp),
       image_size_kib);
 }
 

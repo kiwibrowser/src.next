@@ -26,7 +26,7 @@ TEST(BarrierClosureTest, ChecksIfCalledForZeroClosures) {
       base::BarrierClosure(0, base::DoNothing());
   EXPECT_FALSE(barrier_closure.is_null());
 
-  EXPECT_CHECK_DEATH(barrier_closure.Run());
+  EXPECT_NOTREACHED_DEATH(barrier_closure.Run());
 }
 
 TEST(BarrierClosureTest, RunAfterNumClosures) {
@@ -45,7 +45,7 @@ TEST(BarrierClosureTest, RunAfterNumClosures) {
 class DestructionIndicator {
  public:
   // Sets |*destructed| to true in destructor.
-  DestructionIndicator(bool* destructed) : destructed_(destructed) {
+  explicit DestructionIndicator(bool* destructed) : destructed_(destructed) {
     *destructed_ = false;
   }
 

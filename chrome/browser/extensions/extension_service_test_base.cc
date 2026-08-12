@@ -3,29 +3,29 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "base/memory/raw_ptr.h"
 
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/to_string.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/desktop_forcing_chrome_bookmark_test_client.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/extensions/component_loader.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_garbage_collector_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/load_error_reporter.h"
-#include "chrome/browser/extensions/shared_module_service.h"
+#include "chrome/browser/extensions/external_provider_manager.h"
+#include "chrome/browser/extensions/shared_module_service_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
@@ -44,27 +44,42 @@
 #include "components/crx_file/crx_verifier.h"
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/sync/test/test_sync_service.h"
 #include "components/sync_preferences/pref_service_mock_factory.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_task_environment.h"
+#include "extensions/browser/delayed_install_manager.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/load_error_reporter.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/browser/shared_module_service.h"
+#include "extensions/buildflags/buildflags.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extensions_client.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/ash/app_mode/kiosk_cryptohome_remover.h"
 #include "chrome/browser/ash/extensions/install_limiter.h"
-#include "chrome/browser/ash/login/users/user_manager_delegate_impl.h"
 #include "chrome/browser/browser_process.h"
 #include "chromeos/ash/components/settings/cros_settings.h"
+#include "components/user_manager/fake_user_manager_delegate.h"
 #include "components/user_manager/user_manager_impl.h"
 #endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
 namespace {
+
+std::unique_ptr<KeyedService> CreateTestSyncService(
+    content::BrowserContext* context) {
+  return std::make_unique<syncer::TestSyncService>();
+}
 
 // Create a testing profile according to |params|.
 std::unique_ptr<TestingProfile> BuildTestingProfile(
@@ -79,7 +94,7 @@ std::unique_ptr<TestingProfile> BuildTestingProfile(
 
 #if BUILDFLAG(IS_MAC)
   // For tests, make sure we're working with the absolute profile path, so that
-  // path comparisons don't fail. See https://issues.chromium.org/40916874 for
+  // path comparisons don't fail. See https://crbug.com/40916874 for
   // details.
   if (!temp_dir.Set(base::MakeAbsoluteFilePath(temp_dir.Take()))) {
     return nullptr;
@@ -174,9 +189,15 @@ std::unique_ptr<TestingProfile> BuildTestingProfile(
   }
 
   if (params.enable_bookmark_model) {
-    profile_builder.AddTestingFactory(
-        BookmarkModelFactory::GetInstance(),
-        BookmarkModelFactory::GetDefaultFactory());
+    if (params.force_desktop_bookmark_behavior) {
+      profile_builder.AddTestingFactory(
+          BookmarkModelFactory::GetInstance(),
+          DesktopForcingChromeBookmarkTestClient::GetTestingFactory());
+    } else {
+      profile_builder.AddTestingFactory(
+          BookmarkModelFactory::GetInstance(),
+          BookmarkModelFactory::GetDefaultFactory());
+    }
     profile_builder.AddTestingFactory(
         ManagedBookmarkServiceFactory::GetInstance(),
         ManagedBookmarkServiceFactory::GetDefaultFactory());
@@ -188,13 +209,18 @@ std::unique_ptr<TestingProfile> BuildTestingProfile(
   profile_builder.AddTestingFactories(
       IdentityTestEnvironmentProfileAdaptor::
           GetIdentityTestEnvironmentFactories());
-  // TODO(crbug.com/40774163): SyncService (and thus TrustedVaultService)
-  // instantiation can be scoped down to a few derived fixtures.
-  profile_builder.AddTestingFactory(
-      TrustedVaultServiceFactory::GetInstance(),
-      TrustedVaultServiceFactory::GetDefaultFactory());
-  profile_builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
-                                    SyncServiceFactory::GetDefaultFactory());
+  if (params.use_test_sync_service) {
+    profile_builder.AddTestingFactory(
+        SyncServiceFactory::GetInstance(),
+        base::BindRepeating(&CreateTestSyncService));
+  } else {
+    profile_builder.AddTestingFactory(
+        TrustedVaultServiceFactory::GetInstance(),
+        TrustedVaultServiceFactory::GetDefaultFactory());
+    profile_builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
+                                      SyncServiceFactory::GetDefaultFactory());
+  }
+
   profile_builder.AddTestingFactory(
       ExtensionGarbageCollectorFactory::GetInstance(),
       base::BindRepeating(&ExtensionGarbageCollectorFactory::BuildInstanceFor));
@@ -244,14 +270,10 @@ ExtensionServiceTestBase::ExtensionServiceTestBase()
 ExtensionServiceTestBase::ExtensionServiceTestBase(
     std::unique_ptr<content::BrowserTaskEnvironment> task_environment)
     : task_environment_(std::move(task_environment)),
-      service_(nullptr),
-      testing_local_state_(TestingBrowserProcess::GetGlobal()),
-      registry_(nullptr),
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
       user_manager_(std::make_unique<user_manager::UserManagerImpl>(
-          std::make_unique<ash::UserManagerDelegateImpl>(),
-          testing_local_state_.Get(),
-          ash::CrosSettings::Get())),
+          std::make_unique<user_manager::FakeUserManagerDelegate>(),
+          TestingBrowserProcess::GetGlobal()->local_state())),
 #endif
       verifier_format_override_(crx_file::VerifierFormat::CRX3) {
   base::FilePath test_data_dir;
@@ -265,18 +287,16 @@ ExtensionServiceTestBase::ExtensionServiceTestBase(
       std::vector<
           raw_ptr<policy::ConfigurationPolicyProvider, VectorExperimental>>{
           &policy_provider_});
+  // Allow unpacked extensions without developer mode for testing.
+  feature_list_.InitAndDisableFeature(
+      extensions_features::kExtensionDisableUnsupportedDeveloper);
 }
 
-ExtensionServiceTestBase::~ExtensionServiceTestBase() {
-  // Why? Because |profile_| has to be destroyed before |at_exit_manager_|, but
-  // is declared above it in the class definition since it's protected.
-  // TODO(crbug.com/40205142): Since we're getting rid of at_exit_manager_,
-  // perhaps we don't need this call?
-  profile_.reset();
-}
+ExtensionServiceTestBase::~ExtensionServiceTestBase() = default;
 
 void ExtensionServiceTestBase::InitializeExtensionService(
     ExtensionServiceTestBase::ExtensionServiceInitParams params) {
+  CHECK(is_setup_called_);
   const bool is_first_run = params.is_first_run;
   const bool autoupdate_enabled = params.autoupdate_enabled;
   const bool extensions_enabled = params.extensions_enabled;
@@ -292,6 +312,7 @@ void ExtensionServiceTestBase::InitializeExtensionService(
   CreateExtensionService(is_first_run, autoupdate_enabled, extensions_enabled,
                          enable_install_limiter);
   registry_ = ExtensionRegistry::Get(profile());
+  registrar_ = ExtensionRegistrar::Get(profile());
 }
 
 bool ExtensionServiceTestBase::ShouldAllowMV2Extensions() {
@@ -315,7 +336,9 @@ void ExtensionServiceTestBase::InitializeExtensionServiceWithUpdater() {
   ExtensionServiceInitParams params;
   params.autoupdate_enabled = true;
   InitializeExtensionService(std::move(params));
-  service_->updater()->Start();
+  auto* updater = ExtensionUpdater::Get(profile());
+  CHECK(updater->enabled());
+  updater->Start();
 }
 
 void ExtensionServiceTestBase::
@@ -326,7 +349,7 @@ void ExtensionServiceTestBase::
 }
 
 size_t ExtensionServiceTestBase::GetPrefKeyCount() {
-  const base::Value::Dict& dict =
+  const base::DictValue& dict =
       profile()->GetPrefs()->GetDict(pref_names::kExtensions);
   return dict.size();
 }
@@ -341,12 +364,12 @@ testing::AssertionResult ExtensionServiceTestBase::ValidateBooleanPref(
     bool expected_val) {
   std::string msg =
       base::StringPrintf("while checking: %s %s == %s", extension_id.c_str(),
-                         pref_path.c_str(), expected_val ? "true" : "false");
+                         pref_path.c_str(), base::ToString(expected_val));
 
   PrefService* prefs = profile()->GetPrefs();
-  const base::Value::Dict& dict = prefs->GetDict(pref_names::kExtensions);
+  const base::DictValue& dict = prefs->GetDict(pref_names::kExtensions);
 
-  const base::Value::Dict* pref = dict.FindDict(extension_id);
+  const base::DictValue* pref = dict.FindDict(extension_id);
   if (!pref) {
     return testing::AssertionFailure()
            << "extension pref does not exist " << msg;
@@ -373,8 +396,8 @@ void ExtensionServiceTestBase::ValidateIntegerPref(
       base::NumberToString(expected_val).c_str());
 
   PrefService* prefs = profile()->GetPrefs();
-  const base::Value::Dict& dict = prefs->GetDict(pref_names::kExtensions);
-  const base::Value::Dict* pref = dict.FindDict(extension_id);
+  const base::DictValue& dict = prefs->GetDict(pref_names::kExtensions);
+  const base::DictValue* pref = dict.FindDict(extension_id);
   ASSERT_TRUE(pref) << msg;
   EXPECT_EQ(expected_val, pref->FindIntByDottedPath(pref_path)) << msg;
 }
@@ -387,10 +410,10 @@ void ExtensionServiceTestBase::ValidateStringPref(
                                        extension_id.c_str(), pref_path.c_str(),
                                        expected_val.c_str());
 
-  const base::Value::Dict& dict =
+  const base::DictValue& dict =
       profile()->GetPrefs()->GetDict(pref_names::kExtensions);
   std::string manifest_path = extension_id + ".manifest";
-  const base::Value::Dict* pref = dict.FindDictByDottedPath(manifest_path);
+  const base::DictValue* pref = dict.FindDictByDottedPath(manifest_path);
   ASSERT_TRUE(pref) << msg;
   const std::string* val = pref->FindStringByDottedPath(pref_path);
   ASSERT_TRUE(val) << msg;
@@ -398,6 +421,7 @@ void ExtensionServiceTestBase::ValidateStringPref(
 }
 
 void ExtensionServiceTestBase::SetUp() {
+  is_setup_called_ = true;
   LoadErrorReporter::GetInstance()->ClearErrors();
 
   // Force TabManager/TabLifecycleUnitSource creation.
@@ -413,7 +437,12 @@ void ExtensionServiceTestBase::SetUp() {
   // TODO(b/308107135) own KioskController instead of KioskAppManager.
   // A test might have initialized a `KioskAppManager` already.
   if (!ash::KioskChromeAppManager::IsInitialized()) {
-    kiosk_chrome_app_manager_ = std::make_unique<ash::KioskChromeAppManager>();
+    kiosk_cryptohome_remover_ = std::make_unique<ash::KioskCryptohomeRemover>(
+        TestingBrowserProcess::GetGlobal()->local_state());
+    kiosk_chrome_app_manager_ = std::make_unique<ash::KioskChromeAppManager>(
+        TestingBrowserProcess::GetGlobal()->local_state(),
+        TestingBrowserProcess::GetGlobal()->shared_url_loader_factory(),
+        kiosk_cryptohome_remover_.get());
   }
 #endif
 
@@ -436,6 +465,7 @@ void ExtensionServiceTestBase::TearDown() {
 #if BUILDFLAG(IS_CHROMEOS)
   kiosk_chrome_app_manager_.reset();
 #endif
+  DeleteProfile();
 }
 
 void ExtensionServiceTestBase::SetUpTestSuite() {
@@ -451,6 +481,19 @@ content::BrowserContext* ExtensionServiceTestBase::browser_context() {
 
 Profile* ExtensionServiceTestBase::profile() {
   return profile_.get();
+}
+
+TestingProfile* ExtensionServiceTestBase::testing_profile() {
+  return profile_.get();
+}
+
+void ExtensionServiceTestBase::DeleteProfile() {
+  registrar_ = nullptr;
+  registry_ = nullptr;
+  service_ = nullptr;
+  extensions_install_dir_ = base::FilePath();
+  unpacked_install_dir_ = base::FilePath();
+  profile_.reset();
 }
 
 void ExtensionServiceTestBase::SetGuestSessionOnProfile(bool guest_session) {
@@ -477,17 +520,18 @@ void ExtensionServiceTestBase::CreateExtensionService(
       base::CommandLine::ForCurrentProcess(), extensions_install_dir_,
       unpacked_install_dir_, autoupdate_enabled, extensions_enabled);
 
-  service_->component_loader()->set_ignore_allowlist_for_testing(true);
+  ComponentLoader::Get(profile())->set_ignore_allowlist_for_testing(true);
 
   // When we start up, we want to make sure there is no external provider,
   // since the ExtensionService on Windows will use the Registry as a default
   // provider and if there is something already registered there then it will
   // interfere with the tests. Those tests that need an external provider
   // will register one specifically.
-  service_->ClearProvidersForTesting();
+  ExternalProviderManager::Get(profile())->ClearProvidersForTesting();
 
-  service_->RegisterInstallGate(ExtensionPrefs::DelayReason::kWaitForImports,
-                                service_->shared_module_service());
+  DelayedInstallManager::Get(profile())->RegisterInstallGate(
+      ExtensionPrefs::DelayReason::kWaitForImports,
+      SharedModuleServiceFactory::GetForBrowserContext(profile()));
 
 #if BUILDFLAG(IS_CHROMEOS)
   if (!enable_install_limiter) {

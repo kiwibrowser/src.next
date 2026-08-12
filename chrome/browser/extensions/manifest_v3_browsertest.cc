@@ -6,15 +6,12 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/extensions/extension_action_test_helper.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/version_info/channel.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_action.h"
 #include "extensions/browser/extension_action_manager.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -23,16 +20,23 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/extension_action_test_helper.h"
+#endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
 namespace extensions {
 
 class ManifestV3BrowserTest : public ExtensionBrowserTest {
  public:
-  ManifestV3BrowserTest() {}
+  ManifestV3BrowserTest() = default;
 
   ManifestV3BrowserTest(const ManifestV3BrowserTest&) = delete;
   ManifestV3BrowserTest& operator=(const ManifestV3BrowserTest&) = delete;
 
-  ~ManifestV3BrowserTest() override {}
+  ~ManifestV3BrowserTest() override = default;
 
   void SetUpOnMainThread() override {
     ExtensionBrowserTest::SetUpOnMainThread();
@@ -100,13 +104,12 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ProgrammaticScriptInjection) {
   ASSERT_TRUE(listener.WaitUntilSatisfied());
 
   ResultCatcher catcher;
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(),
+  ASSERT_TRUE(NavigateToURL(
+      GetActiveWebContents(),
       embedded_test_server()->GetURL("example.com", "/simple.html")));
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 
-  EXPECT_EQ(u"My New Title",
-            browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
+  EXPECT_EQ(u"My New Title", GetActiveWebContents()->GetTitle());
 }
 
 // A simple end-to-end test exercising the new action API in Manifest V3.
@@ -141,21 +144,29 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ActionAPI) {
   ASSERT_TRUE(extension);
   ASSERT_TRUE(listener.WaitUntilSatisfied());
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  // TODO(crbug.com/393179880): Desktop Android does not yet support
+  // ExtensionActionTestHelper.
   std::unique_ptr<ExtensionActionTestHelper> action_test_util =
       ExtensionActionTestHelper::Create(browser());
   ASSERT_EQ(1, action_test_util->NumberOfBrowserActions());
   EXPECT_TRUE(action_test_util->HasAction(extension->id()));
+#endif
 
   ExtensionAction* const action =
       ExtensionActionManager::Get(profile())->GetExtensionAction(*extension);
   ASSERT_TRUE(action);
   EXPECT_FALSE(action->HasIcon(ExtensionAction::kDefaultTabId));
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  // TODO(crbug.com/393179880): Desktop Android does not yet support
+  // ExtensionActionTestHelper.
   ResultCatcher catcher;
   action_test_util->Press(extension->id());
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 
   EXPECT_TRUE(action->HasIcon(ExtensionAction::kDefaultTabId));
+#endif
 }
 
 IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, SynthesizedAction) {
@@ -176,8 +187,7 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, SynthesizedAction) {
       ExtensionActionManager::Get(profile())->GetExtensionAction(*extension);
   ASSERT_TRUE(action);
   EXPECT_FALSE(action->GetIsVisible(ExtensionAction::kDefaultTabId));
-  int tab_id = ExtensionTabUtil::GetTabId(
-      browser()->tab_strip_model()->GetActiveWebContents());
+  int tab_id = ExtensionTabUtil::GetTabId(GetActiveWebContents());
   EXPECT_FALSE(action->GetIsVisible(tab_id));
 }
 

@@ -8,6 +8,9 @@
 #include "chrome/browser/extensions/menu_icon_loader.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "extensions/browser/extension_icon_manager.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace content {
 class BrowserContext;
@@ -20,7 +23,7 @@ class Image;
 namespace extensions {
 class Extension;
 
-// This is a wrapper class around |ExtensionIconManager| to be used for the
+// This is a wrapper class around `ExtensionIconManager` to be used for the
 // Context Menus API.
 class ExtensionMenuIconLoader : public MenuIconLoader {
  public:

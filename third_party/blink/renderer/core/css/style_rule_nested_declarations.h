@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_RULE_NESTED_DECLARATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_RULE_NESTED_DECLARATIONS_H_
 
+#include "third_party/blink/renderer/core/css/parser/css_nesting_type.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -27,17 +28,16 @@ class StyleRule;
 // https://drafts.csswg.org/css-nesting-1/#nested-declarations-rule
 class CORE_EXPORT StyleRuleNestedDeclarations : public StyleRuleBase {
  public:
-  explicit StyleRuleNestedDeclarations(StyleRule* style_rule)
-      : StyleRuleBase(kNestedDeclarations), style_rule_(style_rule) {}
+  StyleRuleNestedDeclarations(CSSNestingType nesting_type,
+                              StyleRule* style_rule)
+      : StyleRuleBase(kNestedDeclarations),
+        nesting_type_(nesting_type),
+        style_rule_(style_rule) {}
 
-  StyleRuleNestedDeclarations(const StyleRuleNestedDeclarations& o)
-      : StyleRuleBase(o), style_rule_(o.style_rule_->Copy()) {}
+  StyleRuleNestedDeclarations(const StyleRuleNestedDeclarations& o) = delete;
 
+  CSSNestingType NestingType() const { return nesting_type_; }
   StyleRule* InnerStyleRule() const { return style_rule_.Get(); }
-
-  // Replaces the selector list of the inner StyleRule.
-  // This is used when reparenting, see StyleRuleBase::Reparent.
-  void ReplaceSelectorList(const CSSSelector* selector_list);
 
   // Properties of the inner StyleRule.
   const CSSPropertyValueSet& Properties() const {
@@ -48,16 +48,19 @@ class CORE_EXPORT StyleRuleNestedDeclarations : public StyleRuleBase {
     return style_rule_->MutableProperties();
   }
 
-  StyleRuleNestedDeclarations* Copy() const {
-    return MakeGarbageCollected<StyleRuleNestedDeclarations>(*this);
-  }
-
   void TraceAfterDispatch(blink::Visitor* visitor) const {
     visitor->Trace(style_rule_);
     StyleRuleBase::TraceAfterDispatch(visitor);
   }
 
  private:
+  // Whether this StyleRuleNestedDeclarations rule is a child of
+  // a regular style rule (kNesting) or an @scope rule (kScope).
+  // In the kNesting case the selector list held by `style_rule_` is a deep
+  // copy of the outer selector list, but in the kScope case, it's simply
+  // the :where(:scope) selector. We need to differentiate between these two
+  // cases during re-nesting; see StyleRuleBase::Clone.
+  CSSNestingType nesting_type_;
   Member<StyleRule> style_rule_;
 };
 

@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser;
 
-import android.os.Build;
 import android.os.Looper;
 import android.os.StrictMode;
 import android.text.TextUtils;
@@ -18,6 +17,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.version_info.VersionInfo;
 import org.chromium.build.BuildConfig;
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.components.strictmode.StrictModePolicyViolation;
 import org.chromium.components.strictmode.Violation;
@@ -30,15 +30,16 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Initialize application-level StrictMode reporting. */
+@NullMarked
 public class ChromeStrictMode {
     private static final String TAG = "ChromeStrictMode";
     private static final double UPLOAD_PROBABILITY = 0.01;
     private static final double MAX_UPLOADS_PER_SESSION = 3;
 
     private static boolean sIsStrictModeAlreadyConfigured;
-    private static List<Violation> sCachedViolations =
+    private static final List<Violation> sCachedViolations =
             Collections.synchronizedList(new ArrayList<>());
-    private static AtomicInteger sNumUploads = new AtomicInteger();
+    private static final AtomicInteger sNumUploads = new AtomicInteger();
 
     /**
      * Always process the violation on the UI thread. This ensures other crash reports are not
@@ -88,7 +89,7 @@ public class ChromeStrictMode {
     private static void turnOnDetection(StrictMode.VmPolicy.Builder vmPolicy) {
         // Do not enable detectUntaggedSockets(). It does not support native (the vast majority
         // of our sockets), and we have not bothered to tag our Java uses.
-        // https://crbug.com/770792
+        // https://crbug.com/40542768
         // Also: Do not enable detectCleartextNetwork(). We can't prevent websites from using
         // non-https.
         vmPolicy.detectActivityLeaks()
@@ -96,17 +97,11 @@ public class ChromeStrictMode {
                 .detectLeakedRegistrationObjects()
                 .detectLeakedSqlLiteObjects();
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Introduced in O.
-            vmPolicy.detectContentUriWithoutPermission();
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Introduced in Q.
-            vmPolicy.detectCredentialProtectedWhileLocked().detectImplicitDirectBoot();
-        }
+        vmPolicy.detectContentUriWithoutPermission();
+        vmPolicy.detectCredentialProtectedWhileLocked().detectImplicitDirectBoot();
 
         // File URI leak detection, has false positives when file URI intents are passed between
-        // Chrome activities in separate processes. See http://crbug.com/508282#c11.
+        // Chrome activities in separate processes. See http://crbug.com/40425941#comment12.
         vmPolicy.detectFileUriExposure();
     }
 

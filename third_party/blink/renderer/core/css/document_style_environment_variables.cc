@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/css/document_style_environment_variables.h"
 
+#include "third_party/blink/renderer/core/css/font_size_functions.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
@@ -16,7 +18,7 @@ namespace blink {
 
 CSSVariableData* DocumentStyleEnvironmentVariables::ResolveVariable(
     const AtomicString& name,
-    WTF::Vector<unsigned> indices,
+    Vector<unsigned> indices,
     bool record_metrics) {
   if (record_metrics) {
     RecordVariableUsage(name);
@@ -34,7 +36,7 @@ const FeatureContext* DocumentStyleEnvironmentVariables::GetFeatureContext()
 
 CSSVariableData* DocumentStyleEnvironmentVariables::ResolveVariable(
     const AtomicString& name,
-    WTF::Vector<unsigned> indices) {
+    Vector<unsigned> indices) {
   return ResolveVariable(name, std::move(indices), true /* record_metrics */);
 }
 
@@ -53,7 +55,9 @@ void DocumentStyleEnvironmentVariables::InvalidateVariable(
 DocumentStyleEnvironmentVariables::DocumentStyleEnvironmentVariables(
     StyleEnvironmentVariables& parent,
     Document& document)
-    : StyleEnvironmentVariables(parent), document_(&document) {}
+    : StyleEnvironmentVariables(parent), document_(&document) {
+  UpdatePreferredTextScaleFromDocument();
+}
 
 void DocumentStyleEnvironmentVariables::RecordVariableUsage(
     const AtomicString& name) {
@@ -78,9 +82,56 @@ void DocumentStyleEnvironmentVariables::RecordVariableUsage(
   } else if (name == "safe-area-inset-right") {
     UseCounter::Count(document_,
                       WebFeature::kCSSEnvironmentVariable_SafeAreaInsetRight);
+  } else if (name == "safe-area-max-inset-bottom") {
+    UseCounter::Count(
+        document_, WebFeature::kCSSEnvironmentVariable_SafeAreaMaxInsetBottom);
+  } else if (name == GetVariableName(UADefinedVariable::kPreferredTextScale,
+                                     /* feature_context */ nullptr)) {
+    UseCounter::Count(document_,
+                      WebFeature::kCSSEnvironmentVariable_PreferredTextScale);
   } else {
     // Do nothing if this is an unknown variable.
   }
+}
+
+void DocumentStyleEnvironmentVariables::UpdatePreferredTextScaleFromDocument() {
+  double scale_factor;
+
+  Settings* settings = document_->GetSettings();
+  if (!settings) {
+    // Non-rendered documents (no Frame) return nullptr for GetSettings().
+    return;
+  }
+
+  // For compat, we don't expose env(preferred-text-scale)'s true value to pages
+  // in WebView if the page has no meta text-scale tag and the app does not
+  // enable autosizing.
+  //
+  // WebView defaults to inflating ALL text on the page, so if there's a page
+  // that uses env(preferred-text-scale) to inflate *parts* of the page, those
+  // parts will get double-scaled (once along with everything else, then once
+  // again by env()).
+
+  if (document_->TextScaleMetaTagPresent()) {
+    // But if a page includes meta, they are signaling to us that the page will
+    // handle scaling themselves, so we populate env() to let them use it.
+    // Elsewhere, in response to meta, we have disabled Webview inflating all
+    // text.
+    scale_factor = FontSizeFunctions::SnapToClosestFontScaleBucket(
+                       settings->GetAccessibilityFontScaleFactor()) *
+                   (settings->GetDefaultFontSize() / 16.0);
+  } else {
+    const bool should_hide_env_to_prevent_double_scaling =
+        settings->GetScaleAllFontsIfNoMetaTextScaleTag();
+
+    scale_factor = should_hide_env_to_prevent_double_scaling
+                       ? 1.0
+                       : FontSizeFunctions::SnapToClosestFontScaleBucket(
+                             settings->GetAccessibilityFontScaleFactor());
+  }
+
+  SetVariable(UADefinedVariable::kPreferredTextScale,
+              String::Number(scale_factor));
 }
 
 }  // namespace blink

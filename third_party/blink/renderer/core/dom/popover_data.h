@@ -8,8 +8,10 @@
 #include "base/check_op.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/closewatcher/close_watcher.h"
+#include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -25,7 +27,7 @@ using PopoverHoverShowMap =
     HeapHashMap<WeakMember<const HTMLFormControlElement>, TaskHandle>;
 
 class PopoverData final : public GarbageCollected<PopoverData>,
-                          public ElementRareDataField {
+                          public NodeRareDataField {
  public:
   PopoverData() = default;
   PopoverData(const PopoverData&) = delete;
@@ -71,36 +73,6 @@ class PopoverData final : public GarbageCollected<PopoverData>,
     pending_toggle_event_started_closed_ = was_closed;
   }
 
-  class ScopedStartShowingOrHiding {
-    STACK_ALLOCATED();
-
-   public:
-    explicit ScopedStartShowingOrHiding(const Element& popover,
-                                        bool show_warning = true)
-        : popover_(popover),
-          was_set_(popover.GetPopoverData()->hiding_or_showing_this_popover_) {
-      if (was_set_ && show_warning) {
-        popover_.GetDocument().AddConsoleMessage(MakeGarbageCollected<
-                                                 ConsoleMessage>(
-            mojom::blink::ConsoleMessageSource::kOther,
-            mojom::blink::ConsoleMessageLevel::kWarning,
-            "The `beforetoggle` event handler for a popover triggered another "
-            "popover to be shown or hidden. This is not recommended."));
-      } else {
-        popover_.GetPopoverData()->hiding_or_showing_this_popover_ = true;
-      }
-    }
-    ~ScopedStartShowingOrHiding() {
-      if (!was_set_ && popover_.GetPopoverData()) {
-        popover_.GetPopoverData()->hiding_or_showing_this_popover_ = false;
-      }
-    }
-    explicit operator bool() const { return was_set_; }
-
-   private:
-    const Element& popover_;
-    bool was_set_;
-  };
 
   PopoverHoverShowMap& hoverShowTasks() { return hover_show_tasks_; }
 
@@ -119,13 +91,16 @@ class PopoverData final : public GarbageCollected<PopoverData>,
     close_watcher_ = close_watcher;
   }
 
+  bool hiding_this_popover() const { return hiding_this_popover_; }
+  void setHidingThisPopover(bool hiding) { hiding_this_popover_ = hiding; }
+
   void Trace(Visitor* visitor) const override {
     visitor->Trace(invoker_);
     visitor->Trace(previously_focused_element_);
     visitor->Trace(hover_show_tasks_);
     visitor->Trace(implicit_anchor_);
     visitor->Trace(close_watcher_);
-    ElementRareDataField::Trace(visitor);
+    NodeRareDataField::Trace(visitor);
   }
 
  private:
@@ -139,8 +114,8 @@ class PopoverData final : public GarbageCollected<PopoverData>,
   TaskHandle pending_toggle_event_task_;
   bool pending_toggle_event_started_closed_;
 
-  // True when we're in the middle of trying to hide/show this popover.
-  bool hiding_or_showing_this_popover_;
+  // True when we're in the middle of trying to hide this popover.
+  bool hiding_this_popover_ = false;
 
   // Map from elements with the 'popovertarget' attribute and
   // `popovertargetaction=hover` to a task that will show the popover after a

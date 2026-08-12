@@ -116,7 +116,7 @@ class VideoPainterTest : public PaintControllerPaintTestBase {
   void SetUp() override {
     EnableCompositing();
     PaintControllerPaintTestBase::SetUp();
-    GetDocument().SetURL(KURL(NullURL(), "https://example.com/"));
+    GetDocument().SetURL(KURL(NullUrl(), "https://example.com/"));
   }
 
   bool HasLayerAttached(const cc::Layer& layer) {
@@ -141,8 +141,8 @@ TEST_F(VideoPainterTest, VideoLayerAppearsInLayerTree) {
   ASSERT_TRUE(layer);
   EXPECT_TRUE(HasLayerAttached(*layer));
   // The layer bounds reflects the aspect ratio and object-fit of the video.
-  EXPECT_EQ(gfx::Vector2dF(0, 75), layer->offset_to_transform_parent());
-  EXPECT_EQ(gfx::Size(300, 150), layer->bounds());
+  EXPECT_EQ(gfx::Vector2dF(0, 0), layer->offset_to_transform_parent());
+  EXPECT_EQ(gfx::Size(300, 300), layer->bounds());
 }
 
 class MockWebMediaPlayer : public StubWebMediaPlayer {
@@ -151,8 +151,9 @@ class MockWebMediaPlayer : public StubWebMediaPlayer {
       : StubWebMediaPlayer(client) {}
   MOCK_CONST_METHOD0(HasAvailableVideoFrame, bool());
   MOCK_CONST_METHOD0(HasReadableVideoFrame, bool());
-  MOCK_METHOD3(Paint,
-               void(cc::PaintCanvas*, const gfx::Rect&, cc::PaintFlags&));
+  MOCK_METHOD4(
+      Paint,
+      void(cc::PaintCanvas*, const gfx::Rect&, const cc::PaintFlags&, bool));
 };
 
 class TestWebFrameClientImpl : public frame_test_helpers::TestWebFrameClient {
@@ -238,7 +239,8 @@ class VideoPaintPreviewTest : public testing::Test,
     GetLocalMainFrame().CapturePaintPreview(
         bounds(), canvas,
         /*include_linked_destinations=*/true,
-        /*skip_accelerated_content=*/skip_accelerated_content);
+        /*skip_accelerated_content=*/skip_accelerated_content,
+        /*allow_scrollbars=*/false);
     return recorder.finishRecordingAsPicture();
   }
 
@@ -258,7 +260,9 @@ class VideoPaintPreviewTest : public testing::Test,
 
 INSTANTIATE_PAINT_TEST_SUITE_P(VideoPaintPreviewTest);
 
-TEST_P(VideoPaintPreviewTest, URLIsRecordedWhenPaintingPreview) {
+// TODO(crbug.com/398893942): This test is flaky on Win and Linux, when this
+// fails it doesn't find any records with cc::ImageType::kGIF.
+TEST_P(VideoPaintPreviewTest, DISABLED_URLIsRecordedWhenPaintingPreview) {
   // Insert a <video> and allow it to begin loading. The image was taken from
   // the RFC for the data URI scheme https://tools.ietf.org/html/rfc2397.
   SetBodyInnerHTML(R"HTML(
@@ -285,7 +289,9 @@ TEST_P(VideoPaintPreviewTest, URLIsRecordedWhenPaintingPreview) {
   EXPECT_EQ(1U, CountImagesOfType(record, cc::ImageType::kGIF));
 }
 
-TEST_P(VideoPaintPreviewTest, PosterFlagToggleFrameCapture) {
+// TODO(crbug.com/398893942): This test is flaky on Win and Linux, when this
+// fails it doesn't find any records with cc::ImageType::kGIF.
+TEST_P(VideoPaintPreviewTest, DISABLED_PosterFlagToggleFrameCapture) {
   // Insert a <video> and allow it to begin loading. The image was taken from
   // the RFC for the data URI scheme https://tools.ietf.org/html/rfc2397.
   SetBodyInnerHTML(R"HTML(
@@ -307,7 +313,8 @@ TEST_P(VideoPaintPreviewTest, PosterFlagToggleFrameCapture) {
   auto* element = To<HTMLMediaElement>(GetDocument().body()->firstChild());
   MockWebMediaPlayer* player =
       static_cast<MockWebMediaPlayer*>(element->GetWebMediaPlayer());
-  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_)).Times(0);
+  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_, testing::_))
+      .Times(0);
   auto record = CapturePaintPreview(/*skip_accelerated_content=*/true);
 
   std::vector<std::pair<GURL, SkRect>> links;
@@ -320,7 +327,7 @@ TEST_P(VideoPaintPreviewTest, PosterFlagToggleFrameCapture) {
   EXPECT_EQ(1U, CountImagesOfType(record, cc::ImageType::kGIF));
 
   // Capture using video frame.
-  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_));
+  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_, testing::_));
   record = CapturePaintPreview(/*skip_accelerated_content=*/false);
 
   links.clear();
@@ -351,7 +358,8 @@ TEST_P(VideoPaintPreviewTest, PosterFlagToggleNoPosterFrameCapture) {
   auto* element = To<HTMLMediaElement>(GetDocument().body()->firstChild());
   MockWebMediaPlayer* player =
       static_cast<MockWebMediaPlayer*>(element->GetWebMediaPlayer());
-  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_)).Times(0);
+  EXPECT_CALL(*player, Paint(testing::_, testing::_, testing::_, testing::_))
+      .Times(0);
 
   // Capture without poster.
   auto record = CapturePaintPreview(/*skip_accelerated_content=*/true);

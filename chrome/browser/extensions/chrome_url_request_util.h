@@ -5,11 +5,15 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_URL_REQUEST_UTIL_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_URL_REQUEST_UTIL_H_
 
+#include "content/public/common/child_process_id.h"
+#include "extensions/buildflags/buildflags.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom-forward.h"
 #include "ui/base/page_transition_types.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 class GURL;
 
@@ -41,7 +45,7 @@ bool AllowCrossRendererResourceLoad(
     const network::ResourceRequest& request,
     network::mojom::RequestDestination destination,
     ui::PageTransition page_transition,
-    int child_id,
+    content::ChildProcessId child_id,
     bool is_incognito,
     const Extension* extension,
     const ExtensionSet& extensions,
@@ -49,10 +53,10 @@ bool AllowCrossRendererResourceLoad(
     const GURL& upstream_url,
     bool* allowed);
 
-// Return the |request|'s resource path relative to the Chromium resources path
+// Return the `request`'s resource path relative to the Chromium resources path
 // (chrome::DIR_RESOURCES) *if* the request refers to a resource within the
 // Chrome resource bundle. If not then the returned file path will be empty.
-// |resource_id| is used to check whether the requested resource is registered
+// `resource_id` is used to check whether the requested resource is registered
 // as a component extensions resource, via
 // ChromeComponentExtensionResourceManager::IsComponentExtensionResource()
 base::FilePath GetBundleResourcePath(

@@ -10,10 +10,12 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
+#include "base/rand_util.h"
 #include "base/time/time.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
@@ -38,16 +40,14 @@ InputHintChecker* g_test_instance;
 
 // Whether to fetch the input hint from the system. When disabled, pretends
 // that no input is ever queued.
-BASE_EXPORT
-BASE_FEATURE(kYieldWithInputHint,
-             "YieldWithInputHint",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kYieldWithInputHint, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Min time delta between checks for the input hint. Must be a smaller than
 // time to produce a frame, but a bit longer than the time it takes to retrieve
 // the hint.
+// Note: Do not use the prepared macro as of no need for a local cache.
 const base::FeatureParam<int> kPollIntervalMillisParam{&kYieldWithInputHint,
-                                                       "poll_interval_ms", 3};
+                                                       "poll_interval_ms", 1};
 
 // Class calling a private method of InputHintChecker.
 // This allows not to declare the method called by pthread_create in the public
@@ -74,9 +74,8 @@ void InputHintChecker::InitializeFeatures() {
   }
 }
 
-void InputHintChecker::SetView(
-    JNIEnv* env,
-    const jni_zero::JavaParamRef<jobject>& root_view) {
+void InputHintChecker::SetView(JNIEnv* env,
+                               const jni_zero::JavaRef<jobject>& root_view) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   InitState state = FetchState();
   if (state == InitState::kFailedToInitialize) {
@@ -91,8 +90,8 @@ void InputHintChecker::SetView(
     // separate non-Java thread is required to obtain a reference to
     // j.l.reflect.Method via double-reflection.
     TransitionToState(InitState::kInProgress);
-    view_class_ =
-        ScopedJavaGlobalRef<jobject>(env, env->GetObjectClass(root_view.obj()));
+    view_class_ = ScopedJavaGlobalRef<jobject>(
+        env, jni_zero::AdoptRef(env, env->GetObjectClass(root_view.obj())));
     pthread_t new_thread;
     if (pthread_create(&new_thread, nullptr, OffThreadInitInvoker::Run,
                        nullptr) != 0) {
@@ -166,7 +165,7 @@ bool InputHintChecker::HasInputImplWithThrottlingForTesting(_JNIEnv* env) {
 }
 
 bool InputHintChecker::HasInputImpl(JNIEnv* env, jobject o) {
-  auto has_input_result = ScopedJavaLocalRef<jobject>::Adopt(
+  auto has_input_result = jni_zero::AdoptRef(
       env, env->CallObjectMethod(reflect_method_for_has_input_.obj(),
                                  invoke_id_, o, nullptr));
   if (ClearException(env)) {
@@ -239,8 +238,8 @@ void InputHintChecker::InitGlobalRefsAndMethodIds(JNIEnv* env) {
     return;
   }
   ScopedJavaLocalRef<jstring> has_input_string =
-      ConvertUTF8ToJavaString(env, "probablyHasInput");
-  auto method = ScopedJavaLocalRef<jobject>::Adopt(
+      jni_zero::NewAsciiString(env, "probablyHasInput");
+  ScopedJavaLocalRef<jobject> method = jni_zero::AdoptRef(
       env, env->CallObjectMethod(view_class_.obj(), get_method_id,
                                  has_input_string.obj(), nullptr));
   if (ClearException(env)) {
@@ -305,48 +304,55 @@ InputHintChecker::ScopedOverrideInstance::~ScopedOverrideInstance() {
   g_test_instance = nullptr;
 }
 
-// static
 void InputHintChecker::RecordInputHintResult(InputHintResult result) {
+  if (!metric_subsampling_disabled_ &&
+      !base::ShouldRecordSubsampledMetric(0.001)) {
+    return;
+  }
   UMA_HISTOGRAM_ENUMERATION("Android.InputHintChecker.InputHintResult", result);
 }
 
-void JNI_InputHintChecker_SetView(_JNIEnv* env,
-                                  const jni_zero::JavaParamRef<jobject>& v) {
+static void JNI_InputHintChecker_SetView(_JNIEnv* env,
+                                         const jni_zero::JavaRef<jobject>& v) {
   InputHintChecker::GetInstance().SetView(env, v);
 }
 
-void JNI_InputHintChecker_OnCompositorViewHolderTouchEvent(_JNIEnv* env) {
+static void JNI_InputHintChecker_OnCompositorViewHolderTouchEvent(
+    _JNIEnv* env) {
   auto& checker = InputHintChecker::GetInstance();
   if (checker.is_after_input_yield()) {
-    InputHintChecker::RecordInputHintResult(
-        InputHintResult::kCompositorViewTouchEvent);
+    checker.RecordInputHintResult(InputHintResult::kCompositorViewTouchEvent);
   }
   checker.set_is_after_input_yield(false);
 }
 
-jboolean JNI_InputHintChecker_IsInitializedForTesting(_JNIEnv* env) {
+static bool JNI_InputHintChecker_IsInitializedForTesting(_JNIEnv* env) {
   return InputHintChecker::GetInstance().IsInitializedForTesting();  // IN-TEST
 }
 
-jboolean JNI_InputHintChecker_FailedToInitializeForTesting(_JNIEnv* env) {
+static bool JNI_InputHintChecker_FailedToInitializeForTesting(_JNIEnv* env) {
   return InputHintChecker::GetInstance()
       .FailedToInitializeForTesting();  // IN-TEST
 }
 
-jboolean JNI_InputHintChecker_HasInputForTesting(_JNIEnv* env) {
+static bool JNI_InputHintChecker_HasInputForTesting(_JNIEnv* env) {
   InputHintChecker& checker = InputHintChecker::GetInstance();
   return checker.HasInputImplNoThrottlingForTesting(env);  // IN-TEST
 }
 
-jboolean JNI_InputHintChecker_HasInputWithThrottlingForTesting(_JNIEnv* env) {
+static bool JNI_InputHintChecker_HasInputWithThrottlingForTesting(
+    _JNIEnv* env) {
   InputHintChecker& checker = InputHintChecker::GetInstance();
   return checker.HasInputImplWithThrottlingForTesting(env);  // IN-TEST
 }
 
-void JNI_InputHintChecker_SetIsAfterInputYieldForTesting(  // IN-TEST
+static void JNI_InputHintChecker_SetIsAfterInputYieldForTesting(  // IN-TEST
     _JNIEnv* env,
-    jboolean after) {
+    bool after) {
+  InputHintChecker::GetInstance().disable_metric_subsampling();
   InputHintChecker::GetInstance().set_is_after_input_yield(after);
 }
 
 }  // namespace base::android
+
+DEFINE_JNI(InputHintChecker)

@@ -2,17 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 // The rules for parsing content-types were borrowed from Firefox:
 // http://lxr.mozilla.org/mozilla/source/netwerk/base/src/nsURLHelper.cpp#834
 
 #include "net/http/http_util.h"
 
 #include <algorithm>
+#include <array>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +20,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "base/strings/string_view_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "net/base/features.h"
@@ -30,10 +28,15 @@
 #include "net/base/parse_number.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
+#include "url/gurl.h"
 
 namespace net {
 
 namespace {
+
+// Standard range unit used by HTTP range headers.
+constexpr std::string_view kBytesUnit = "bytes";
 
 template <typename ConstIterator>
 void TrimLWSImplementation(ConstIterator* begin, ConstIterator* end) {
@@ -54,17 +57,17 @@ class AcceptLanguageBuilder {
  public:
   // Adds a language to the string.
   // Duplicates are ignored.
-  void AddLanguageCode(const std::string& language) {
+  void AddLanguageCode(std::string_view language) {
     // No Q score supported, only supports ASCII.
-    DCHECK_EQ(std::string::npos, language.find_first_of("; "));
+    DCHECK_EQ(std::string_view::npos, language.find_first_of("; \0"));
     DCHECK(base::IsStringASCII(language));
-    if (seen_.find(language) == seen_.end()) {
+    if (!seen_.contains(language)) {
       if (str_.empty()) {
-        base::StringAppendF(&str_, "%s", language.c_str());
+        str_.assign(language);
       } else {
-        base::StringAppendF(&str_, ",%s", language.c_str());
+        base::StrAppend(&str_, {",", language});
       }
-      seen_.insert(language);
+      seen_.emplace(language);
     }
   }
 
@@ -75,15 +78,17 @@ class AcceptLanguageBuilder {
   // The string that contains the list of languages, comma-separated.
   std::string str_;
   // Set the remove duplicates.
-  std::unordered_set<std::string> seen_;
+  absl::flat_hash_set<std::string> seen_;
 };
 
 // Extract the base language code from a language code.
 // If there is no '-' in the code, the original code is returned.
-std::string GetBaseLanguageCode(const std::string& language_code) {
-  std::vector<std::string> tokens = base::SplitString(
-      language_code, "-", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-  return tokens.empty() ? "" : std::move(tokens[0]);
+std::string_view GetBaseLanguageCode(std::string_view language_code) {
+  size_t pos = language_code.find('-');
+  if (pos != std::string_view::npos) {
+    language_code = language_code.substr(0, pos);
+  }
+  return base::TrimWhitespaceASCII(language_code, base::TRIM_ALL);
 }
 
 }  // namespace
@@ -158,35 +163,32 @@ void HttpUtil::ParseContentType(std::string_view content_type_str,
 }
 
 // static
-bool HttpUtil::ParseRangeHeader(const std::string& ranges_specifier,
+bool HttpUtil::ParseRangeHeader(std::string_view ranges_specifier,
                                 std::vector<HttpByteRange>* ranges) {
   size_t equal_char_offset = ranges_specifier.find('=');
-  if (equal_char_offset == std::string::npos)
-    return false;
-
-  // Try to extract bytes-unit part.
-  std::string_view bytes_unit =
-      std::string_view(ranges_specifier).substr(0, equal_char_offset);
-
-  // "bytes" unit identifier is not found.
-  bytes_unit = TrimLWS(bytes_unit);
-  if (!base::EqualsCaseInsensitiveASCII(bytes_unit, "bytes")) {
+  if (equal_char_offset == std::string::npos) {
     return false;
   }
 
-  std::string::const_iterator byte_range_set_begin =
-      ranges_specifier.begin() + equal_char_offset + 1;
-  std::string::const_iterator byte_range_set_end = ranges_specifier.end();
+  // Try to extract bytes-unit part.
+  std::string_view bytes_unit = ranges_specifier.substr(0, equal_char_offset);
+
+  // "bytes" unit identifier is not found.
+  bytes_unit = TrimLWS(bytes_unit);
+  if (!base::EqualsCaseInsensitiveASCII(bytes_unit, kBytesUnit)) {
+    return false;
+  }
 
   ValuesIterator byte_range_set_iterator(
-      std::string_view(byte_range_set_begin, byte_range_set_end),
+      ranges_specifier.substr(equal_char_offset + 1),
       /*delimiter=*/',');
   while (byte_range_set_iterator.GetNext()) {
     std::string_view value = byte_range_set_iterator.value();
     size_t minus_char_offset = value.find('-');
     // If '-' character is not found, reports failure.
-    if (minus_char_offset == std::string::npos)
+    if (minus_char_offset == std::string::npos) {
       return false;
+    }
 
     std::string_view first_byte_pos = value.substr(0, minus_char_offset);
     first_byte_pos = TrimLWS(first_byte_pos);
@@ -195,8 +197,9 @@ bool HttpUtil::ParseRangeHeader(const std::string& ranges_specifier,
     // Try to obtain first-byte-pos.
     if (!first_byte_pos.empty()) {
       int64_t first_byte_position = -1;
-      if (!base::StringToInt64(first_byte_pos, &first_byte_position))
+      if (!base::StringToInt64(first_byte_pos, &first_byte_position)) {
         return false;
+      }
       range.set_first_byte_position(first_byte_position);
     }
 
@@ -206,22 +209,106 @@ bool HttpUtil::ParseRangeHeader(const std::string& ranges_specifier,
     // We have last-byte-pos or suffix-byte-range-spec in this case.
     if (!last_byte_pos.empty()) {
       int64_t last_byte_position;
-      if (!base::StringToInt64(last_byte_pos, &last_byte_position))
+      if (!base::StringToInt64(last_byte_pos, &last_byte_position)) {
         return false;
-      if (range.HasFirstBytePosition())
+      }
+      if (range.HasFirstBytePosition()) {
         range.set_last_byte_position(last_byte_position);
-      else
+      } else {
         range.set_suffix_length(last_byte_position);
+      }
     } else if (!range.HasFirstBytePosition()) {
       return false;
     }
 
     // Do a final check on the HttpByteRange object.
-    if (!range.IsValid())
+    if (!range.IsValid()) {
       return false;
+    }
     ranges->push_back(range);
   }
   return !ranges->empty();
+}
+
+// Parses Fetch's "single range header value" for the "bytes" range
+// unit. Optional HTTP tab/space around '=' and '-' is accepted only when
+// allow_whitespace is true. At least one side of the range must contain
+// digits.
+std::optional<HttpByteRange> HttpUtil::ParseFetchSingleRange(
+    std::string_view range_header_value,
+    bool allow_whitespace) {
+  // Fetch requires the range unit to be exactly "bytes".
+  if (!base::StartsWith(range_header_value, kBytesUnit)) {
+    return std::nullopt;
+  }
+  size_t pos = kBytesUnit.size();
+
+  // Returns whether there is still input left to read.
+  auto in_bounds = [&]() { return pos < range_header_value.size(); };
+
+  // Consume spec-allowed whitespace.
+  auto skip_optional_whitespace = [&]() {
+    if (!allow_whitespace) {
+      return;
+    }
+    while (in_bounds() && (range_header_value[pos] == ' ' ||
+                           range_header_value[pos] == '\t')) {
+      ++pos;
+    }
+  };
+
+  // Skip optional whitespace, consume `delimiter`, then skip optional
+  // whitespace. Used for the grammar delimiters '=' and '-'.
+  auto consume_delimiter = [&](char delimiter) {
+    skip_optional_whitespace();
+    if (!in_bounds() || range_header_value[pos] != delimiter) {
+      return false;
+    }
+    ++pos;
+    skip_optional_whitespace();
+    return true;
+  };
+
+  // Values too large for int64_t are saturated to int64_t max.
+  auto parse_decimal_number = [&]() -> std::optional<int64_t> {
+    size_t start = pos;
+    while (in_bounds() && base::IsAsciiDigit(range_header_value[pos])) {
+      ++pos;
+    }
+    if (pos == start) {
+      return std::nullopt;
+    }
+    int64_t parsed = 0;
+    if (!ParseInt64(range_header_value.substr(start, pos - start),
+                    ParseIntFormat::NON_NEGATIVE, &parsed)) {
+      // If parsing fails, the value is larger than int64_t can represent.
+      // Treat it as int64_t max instead of rejecting it.
+      return std::numeric_limits<int64_t>::max();
+    }
+    return parsed;
+  };
+
+  if (!consume_delimiter('=')) {
+    return std::nullopt;
+  }
+  // Parse the range separator.
+  std::optional<int64_t> range_start = parse_decimal_number();
+  if (!consume_delimiter('-')) {
+    return std::nullopt;
+  }
+  std::optional<int64_t> range_end = parse_decimal_number();
+  // Reject trailing input and empty ranges.
+  if (in_bounds() || (!range_start && !range_end)) {
+    return std::nullopt;
+  }
+
+  if (!range_start) {
+    return HttpByteRange::Suffix(*range_end);
+  }
+  if (!range_end) {
+    return HttpByteRange::RightUnbounded(*range_start);
+  }
+  return HttpByteRange::Bounded(*range_start, *range_end);
 }
 
 // static
@@ -246,7 +333,7 @@ bool HttpUtil::ParseContentRangeHeaderFor206(
 
   // Invalid header if it doesn't contain "bytes-unit".
   if (!base::EqualsCaseInsensitiveASCII(
-          TrimLWS(content_range_spec.substr(0, space_position)), "bytes")) {
+          TrimLWS(content_range_spec.substr(0, space_position)), kBytesUnit)) {
     return false;
   }
 
@@ -304,11 +391,11 @@ bool HttpUtil::ParseRetryAfterHeader(const std::string& retry_after_string,
 
 // static
 std::string HttpUtil::TimeFormatHTTP(base::Time time) {
-  static constexpr char kWeekdayName[7][4] = {"Sun", "Mon", "Tue", "Wed",
-                                              "Thu", "Fri", "Sat"};
-  static constexpr char kMonthName[12][4] = {"Jan", "Feb", "Mar", "Apr",
-                                             "May", "Jun", "Jul", "Aug",
-                                             "Sep", "Oct", "Nov", "Dec"};
+  static constexpr std::array<char[4], 7> kWeekdayName = {
+      "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  static constexpr std::array<char[4], 12> kMonthName = {
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   base::Time::Exploded exploded;
   time.UTCExplode(&exploded);
   return base::StringPrintf(
@@ -326,7 +413,6 @@ const char* const kForbiddenHeaderFields[] = {
     "accept-encoding",
     "access-control-request-headers",
     "access-control-request-method",
-    "access-control-request-private-network",
     "connection",
     "content-length",
     "cookie",
@@ -459,17 +545,43 @@ void HttpUtil::TrimLWS(std::string::const_iterator* begin,
 
 // static
 std::string_view HttpUtil::TrimLWS(std::string_view string) {
-  const char* begin = string.data();
-  const char* end = string.data() + string.size();
-  TrimLWSImplementation(&begin, &end);
-  return std::string_view(begin, end - begin);
+  size_t begin_offset = 0;
+  size_t end_offset = string.size();
+  TrimLWS(string, begin_offset, end_offset);
+  return string.substr(begin_offset, end_offset - begin_offset);
+}
+
+// static
+void HttpUtil::TrimLWS(std::string_view string,
+                       size_t& begin_offset,
+                       size_t& end_offset) {
+  // Leading whitespace
+  while (begin_offset < end_offset && HttpUtil::IsLWS(string[begin_offset])) {
+    ++begin_offset;
+  }
+
+  // Trailing whitespace
+  while (begin_offset < end_offset && HttpUtil::IsLWS(string[end_offset - 1])) {
+    --end_offset;
+  }
 }
 
 bool HttpUtil::IsTokenChar(char c) {
-  return !(c >= 0x7F || c <= 0x20 || c == '(' || c == ')' || c == '<' ||
-           c == '>' || c == '@' || c == ',' || c == ';' || c == ':' ||
-           c == '\\' || c == '"' || c == '/' || c == '[' || c == ']' ||
-           c == '?' || c == '=' || c == '{' || c == '}');
+  // See RFC 7230 Sec 3.2.6.
+  static constexpr std::array<uint32_t, 8> kIsTokenCharMask = [] {
+    std::array<uint32_t, 8> mask = {};
+    for (int i = 0; i < 256; ++i) {
+      if (!(i >= 0x7F || i <= 0x20 || i == '(' || i == ')' || i == '<' ||
+            i == '>' || i == '@' || i == ',' || i == ';' || i == ':' ||
+            i == '\\' || i == '"' || i == '/' || i == '[' || i == ']' ||
+            i == '?' || i == '=' || i == '{' || i == '}')) {
+        mask[i >> 5] |= (uint32_t{1} << (i & 31));
+      }
+    }
+    return mask;
+  }();
+  uint8_t index = static_cast<uint8_t>(c);
+  return (kIsTokenCharMask[index >> 5] >> (index & 31)) & 1;
 }
 
 // See RFC 7230 Sec 3.2.6 for the definition of |token|.
@@ -690,14 +802,13 @@ std::string HttpUtil::AssembleRawHeaders(std::string_view input) {
   // line's field-value.
 
   // TODO(ericroman): is this too permissive? (delimits on [\r\n]+)
-  base::CStringTokenizer lines(input.data(), input.data() + input.size(),
-                               "\r\n");
+  base::StringViewTokenizer lines(input, "\r\n");
 
   // This variable is true when the previous line was continuable.
   bool prev_line_continuable = false;
 
   while (lines.GetNext()) {
-    std::string_view line = lines.token_piece();
+    std::string_view line = lines.token();
 
     if (prev_line_continuable && IsLWS(line[0])) {
       // Join continuation; reduce the leading LWS to a single SP.
@@ -734,8 +845,8 @@ std::string HttpUtil::ConvertHeadersBackToHTTPResponse(const std::string& str) {
   return disassembled_headers;
 }
 
-std::string HttpUtil::ExpandLanguageList(const std::string& language_prefs) {
-  const std::vector<std::string> languages = base::SplitString(
+std::string HttpUtil::ExpandLanguageList(std::string_view language_prefs) {
+  const std::vector<std::string_view> languages = base::SplitStringPiece(
       language_prefs, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   if (languages.empty())
@@ -745,11 +856,11 @@ std::string HttpUtil::ExpandLanguageList(const std::string& language_prefs) {
 
   const size_t size = languages.size();
   for (size_t i = 0; i < size; ++i) {
-    const std::string& language = languages[i];
+    const std::string_view language = languages[i];
     builder.AddLanguageCode(language);
 
     // Extract the primary language subtag.
-    const std::string& base_language = GetBaseLanguageCode(language);
+    const std::string_view base_language = GetBaseLanguageCode(language);
 
     // Skip 'x' and 'i' as a primary language subtag per RFC 5646 section 2.1.1.
     if (base_language == "x" || base_language == "i")
@@ -898,39 +1009,51 @@ int HttpUtil::MapStatusCodeForHistogram(int code) {
 //                     of token, separators, and quoted-string>
 //
 
-HttpUtil::HeadersIterator::HeadersIterator(
-    std::string::const_iterator headers_begin,
-    std::string::const_iterator headers_end,
-    const std::string& line_delimiter)
-    : lines_(headers_begin, headers_end, line_delimiter) {
-}
+HttpUtil::HeadersIterator::HeadersIterator(std::string_view headers,
+                                           const std::string& line_delimiter)
+    : headers_(headers),
+      // It's important to use `headers_` here rather than `headers`, since
+      // subtracting two string_view::iterators from each other is not
+      // guaranteed to work, if they're from different string_views, even if one
+      // is a copy of the other. Note that StringViewTokenizer uses iterators to
+      // the passed in string_view, rather than a copying it.
+      lines_(headers_, line_delimiter) {}
 
 HttpUtil::HeadersIterator::~HeadersIterator() = default;
 
 bool HttpUtil::HeadersIterator::GetNext() {
   while (lines_.GetNext()) {
-    name_begin_ = lines_.token_begin();
-    values_end_ = lines_.token_end();
+    // Since `tokenizer_` was constructed using `headers_`, this is subtracting
+    // iterators for the exact same string_view, rather than to two copies of
+    // the same string_view, so is safe.
+    name_begin_ = lines_.token_begin() - headers_.begin();
+    values_end_ = lines_.token_end() - headers_.begin();
 
-    std::string::const_iterator colon(std::find(name_begin_, values_end_, ':'));
-    if (colon == values_end_)
+    // Colon index, relative to start of line.
+    size_t colon = lines_.token().find(':');
+    if (colon == std::string_view::npos) {
       continue;  // skip malformed header
+    }
+    // Adjust colon to be relative to start of headers.
+    colon += name_begin_;
 
     name_end_ = colon;
 
     // If the name starts with LWS, it is an invalid line.
     // Leading LWS implies a line continuation, and these should have
     // already been joined by AssembleRawHeaders().
-    if (name_begin_ == name_end_ || IsLWS(*name_begin_))
+    if (name_begin_ == name_end_ || IsLWS(headers_[name_begin_])) {
       continue;
+    }
 
-    TrimLWS(&name_begin_, &name_end_);
-    DCHECK(name_begin_ < name_end_);
-    if (!IsToken(base::MakeStringPiece(name_begin_, name_end_)))
+    TrimLWS(headers_, name_begin_, name_end_);
+    CHECK_LT(name_begin_, name_end_);
+    if (!IsToken(headers_.substr(name_begin_, name_end_ - name_begin_))) {
       continue;  // skip malformed header
+    }
 
     values_begin_ = colon + 1;
-    TrimLWS(&values_begin_, &values_end_);
+    TrimLWS(headers_, values_begin_, values_end_);
 
     // if we got a header name, then we are done.
     return true;
@@ -938,32 +1061,24 @@ bool HttpUtil::HeadersIterator::GetNext() {
   return false;
 }
 
-bool HttpUtil::HeadersIterator::AdvanceTo(const char* name) {
-  DCHECK(name != nullptr);
-  DCHECK_EQ(0, base::ToLowerASCII(name).compare(name))
-      << "the header name must be in all lower case";
-
-  while (GetNext()) {
-    if (base::EqualsCaseInsensitiveASCII(
-            base::MakeStringPiece(name_begin_, name_end_), name)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 HttpUtil::ValuesIterator::ValuesIterator(std::string_view values,
                                          char delimiter,
                                          bool ignore_empty_values)
-    : values_(values, std::string(1, delimiter)),
-      ignore_empty_values_(ignore_empty_values) {
-  values_.set_quote_chars("\"");
+    : values_(values),
+      ignore_empty_values_(ignore_empty_values),
+      // It's important to use `values_` here rather than `value`, since
+      // subtracting two string_view::iterators from each other is not
+      // guaranteed to work, if they're from different string_views, even if one
+      // is a copy of the other. Note that StringViewTokenizer uses iterators to
+      // the passed in string_view, rather than a copying it.
+      tokenizer_(values_, std::string(1, delimiter)) {
+  tokenizer_.set_quote_chars("\"");
   // Could set this unconditionally, since code below has to check for empty
   // values after trimming, anyways, but may provide a minor performance
   // improvement.
-  if (!ignore_empty_values_)
-    values_.set_options(base::StringTokenizer::RETURN_EMPTY_TOKENS);
+  if (!ignore_empty_values_) {
+    tokenizer_.set_options(base::StringTokenizer::RETURN_EMPTY_TOKENS);
+  }
 }
 
 HttpUtil::ValuesIterator::ValuesIterator(const ValuesIterator& other) = default;
@@ -971,10 +1086,15 @@ HttpUtil::ValuesIterator::ValuesIterator(const ValuesIterator& other) = default;
 HttpUtil::ValuesIterator::~ValuesIterator() = default;
 
 bool HttpUtil::ValuesIterator::GetNext() {
-  while (values_.GetNext()) {
-    value_ = TrimLWS(values_.token());
+  while (tokenizer_.GetNext()) {
+    // Since `tokenizer_` was constructed using `values_`, this is subtracting
+    // iterators for the exact same string_view, rather than to two copies of
+    // the same string_view, so is safe.
+    value_begin_ = tokenizer_.token_begin() - values_.begin();
+    value_end_ = tokenizer_.token_end() - values_.begin();
+    TrimLWS(values_, value_begin_, value_end_);
 
-    if (!ignore_empty_values_ || !value_.empty()) {
+    if (!ignore_empty_values_ || value_begin_ != value_end_) {
       return true;
     }
   }
@@ -1047,7 +1167,7 @@ bool HttpUtil::NameValuePairsIterator::ParseNameValuePair(
   // If there is a value, do additional checking and calculate the value.
   if (has_value) {
     // Check that no quote appears before the equals sign.
-    if (base::ranges::any_of(name_, IsQuote)) {
+    if (std::ranges::any_of(name_, IsQuote)) {
       return false;
     }
 

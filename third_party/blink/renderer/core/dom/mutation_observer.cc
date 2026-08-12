@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 
 namespace blink {
@@ -112,8 +113,8 @@ class MutationObserverAgentData
     if (active_mutation_observers_.empty() &&
         active_slot_change_list_.empty()) {
       GetSupplementable()->event_loop()->EnqueueMicrotask(
-          WTF::BindOnce(&MutationObserverAgentData::DeliverMutations,
-                        WrapWeakPersistent(this)));
+          BindOnce(&MutationObserverAgentData::DeliverMutations,
+                   WrapWeakPersistent(this)));
     }
   }
 
@@ -327,10 +328,12 @@ static void ActivateObserver(MutationObserver* observer) {
 
 void MutationObserver::EnqueueMutationRecord(MutationRecord* mutation) {
   DCHECK(IsMainThread());
+  if (records_.empty()) {
+    async_task_context_.Schedule(delegate_->GetExecutionContext(),
+                                 mutation->type());
+  }
   records_.push_back(mutation);
   ActivateObserver(this);
-  mutation->async_task_context()->Schedule(delegate_->GetExecutionContext(),
-                                           mutation->type());
 }
 
 void MutationObserver::SetHasTransientRegistration() {
@@ -362,9 +365,7 @@ void MutationObserver::ContextDestroyed() {
 }
 
 void MutationObserver::CancelInspectorAsyncTasks() {
-  for (auto& record : records_) {
-    record->async_task_context()->Cancel();
-  }
+  async_task_context_.Cancel();
 }
 
 void MutationObserver::Deliver() {
@@ -390,7 +391,7 @@ void MutationObserver::Deliver() {
 
   // Report the first (earliest) stack as the async cause.
   probe::AsyncTask async_task(delegate_->GetExecutionContext(),
-                              records.front()->async_task_context());
+                              &async_task_context_);
   delegate_->Deliver(records, *this);
 }
 

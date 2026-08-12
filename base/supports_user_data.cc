@@ -59,7 +59,7 @@ std::unique_ptr<SupportsUserData::Data> SupportsUserData::TakeUserData(
   if (found != impl_->user_data_.end()) {
     std::unique_ptr<SupportsUserData::Data> deowned;
     deowned.swap(found->second);
-    impl_->user_data_.erase(key);
+    impl_->user_data_.erase(found);
     return deowned;
   }
   return nullptr;
@@ -140,6 +140,11 @@ void SupportsUserData::ClearAllUserData() {
   // local.
   absl::flat_hash_map<const void*, std::unique_ptr<Data>> user_data;
   impl_->user_data_.swap(user_data);
+}
+
+size_t SupportsUserData::UserDataCount() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return impl_->user_data_.size();
 }
 
 }  // namespace base

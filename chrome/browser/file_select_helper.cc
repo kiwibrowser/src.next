@@ -6,10 +6,12 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
@@ -19,18 +21,17 @@
 #include "base/task/thread_pool.h"
 #include "base/threading/hang_watcher.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/connectors/common.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
+#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/enterprise/buildflags/buildflags.h"
 #include "components/enterprise/common/proto/connectors.pb.h"
-#include "components/safe_browsing/buildflags.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/file_select_listener.h"
@@ -45,15 +46,11 @@
 #include "ui/base/models/dialog_model.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/file_manager/fileapi_util.h"
+#include "chrome/browser/ash/fusebox/fusebox_server.h"
+#include "components/enterprise/connectors/core/features.h"
 #include "content/public/browser/site_instance.h"
-#endif
-
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-#include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
-#include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
@@ -61,6 +58,7 @@
 #else
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/picture_in_picture/scoped_disallow_picture_in_picture.h"
+#include "chrome/browser/picture_in_picture/scoped_tuck_picture_in_picture.h"
 #endif  // BUILDFLAG(IS_ANDROID)
 
 using blink::mojom::FileChooserFileInfo;
@@ -89,55 +87,6 @@ bool IsValidProfile(Profile* profile) {
     return true;
   return g_browser_process->profile_manager()->IsValidProfile(profile);
 }
-
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-
-// Safe Browsing checks are only applied when `params->mode` is
-// `kSave`, which is only for PPAPI requests.
-bool IsDownloadAllowedBySafeBrowsing(
-    safe_browsing::DownloadCheckResult result) {
-  using Result = safe_browsing::DownloadCheckResult;
-  switch (result) {
-    // Only allow downloads that are marked as SAFE or UNKNOWN by SafeBrowsing.
-    // All other types are going to be blocked. UNKNOWN could be the result of a
-    // failed safe browsing ping.
-    case Result::UNKNOWN:
-    case Result::SAFE:
-    case Result::ALLOWLISTED_BY_POLICY:
-      return true;
-
-    case Result::DANGEROUS:
-    case Result::UNCOMMON:
-    case Result::DANGEROUS_HOST:
-    case Result::POTENTIALLY_UNWANTED:
-    case Result::DANGEROUS_ACCOUNT_COMPROMISE:
-      return false;
-
-    // Safe Browsing should only return these results for client downloads, not
-    // for PPAPI downloads.
-    case Result::ASYNC_SCANNING:
-    case Result::ASYNC_LOCAL_PASSWORD_SCANNING:
-    case Result::BLOCKED_PASSWORD_PROTECTED:
-    case Result::BLOCKED_TOO_LARGE:
-    case Result::SENSITIVE_CONTENT_BLOCK:
-    case Result::SENSITIVE_CONTENT_WARNING:
-    case Result::DEEP_SCANNED_SAFE:
-    case Result::PROMPT_FOR_SCANNING:
-    case Result::PROMPT_FOR_LOCAL_PASSWORD_SCANNING:
-    case Result::DEEP_SCANNED_FAILED:
-    case Result::BLOCKED_SCAN_FAILED:
-    case Result::IMMEDIATE_DEEP_SCAN:
-      NOTREACHED();
-  }
-  NOTREACHED();
-}
-
-void InterpretSafeBrowsingVerdict(base::OnceCallback<void(bool)> recipient,
-                                  safe_browsing::DownloadCheckResult result) {
-  std::move(recipient).Run(IsDownloadAllowedBySafeBrowsing(result));
-}
-
-#endif
 
 #if BUILDFLAG(IS_ANDROID)
 std::u16string GetDisplayName(const base::FilePath& content_uri) {
@@ -331,7 +280,7 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
   if (AbortIfWebContentsDestroyed())
     return;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (!files.empty()) {
     if (!IsValidProfile(profile_)) {
       RunFileChooserEnd();
@@ -350,7 +299,7 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
                        this));
     return;
   }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   std::vector<FileChooserFileInfoPtr> chooser_files;
   for (const auto& file : files) {
@@ -361,6 +310,41 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
   }
 
   PerformContentAnalysisIfNeeded(std::move(chooser_files));
+}
+
+base::FilePath FileSelectHelper::MaybeSubstituteFuseboxFilePath(
+    const blink::mojom::FileSystemFileInfo& file_system_info) {
+#if BUILDFLAG(IS_CHROMEOS)
+  content::SiteInstance* site_instance = render_frame_host_->GetSiteInstance();
+  storage::FileSystemContext* file_system_context =
+      profile_->GetStoragePartition(site_instance)->GetFileSystemContext();
+  if (!file_system_context) {
+    return base::FilePath();
+  }
+
+  const storage::FileSystemURL cracked_url =
+      file_system_context->CrackURLInFirstPartyContext(file_system_info.url);
+  if (!cracked_url.is_valid()) {
+    return base::FilePath();
+  }
+
+  GURL external_gurl;
+  if (!file_manager::util::ConvertAbsoluteFilePathToFileSystemUrl(
+          profile_, cracked_url.path(), file_manager::util::GetFileManagerURL(),
+          &external_gurl)) {
+    return base::FilePath();
+  }
+
+  const storage::FileSystemURL external_cracked_url =
+      file_system_context->CrackURLInFirstPartyContext(external_gurl);
+  if (!external_cracked_url.is_valid()) {
+    return base::FilePath();
+  }
+
+  return fusebox::Server::SubstituteFuseboxFilePath(external_cracked_url);
+#else
+  return base::FilePath();
+#endif
 }
 
 void FileSelectHelper::PerformContentAnalysisIfNeeded(
@@ -377,8 +361,23 @@ void FileSelectHelper::PerformContentAnalysisIfNeeded(
         enterprise_connectors::ContentAnalysisRequest::FILE_PICKER_DIALOG;
     data.paths.reserve(list.size());
     for (const auto& file : list) {
-      if (file && file->is_native_file())
+      if (!file) {
+        continue;
+      }
+      if (file->is_native_file()) {
         data.paths.push_back(file->get_native_file()->file_path);
+      }
+#if BUILDFLAG(IS_CHROMEOS)
+      else if (base::FeatureList::IsEnabled(
+                   enterprise_connectors::kEnableDlpFileSystemApi) &&
+               file->is_file_system()) {
+        base::FilePath path =
+            MaybeSubstituteFuseboxFilePath(*file->get_file_system());
+        if (!path.empty()) {
+          data.paths.push_back(std::move(path));
+        }
+      }
+#endif
     }
 
     if (data.paths.empty()) {
@@ -388,7 +387,7 @@ void FileSelectHelper::PerformContentAnalysisIfNeeded(
           web_contents_, std::move(data),
           base::BindOnce(&FileSelectHelper::ContentAnalysisCompletionCallback,
                          this, std::move(list)),
-          safe_browsing::DeepScanAccessPoint::UPLOAD);
+          enterprise_connectors::DeepScanAccessPoint::UPLOAD);
     }
   } else {
     NotifyListenerAndEnd(std::move(list));
@@ -415,7 +414,7 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
   // files, block the entire folder and update `result` to reflect the block
   // verdict for all files scanned.
   if (dialog_type_ == ui::SelectFileDialog::SELECT_UPLOAD_FOLDER) {
-    if (base::Contains(result.paths_results, false)) {
+    if (std::ranges::contains(result.paths_results, false)) {
       list.clear();
       for (size_t index = 0; index < data.paths.size(); ++index) {
         result.paths_results[index] = false;
@@ -427,10 +426,23 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
   }
 
   // For single or multiple file uploads, remove any files that did not pass the
-  // deep scan. Non-native files are skipped.
+  // deep scan. Non-native files not backed by fusebox are skipped.
   size_t i = 0;
   for (auto it = list.begin(); it != list.end();) {
+    bool is_scanned = false;
     if ((*it)->is_native_file()) {
+      is_scanned = true;
+    }
+#if BUILDFLAG(IS_CHROMEOS)
+    else if (base::FeatureList::IsEnabled(
+                 enterprise_connectors::kEnableDlpFileSystemApi) &&
+             (*it)->is_file_system()) {
+      is_scanned =
+          !MaybeSubstituteFuseboxFilePath(*(*it)->get_file_system()).empty();
+    }
+#endif
+
+    if (is_scanned) {
       if (!result.paths_results[i]) {
         it = list.erase(it);
       } else {
@@ -438,8 +450,6 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
       }
       ++i;
     } else {
-      // Skip non-native files by incrementing the iterator without changing `i`
-      // so that no result is skipped.
       ++it;
     }
   }
@@ -471,7 +481,7 @@ void FileSelectHelper::CleanUp() {
 
     // Now that the temporary files have been scheduled for deletion, there
     // is no longer any reason to keep this instance around.
-    Release();
+    self_ptr_.reset();
   }
 }
 
@@ -610,13 +620,17 @@ void FileSelectHelper::RunFileChooser(
   render_frame_host_ = render_frame_host;
   web_contents_ = WebContents::FromRenderFrameHost(render_frame_host);
   listener_ = std::move(listener);
-  content::WebContentsObserver::Observe(web_contents_);
+  InitLifecycleObserver(web_contents_);
 
 #if !BUILDFLAG(IS_ANDROID)
   if (PictureInPictureWindowManager::GetInstance()
           ->ShouldFileDialogBlockPictureInPicture(web_contents_)) {
     scoped_disallow_picture_in_picture_ =
         std::make_unique<ScopedDisallowPictureInPicture>();
+  } else if (PictureInPictureWindowManager::GetInstance()
+                 ->ShouldFileDialogTuckPictureInPicture(web_contents_)) {
+    scoped_tuck_picture_in_picture_ =
+        std::make_unique<ScopedTuckPictureInPicture>();
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -627,10 +641,10 @@ void FileSelectHelper::RunFileChooser(
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
-  // instance. We AddRef() here to keep the instance alive after we return
-  // to the caller, until the last callback is received from the file dialog.
-  // At that point, we must call RunFileChooserEnd().
-  AddRef();
+  // instance. We keep a reference to ourself to keep the instance alive after
+  // we return to the caller, until the last callback is received from the
+  // file dialog. At that point, we must call RunFileChooserEnd().
+  self_ptr_ = this;
 }
 
 void FileSelectHelper::GetFileTypesInThreadPool(FileChooserParamsPtr params) {
@@ -652,65 +666,8 @@ void FileSelectHelper::GetSanitizedFilenameOnUIThread(
 
   base::FilePath default_file_path = profile_->last_selected_directory().Append(
       GetSanitizedFileName(params->default_file_name));
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-  // Mode `kSave` is only for PPAPI writes, which are checked by Safe Browsing.
-  // See comments on
-  // //third_party/blink/public/mojom/choosers/file_chooser.mojom.
-  if (params->mode == FileChooserParams::Mode::kSave) {
-    CheckDownloadRequestWithSafeBrowsing(default_file_path, std::move(params));
-    return;
-  }
-#endif
   RunFileChooserOnUIThread(default_file_path, std::move(params));
 }
-
-#if BUILDFLAG(FULL_SAFE_BROWSING)
-void FileSelectHelper::CheckDownloadRequestWithSafeBrowsing(
-    const base::FilePath& default_file_path,
-    FileChooserParamsPtr params) {
-  // Download Protection is not supported on Android.
-  safe_browsing::SafeBrowsingService* sb_service =
-      g_browser_process->safe_browsing_service();
-
-  if (!sb_service || !sb_service->download_protection_service() ||
-      !sb_service->download_protection_service()->enabled()) {
-    RunFileChooserOnUIThread(default_file_path, std::move(params));
-    return;
-  }
-
-  std::vector<base::FilePath::StringType> alternate_extensions;
-  if (select_file_types_) {
-    for (const auto& extensions_list : select_file_types_->extensions) {
-      for (const auto& extension_in_list : extensions_list) {
-        base::FilePath::StringType extension =
-            default_file_path.ReplaceExtension(extension_in_list)
-                .FinalExtension();
-        alternate_extensions.push_back(extension);
-      }
-    }
-  }
-
-  GURL requestor_url = params->requestor;
-  sb_service->download_protection_service()->CheckPPAPIDownloadRequest(
-      requestor_url, render_frame_host_, default_file_path,
-      alternate_extensions, profile_,
-      base::BindOnce(
-          &InterpretSafeBrowsingVerdict,
-          base::BindOnce(&FileSelectHelper::ProceedWithSafeBrowsingVerdict,
-                         this, default_file_path, std::move(params))));
-}
-
-void FileSelectHelper::ProceedWithSafeBrowsingVerdict(
-    const base::FilePath& default_file_path,
-    FileChooserParamsPtr params,
-    bool allowed_by_safe_browsing) {
-  if (!allowed_by_safe_browsing) {
-    RunFileChooserEnd();
-    return;
-  }
-  RunFileChooserOnUIThread(default_file_path, std::move(params));
-}
-#endif
 
 void FileSelectHelper::RunFileChooserOnUIThread(
     const base::FilePath& default_file_path,
@@ -777,14 +734,27 @@ void FileSelectHelper::RunFileChooserOnUIThread(
 // dialog or if the renderer was destroyed. Perform any cleanup and release the
 // reference we added in RunFileChooser().
 void FileSelectHelper::RunFileChooserEnd() {
+#if !BUILDFLAG(IS_ANDROID)
+  // Ensure picture-in-picture occlusion mitigation stops, even if we need to
+  // keep this instance alive for temporary files.
+  scoped_disallow_picture_in_picture_.reset();
+  scoped_tuck_picture_in_picture_.reset();
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+  tab_deactivated_subscription_ = {};
+  directory_enumeration_.reset();
+
   // If there are temporary files, then this instance needs to stick around
   // until web_contents_ is destroyed, so that this instance can delete the
   // temporary files.
-  if (!temporary_files_.empty())
+  if (!temporary_files_.empty()) {
     return;
+  }
 
-  if (listener_)
+  if (listener_) {
     listener_->FileSelectionCanceled();
+    listener_.reset();
+  }
   render_frame_host_ = nullptr;
   web_contents_ = nullptr;
   // If the dialog was actually opened, dispose of our reference.
@@ -793,11 +763,7 @@ void FileSelectHelper::RunFileChooserEnd() {
     select_file_dialog_.reset();
   }
 
-#if !BUILDFLAG(IS_ANDROID)
-  scoped_disallow_picture_in_picture_.reset();
-#endif  // !BUILDFLAG(IS_ANDROID)
-
-  Release();
+  self_ptr_.reset();
 }
 
 void FileSelectHelper::EnumerateDirectoryImpl(
@@ -809,12 +775,13 @@ void FileSelectHelper::EnumerateDirectoryImpl(
   dialog_type_ = ui::SelectFileDialog::SELECT_NONE;
   web_contents_ = tab;
   listener_ = std::move(listener);
+  InitLifecycleObserver(web_contents_);
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
-  // instance. We AddRef() here to keep the instance alive after we return
-  // to the caller, until the last callback is received from the enumeration
-  // code. At that point, we must call EnumerateDirectoryEnd().
-  AddRef();
+  // instance. We keep a reference to ourself to keep the instance alive after
+  // we return to the caller, until the last callback is received from the
+  // enumeration code. At that point, we must call EnumerateDirectoryEnd().
+  self_ptr_ = this;
 #if BUILDFLAG(IS_ANDROID)
   if (path.IsContentUri()) {
     base::ThreadPool::PostTaskAndReplyWithResult(
@@ -830,7 +797,7 @@ void FileSelectHelper::EnumerateDirectoryImpl(
 // code. Perform any cleanup and release the reference we added in
 // EnumerateDirectoryImpl().
 void FileSelectHelper::EnumerateDirectoryEnd() {
-  Release();
+  RunFileChooserEnd();
 }
 
 void FileSelectHelper::RenderFrameHostChanged(
@@ -858,6 +825,24 @@ void FileSelectHelper::WebContentsDestroyed() {
   web_contents_ = nullptr;
   profile_ = nullptr;
   CleanUp();
+}
+
+void FileSelectHelper::InitLifecycleObserver(
+    content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  content::WebContentsObserver::Observe(web_contents);
+
+  tabs::TabInterface* tab_interface =
+      tabs::TabInterface::MaybeGetFromContents(web_contents);
+  if (tab_interface) {
+    tab_deactivated_subscription_ =
+        tab_interface->RegisterWillDeactivate(base::BindRepeating(
+            &FileSelectHelper::OnTabDeactivated, base::Unretained(this)));
+  }
+}
+
+void FileSelectHelper::OnTabDeactivated(tabs::TabInterface* tab) {
+  RunFileChooserEnd();
 }
 
 // static

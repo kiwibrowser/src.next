@@ -96,11 +96,9 @@ class BrowserChildProcessBackgroundedBridgeTest
   base::OnceClosure quit_closure_;
 };
 
+// TODO(crbug.com/40911694): Disabled because this test is flaky.
 IN_PROC_BROWSER_TEST_F(BrowserChildProcessBackgroundedBridgeTest,
-                       InitiallyForegrounded) {
-  if (base::mac::MacOSMajorVersion() >= 13) {
-    GTEST_SKIP() << "Flaking on macOS 13: https://crbug.com/1444130";
-  }
+                       DISABLED_InitiallyForegrounded) {
   // Set the browser process as foregrounded.
   SetProcessPriority(base::Process::Current().Pid(),
                      base::Process::Priority::kUserBlocking);

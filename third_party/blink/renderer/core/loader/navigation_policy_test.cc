@@ -31,12 +31,11 @@
 #include "third_party/blink/renderer/core/loader/navigation_policy.h"
 
 #include "base/auto_reset.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mouse_event_init.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
@@ -48,8 +47,6 @@ namespace blink {
 class NavigationPolicyTest : public testing::Test {
  protected:
   void SetUp() override {
-    // Default
-    scoped_feature_list_.InitAndDisableFeature(features::kLinkPreview);
   }
 
   NavigationPolicy GetPolicyForCreateWindow(int modifiers,
@@ -98,14 +95,16 @@ class NavigationPolicyTest : public testing::Test {
   }
 
   WebWindowFeatures features;
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-class NavigationPolicyWithLinkPreviewEnabledTest : public NavigationPolicyTest {
+class NavigationPolicyWithSplitViewEnabledTest : public NavigationPolicyTest {
  protected:
   void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        features::kLinkPreview, {{"trigger_type", "alt_click"}});
+    WebRuntimeFeatures::EnableFeatureFromString("SplitViewLinkOpen", true);
+  }
+
+  void TearDown() override {
+    WebRuntimeFeatures::EnableFeatureFromString("SplitViewLinkOpen", false);
   }
 };
 
@@ -437,17 +436,28 @@ TEST_F(NavigationPolicyTest, EventAltClickWithDifferentUserEvent) {
             GetPolicyFromEvent(modifiers, button, 0, button));
 }
 
-TEST_F(NavigationPolicyWithLinkPreviewEnabledTest, EventAltClick) {
-  int modifiers = WebInputEvent::kAltKey;
+
+TEST_F(NavigationPolicyWithSplitViewEnabledTest,
+       EventAltControlOrMetaLeftClick) {
+#if BUILDFLAG(IS_MAC)
+  int modifiers = WebInputEvent::kMetaKey | WebInputEvent::kAltKey;
+#else
+  int modifiers = WebInputEvent::kControlKey | WebInputEvent::kAltKey;
+#endif
   WebMouseEvent::Button button = WebMouseEvent::Button::kLeft;
   EXPECT_EQ(kNavigationPolicyCurrentTab,
             NavigationPolicyFromEvent(GetEvent(modifiers, button)));
 }
 
-TEST_F(NavigationPolicyWithLinkPreviewEnabledTest, EventAltClickWithUserEvent) {
-  int modifiers = WebInputEvent::kAltKey;
+TEST_F(NavigationPolicyWithSplitViewEnabledTest,
+       EventAltControlOrMetaLeftClickWithUserEvent) {
+#if BUILDFLAG(IS_MAC)
+  int modifiers = WebInputEvent::kMetaKey | WebInputEvent::kAltKey;
+#else
+  int modifiers = WebInputEvent::kControlKey | WebInputEvent::kAltKey;
+#endif
   WebMouseEvent::Button button = WebMouseEvent::Button::kLeft;
-  EXPECT_EQ(kNavigationPolicyLinkPreview,
+  EXPECT_EQ(kNavigationPolicySplitView,
             GetPolicyFromEvent(modifiers, button, modifiers, button));
 }
 

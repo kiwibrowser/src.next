@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/css_position_try_rule.h"
 
-#include "third_party/blink/renderer/core/css/cascade_layer.h"
+#include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_position_try_descriptors.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -18,7 +18,6 @@ StyleRulePositionTry::StyleRulePositionTry(const AtomicString& name,
 StyleRulePositionTry::~StyleRulePositionTry() = default;
 
 void StyleRulePositionTry::TraceAfterDispatch(Visitor* visitor) const {
-  visitor->Trace(layer_);
   visitor->Trace(properties_);
   StyleRuleBase::TraceAfterDispatch(visitor);
 }
@@ -29,10 +28,16 @@ CSSPositionTryRule::CSSPositionTryRule(StyleRulePositionTry* position_try_rule,
 
 CSSPositionTryRule::~CSSPositionTryRule() = default;
 
+String CSSPositionTryRule::name() const {
+  StringBuilder result;
+  SerializeIdentifier(position_try_rule_->Name(), result);
+  return result.ReleaseString();
+}
+
 String CSSPositionTryRule::cssText() const {
   StringBuilder result;
   result.Append("@position-try ");
-  result.Append(name());
+  SerializeIdentifier(position_try_rule_->Name(), result);
   result.Append(" { ");
   if (!position_try_rule_->Properties().IsEmpty()) {
     result.Append(position_try_rule_->Properties().AsText());
@@ -61,6 +66,10 @@ CSSStyleDeclaration* CSSPositionTryRule::style() const {
 void CSSPositionTryRule::Reattach(StyleRuleBase* rule) {
   DCHECK(rule);
   position_try_rule_ = To<StyleRulePositionTry>(rule);
+  if (properties_cssom_wrapper_) {
+    properties_cssom_wrapper_->Reattach(
+        position_try_rule_->MutableProperties());
+  }
 }
 
 void CSSPositionTryRule::Trace(Visitor* visitor) const {

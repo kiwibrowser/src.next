@@ -5,16 +5,20 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 
 #include "base/json/json_reader.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/gmock_expected_support.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/mojom/context_type.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -178,13 +182,20 @@ TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigation) {
         kFileURLWithAccess, extension.get(), browser_context());
     EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURLWithAccess)));
   }
-  // Regression test for crbug.com/1487908. Ensure that file URLs are returned
+  // Regression test for crbug.com/40073743. Ensure that file URLs are returned
   // when the call originates from non-extension contexts (e.g. WebUI contexts).
   {
     const std::string kFileURL("file:///etc/passwd");
     auto url = ExtensionTabUtil::PrepareURLForNavigation(
         kFileURL, /*extension=*/nullptr, browser_context());
     EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURL)));
+  }
+  // Regression test for crbug.com/348405962.
+  {
+    const std::string kTestPath("mailto:8080?cc=&bcc=&subject=&body=");
+    auto url = ExtensionTabUtil::PrepareURLForNavigation(
+        kTestPath, extension.get(), browser_context());
+    EXPECT_THAT(url, base::test::ValueIs(GURL(kTestPath)));
   }
 }
 
@@ -200,7 +211,8 @@ TEST_F(ChromeExtensionNavigationTest,
       })",
       extension_id.c_str());
 
-  std::optional<base::Value> settings = base::JSONReader::Read(json);
+  std::optional<base::Value> settings =
+      base::JSONReader::Read(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   testing_pref_service()->SetManagedPref(
       pref_names::kExtensionManagement,
       base::Value::ToUniquePtrValue(std::move(settings.value())));
@@ -236,23 +248,6 @@ TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigationOnDevtools) {
         kDevtoolsURL, no_permission_extension.get(), browser_context());
     EXPECT_THAT(
         url, base::test::ErrorIs(ExtensionTabUtil::kCannotNavigateToDevtools));
-  }
-  // Having the devtools permissions should allow access.
-  {
-    auto devtools_extension = ExtensionBuilder("devtools")
-                                  .SetManifestKey("devtools_page", "foo.html")
-                                  .Build();
-    auto url = ExtensionTabUtil::PrepareURLForNavigation(
-        kDevtoolsURL, devtools_extension.get(), browser_context());
-    EXPECT_THAT(url, base::test::ValueIs(kDevtoolsURL));
-  }
-  // Having the debugger permissions should also allow access.
-  {
-    auto debugger_extension =
-        ExtensionBuilder("debugger").AddAPIPermission("debugger").Build();
-    auto url = ExtensionTabUtil::PrepareURLForNavigation(
-        kDevtoolsURL, debugger_extension.get(), browser_context());
-    EXPECT_THAT(url, base::test::ValueIs(kDevtoolsURL));
   }
 }
 

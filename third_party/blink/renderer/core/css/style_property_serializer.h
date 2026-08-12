@@ -25,19 +25,19 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_PROPERTY_SERIALIZER_H_
 
 #include <bitset>
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
-
-namespace WTF {
-class StringBuilder;
-}  // namespace WTF
+#include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class CSSPropertyName;
 class CSSPropertyValueSet;
 class StylePropertyShorthand;
+
+enum class CSSGapDecorationPropertyDirection : int;
 
 class CORE_EXPORT StylePropertySerializer {
   STACK_ALLOCATED();
@@ -55,12 +55,39 @@ class CORE_EXPORT StylePropertySerializer {
                              const StylePropertyShorthand&) const;
   String BorderImagePropertyValue() const;
   String BorderRadiusValue() const;
+  String CornerShapeValue() const;
+  String CornersValue() const;
+  String SingleCornerShorthandValue(const StylePropertyShorthand&) const;
+  String CornerPairShorthandValue(const StylePropertyShorthand&) const;
   String GetLayeredShorthandValue(const StylePropertyShorthand&) const;
   String Get2Values(const StylePropertyShorthand&) const;
   String Get4Values(const StylePropertyShorthand&) const;
   String PageBreakPropertyValue(const StylePropertyShorthand&) const;
   String GetShorthandValue(const StylePropertyShorthand&,
                            String separator = " ") const;
+  String GetShorthandValueForBorder(const StylePropertyShorthand&) const;
+  String GetShorthandValueForRule(const StylePropertyShorthand&,
+                                  const StylePropertyShorthand&) const;
+  String GetShorthandValueForBidirectionalGapRuleInset(
+      const StylePropertyShorthand&) const;
+  String GetShorthandValueForBidirectionalGapRuleInsetCapJunction(
+      const StylePropertyShorthand&) const;
+  String GetShorthandValueForBidirectionalGapRuleInsetStartEnd(
+      const StylePropertyShorthand&) const;
+  String GetShorthandValueForBidirectionalGapRules(
+      const StylePropertyShorthand&) const;
+  String GetShorthandValueForGapDecorationsRule(
+      const StylePropertyShorthand&,
+      CSSGapDecorationPropertyDirection direction) const;
+  String GetShorthandValueForGapDecorationsRuleInset(
+      const StylePropertyShorthand&,
+      CSSGapDecorationPropertyDirection direction) const;
+  String GetShorthandValueForGapDecorationsRuleInsetCapJunction(
+      const StylePropertyShorthand&,
+      CSSGapDecorationPropertyDirection direction,
+      bool is_cap) const;
+  String GetShorthandValueForGapDecorationsRuleInsetStartEnd(
+      const StylePropertyShorthand&) const;
   String GetShorthandValueForColumnRule(const StylePropertyShorthand&) const;
   String GetShorthandValueForColumns(const StylePropertyShorthand&) const;
   // foo || bar || ... || baz
@@ -71,17 +98,19 @@ class CORE_EXPORT StylePropertySerializer {
   String GetShorthandValueForGridArea(const StylePropertyShorthand&) const;
   String GetShorthandValueForGridLine(const StylePropertyShorthand&) const;
   String GetShorthandValueForGridTemplate(const StylePropertyShorthand&) const;
-  String GetShorthandValueForMasonryTrack() const;
+  String GetShorthandValueForGridLanes(const StylePropertyShorthand&) const;
   String ContainerValue() const;
   String TimelineValue(const StylePropertyShorthand&) const;
   String ScrollTimelineValue() const;
   String ViewTimelineValue() const;
   String AnimationRangeShorthandValue() const;
+  String TimelineTriggerActivationRangeShorthandValue() const;
+  String TimelineTriggerExitRangeShorthandValue() const;
   String FontValue() const;
   String FontSynthesisValue() const;
   String FontVariantValue() const;
   bool AppendFontLonghandValueIfNotNormal(const CSSProperty&,
-                                          WTF::StringBuilder& result) const;
+                                          StringBuilder& result) const;
   String OffsetValue() const;
   String TextBoxValue() const;
   String TextDecorationValue() const;
@@ -89,7 +118,7 @@ class CORE_EXPORT StylePropertySerializer {
   String TextWrapValue() const;
   String ContainIntrinsicSizeValue() const;
   String WhiteSpaceValue() const;
-  String ScrollStartValue() const;
+  String LineClampValue(bool is_webkit_line_clamp) const;
   String PositionTryValue(const StylePropertyShorthand&) const;
   String GetPropertyText(const CSSPropertyName&,
                          const String& value,
@@ -98,7 +127,7 @@ class CORE_EXPORT StylePropertySerializer {
   bool IsPropertyShorthandAvailable(const StylePropertyShorthand&) const;
   bool ShorthandHasOnlyInitialOrInheritedValue(
       const StylePropertyShorthand&) const;
-  void AppendBackgroundPropertyAsText(WTF::StringBuilder& result,
+  void AppendBackgroundPropertyAsText(StringBuilder& result,
                                       unsigned& num_decls) const;
 
   // This function does checks common to all shorthands, and returns:
@@ -114,25 +143,22 @@ class CORE_EXPORT StylePropertySerializer {
     STACK_ALLOCATED();
 
    public:
-    explicit PropertyValueForSerializer(
-        CSSPropertyValueSet::PropertyReference property)
-        : value_(&property.Value()),
+    explicit PropertyValueForSerializer(const CSSPropertyValue& property)
+        : value_(property.Value()),
           name_(property.Name()),
           is_important_(property.IsImportant()) {}
 
-    // TODO(sashab): Make this take a const CSSValue&.
     PropertyValueForSerializer(const CSSPropertyName& name,
-                               const CSSValue* value,
+                               const CSSValue& value,
                                bool is_important)
         : value_(value), name_(name), is_important_(is_important) {}
 
     const CSSPropertyName& Name() const { return name_; }
-    const CSSValue* Value() const { return value_; }
+    const CSSValue& Value() const { return value_; }
     bool IsImportant() const { return is_important_; }
-    bool IsValid() const { return value_; }
 
    private:
-    const CSSValue* value_;
+    const CSSValue& value_;
     CSSPropertyName name_;
     bool is_important_;
   };
@@ -156,17 +182,23 @@ class CORE_EXPORT StylePropertySerializer {
     void Trace(Visitor*) const;
 
    private:
+    // Number of CSS longhand property IDs in the expansion range.
+    static constexpr unsigned kAllLonghandCount =
+        kIntLastCSSProperty - kIntFirstCSSProperty + 1;
     bool HasExpandedAllProperty() const {
       return HasAllProperty() && need_to_expand_all_;
     }
     bool HasAllProperty() const { return all_index_ != -1; }
     bool IsIndexInPropertySet(unsigned index) const {
-      return index < property_set_->PropertyCount();
-    }
-    CSSPropertyID IndexToPropertyID(unsigned index) const {
-      // Iterating over "all"-expanded longhands is done using indices greater
-      // than, or equal to, the property set size. Map the index to the property
-      // ID based on the property set size.
+      if (!HasExpandedAllProperty()) {
+        return index < property_set_->PropertyCount();
+      }
+      // When expanding "all", the index range is split into two parts:
+      //
+      // [0, kAllLonghandCount)      → all-expansion longhands (emitted first)
+      // [kAllLonghandCount, kAllLonghandCount + property_set_->PropertyCount())
+      //                             → actual property-set entries (custom props
+      //                               + explicit overrides, emitted at the end)
       //
       // For this property set:
       //
@@ -176,23 +208,35 @@ class CORE_EXPORT StylePropertySerializer {
       //   background-color: green;
       // }
       //
-      // We end up with indices (This method is supposed to do the mapping from
-      // index to property ID for the enumerated properties from color and
-      // onwards):
+      // Indices:
+      //   0 .. (kAllLonghandCount-1): expanded longhands (color, display, ...)
+      //   kAllLonghandCount + 0: --foo
+      //   kAllLonghandCount + 1: all
+      //   kAllLonghandCount + 2: background-color
       //
-      // 0: --foo
-      // 1: all
-      // 2: background-color
-      // 3: color (this is kIntFirstCSSProperty)
-      // 4: ...
-      //
-      DCHECK_GE(index, property_set_->PropertyCount());
-      return static_cast<CSSPropertyID>(index - property_set_->PropertyCount() +
-                                        kIntFirstCSSProperty);
+      return index >= kAllLonghandCount;
+    }
+    CSSPropertyID IndexToPropertyID(unsigned index) const {
+      DCHECK(!IsIndexInPropertySet(index));
+      return static_cast<CSSPropertyID>(index + kIntFirstCSSProperty);
     }
     Member<const CSSPropertyValueSet> property_set_;
     int all_index_;
+    // Bitset of named longhands in the property set whose value explicitly
+    // differs from that of "all" and is not overridden by !important.
+    //
+    // Used when "all" is not expanded to determine which longhands need to be
+    // emitted during serialization.
     std::bitset<kNumCSSProperties> longhand_property_used_;
+    // Bitset of all named longhands that appear after the "all" declaration
+    // in the property set, regardless of whether their computed value matches
+    // that of "all".
+    //
+    // When expanding "all", this ensures that related longhands (e.g. those
+    // originating from a border shorthand, including border-width-*) are
+    // emitted together at the end of the serialized cssText so that
+    // shorthands can be reconstructed correctly.
+    std::bitset<kNumCSSProperties> longhand_after_all_;
     bool need_to_expand_all_;
   };
 

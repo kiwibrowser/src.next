@@ -4,13 +4,19 @@
 
 package org.chromium.chrome.browser.tab;
 
+import static org.chromium.build.NullUtil.assertNonNull;
+
 import android.annotation.SuppressLint;
 import android.os.Handler;
 import android.os.Message;
 
-import androidx.annotation.Nullable;
+import androidx.annotation.IntDef;
 
+import org.chromium.base.Log;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -26,6 +32,8 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.url.GURL;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -33,17 +41,46 @@ import java.util.Set;
  * Determines the desired visibility of the browser controls based on the current state of a given
  * tab.
  */
+@NullMarked
 public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVisibilityDelegate
         implements ImeEventObserver {
+    private static final String TAG = "BrowserControls";
     protected static final int MSG_ID_ENABLE_FULLSCREEN_AFTER_LOAD = 1;
 
     /** The maximum amount of time to wait for a page to load before entering fullscreen. */
     private static final long MAX_FULLSCREEN_LOAD_DELAY_MS = 3000;
 
+    // These values are persisted to logs. Entries should not be renumbered and
+    // numeric values should never be reused.
+    @IntDef({
+        LockReason.CHROME_URL,
+        LockReason.TAB_CONTENT_DANGEROUS,
+        LockReason.EDITABLE_NODE_FOCUS,
+        LockReason.TAB_ERROR,
+        LockReason.TAB_HIDDEN,
+        LockReason.FULLSCREEN_LOADING,
+        LockReason.A11Y_ENABLED,
+        LockReason.FULLSCREEN_DISABLED,
+        LockReason.NUM_TOTAL
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    @interface LockReason {
+        int CHROME_URL = 0;
+        int TAB_CONTENT_DANGEROUS = 1;
+        int EDITABLE_NODE_FOCUS = 2;
+        int TAB_ERROR = 3;
+        int TAB_HIDDEN = 4;
+        int FULLSCREEN_LOADING = 5;
+        int A11Y_ENABLED = 6;
+        int FULLSCREEN_DISABLED = 7;
+
+        int NUM_TOTAL = 8;
+    }
+
     private static boolean sDisableLoadingCheck;
 
     protected final TabImpl mTab;
-    private WebContents mWebContents;
+    private @Nullable WebContents mWebContents;
 
     private boolean mIsFullscreenWaitingForLoad;
     private boolean mIsFocusedNodeEditable;
@@ -56,14 +93,11 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
      * @param tab The associated {@link Tab}.
      */
     public TabStateBrowserControlsVisibilityDelegate(Tab tab) {
-        super(BrowserControlsState.BOTH);
-
         mTab = (TabImpl) tab;
-
         mTab.addObserver(
                 new EmptyTabObserver() {
                     @SuppressLint("HandlerLeak")
-                    private Handler mHandler =
+                    private final Handler mHandler =
                             new Handler() {
                                 @Override
                                 public void handleMessage(Message msg) {
@@ -95,16 +129,6 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
                     @Override
                     public void onContentChanged(Tab tab) {
                         onWebContentsUpdated(tab.getWebContents());
-                    }
-
-                    @Override
-                    public void onWebContentsSwapped(
-                            Tab tab, boolean didStartLoad, boolean didFinishLoad) {
-                        if (!didStartLoad) return;
-
-                        // As we may have missed the main frame commit notification for the
-                        // swapped web contents, schedule the enabling of fullscreen now.
-                        scheduleEnableFullscreenLoadDelayIfNecessary();
                     }
 
                     @Override
@@ -174,7 +198,7 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
                         // TODO(crbug.com/40926082): Associate events with navigation ids or
                         // urls, so that we can fully unlock controls here possible here.
                         // May have already received the start of a different navigation. Do not
-                        // cancel the outstanding delay. See https://crbug.com/1447237.
+                        // cancel the outstanding delay. See https://crbug.com/40064686.
                         if (!ChromeFeatureList.sControlsVisibilityFromNavigations.isEnabled()) {
                             scheduleEnableFullscreenLoadDelayIfNecessary();
                         }
@@ -223,11 +247,16 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
         updateVisibilityConstraints();
     }
 
-    private void onWebContentsUpdated(WebContents contents) {
+    private void onWebContentsUpdated(@Nullable WebContents contents) {
         if (mWebContents == contents) return;
         mWebContents = contents;
+
         if (mWebContents == null) return;
-        ImeAdapter.fromWebContents(mWebContents).addEventObserver(this);
+
+        ImeAdapter adapter = assertNonNull(ImeAdapter.fromWebContents(mWebContents));
+
+        // Gracefully handle a null adapter in non-debug builds.
+        if (adapter != null) adapter.addEventObserver(this);
     }
 
     private void updateWaitingForLoad(boolean waiting) {
@@ -241,22 +270,50 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
         if (webContents == null || webContents.isDestroyed()) return false;
 
         GURL url = mTab.getUrl();
-        boolean enableHidingBrowserControls = url != null;
-        enableHidingBrowserControls &= !url.getScheme().equals(UrlConstants.CHROME_SCHEME);
-        enableHidingBrowserControls &= !url.getScheme().equals(UrlConstants.CHROME_NATIVE_SCHEME);
-
-        enableHidingBrowserControls &=
-                !SecurityStateModel.isContentDangerous(mTab.getWebContents());
-        enableHidingBrowserControls &= !mIsFocusedNodeEditable;
-        enableHidingBrowserControls &= !mTab.isShowingErrorPage();
-        enableHidingBrowserControls &= !mTab.isRendererUnresponsive();
-        enableHidingBrowserControls &= !mTab.isHidden();
-        enableHidingBrowserControls &= !mIsFullscreenWaitingForLoad;
-
+        boolean enableHidingBrowserControls = true;
+        int flags = 0;
+        if (url.getScheme().equals(UrlConstants.CHROME_SCHEME)
+                || url.getScheme().equals(UrlConstants.CHROME_NATIVE_SCHEME)) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.CHROME_URL);
+        }
+        if (SecurityStateModel.isContentDangerous(mTab.getWebContents())) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.TAB_CONTENT_DANGEROUS);
+        }
+        if (mIsFocusedNodeEditable) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.EDITABLE_NODE_FOCUS);
+        }
+        if (mTab.isShowingErrorPage() || mTab.isRendererUnresponsive()) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.TAB_ERROR);
+        }
+        if (mTab.isHidden()) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.TAB_HIDDEN);
+        }
+        if (mIsFullscreenWaitingForLoad) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.FULLSCREEN_LOADING);
+        }
         // TODO(tedchoc): AccessibilityUtil and DeviceClassManager checks do not belong in Tab
         //                logic.  They should be moved to application level checks.
-        enableHidingBrowserControls &= !ChromeAccessibilityUtil.get().isAccessibilityEnabled();
-        enableHidingBrowserControls &= DeviceClassManager.enableFullscreen();
+        if (ChromeAccessibilityUtil.get().isAccessibilityEnabled()) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.A11Y_ENABLED);
+        }
+        if (!DeviceClassManager.enableFullscreen()) {
+            enableHidingBrowserControls = false;
+            flags |= (1 << (int) LockReason.FULLSCREEN_DISABLED);
+        }
+
+        RecordHistogram.recordBooleanHistogram(
+                "Android.BrowserControls.LockedByTabState", !enableHidingBrowserControls);
+
+        if (ChromeFeatureList.sBrowserControlsDebugging.isEnabled()) {
+            Log.i(TAG, "Browser controls hiding reason flags: " + Integer.toBinaryString(flags));
+        }
 
         return enableHidingBrowserControls;
     }
@@ -278,6 +335,7 @@ public class TabStateBrowserControlsVisibilityDelegate extends BrowserControlsVi
     /** Disables the logic that prevents hiding the top controls during page load for testing. */
     public static void disablePageLoadDelayForTests() {
         sDisableLoadingCheck = true;
+        ResettersForTesting.register(() -> sDisableLoadingCheck = false);
     }
 
     // ImeEventObserver

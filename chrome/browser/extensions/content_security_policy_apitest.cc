@@ -6,15 +6,16 @@
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -175,13 +176,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionCspApiTest,
   ASSERT_FALSE(Manifest::IsUnpackedLocation(extension->location()));
 
   // Blocking the script load should emit a log.
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* web_contents = GetActiveWebContents();
   content::WebContentsConsoleObserver console_observer(web_contents);
-  console_observer.SetPattern("Refused to load the script '*");
+  console_observer.SetPattern("Loading the script '*' violates the following*");
 
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), extension->GetResourceURL("page.html")));
+  ASSERT_TRUE(
+      NavigateToURL(web_contents, extension->GetResourceURL("page.html")));
   ASSERT_TRUE(result_catcher.GetNextResult()) << result_catcher.message();
 
   EXPECT_EQ(2u, console_observer.messages().size());
@@ -249,6 +249,41 @@ IN_PROC_BROWSER_TEST_F(ExtensionCspApiTestWithPageNavigation,
   ASSERT_TRUE(RunExtensionTest(test_dir.UnpackedPath(),
                                {.page_url = url.spec().c_str()}, {}))
       << message_;
+}
+
+// Verifies that a service worker that is listed in sandbox.pages is still
+// subject to the strict MV3 CSP.
+IN_PROC_BROWSER_TEST_F(ExtensionCspApiTest,
+                       ServiceWorkerIsConstrainedByMV3CSPEvenIfSandboxed) {
+  static constexpr char kManifest[] =
+      R"({
+           "name": "Sandboxed Service Worker",
+           "manifest_version": 3,
+           "version": "0.1",
+           "background": {"service_worker": "sw.js"},
+           "content_security_policy": {
+             "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval';"
+           },
+           "sandbox": { "pages": ["sw.js"] }
+         })";
+  // The service worker attempts to use eval(), which is allowed by the
+  // sandbox CSP but disallowed by the strict MV3 extension CSP.
+  static constexpr char kServiceWorkerJs[] =
+      R"(chrome.test.runTests([
+           function testEvalIsDisallowed() {
+             try {
+               eval('1 + 1');
+               chrome.test.fail('eval() should have been disallowed by CSP.');
+             } catch (e) {
+               chrome.test.succeed();
+             }
+           }]);)";
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(kManifest);
+  test_dir.WriteFile(FILE_PATH_LITERAL("sw.js"), kServiceWorkerJs);
+
+  ASSERT_TRUE(RunExtensionTest(test_dir.UnpackedPath(), {}, {})) << message_;
 }
 
 }  // namespace extensions

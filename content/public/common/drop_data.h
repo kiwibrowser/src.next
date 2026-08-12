@@ -18,13 +18,29 @@
 
 #include "base/files/file_path.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_message.h"
+#include "ipc/constants.mojom-forward.h"
 #include "services/network/public/mojom/referrer_policy.mojom.h"
+#include "ui/base/clipboard/clipboard_url_info.h"
 #include "ui/base/clipboard/file_info.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
+
+struct CONTENT_EXPORT DownloadUrlMetadata {
+  DownloadUrlMetadata();
+  ~DownloadUrlMetadata();
+
+  DownloadUrlMetadata(const DownloadUrlMetadata&);
+  DownloadUrlMetadata& operator=(const DownloadUrlMetadata&);
+
+  DownloadUrlMetadata(DownloadUrlMetadata&&);
+  DownloadUrlMetadata& operator=(DownloadUrlMetadata&&);
+
+  std::string mime_type;
+  std::string suggested_file_name;
+  GURL url;
+};
 
 struct CONTENT_EXPORT DropData {
   struct CONTENT_EXPORT FileSystemFileInfo {
@@ -54,7 +70,9 @@ struct CONTENT_EXPORT DropData {
   struct Metadata {
     static Metadata CreateForMimeType(Kind kind,
                                       const std::u16string& mime_type);
-    static Metadata CreateForFilePath(const base::FilePath& filename);
+    static Metadata CreateForFilePath(
+        const base::FilePath& filename,
+        const base::FilePath& display_name = base::FilePath());
     static Metadata CreateForFileSystemUrl(const GURL& file_system_url);
     static Metadata CreateForBinary(const GURL& file_contents_url);
 
@@ -65,6 +83,7 @@ struct CONTENT_EXPORT DropData {
     Kind kind;
     std::u16string mime_type;
     base::FilePath filename;
+    base::FilePath display_name;
     GURL file_system_url;
     GURL file_contents_url;
   };
@@ -77,7 +96,7 @@ struct CONTENT_EXPORT DropData {
   // if no sanitized name could be synthesized.
   std::optional<base::FilePath> GetSafeFilenameForImageFileContents() const;
 
-  int view_id = MSG_ROUTING_NONE;
+  int view_id = IPC::mojom::kRoutingIdNone;
 
   // Whether this drag originated from a renderer.
   bool did_originate_from_renderer = false;
@@ -85,12 +104,12 @@ struct CONTENT_EXPORT DropData {
   // Whether this drag is from a privileged WebContents.
   bool is_from_privileged = false;
 
-  // User is dragging a link or image.
-  GURL url;
-  std::u16string url_title;  // The title associated with `url`.
+  // Holds one or more URLs, such as those from dragging links or images.
+  std::vector<ui::ClipboardUrlInfo> url_infos;
 
-  // User is dragging a link out-of the webview.
-  std::u16string download_metadata;
+  // User is dragging a link out-of the webview using the non-standard
+  // "downloadurl" type.
+  std::optional<DownloadUrlMetadata> download_metadata;
 
   // Referrer policy to use when dragging a link out of the webview results in
   // a download.
@@ -120,7 +139,7 @@ struct CONTENT_EXPORT DropData {
   GURL html_base_url;
 
   // User is dragging an image out of the WebView.
-  std::string file_contents;
+  std::vector<uint8_t> file_contents;
   bool file_contents_image_accessible = false;
   GURL file_contents_source_url;
   base::FilePath::StringType file_contents_filename_extension;
@@ -132,6 +151,9 @@ struct CONTENT_EXPORT DropData {
   // a discussion of `operation` and `document_is_handling_drag`.
   ui::mojom::DragOperation operation = ui::mojom::DragOperation::kNone;
   bool document_is_handling_drag = false;
+
+  // Raw source effectAllowed value, if available.
+  std::optional<std::u16string> source_effect_allowed;
 };
 
 }  // namespace content

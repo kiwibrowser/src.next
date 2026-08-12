@@ -29,7 +29,6 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/native_widget_types.h"
 
 #ifdef USE_AURA
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
@@ -195,6 +194,16 @@ void FakeKeyboardLockWebContentsDelegate::CancelKeyboardLockRequest(
     WebContents* web_contents) {
   keyboard_lock_requested_ = false;
 }
+
+// A delegate that opts in to allowing keyboard lock for inner WebContents
+// (e.g. as Browser does for WebUIBrowserWindow tabs).
+class AllowInnerContentsKeyboardLockDelegate
+    : public FakeKeyboardLockWebContentsDelegate {
+ public:
+  bool AllowKeyboardLockForInnerContents(WebContents* web_contents) override {
+    return true;
+  }
+};
 
 }  // namespace
 
@@ -868,6 +877,36 @@ IN_PROC_BROWSER_TEST_F(KeyboardLockBrowserTest,
       inner_contents_impl->GetRenderWidgetHostView()->IsKeyboardLocked());
   ASSERT_FALSE(web_contents()->GetKeyboardLockWidget());
   ASSERT_FALSE(web_contents()->GetRenderWidgetHostView()->IsKeyboardLocked());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    KeyboardLockBrowserTest,
+    LockRequestSucceedsFromInnerWebContentsWhenAllowedByDelegate) {
+  NavigateToTestURL(https_cross_site_frame());
+
+  // The first child is a same-origin iframe.
+  RenderFrameHost* main_frame = web_contents()->GetPrimaryMainFrame();
+  RenderFrameHost* child = ChildFrameAt(main_frame, 0);
+  ASSERT_TRUE(child);
+
+  WebContents* inner_contents = CreateAndAttachInnerContents(child);
+
+  // Use a delegate that opts in via AllowKeyboardLockForInnerContents().
+  AllowInnerContentsKeyboardLockDelegate allow_delegate;
+  inner_contents->SetDelegate(&allow_delegate);
+
+  ASSERT_TRUE(
+      NavigateToURLFromRenderer(inner_contents, https_fullscreen_frame()));
+
+  ASSERT_EQ(true, EvalJs(inner_contents, kKeyboardLockMethodExistanceCheck));
+
+  // The lock request should succeed because the delegate allows it.
+  ASSERT_EQ(true, EvalJs(inner_contents, kKeyboardLockMethodCallWithAllKeys));
+
+  // Verify the inner WebContents has an active keyboard lock request.
+  WebContentsImpl* inner_contents_impl =
+      static_cast<WebContentsImpl*>(inner_contents);
+  ASSERT_TRUE(inner_contents_impl->GetKeyboardLockWidget());
 }
 
 IN_PROC_BROWSER_TEST_F(KeyboardLockBrowserTest,

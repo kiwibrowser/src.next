@@ -2,29 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/startup_helper.h"
+
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/platform_browser_test.h"
 #include "content/public/test/browser_test.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 
-class StartupHelperBrowserTest : public InProcessBrowserTest {
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+class StartupHelperBrowserTest : public PlatformBrowserTest {
  public:
-  StartupHelperBrowserTest() {}
+  StartupHelperBrowserTest() = default;
 
   StartupHelperBrowserTest(const StartupHelperBrowserTest&) = delete;
   StartupHelperBrowserTest& operator=(const StartupHelperBrowserTest&) = delete;
 
-  ~StartupHelperBrowserTest() override {}
+  ~StartupHelperBrowserTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
+    PlatformBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kNoStartupWindow);
 
     base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_);

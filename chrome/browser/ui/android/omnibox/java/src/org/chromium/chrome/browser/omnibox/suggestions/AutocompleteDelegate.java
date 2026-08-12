@@ -4,13 +4,14 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
-import androidx.annotation.Nullable;
-
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab.LoadUrlResult;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 /** Provides the additional functionality to trigger and interact with autocomplete suggestions. */
+@NullMarked
 public interface AutocompleteDelegate extends UrlBarDelegate {
 
     /** Called when loadUrl is done on a {@link Tab}. */
@@ -18,15 +19,13 @@ public interface AutocompleteDelegate extends UrlBarDelegate {
         void onLoadUrl(LoadUrlParams params, LoadUrlResult loadUrlResult);
     }
 
-    /** Notified that the URL text has changed. */
-    void onUrlTextChanged();
-
     /**
      * Notified that suggestions have changed.
      *
      * @param defaultMatch default AutocompleteMatch.
+     * @param hasSuggestions Whether 1 or more suggestions are being displayed.
      */
-    void onSuggestionsChanged(@Nullable AutocompleteMatch defaultMatch);
+    void onSuggestionsChanged(@Nullable AutocompleteMatch defaultMatch, boolean hasSuggestions);
 
     /**
      * Requests the keyboard visibility update.
@@ -55,11 +54,12 @@ public interface AutocompleteDelegate extends UrlBarDelegate {
      */
     boolean didFocusUrlFromFakebox();
 
-    /**
-     * @return Whether the URL currently has focus.
-     */
-    boolean isUrlBarFocused();
-
     /* Requests to show default browser promo when user pasting an URL. */
     void maybeShowDefaultBrowserPromo();
+
+    /** Whether the toolbar hosting the omnibox could potentially be change positions at runtime. */
+    boolean isToolbarPositionCustomizationEnabled();
+
+    /** Whether the toolbar hosting the omnibox is currently bottom-anchored. */
+    boolean isToolbarBottomAnchored();
 }

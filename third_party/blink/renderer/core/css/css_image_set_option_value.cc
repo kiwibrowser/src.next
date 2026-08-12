@@ -30,13 +30,15 @@ CSSImageSetOptionValue::CSSImageSetOptionValue(
 
 CSSImageSetOptionValue::~CSSImageSetOptionValue() = default;
 
-double CSSImageSetOptionValue::ComputedResolution() const {
-  return resolution_->ComputeDotsPerPixel();
+double CSSImageSetOptionValue::ComputedResolution(
+    const CSSLengthResolver& resolver) const {
+  return resolution_->ComputeDotsPerPixel(resolver);
 }
 
-bool CSSImageSetOptionValue::IsSupported() const {
+bool CSSImageSetOptionValue::IsSupported(
+    const CSSLengthResolver& resolver) const {
   return (!type_ || type_->IsSupported()) &&
-         (resolution_->ComputeDotsPerPixel() > 0.0);
+         (ComputedResolution(resolver) > 0.0);
 }
 
 CSSValue& CSSImageSetOptionValue::GetImage() const {
@@ -69,6 +71,10 @@ bool CSSImageSetOptionValue::Equals(const CSSImageSetOptionValue& other) const {
   return base::ValuesEquivalent(image_, other.image_) &&
          base::ValuesEquivalent(resolution_, other.resolution_) &&
          base::ValuesEquivalent(type_, other.type_);
+}
+
+bool CSSImageSetOptionValue::HasRandomFunctions() const {
+  return resolution_ && resolution_->HasRandomFunctions();
 }
 
 void CSSImageSetOptionValue::TraceAfterDispatch(blink::Visitor* visitor) const {

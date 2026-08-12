@@ -22,6 +22,9 @@
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/updater/extension_downloader_test_delegate.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -41,9 +44,9 @@ class DownloaderTestDelegate : public ExtensionDownloaderTestDelegate {
 
   ~DownloaderTestDelegate();
 
-  // This makes it so that update check requests for |extension_id| will return
-  // a downloaded file of |crx_path| that is claimed to have version
-  // |version_string|.
+  // This makes it so that update check requests for `extension_id` will return
+  // a downloaded file of `crx_path` that is claimed to have version
+  // `version_string`.
   void AddResponse(const ExtensionId& extension_id,
                    const std::string& version_string,
                    const base::FilePath& crx_path);
@@ -65,7 +68,7 @@ class DownloaderTestDelegate : public ExtensionDownloaderTestDelegate {
 };
 
 // This lets us simulate a policy-installed extension being "force" installed;
-// ie a user is not allowed to manually uninstall/disable it.
+// i.e. a user is not allowed to manually uninstall/disable it.
 class ForceInstallProvider : public ManagementPolicy::Provider {
  public:
   explicit ForceInstallProvider(const ExtensionId& id);

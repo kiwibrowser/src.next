@@ -17,16 +17,11 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/core/page/touch_adjustment.h"
 
 #include "third_party/blink/renderer/core/dom/container_node.h"
+#include "third_party/blink/renderer/core/dom/node-inl.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -235,8 +230,7 @@ static inline void AppendContextSubtargetsForNode(
           .ShouldSelectOnContextualMenuClick()) {
     // Make subtargets out of every word.
     String text_value = text_node->data();
-    TextBreakIterator* word_iterator =
-        WordBreakIterator(text_value, 0, text_value.length());
+    TextBreakIterator* word_iterator = WordBreakIterator(text_value);
     int last_offset = word_iterator->first();
     if (last_offset == -1)
       return;
@@ -528,9 +522,12 @@ bool FindNodeWithLowestDistanceMetric(Node*& adjusted_node,
     }
   }
 
-  // As for HitTestResult.innerNode, we skip over pseudo elements.
-  if (adjusted_node && adjusted_node->IsPseudoElement() &&
-      !adjusted_node->IsScrollMarkerPseudoElement()) {
+  // Resolve pseudos to their originating element unless they have activation
+  // behavior (::scroll-marker, ::scroll-button, ::interest-button). Touch
+  // adjustment targets the clickable element, which for pseudos like
+  // ::before, ::after, ::marker is the originating element.
+  while (adjusted_node && adjusted_node->IsPseudoElement() &&
+         !To<PseudoElement>(adjusted_node)->HasActivationBehavior()) {
     adjusted_node = adjusted_node->ParentOrShadowHostNode();
   }
 

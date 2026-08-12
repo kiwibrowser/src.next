@@ -4,8 +4,11 @@
 
 #include "base/files/file_path.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "build/buildflag.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
@@ -22,7 +25,7 @@ class IFrameTest : public InProcessBrowserTest {
 
  protected:
   void NavigateAndVerifyTitle(const char* file, const char* page_title) {
-    GURL url = ui_test_utils::GetTestUrl(
+    GURL url = chrome_test_utils::GetTestUrl(
         base::FilePath(), base::FilePath().AppendASCII(file));
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
@@ -39,14 +42,11 @@ IN_PROC_BROWSER_TEST_F(IFrameTest, InEmptyFrame) {
   NavigateAndVerifyTitle("iframe_in_empty_frame.html", "iframe test");
 }
 
-// Test for https://crbug.com/621076. It ensures that file chooser triggered
+// Test for https://crbug.com/41259523. It ensures that file chooser triggered
 // by an iframe, which is destroyed before the chooser is closed, does not
 // result in a use-after-free condition.
-//
-// Note: This test is disabled temporarily to track down a memory leak reported
-// by the ASan bots. It will be enabled once the root cause is found.
-// TODO(crbug.com/40904458): Re-enable this test
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+// TODO(crbug.com/500416901, crbug.com/40904458): Fix and re-enable this test.
+#if defined(MEMORY_SANITIZER) && BUILDFLAG(IS_LINUX)
 #define MAYBE_FileChooserInDestroyedSubframe \
   DISABLED_FileChooserInDestroyedSubframe
 #else
@@ -69,9 +69,11 @@ IN_PROC_BROWSER_TEST_F(IFrameTest, MAYBE_FileChooserInDestroyedSubframe) {
   EXPECT_EQ(frame->GetSiteInstance(),
             tab->GetPrimaryMainFrame()->GetSiteInstance());
   EXPECT_TRUE(ExecJs(frame, "document.getElementById('fileinput').click();"));
+  content::RenderFrameDeletedObserver deleted_observer(frame);
   EXPECT_TRUE(ExecJs(tab->GetPrimaryMainFrame(),
                      "document.body.removeChild("
                      "document.querySelectorAll('iframe')[0])"));
+  deleted_observer.WaitUntilDeleted();
   ASSERT_EQ(nullptr, ChildFrameAt(tab->GetPrimaryMainFrame(), 0));
 
   // On ASan bots, this test should succeed without reporting use-after-free

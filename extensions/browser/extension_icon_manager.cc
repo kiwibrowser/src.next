@@ -16,12 +16,14 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/paint_vector_icon.h"
 
@@ -91,7 +93,9 @@ void ExtensionIconManager::OnImageLoaded(const ExtensionId& extension_id,
 void ExtensionIconManager::EnsureDefaultIcon() {
   if (default_icon_.IsEmpty()) {
     default_icon_ = gfx::Image(gfx::CreateVectorIcon(
-        vector_icons::kExtensionIcon, gfx::kFaviconSize, gfx::kGoogleGrey700));
+        features::IsRoundedIconsEnabled() ? vector_icons::kExtensionFilledIcon
+                                          : vector_icons::kExtensionOldIcon,
+        gfx::kFaviconSize, gfx::kGoogleGrey700));
   }
 }
 

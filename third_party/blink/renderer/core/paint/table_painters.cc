@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/layout/table/layout_table_cell.h"
 #include "third_party/blink/renderer/core/layout/table/layout_table_column.h"
 #include "third_party/blink/renderer/core/layout/table/table_borders.h"
+#include "third_party/blink/renderer/core/paint/border_shape_utils.h"
 #include "third_party/blink/renderer/core/paint/box_background_paint_context.h"
 #include "third_party/blink/renderer/core/paint/box_border_painter.h"
 #include "third_party/blink/renderer/core/paint/box_decoration_data.h"
@@ -216,9 +217,6 @@ class TableCollapsedEdge {
   }
   bool operator==(const TableCollapsedEdge& rhs) const {
     return edge_index_ == rhs.edge_index_;
-  }
-  bool operator!=(const TableCollapsedEdge& rhs) const {
-    return !(*this == rhs);
   }
 
  private:
@@ -437,9 +435,9 @@ void TablePainter::PaintBoxDecorationBackground(
   }
 
   // Optimization: only traverse colgroups with backgrounds.
-  const TableFragmentData::ColumnGeometries* column_geometries_original =
+  const GCedTableColumnGeometries* column_geometries_original =
       fragment_.TableColumnGeometries();
-  TableFragmentData::ColumnGeometries column_geometries_with_background;
+  TableColumnGeometries column_geometries_with_background;
   if (column_geometries_original) {
     for (const auto& column_geometry : *column_geometries_original) {
       if (column_geometry.node.Style().HasBoxDecorationBackground()) {
@@ -523,8 +521,8 @@ void TablePainter::PaintCollapsedBorders(const PaintInfo& paint_info,
   const TableBorders* collapsed_borders = fragment_.TableCollapsedBorders();
   if (!collapsed_borders)
     return;
-  const TableFragmentData::CollapsedBordersGeometry*
-      collapsed_borders_geometry = fragment_.TableCollapsedBordersGeometry();
+  const CollapsedTableBordersGeometry* collapsed_borders_geometry =
+      fragment_.TableCollapsedBordersGeometry();
   CHECK(collapsed_borders_geometry);
 
   const auto& layout_table = *To<LayoutTable>(fragment_.GetLayoutObject());
@@ -736,9 +734,12 @@ void TableSectionPainter::PaintBoxDecorationBackground(
     const BoxDecorationData& box_decoration_data) {
   DCHECK(box_decoration_data.ShouldPaint());
   if (box_decoration_data.ShouldPaintShadow()) {
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        ComputeBorderShapeReferenceRects(paint_rect, fragment_.Style(),
+                                         *fragment_.GetLayoutObject());
     BoxPainterBase::PaintNormalBoxShadow(
-        paint_info, paint_rect, fragment_.Style(), PhysicalBoxSides(),
-        !box_decoration_data.ShouldPaintBackground());
+        paint_info, paint_rect, fragment_.Style(), border_shape_rects,
+        PhysicalBoxSides(), !box_decoration_data.ShouldPaintBackground());
   }
 
   // If we are fragmented - determine the total part size, relative to the
@@ -768,7 +769,7 @@ void TableSectionPainter::PaintColumnsBackground(
     const PaintInfo& paint_info,
     const PhysicalOffset& section_paint_offset,
     const PhysicalRect& columns_paint_rect,
-    const TableFragmentData::ColumnGeometries& column_geometries) {
+    const TableColumnGeometries& column_geometries) {
   for (const PhysicalFragmentLink& row : fragment_.Children()) {
     if (!row.fragment->IsTableRow()) {
       continue;
@@ -785,9 +786,12 @@ void TableRowPainter::PaintBoxDecorationBackground(
     const BoxDecorationData& box_decoration_data) {
   DCHECK(box_decoration_data.ShouldPaint());
   if (box_decoration_data.ShouldPaintShadow()) {
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        ComputeBorderShapeReferenceRects(paint_rect, fragment_.Style(),
+                                         *fragment_.GetLayoutObject());
     BoxPainterBase::PaintNormalBoxShadow(
-        paint_info, paint_rect, fragment_.Style(), PhysicalBoxSides(),
-        !box_decoration_data.ShouldPaintBackground());
+        paint_info, paint_rect, fragment_.Style(), border_shape_rects,
+        PhysicalBoxSides(), !box_decoration_data.ShouldPaintBackground());
   }
 
   // If we are fragmented - determine the total part size, relative to the
@@ -829,7 +833,7 @@ void TableRowPainter::PaintColumnsBackground(
     const PaintInfo& paint_info,
     const PhysicalOffset& row_paint_offset,
     const PhysicalRect& columns_paint_rect,
-    const TableFragmentData::ColumnGeometries& column_geometries) {
+    const TableColumnGeometries& column_geometries) {
   WritingModeConverter converter(fragment_.Style().GetWritingDirection(),
                                  columns_paint_rect.size);
   for (const PhysicalFragmentLink& child : fragment_.Children()) {

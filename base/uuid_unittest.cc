@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <array>
 #include <limits>
 #include <set>
 #include <string_view>
@@ -14,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/numeric/int128.h"
 
 namespace base {
 
@@ -188,35 +190,18 @@ TEST(UuidTest, Compare) {
   EXPECT_FALSE(guid_invalid >= guid);
 }
 
-TEST(UuidTest, FormatRandomDataAsV4) {
-  static constexpr uint64_t bytes1a[] = {0x0123456789abcdefull,
-                                         0x5a5a5a5aa5a5a5a5ull};
-  static constexpr uint64_t bytes1b[] = {bytes1a[0], bytes1a[1]};
-  static constexpr uint64_t bytes2[] = {0xfffffffffffffffdull,
-                                        0xfffffffffffffffeull};
-  static constexpr uint64_t bytes3[] = {0xfffffffffffffffdull,
-                                        0xfffffffffffffffcull};
+TEST(UuidTest, AsIntegerValid) {
+  const Uuid uuid =
+      Uuid::ParseCaseInsensitive("01234567-89ab-cdef-fedc-ba9876543210");
+  ASSERT_TRUE(uuid.is_valid());
+  EXPECT_EQ(uuid.AsInteger(),
+            absl::MakeUint128(0x01234567'89ab'cdef, 0xfedc'ba9876543210));
+}
 
-  const Uuid guid1a =
-      Uuid::FormatRandomDataAsV4ForTesting(as_bytes(make_span(bytes1a)));
-  const Uuid guid1b =
-      Uuid::FormatRandomDataAsV4ForTesting(as_bytes(make_span(bytes1b)));
-  const Uuid guid2 =
-      Uuid::FormatRandomDataAsV4ForTesting(as_bytes(make_span(bytes2)));
-  const Uuid guid3 =
-      Uuid::FormatRandomDataAsV4ForTesting(as_bytes(make_span(bytes3)));
-
-  EXPECT_TRUE(guid1a.is_valid());
-  EXPECT_TRUE(guid1b.is_valid());
-  EXPECT_TRUE(guid2.is_valid());
-  EXPECT_TRUE(guid3.is_valid());
-
-  // The same input should give the same Uuid.
-  EXPECT_EQ(guid1a, guid1b);
-
-  EXPECT_NE(guid1a, guid2);
-  EXPECT_NE(guid1a, guid3);
-  EXPECT_NE(guid2, guid3);
+TEST(UuidTest, AsIntegerInvalid) {
+  const Uuid uuid = Uuid::ParseCaseInsensitive("invalid");
+  ASSERT_FALSE(uuid.is_valid());
+  EXPECT_EQ(uuid.AsInteger(), 0);
 }
 
 }  // namespace base

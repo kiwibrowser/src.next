@@ -12,9 +12,10 @@
 #include <utility>
 
 #include "base/check.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +24,8 @@
 #include "base/types/optional_ref.h"
 #include "base/values.h"
 #include "components/history/core/browser/browsing_history_driver.h"
+#include "components/history/core/browser/features.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/sync/protocol/history_delete_directive_specifics.pb.h"
@@ -33,14 +36,6 @@ namespace {
 
 // The amount of time to wait for a response from the WebHistoryService.
 constexpr int kWebHistoryTimeoutSeconds = 3;
-
-// Buckets for UMA histograms.
-enum WebHistoryQueryBuckets {
-  WEB_HISTORY_QUERY_FAILED = 0,
-  WEB_HISTORY_QUERY_SUCCEEDED,
-  WEB_HISTORY_QUERY_TIMED_OUT,
-  NUM_WEB_HISTORY_QUERY_BUCKETS
-};
 
 QueryOptions OptionsWithEndTime(QueryOptions original_options,
                                 base::Time end_time) {
@@ -67,7 +62,8 @@ enum QuerySourceStatus {
 
 bool CanRetry(QuerySourceStatus status) {
   // TODO(skym): Should we be retrying on FAILURE?
-  return status == MORE_RESULTS || status == FAILURE || status == TIMED_OUT;
+  return status == UNINITIALIZED || status == MORE_RESULTS ||
+         status == FAILURE || status == TIMED_OUT;
 }
 
 base::Time OldestTime(
@@ -121,6 +117,7 @@ BrowsingHistoryService::HistoryEntry::HistoryEntry(
     const GURL& remote_icon_url_for_uma,
     int visit_count,
     int typed_count,
+    bool is_actor_visit,
     std::optional<std::string> app_id)
     : entry_type(entry_type),
       url(url),
@@ -133,8 +130,9 @@ BrowsingHistoryService::HistoryEntry::HistoryEntry(
       remote_icon_url_for_uma(remote_icon_url_for_uma),
       visit_count(visit_count),
       typed_count(typed_count),
+      is_actor_visit(is_actor_visit),
       app_id(app_id) {
-  all_timestamps.insert(time.ToInternalValue());
+  all_timestamps[url].insert(time);
 }
 
 BrowsingHistoryService::HistoryEntry::HistoryEntry()
@@ -175,8 +173,9 @@ BrowsingHistoryService::BrowsingHistoryService(
   DCHECK(driver_);
 
   // Get notifications when history is cleared.
-  if (local_history_)
+  if (local_history_) {
     history_service_observation_.Observe(local_history_.get());
+  }
 
   // Get notifications when web history is deleted.
   WebHistoryService* web_history = driver_->GetWebHistoryService();
@@ -223,8 +222,9 @@ void BrowsingHistoryService::WebHistoryTimeout(
 
   // Don't reset `web_history_request_` so we can still record histogram.
   // TODO(dubroy): Communicate the failure to the front end.
-  if (!query_task_tracker_.HasTrackedTasks())
+  if (!query_task_tracker_.HasTrackedTasks()) {
     ReturnResultsToDriver(std::move(state));
+  }
 }
 
 void BrowsingHistoryService::QueryHistory(const std::u16string& search_text,
@@ -245,12 +245,13 @@ void BrowsingHistoryService::QueryHistoryInternal(
   web_history_request_.reset();
 
   bool should_return_results_immediately = true;
-  size_t desired_count =
+  const size_t desired_count =
       static_cast<size_t>(state->original_options.EffectiveMaxCount());
 
   if (local_history_) {
     if (state->local_results.size() < desired_count &&
         state->local_status != REACHED_BEGINNING) {
+      CHECK_NE(state->local_status, NO_DEPENDENCY);
       should_return_results_immediately = false;
       local_history_->QueryHistory(
           state->search_text,
@@ -266,23 +267,28 @@ void BrowsingHistoryService::QueryHistoryInternal(
 
   WebHistoryService* web_history = driver_->GetWebHistoryService();
   if (web_history) {
-    // Run WebHistory query for full history. App-specific history uses the
-    // results from the local database only, since the legacy json API service
-    // WebHistory relies on can't be updated to process app_id.
-    if (state->original_options.app_id == kNoAppIdFilter) {
-      if (state->remote_results.size() < desired_count &&
-          state->remote_status != REACHED_BEGINNING) {
-        // Start a timer with timeout before we make the actual query, otherwise
-        // tests get confused when completion callback is run synchronously.
-        web_history_timer_->Start(
-            FROM_HERE, base::Seconds(kWebHistoryTimeoutSeconds),
-            base::BindOnce(&BrowsingHistoryService::WebHistoryTimeout,
-                           weak_factory_.GetWeakPtr(), state));
+    // Test the existence of other forms of browsing history, to display the
+    // privacy disclaimer in the UI. This needs to happen independently of
+    // whether an actual remote history query is happening (yet).
+    driver_->ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
+        sync_service_, web_history,
+        base::BindOnce(
+            &BrowsingHistoryService::OtherFormsOfBrowsingHistoryQueryComplete,
+            weak_factory_.GetWeakPtr()));
 
-        net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
-            net::DefinePartialNetworkTrafficAnnotation("web_history_query",
-                                                       "web_history_service",
-                                                       R"(
+    // If necessary, run a WebHistory query for remote history.
+    if (ShouldQueryRemote(*state)) {
+      // Start a timer with timeout before we make the actual query, otherwise
+      // tests get confused when completion callback is run synchronously.
+      web_history_timer_->Start(
+          FROM_HERE, base::Seconds(kWebHistoryTimeoutSeconds),
+          base::BindOnce(&BrowsingHistoryService::WebHistoryTimeout,
+                         weak_factory_.GetWeakPtr(), state));
+
+      net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
+          net::DefinePartialNetworkTrafficAnnotation("web_history_query",
+                                                     "web_history_service",
+                                                     R"(
             semantics {
               description:
                 "If history sync is enabled, this downloads the synced "
@@ -306,23 +312,19 @@ void BrowsingHistoryService::QueryHistoryInternal(
                 }
               }
             })");
-        should_return_results_immediately = false;
-        web_history_request_ = web_history->QueryHistory(
-            state->search_text,
-            OptionsWithEndTime(state->original_options,
-                               state->remote_end_time_for_continuation),
-            base::BindOnce(&BrowsingHistoryService::WebHistoryQueryComplete,
-                           weak_factory_.GetWeakPtr(), state, clock_->Now()),
-            partial_traffic_annotation);
-      }
+      should_return_results_immediately = false;
+      QueryOptions options = OptionsWithEndTime(
+          state->original_options, state->remote_end_time_for_continuation);
+      options.max_count = desired_count - state->local_results.size();
+      // If no remote results were needed, ShouldQueryRemote() should have
+      // returned false and control flow wouldn't reach here.
+      CHECK(options.max_count > 0);
+      web_history_request_ = web_history->QueryHistory(
+          state->search_text, options,
+          base::BindOnce(&BrowsingHistoryService::WebHistoryQueryComplete,
+                         weak_factory_.GetWeakPtr(), state, clock_->Now()),
+          partial_traffic_annotation);
     }
-    // Test the existence of other forms of browsing history. Performed for both
-    // full/app-specific history to display the privacy disclaimer on UI.
-    driver_->ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
-        sync_service_, web_history,
-        base::BindOnce(
-            &BrowsingHistoryService::OtherFormsOfBrowsingHistoryQueryComplete,
-            weak_factory_.GetWeakPtr()));
   } else {
     state->remote_status = NO_DEPENDENCY;
     // The notice could not have been shown, because there is no web history.
@@ -350,7 +352,8 @@ void BrowsingHistoryService::GetLastVisitToHostBeforeRecentNavigations(
     base::OnceCallback<void(base::Time)> callback) {
   base::Time now = base::Time::Now();
   local_history_->GetLastVisitToHost(
-      host_name, base::Time() /* before_time */, now /* end_time */,
+      host_name, /*begin_time=*/base::Time(), /*end_time=*/now,
+      VisitQuery404sPolicy::kExclude404s,
       base::BindOnce(
           &BrowsingHistoryService::OnLastVisitBeforeRecentNavigationsComplete,
           weak_factory_.GetWeakPtr(), host_name, now, std::move(callback)),
@@ -372,7 +375,8 @@ void BrowsingHistoryService::OnLastVisitBeforeRecentNavigationsComplete(
           ? result.last_visit
           : query_start_time - base::Minutes(1);
   local_history_->GetLastVisitToHost(
-      host_name, base::Time() /* before_time */, end_time /* end_time */,
+      host_name, /*begin_time=*/base::Time(), end_time,
+      VisitQuery404sPolicy::kExclude404s,
       base::BindOnce(
           &BrowsingHistoryService::OnLastVisitBeforeRecentNavigationsComplete2,
           weak_factory_.GetWeakPtr(), std::move(callback)),
@@ -407,17 +411,20 @@ void BrowsingHistoryService::RemoveVisits(
         delete_directive.mutable_global_id_directive();
     ExpireHistoryArgs* expire_args = nullptr;
 
-    for (int64_t timestamp : entry.all_timestamps) {
-      if (!expire_args) {
-        GURL gurl(entry.url);
-        expire_list.resize(expire_list.size() + 1);
-        expire_args = &expire_list.back();
-        expire_args->SetTimeRangeForOneDay(
-            base::Time::FromInternalValue(timestamp));
-        expire_args->urls.insert(gurl);
+    for (const auto& [url, timestamps] : entry.all_timestamps) {
+      // Add every timestamp for every similar or duplicated visit.
+      for (base::Time timestamp : timestamps) {
+        if (!expire_args) {
+          expire_list.resize(expire_list.size() + 1);
+          expire_args = &expire_list.back();
+          expire_args->SetTimeRangeForOneDay(timestamp);
+          expire_args->urls.insert(url);
+        }
+
+        // The local visit time is treated as a global ID for the visit.
+        global_id_directive->add_global_id(
+            timestamp.ToDeltaSinceWindowsEpoch().InMicroseconds());
       }
-      // The local visit time is treated as a global ID for the visit.
-      global_id_directive->add_global_id(timestamp);
     }
 
     // Set the start and end time in microseconds since the Unix epoch.
@@ -425,7 +432,6 @@ void BrowsingHistoryService::RemoveVisits(
         (expire_args->begin_time - base::Time::UnixEpoch()).InMicroseconds());
 
     // Delete directives shouldn't have an end time in the future.
-    // TODO(dubroy): Use sane time (crbug.com/146090) here when it's ready.
     base::Time end_time = std::min(expire_args->end_time, now);
 
     // -1 because end time in delete directives is inclusive.
@@ -435,8 +441,9 @@ void BrowsingHistoryService::RemoveVisits(
     expire_args->restrict_app_id = entry.app_id;
 
     // TODO(dubroy): Figure out the proper way to handle an error here.
-    if (web_history && local_history_)
+    if (web_history && local_history_) {
       local_history_->ProcessLocalDeleteDirective(delete_directive);
+    }
   }
 
   if (local_history_) {
@@ -478,12 +485,103 @@ void BrowsingHistoryService::RemoveVisits(
         base::BindOnce(&BrowsingHistoryService::RemoveWebHistoryComplete,
                        weak_factory_.GetWeakPtr()),
         partial_traffic_annotation);
+
+    base::UmaHistogramCounts1000(
+        "History.RemoveVisitsFromWebHistory.EntryCount", expire_list.size());
   }
 
   driver_->OnRemoveVisits(expire_list);
 }
 
 // static
+bool BrowsingHistoryService::ShouldQueryRemote(const QueryHistoryState& state) {
+  if (state.remote_status == REACHED_BEGINNING) {
+    // Finished with remote history, no point in querying any more.
+    return false;
+  }
+
+#if !BUILDFLAG(IS_IOS)
+  // Actor visits are local-only and user visits should not be queried.
+  if (history::IsBrowsingHistoryActorIntegrationM3Enabled() &&
+      !state.original_options.include_user_visits) {
+    return false;
+  }
+#endif
+
+  const size_t desired_count =
+      static_cast<size_t>(state.original_options.EffectiveMaxCount());
+  if (CanRetry(state.local_status)) {
+    // There is more local history to query first, so don't query remote yet.
+    return false;
+  }
+  if (state.local_results.size() + state.remote_results.size() >=
+      desired_count) {
+    // Already have sufficient results, no need to query more.
+    return false;
+  }
+
+  // App-specific history uses the results from the local database only, since
+  // the legacy json API service WebHistory relies on can't be updated to
+  // process app_id.
+  // TODO(crbug.com/460361854): Once migrated to a non-legacy API, also query
+  // remote app-specific history.
+  if (state.original_options.app_id != kNoAppIdFilter) {
+    return false;
+  }
+
+  return true;
+}
+
+// static
+void BrowsingHistoryService::HoldbackAndPartitionResults(
+    QueryHistoryState* state,
+    const base::Time oldest_local,
+    const base::Time oldest_remote,
+    std::vector<HistoryEntry>* results) {
+  // If the beginning of either source was not reached, that means there are
+  // more results from that source, and the other source needs to have its data
+  // held back until the former source catches up. This only sends the UI
+  // history entries in the correct order. Subsequent continuation requests will
+  // get the delayed entries.
+  base::Time oldest_allowed = base::Time();
+  if (state->local_status == MORE_RESULTS) {
+    oldest_allowed = std::max(oldest_allowed, oldest_local);
+    state->local_end_time_for_continuation = oldest_local;
+  }
+  if (state->remote_status == MORE_RESULTS) {
+    oldest_allowed = std::max(oldest_allowed, oldest_remote);
+    state->remote_end_time_for_continuation = oldest_remote;
+  } else if (CanRetry(state->remote_status) && oldest_local != base::Time()) {
+    // TODO(skym): It is unclear if this is the best behavior. The UI is going
+    // to behave incorrectly if out of order results are received. So to
+    // guarantee that doesn't happen, use `oldest_local` for continuation
+    // calls. This will result in missing history entries for the failed calls.
+    // crbug.com/685866 is related to this problem.
+    state->remote_end_time_for_continuation = oldest_local;
+  }
+
+  HistoryEntry search_entry;
+  search_entry.time = oldest_allowed;
+  auto threshold_iter =
+      std::upper_bound(results->begin(), results->end(), search_entry,
+                       HistoryEntry::SortByTimeDescending);
+
+  // Everything from threshold_iter to results->end() should either be all local
+  // or all remote, never a mix.
+  if (threshold_iter != results->end()) {
+    if (threshold_iter->entry_type == HistoryEntry::LOCAL_ENTRY) {
+      state->local_results.assign(std::make_move_iterator(threshold_iter),
+                                  std::make_move_iterator(results->end()));
+    } else if (threshold_iter->entry_type == HistoryEntry::REMOTE_ENTRY) {
+      state->remote_results.assign(std::make_move_iterator(threshold_iter),
+                                   std::make_move_iterator(results->end()));
+    } else {
+      NOTREACHED();
+    }
+    results->erase(threshold_iter, results->end());
+  }
+}
+
 void BrowsingHistoryService::MergeDuplicateResults(
     QueryHistoryState* state,
     std::vector<HistoryEntry>* results) {
@@ -512,30 +610,47 @@ void BrowsingHistoryService::MergeDuplicateResults(
   std::vector<HistoryEntry> deduped;
   deduped.reserve(sorted.size());
 
-  // Maps a URL to the most recent entry on a particular day.
-  std::map<GURL, HistoryEntry*> current_day_entries;
+  // Maps a URL to the most recent entry on a particular day for
+  // non-actor-initiated visits.
+  std::map<GroupingKey, HistoryEntry*> non_actor_current_day_entries;
+  // Same as above, but for actor-initiated visits.
+  std::map<GroupingKey, HistoryEntry*> actor_current_day_entries;
 
-  // Keeps track of the day that `current_day_entries` is holding entries for
-  // in order to handle removing per-day duplicates.
+  // Keeps track of the day that `*_current_day_entries` is holding
+  // entries for in order to handle removing per-day duplicates.
   base::Time current_day_midnight;
 
   for (HistoryEntry& entry : sorted) {
     // Reset the list of found URLs when a visit from a new day is encountered.
     if (current_day_midnight != entry.time.LocalMidnight()) {
-      current_day_entries.clear();
+      non_actor_current_day_entries.clear();
+      actor_current_day_entries.clear();
       current_day_midnight = entry.time.LocalMidnight();
     }
 
+#if !BUILDFLAG(IS_IOS)
+    auto& current_day_entries = entry.is_actor_visit
+                                    ? actor_current_day_entries
+                                    : non_actor_current_day_entries;
+#else
+    auto& current_day_entries = non_actor_current_day_entries;
+#endif
+    GroupingKey key{.url = entry.url, .app_id = entry.app_id};
+
     // Keep this visit if it's the first visit to this URL on the current day.
-    if (current_day_entries.count(entry.url) == 0) {
-      const auto entry_url = entry.url;
+    if (current_day_entries.count(key) == 0) {
       deduped.push_back(std::move(entry));
-      current_day_entries[entry_url] = &deduped.back();
+      current_day_entries[key] = &deduped.back();
     } else {
       // Keep track of the timestamps of all visits to the URL on the same day.
-      HistoryEntry* matching_entry = current_day_entries[entry.url];
-      matching_entry->all_timestamps.insert(entry.all_timestamps.begin(),
-                                            entry.all_timestamps.end());
+      HistoryEntry* matching_entry = current_day_entries[key];
+      // Since this de-duplication logic will only be performed if the grouping
+      // is disabled, the entries will only have timestamps for the same URL.
+      CHECK_EQ(1u, entry.all_timestamps.size());
+      CHECK(entry.all_timestamps.count(entry.url) != 0);
+      matching_entry->all_timestamps[entry.url].insert(
+          entry.all_timestamps[entry.url].begin(),
+          entry.all_timestamps[entry.url].end());
 
       if (matching_entry->entry_type != entry.entry_type) {
         matching_entry->entry_type = HistoryEntry::COMBINED_ENTRY;
@@ -550,52 +665,109 @@ void BrowsingHistoryService::MergeDuplicateResults(
       // Aggregate visit and typed counts.
       matching_entry->visit_count += entry.visit_count;
       matching_entry->typed_count += entry.typed_count;
+
+      // TODO(crbug.com/481934455): Aggregate all relevant HistoryEntry fields
+      // for combined entries.
     }
   }
 
-  // If the beginning of either source was not reached, that means there are
-  // more results from that source, and the other source needs to have its data
-  // held back until the former source catches up. This only sends the UI
-  // history entries in the correct order. Subsequent continuation requests will
-  // get the delayed entries.
-  base::Time oldest_allowed = base::Time();
-  if (state->local_status == MORE_RESULTS) {
-    oldest_allowed = std::max(oldest_allowed, oldest_local);
-    state->local_end_time_for_continuation = oldest_local;
-  }
-  if (state->remote_status == MORE_RESULTS) {
-    oldest_allowed = std::max(oldest_allowed, oldest_remote);
-    state->remote_end_time_for_continuation = oldest_remote;
-  } else if (CanRetry(state->remote_status)) {
-    // TODO(skym): It is unclear if this is the best behavior. The UI is going
-    // to behave incorrectly if out of order results are received. So to
-    // guarantee that doesn't happen, use `oldest_local` for continuation
-    // calls. This will result in missing history entries for the failed calls.
-    // crbug.com/685866 is related to this problem.
-    state->remote_end_time_for_continuation = oldest_local;
-  }
-
-  HistoryEntry search_entry;
-  search_entry.time = oldest_allowed;
-  auto threshold_iter =
-      std::upper_bound(deduped.begin(), deduped.end(), search_entry,
-                       HistoryEntry::SortByTimeDescending);
-
-  // Everything from threshold_iter to deduped.end() should either be all local
-  // or all remote, never a mix.
-  if (threshold_iter != deduped.end()) {
-    if (threshold_iter->entry_type == HistoryEntry::LOCAL_ENTRY) {
-      state->local_results.assign(std::make_move_iterator(threshold_iter),
-                                  std::make_move_iterator(deduped.end()));
-    } else if (threshold_iter->entry_type == HistoryEntry::REMOTE_ENTRY) {
-      state->remote_results.assign(std::make_move_iterator(threshold_iter),
-                                   std::make_move_iterator(deduped.end()));
-    } else {
-      NOTREACHED();
-    }
-    deduped.erase(threshold_iter, deduped.end());
-  }
+  HoldbackAndPartitionResults(state, oldest_local, oldest_remote, &deduped);
   *results = std::move(deduped);
+}
+
+std::vector<BrowsingHistoryService::HistoryEntry>
+BrowsingHistoryService::GroupSimilarVisits(QueryHistoryState* state) {
+  CHECK(state);
+
+  // Will be used later to decide if we need to hold back results. This iterates
+  // through each entry and makes no assumptions about their ordering.
+  base::Time oldest_local = OldestTime(state->local_results);
+  base::Time oldest_remote = OldestTime(state->remote_results);
+
+  std::vector<HistoryEntry> sorted;
+  sorted.assign(std::make_move_iterator(state->local_results.begin()),
+                std::make_move_iterator(state->local_results.end()));
+  state->local_results.clear();
+  sorted.insert(sorted.end(),
+                std::make_move_iterator(state->remote_results.begin()),
+                std::make_move_iterator(state->remote_results.end()));
+  state->remote_results.clear();
+  std::sort(sorted.begin(), sorted.end(), HistoryEntry::SortByTimeDescending);
+
+  // Pre-reserve the size of the new vector. Since we're working with pointers
+  // later on, not doing this could lead to the vector being resized and to
+  // pointers to invalid locations.
+  std::vector<HistoryEntry> grouped;
+  grouped.reserve(sorted.size());
+
+  // Maps the GroupingKey to the most recent entry on a particular day for
+  // non-actor-initiated visits.
+  std::map<GroupingKey, HistoryEntry*> non_actor_current_day_entries;
+  // Same as above, but for actor-initiated visits.
+  std::map<GroupingKey, HistoryEntry*> actor_current_day_entries;
+
+  // Keeps track of the day that `*_current_day_entries` is holding
+  // entries for in order to handle per-day grouping.
+  base::Time current_day_midnight;
+
+  for (HistoryEntry& entry : sorted) {
+    // Reset the list of found entries when a visit from a new day is
+    // encountered.
+    if (current_day_midnight != entry.time.LocalMidnight()) {
+      non_actor_current_day_entries.clear();
+      actor_current_day_entries.clear();
+      current_day_midnight = entry.time.LocalMidnight();
+    }
+
+#if !BUILDFLAG(IS_IOS)
+    auto& current_day_entries = entry.is_actor_visit
+                                    ? actor_current_day_entries
+                                    : non_actor_current_day_entries;
+#else
+    auto& current_day_entries = non_actor_current_day_entries;
+#endif
+
+    // TODO(b/481272035): Use the domain name that matches the displayed domain
+    // name in the UI.
+    GroupingKey key{.host = entry.url.GetHost(),
+                    .title = entry.title,
+                    .app_id = entry.app_id};
+
+    // Keep this visit if it's the first visit of it's kind on the current day.
+    if (current_day_entries.find(key) == current_day_entries.end()) {
+      grouped.push_back(std::move(entry));
+      current_day_entries[key] = &grouped.back();
+    } else {
+      HistoryEntry* matching_entry = current_day_entries[key];
+
+      // Merge all timestamps from the current entry into the matching entry.
+      // This ensures all visits for similar URLs on the same day are tracked.
+      for (const auto& [url, timestamps] : entry.all_timestamps) {
+        matching_entry->all_timestamps[url].insert(timestamps.begin(),
+                                                   timestamps.end());
+      }
+
+      if (matching_entry->entry_type != entry.entry_type) {
+        matching_entry->entry_type = HistoryEntry::COMBINED_ENTRY;
+      }
+
+      // Get first non-empty remote icon url.
+      if (matching_entry->remote_icon_url_for_uma.is_empty() &&
+          !entry.remote_icon_url_for_uma.is_empty()) {
+        matching_entry->remote_icon_url_for_uma = entry.remote_icon_url_for_uma;
+      }
+
+      // Aggregate visit and typed counts.
+      matching_entry->visit_count += entry.visit_count;
+      matching_entry->typed_count += entry.typed_count;
+
+      // TODO(b/482947398): Aggregate all relevant HistoryEntry fields for
+      // combined entries.
+    }
+  }
+
+  HoldbackAndPartitionResults(state, oldest_local, oldest_remote, &grouped);
+  return grouped;
 }
 
 void BrowsingHistoryService::QueryComplete(
@@ -605,19 +777,44 @@ void BrowsingHistoryService::QueryComplete(
   output.reserve(output.size() + results.size());
 
   for (const auto& page : results) {
-    // TODO(dubroy): Use sane time (crbug.com/146090) here when it's ready.
-    output.emplace_back(HistoryEntry(
+    output.emplace_back(
         HistoryEntry::LOCAL_ENTRY, page.url(), page.title(), page.visit_time(),
         std::string(), !state->search_text.empty(), page.snippet().text(),
         page.blocked_visit(), GURL(), page.visit_count(), page.typed_count(),
-        page.app_id()));
+        page.has_actor_source(), page.app_id());
   }
 
   state->local_status =
       results.reached_beginning() ? REACHED_BEGINNING : MORE_RESULTS;
 
-  if (!web_history_timer_->IsRunning())
+  if (results.reached_beginning()) {
+    // Exhausted the local results; continue querying to get remote results.
+    // Start querying at the point where local history ends.
+    base::Time expiry_treshold =
+        clock_->Now() - base::Days(HistoryBackend::kExpireDaysThreshold);
+    if (state->remote_end_time_for_continuation.is_null()) {
+      state->remote_end_time_for_continuation = base::Time::Max();
+    }
+    state->remote_end_time_for_continuation =
+        std::min(state->remote_end_time_for_continuation, expiry_treshold);
+
+    // Local history isn't expired *immediately* once it goes past the expiry
+    // threshold. To avoid duplicates at the switch-over point, make sure to
+    // start querying only past the oldest local entry.
+    if (!output.empty()) {
+      state->remote_end_time_for_continuation =
+          std::min(state->remote_end_time_for_continuation, OldestTime(output));
+    }
+
+    // Note: QueryHistoryInternal() checks whether a remote request is actually
+    // possible and necessary, and returns immediately if not.
+    QueryHistoryInternal(std::move(state));
+    return;
+  }
+
+  if (!web_history_timer_->IsRunning()) {
     ReturnResultsToDriver(std::move(state));
+  }
 }
 
 void BrowsingHistoryService::OnGetAllAppIds(GetAllAppIdsResult result) {
@@ -627,32 +824,45 @@ void BrowsingHistoryService::OnGetAllAppIds(GetAllAppIdsResult result) {
 void BrowsingHistoryService::ReturnResultsToDriver(
     scoped_refptr<QueryHistoryState> state) {
   std::vector<HistoryEntry> results;
+  bool has_remote_results = !state->remote_results.empty();
+  bool group_visits = false;
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  group_visits =
+      base::FeatureList::IsEnabled(kBrowsingHistorySimilarVisitsGrouping);
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
-  // Always merge remote results, because Web History does not deduplicate.
-  // Local history should be using per-query deduplication, but if we are in a
-  // continuation, it's possible that we have carried over pending entries along
-  // with new results, and these two sets may contain duplicates. Assuming every
-  // call to Web History is successful, we shouldn't be able to have empty sync
-  // results at the same time as we have pending local.
-  if (!state->remote_results.empty()) {
-    MergeDuplicateResults(state.get(), &results);
+  if (group_visits) {
+    results = GroupSimilarVisits(state.get());
   } else {
-    // TODO(skym): Is the optimization to skip merge on local only results worth
-    // the complexity increase here?
-    if (state->local_status == MORE_RESULTS && !state->local_results.empty()) {
-      state->local_end_time_for_continuation =
-          state->local_results.rbegin()->time;
+    // Always merge remote results, because Web History does not deduplicate.
+    // Local history should be using per-query deduplication, but if we are in a
+    // continuation, it's possible that we have carried over pending entries
+    // along with new results, and these two sets may contain duplicates.
+    // Assuming every call to Web History is successful, we shouldn't be able
+    // to have empty sync results at the same time as we have pending local.
+    if (has_remote_results) {
+      MergeDuplicateResults(state.get(), &results);
+    } else {
+      // TODO(skym): Is the optimization to skip merge on local only results
+      // worth the complexity increase here?
+      if (state->local_status == MORE_RESULTS &&
+          !state->local_results.empty()) {
+        state->local_end_time_for_continuation =
+            state->local_results.rbegin()->time;
+      }
+      results = std::move(state->local_results);
+      state->local_results.clear();
     }
-    results = std::move(state->local_results);
   }
+
+  RecordResultsMetrics(results);
 
   QueryResultsInfo info;
   info.search_text = state->search_text;
-  info.reached_beginning =
-      !CanRetry(state->local_status) && !CanRetry(state->remote_status);
+  info.reached_beginning = !CanRetry(state->local_status) &&
+                           (!CanRetry(state->remote_status) ||
+                            state->original_options.app_id != kNoAppIdFilter);
   info.sync_timed_out = state->remote_status == TIMED_OUT;
-  info.has_synced_results = state->remote_status == MORE_RESULTS ||
-                            state->remote_status == REACHED_BEGINNING;
   base::OnceClosure continuation =
       base::BindOnce(&BrowsingHistoryService::QueryHistoryInternal,
                      weak_factory_.GetWeakPtr(), std::move(state));
@@ -661,112 +871,120 @@ void BrowsingHistoryService::ReturnResultsToDriver(
                                           has_synced_results_);
 }
 
+void BrowsingHistoryService::RecordResultsMetrics(
+    const std::vector<HistoryEntry>& results) {
+  // Count the number of local, remote, and combined entries, each split by
+  // entries before vs after the local expiry threshold (90 days).
+  const base::Time local_expiry_threshold =
+      clock_->Now() - base::Days(HistoryBackend::kExpireDaysThreshold);
+  base::flat_map<HistoryEntry::EntryType, size_t> pre_expiry_counts;
+  base::flat_map<HistoryEntry::EntryType, size_t> post_expiry_counts;
+  for (const HistoryEntry& entry : results) {
+    if (entry.time < local_expiry_threshold) {
+      ++pre_expiry_counts[entry.entry_type];
+    } else {
+      ++post_expiry_counts[entry.entry_type];
+    }
+  }
+
+  // Note: The histogram max of 150 is chosen to match `RESULTS_PER_PAGE` from
+  // chrome/browser/resources/history/constants.ts and `kMaxQueryCount` from
+  // chrome/browser/android/history/browsing_history_bridge.cc.
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.LocalOnly.PreExpiryThreshold",
+      pre_expiry_counts[HistoryEntry::LOCAL_ENTRY], 0, 150, 50);
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.LocalOnly.PostExpiryThreshold",
+      post_expiry_counts[HistoryEntry::LOCAL_ENTRY], 0, 150, 50);
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.RemoteOnly.PreExpiryThreshold",
+      pre_expiry_counts[HistoryEntry::REMOTE_ENTRY], 0, 150, 50);
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.RemoteOnly.PostExpiryThreshold",
+      post_expiry_counts[HistoryEntry::REMOTE_ENTRY], 0, 150, 50);
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.Combined.PreExpiryThreshold",
+      pre_expiry_counts[HistoryEntry::COMBINED_ENTRY], 0, 150, 50);
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.Combined.PostExpiryThreshold",
+      post_expiry_counts[HistoryEntry::COMBINED_ENTRY], 0, 150, 50);
+
+  RecordDuplicateVisitsCount(results);
+}
+
+void BrowsingHistoryService::RecordDuplicateVisitsCount(
+    const std::vector<HistoryEntry>& results) {
+  int duplicate_visits_count = 0;
+  for (const HistoryEntry& entry : results) {
+    for (const auto& [url, timestamps] : entry.all_timestamps) {
+      // Omit the timestamp for the entry itself from the duplicate count.
+      url == entry.url ? duplicate_visits_count += timestamps.size() - 1
+                        : duplicate_visits_count += timestamps.size();
+    }
+  }
+
+  // Note: The histogram max of 150 is chosen to match `RESULTS_PER_PAGE` from
+  // chrome/browser/resources/history/constants.ts and `kMaxQueryCount` from
+  // chrome/browser/android/history/browsing_history_bridge.cc.
+  base::UmaHistogramCustomCounts(
+      "History.BrowsingHistoryResult.DuplicateVisitsCount",
+      duplicate_visits_count, 0, 150, 50);
+}
+
 void BrowsingHistoryService::WebHistoryQueryComplete(
     scoped_refptr<QueryHistoryState> state,
     base::Time start_time,
     WebHistoryService::Request* request,
-    base::optional_ref<const base::Value::Dict> results_dict) {
+    base::optional_ref<const WebHistoryService::QueryHistoryResult>
+        query_history_result) {
   // If the response came in too late, do nothing.
   // TODO(dubroy): Maybe show a banner, and prompt the user to reload?
-  if (!web_history_timer_->IsRunning())
+  if (!web_history_timer_->IsRunning()) {
     return;
+  }
   web_history_timer_->Stop();
   web_history_request_.reset();
 
-  if (results_dict.has_value()) {
+  if (query_history_result.has_value()) {
     has_synced_results_ = true;
-    if (const base::Value::List* events = results_dict->FindList("event")) {
-      state->remote_results.reserve(state->remote_results.size() +
-                                    events->size());
-      std::string host_name_utf8 = base::UTF16ToUTF8(state->search_text);
-      for (const base::Value& event : *events) {
-        const base::Value::Dict* event_dict = event.GetIfDict();
-        if (!event_dict) {
+
+    state->remote_results.reserve(state->remote_results.size() +
+                                  query_history_result->visits.size());
+    std::string host_name_utf8 = base::UTF16ToUTF8(state->search_text);
+    for (const WebHistoryService::QueryHistoryResult::Visit& visit :
+         query_history_result->visits) {
+      if (state->original_options.host_only) {
+        // Do post filtering to skip entries that do not have the correct
+        // hostname.
+        if (visit.url.GetHost() != host_name_utf8) {
           continue;
-        }
-        const base::Value::List* results = event_dict->FindList("result");
-        if (!results || results->empty()) {
-          continue;
-        }
-        const base::Value::Dict* result = results->front().GetIfDict();
-        if (!result) {
-          continue;
-        }
-        const std::string* url = result->FindString("url");
-        if (!url) {
-          continue;
-        }
-        const base::Value::List* ids = result->FindList("id");
-        if (!ids || ids->empty()) {
-          continue;
-        }
-
-        GURL gurl(*url);
-        if (state->original_options.host_only) {
-          // Do post filter to skip entries that do not have the correct
-          // hostname.
-          if (gurl.host() != host_name_utf8)
-            continue;
-        }
-
-        // Ignore any URLs that should not be shown in the history page.
-        if (driver_->ShouldHideWebHistoryUrl(gurl))
-          continue;
-
-        std::u16string title;
-
-        // Title is optional.
-        if (const std::string* s = result->FindString("title")) {
-          title = base::UTF8ToUTF16(*s);
-        }
-
-        std::string favicon_url;
-        if (const std::string* s = result->FindString("favicon_url")) {
-          favicon_url = *s;
-        }
-
-        // Extract the timestamps of all the visits to this URL.
-        // They are referred to as "IDs" by the server.
-        for (const base::Value& id : *ids) {
-          const std::string* timestamp_string;
-          int64_t timestamp_usec = 0;
-
-          auto* id_dict = id.GetIfDict();
-          if (!id_dict ||
-              !(timestamp_string = id_dict->FindString("timestamp_usec")) ||
-              !base::StringToInt64(*timestamp_string, &timestamp_usec)) {
-            NOTREACHED() << "Unable to extract timestamp.";
-          }
-          // The timestamp on the server is a Unix time.
-          base::Time time =
-              base::Time::UnixEpoch() + base::Microseconds(timestamp_usec);
-
-          // Get the ID of the client that this visit came from.
-          std::string client_id;
-          if (const std::string* s = result->FindString("client_id")) {
-            client_id = *s;
-          }
-
-          state->remote_results.emplace_back(HistoryEntry(
-              HistoryEntry::REMOTE_ENTRY, gurl, title, time, client_id,
-              !state->search_text.empty(), std::u16string(),
-              /* blocked_visit */ false, GURL(favicon_url), 0, 0,
-              /*app_id= */ std::nullopt));
         }
       }
+
+      // Ignore any URLs that should not be shown in the history page.
+      if (driver_->ShouldHideWebHistoryUrl(visit.url)) {
+        continue;
+      }
+
+      state->remote_results.emplace_back(
+          HistoryEntry::REMOTE_ENTRY, visit.url, base::UTF8ToUTF16(visit.title),
+          visit.timestamp, visit.client_id, !state->search_text.empty(),
+          std::u16string(),
+          /*blocked_visit=*/false, visit.favicon_url, 0, 0,
+          /*is_actor_visit=*/false,
+          /*app_id=*/std::nullopt);
     }
-    const std::string* continuation_token =
-        results_dict->FindString("continuation_token");
-    state->remote_status = !continuation_token || continuation_token->empty()
-                               ? REACHED_BEGINNING
-                               : MORE_RESULTS;
+    state->remote_status = query_history_result->has_more_results
+                               ? MORE_RESULTS
+                               : REACHED_BEGINNING;
   } else {
     has_synced_results_ = false;
     state->remote_status = FAILURE;
   }
 
-  if (!query_task_tracker_.HasTrackedTasks())
+  if (!query_task_tracker_.HasTrackedTasks()) {
     ReturnResultsToDriver(std::move(state));
+  }
 }
 
 void BrowsingHistoryService::OtherFormsOfBrowsingHistoryQueryComplete(
@@ -779,16 +997,18 @@ void BrowsingHistoryService::OtherFormsOfBrowsingHistoryQueryComplete(
 void BrowsingHistoryService::RemoveComplete() {
   // Notify the driver that the deletion request is complete, but only if
   // web history delete request is not still pending.
-  if (!has_pending_delete_request_)
+  if (!has_pending_delete_request_) {
     driver_->OnRemoveVisitsComplete();
+  }
 }
 
 void BrowsingHistoryService::RemoveWebHistoryComplete(bool success) {
   has_pending_delete_request_ = false;
   // TODO(dubroy): Should we handle failure somehow? Delete directives will
   // ensure that the visits are eventually deleted, so maybe it's not necessary.
-  if (!delete_task_tracker_.HasTrackedTasks())
+  if (!delete_task_tracker_.HasTrackedTasks()) {
     RemoveComplete();
+  }
 }
 
 void BrowsingHistoryService::OnHistoryDeletions(

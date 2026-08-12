@@ -7,7 +7,6 @@
 
 #include <stdint.h>
 
-#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -15,7 +14,6 @@
 #include "base/atomicops.h"
 #include "base/functional/callback.h"
 #include "base/location.h"
-#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -30,6 +28,7 @@
 #include "gpu/config/gpu_mode.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_manager.mojom.h"
 #include "services/viz/privileged/mojom/gl/gpu_host.mojom.h"
@@ -40,22 +39,34 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "services/viz/privileged/mojom/gl/info_collection_gpu_service.mojom.h"
+#include "services/webnn/public/cpp/context_properties.h"
+#include "services/webnn/public/mojom/webnn_context_provider.mojom.h"
 #endif
 
 namespace base {
 class Thread;
 }
 
+#if BUILDFLAG(IS_WIN)
+namespace webnn {
+struct EpDeviceInfo;
+}
+#endif
+
 namespace content {
 class BrowserChildProcessHostImpl;
+
+#if BUILDFLAG(IS_WIN)
+class WebNNCompilerProcessHost;
+#endif
 
 #if BUILDFLAG(IS_MAC)
 class BrowserChildProcessBackgroundedBridge;
 class CATransactionGPUCoordinator;
 #endif
 
-class GpuProcessHost : public BrowserChildProcessHostDelegate,
-                       public viz::GpuHostImpl::Delegate {
+class GpuProcessHost final : public BrowserChildProcessHostDelegate,
+                             public viz::GpuHostImpl::Delegate {
  public:
   static int GetGpuCrashCount();
 
@@ -199,6 +210,16 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 #if BUILDFLAG(IS_OZONE)
   void TerminateGpuProcess(const std::string& message) override;
 #endif
+#if BUILDFLAG(IS_WIN)
+  void RequestWebNNCompilerContext(
+      webnn::mojom::CreateContextOptionsPtr context_options,
+      const webnn::ContextProperties& context_properties,
+      const webnn::EpDeviceInfo& target_device,
+      mojo::PendingReceiver<webnn::mojom::WebNNCompilerContext>
+          compiler_context_receiver,
+      mojo::PendingRemote<webnn::mojom::WebNNModelLoader> model_loader_remote)
+      override;
+#endif
 
   bool LaunchGpuProcess();
 
@@ -211,12 +232,6 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   int GetFallbackCrashLimit() const;
 
   void RunServiceImpl(mojo::GenericPendingReceiver receiver);
-
-#if !BUILDFLAG(IS_ANDROID)
-  // Memory pressure handler, called by |memory_pressure_listener_|.
-  void OnMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel level);
-#endif
 
   // The serial number of the GpuProcessHost.
   int host_id_;
@@ -237,6 +252,9 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 
   // Whether we actually launched a GPU process.
   bool process_launched_;
+
+  // When the process was successfully launched.
+  base::TimeTicks process_start_time_;
 
   GpuTerminationOrigin termination_origin_ =
       GpuTerminationOrigin::kUnknownOrigin;
@@ -276,13 +294,12 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // automatic execution of 3D content from those domains.
   std::multiset<GURL> urls_with_live_offscreen_contexts_;
 
-#if !BUILDFLAG(IS_ANDROID)
-  // Responsible for forwarding the memory pressure notifications from the
-  // browser process to the GPU process.
-  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
-#endif
-
   std::unique_ptr<viz::GpuHostImpl> gpu_host_;
+
+#if BUILDFLAG(IS_WIN)
+  // Manages the WebNN Compiler utility process lifecycle.
+  std::unique_ptr<WebNNCompilerProcessHost> webnn_compiler_process_host_;
+#endif
 
   base::WeakPtrFactory<GpuProcessHost> weak_ptr_factory_{this};
 };

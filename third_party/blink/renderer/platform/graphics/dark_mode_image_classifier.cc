@@ -4,21 +4,69 @@
 
 #include "third_party/blink/renderer/platform/graphics/dark_mode_image_classifier.h"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <set>
 
+#include "base/containers/span.h"
 #include "base/memory/singleton.h"
-#include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/graphics/darkmode/darkmode_classifier.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace blink {
 namespace {
 
-// Decision tree lower and upper thresholds for grayscale and color images.
-constexpr std::array<float, 2> kLowColorCountThreshold = {0.8125, 0.015137};
-constexpr std::array<float, 2> kHighColorCountThreshold = {1, 0.025635};
+const int kMaxSampledPixels = 1000;
+const int kMaxBlocks = 10;
+const float kMinOpaquePixelPercentageForForeground = 0.2;
+// Color is considered light if its luma is above this threshold.
+constexpr int kHighLightnessThreshold = 96;
+
+// Per-pixel chroma (max channel - min channel, in 0..255) at or above which
+// the pixel is considered vivid / highly saturated. Tuned to count both
+// fully saturated colors and their anti-aliased fringes, while excluding
+// typical photographic colors which usually have chroma below 60.
+constexpr int kHighSaturationThreshold = 80;
+
+// Per-pixel chroma at or above which the pixel is considered chromatic
+// (i.e. not effectively gray). Set well below kHighSaturationThreshold so
+// that muted / mid-tone colors found in illustrated assets (olive, teal,
+// maroon, pastels) are still counted as chromatic. Anti-aliased fringes
+// around grayscale text and minor JPEG chroma noise typically stay below
+// chroma ~15, so this floor still excludes them.
+constexpr int kChromaticThreshold = 20;
+
+// Decision tree thresholds for classifying images
+
+// Lower and upper color thresholds for grayscale and color images.
+constexpr std::array<float, 2> kFeatureLowColorCountThreshold = {0.8125,
+                                                                 0.015137};
+constexpr std::array<float, 2> kFeatureHighColorCountThreshold = {1, 0.025635};
+
+// Transparency ratio threshold above which the image is classified as
+// transparent, meaning most of the background pixels are transparent.
+constexpr float kFeatureTransparencyRatioThreshold = 0.4f;
+
+// Luminance ratio threshold above which the image is classified as light.
+constexpr float kFeatureHighLuminanceThreshold = 0.5f;
+
+// Saturated pixel ratio threshold above which a low-color-bucket image is
+// considered to have a vivid-color theme and is skipped from inversion.
+constexpr float kFeatureHighSaturationRatioThreshold = 0.3f;
+
+// Lower saturation threshold used together with a high luminance gate to
+// catch images with a mostly-light field and a smaller saturated region,
+// where the dominant light pixels pull the overall saturated_pixel_ratio
+// below kFeatureHighSaturationRatioThreshold.
+constexpr float kFeatureLowSaturationRatioThreshold = 0.1f;
+
+// Chromatic pixel ratio threshold above which a limited-palette colorful
+// image is considered to carry semantic color information end-to-end
+// (rather than being a near-grayscale icon with a tiny color accent) and
+// is skipped from inversion. Tuned so dark / grayscale text with
+// anti-aliased fringes or minor chroma noise stays below this floor.
+constexpr float kFeatureChromaticPixelRatioThreshold = 0.5f;
 
 bool IsColorGray(const SkColor& color) {
   return abs(static_cast<int>(SkColorGetR(color)) -
@@ -32,15 +80,39 @@ bool IsColorTransparent(const SkColor& color) {
   return (SkColorGetA(color) < 128);
 }
 
-const int kMaxSampledPixels = 1000;
-const int kMaxBlocks = 10;
-const float kMinOpaquePixelPercentageForForeground = 0.2;
+bool IsColorLight(const SkColor& color) {
+  // ITU-R BT.601 Y'CbCr based luma calculation.
+  int luma = (SkColorGetR(color) * 299 + SkColorGetG(color) * 587 +
+              SkColorGetB(color) * 114) /
+             1000;
+  return luma >= kHighLightnessThreshold;
+}
+
+bool IsColorSaturated(const SkColor& color) {
+  // Approximate HSV chroma: max(R,G,B) - min(R,G,B). A high value indicates
+  // a vivid/saturated color, while neutral grays and pastels have a low
+  // value.
+  int r = SkColorGetR(color);
+  int g = SkColorGetG(color);
+  int b = SkColorGetB(color);
+  int chroma = std::max({r, g, b}) - std::min({r, g, b});
+  return chroma >= kHighSaturationThreshold;
+}
+
+bool IsColorChromatic(const SkColor& color) {
+  // Same chroma metric as IsColorSaturated() but with a much lower
+  // threshold, so muted / mid-tone colors are still counted as carrying
+  // hue information.
+  int r = SkColorGetR(color);
+  int g = SkColorGetG(color);
+  int b = SkColorGetB(color);
+  int chroma = std::max({r, g, b}) - std::min({r, g, b});
+  return chroma >= kChromaticThreshold;
+}
 
 }  // namespace
 
-DarkModeImageClassifier::DarkModeImageClassifier(
-    DarkModeImageClassifierPolicy image_classifier_policy)
-    : image_classifier_policy_(image_classifier_policy) {}
+DarkModeImageClassifier::DarkModeImageClassifier() = default;
 
 DarkModeImageClassifier::~DarkModeImageClassifier() = default;
 
@@ -180,12 +252,28 @@ DarkModeImageClassifier::Features DarkModeImageClassifier::ComputeFeatures(
     const float background_ratio) const {
   int samples_count = static_cast<int>(sampled_pixels.size());
 
-  // Is image grayscale.
   int color_pixels = 0;
+  int high_luma_pixels = 0;
+  int saturated_pixels = 0;
+  int chromatic_pixels = 0;
   for (const SkColor& sample : sampled_pixels) {
-    if (!IsColorGray(sample))
+    if (!IsColorGray(sample)) {
       color_pixels++;
+    }
+
+    if (IsColorLight(sample)) {
+      high_luma_pixels++;
+    }
+
+    if (IsColorSaturated(sample)) {
+      saturated_pixels++;
+    }
+
+    if (IsColorChromatic(sample)) {
+      chromatic_pixels++;
+    }
   }
+
   ColorMode color_mode = (color_pixels > samples_count / 100)
                              ? ColorMode::kColor
                              : ColorMode::kGrayscale;
@@ -196,6 +284,12 @@ DarkModeImageClassifier::Features DarkModeImageClassifier::ComputeFeatures(
       ComputeColorBucketsRatio(sampled_pixels, color_mode);
   features.transparency_ratio = transparency_ratio;
   features.background_ratio = background_ratio;
+  features.high_luminance_ratio =
+      static_cast<float>(high_luma_pixels) / samples_count;
+  features.saturated_pixel_ratio =
+      static_cast<float>(saturated_pixels) / samples_count;
+  features.chromatic_pixel_ratio =
+      static_cast<float>(chromatic_pixels) / samples_count;
 
   return features;
 }
@@ -233,17 +327,6 @@ float DarkModeImageClassifier::ComputeColorBucketsRatio(
 
 DarkModeResult DarkModeImageClassifier::ClassifyWithFeatures(
     const Features& features) const {
-  if (image_classifier_policy_ ==
-      DarkModeImageClassifierPolicy::kTransparencyAndNumColors) {
-    return (features.transparency_ratio > 0 &&
-            features.color_buckets_ratio < static_cast<float>(0.5))
-               ? DarkModeResult::kApplyFilter
-               : DarkModeResult::kDoNotApplyFilter;
-  }
-
-  DCHECK(image_classifier_policy_ ==
-         DarkModeImageClassifierPolicy::kNumColorsWithMlFallback);
-
   DarkModeResult result = ClassifyUsingDecisionTree(features);
 
   // If decision tree cannot decide, we use a neural network to decide whether
@@ -259,7 +342,8 @@ DarkModeResult DarkModeImageClassifier::ClassifyWithFeatures(
         features.is_colorful ? 1.0f : 0.0f, features.color_buckets_ratio,
         features.transparency_ratio, features.background_ratio};
 
-    darkmode_tfnative_model::Inference(feature_list, &nn_out, &nn_temp);
+    darkmode_tfnative_model::Inference(feature_list,
+                                       base::span_from_ref(nn_out), &nn_temp);
     result = nn_out > 0 ? DarkModeResult::kApplyFilter
                         : DarkModeResult::kDoNotApplyFilter;
   }
@@ -269,18 +353,62 @@ DarkModeResult DarkModeImageClassifier::ClassifyWithFeatures(
 
 DarkModeResult DarkModeImageClassifier::ClassifyUsingDecisionTree(
     const DarkModeImageClassifier::Features& features) const {
-  float low_color_count_threshold =
-      kLowColorCountThreshold[features.is_colorful];
-  float high_color_count_threshold =
-      kHighColorCountThreshold[features.is_colorful];
+  // Skip filtering for images that have transparent background and whose
+  // foreground is predominantly light. Inverting such images would make
+  // visible pixels darker, causing them to merge with dark background, so do
+  // not apply filter.
+  if (features.transparency_ratio > kFeatureTransparencyRatioThreshold &&
+      features.high_luminance_ratio > kFeatureHighLuminanceThreshold) {
+    return DarkModeResult::kDoNotApplyFilter;
+  }
+
+  // Skip filtering for images with a limited palette dominated by highly
+  // saturated colors. Inverting such images would replace their semantic
+  // colors with the complements, which is usually wrong (a saturated red
+  // should not become teal). Use the upper bucket threshold to remain
+  // robust to compression artifacts that can inflate the bucket count.
+  if (features.is_colorful &&
+      features.color_buckets_ratio <
+          kFeatureHighColorCountThreshold[features.is_colorful] &&
+      features.saturated_pixel_ratio > kFeatureHighSaturationRatioThreshold) {
+    return DarkModeResult::kDoNotApplyFilter;
+  }
+
+  // Also skip images with a mostly-light field and a smaller saturated
+  // region. These have a low overall saturated_pixel_ratio because light
+  // pixels dominate, but the combination of few colors, high luminance, and
+  // some saturated content indicates an asset whose colors carry meaning
+  // and should be preserved rather than inverted.
+  if (features.is_colorful &&
+      features.color_buckets_ratio <
+          kFeatureHighColorCountThreshold[features.is_colorful] &&
+      features.high_luminance_ratio > kFeatureHighLuminanceThreshold &&
+      features.saturated_pixel_ratio > kFeatureLowSaturationRatioThreshold) {
+    return DarkModeResult::kDoNotApplyFilter;
+  }
+
+  // Skip limited-palette colorful images whose pixels are mostly chromatic
+  // (muted / mid-tone hues), e.g. emotes, stickers, or character art. Their
+  // semantic hue must be preserved. Grayscale text and JPEG chroma noise
+  // stay below |kFeatureChromaticPixelRatioThreshold| and are still inverted.
+  if (features.is_colorful &&
+      features.color_buckets_ratio <
+          kFeatureHighColorCountThreshold[features.is_colorful] &&
+      features.chromatic_pixel_ratio > kFeatureChromaticPixelRatioThreshold) {
+    return DarkModeResult::kDoNotApplyFilter;
+  }
 
   // Very few colors means it's not a photo, apply the filter.
-  if (features.color_buckets_ratio < low_color_count_threshold)
+  if (features.color_buckets_ratio <
+      kFeatureLowColorCountThreshold[features.is_colorful]) {
     return DarkModeResult::kApplyFilter;
+  }
 
   // Too many colors means it's probably photorealistic, do not apply it.
-  if (features.color_buckets_ratio > high_color_count_threshold)
+  if (features.color_buckets_ratio >
+      kFeatureHighColorCountThreshold[features.is_colorful]) {
     return DarkModeResult::kDoNotApplyFilter;
+  }
 
   // In-between, decision tree cannot give a precise result.
   return DarkModeResult::kNotClassified;

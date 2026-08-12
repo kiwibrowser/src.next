@@ -32,32 +32,46 @@ bool IsAncestorOf(const Element& ancestor, const Element& descendant) {
   return false;
 }
 
+bool IsForbiddenForCounter(PseudoId style_type) {
+  switch (style_type) {
+    case kPseudoIdNone:
+    case kPseudoIdCheckMark:
+    case kPseudoIdBefore:
+    case kPseudoIdAfter:
+    case kPseudoIdExpandIcon:
+    case kPseudoIdPickerIcon:
+    case kPseudoIdInterestButton:
+    case kPseudoIdMarker:
+    case kPseudoIdScrollMarkerGroup:
+    case kPseudoIdScrollMarker:
+      return false;
+    default:
+      return true;  // Counters are forbidden from all other pseudo
+                    // elements.
+  }
+}
+
 std::optional<std::pair<unsigned, int>> DetermineCounterTypeAndValue(
     const LayoutObject& layout_object,
+    const AtomicString& counter_name,
     const CounterDirectives& directives) {
   if (layout_object.IsText() && !layout_object.IsBR()) {
     return std::nullopt;
   }
   const ComputedStyle& style = layout_object.StyleRef();
-  switch (style.StyleType()) {
-    case kPseudoIdNone:
-    case kPseudoIdCheck:
-    case kPseudoIdBefore:
-    case kPseudoIdAfter:
-    case kPseudoIdSelectArrow:
-    case kPseudoIdMarker:
-    case kPseudoIdScrollMarkerGroup:
-    case kPseudoIdScrollMarker:
-      break;
-    default:
-      return std::nullopt;  // Counters are forbidden from all other pseudo
-                            // elements.
+  if (IsForbiddenForCounter(style.StyleType())) {
+    return std::nullopt;
   }
 
   if (directives.IsDefined()) {
     unsigned type_mask = 0;
-    int value = directives.CombinedValue();
-    type_mask |= directives.IsIncrement()
+    int value =
+        RuntimeEnabledFeatures::CSSListCounterAccountingEnabled() &&
+                directives.IsContentBasedReset()
+            ? CountersAttachmentContext::CalculateInitialValueForReversed(
+                  *layout_object.GetNode(), counter_name, directives)
+            : directives.CombinedValue();
+    type_mask |= directives.HasIncrement()
                      ? static_cast<unsigned>(
                            CountersAttachmentContext::Type::kIncrementType)
                      : 0u;
@@ -66,7 +80,7 @@ std::optional<std::pair<unsigned, int>> DetermineCounterTypeAndValue(
             ? static_cast<unsigned>(CountersAttachmentContext::Type::kResetType)
             : 0;
     type_mask |=
-        directives.IsSet()
+        directives.HasSet()
             ? static_cast<unsigned>(CountersAttachmentContext::Type::kSetType)
             : 0;
     return std::make_pair(type_mask, value);
@@ -113,6 +127,66 @@ bool CountersAttachmentContext::ElementGeneratesListItemCounter(
          IsA<HTMLDirectoryElement>(element);
 }
 
+// Algorithm: https://drafts.csswg.org/css-lists/#instantiating-counters
+int CountersAttachmentContext::CalculateInitialValueForReversed(
+    const Node& node,
+    const AtomicString& counter_name,
+    const CounterDirectives& directives) {
+  DCHECK(directives.IsContentBasedReset());
+  const AtomicString list_item_name("list-item");
+  const Node* current = &node;
+  const Node* parent = LayoutTreeBuilderTraversal::Parent(*current);
+  int64_t initial_value = 0;
+  int last_non_zero_increment_negated = 0;
+  current = LayoutTreeBuilderTraversal::Next(*current, parent);
+  while (current) {
+    const Element* element = DynamicTo<Element>(current);
+    if (!element) {
+      current = LayoutTreeBuilderTraversal::Next(*current, parent);
+      continue;
+    }
+    const ComputedStyle* style = element->GetComputedStyle();
+    if (!style ||
+        (counter_name != list_item_name && !style->GetCounterDirectives()) ||
+        IsForbiddenForCounter(style->StyleType())) {
+      current = LayoutTreeBuilderTraversal::Next(*current, parent);
+      continue;
+    }
+    const CounterDirectives current_directives =
+        style->GetCounterDirectives(counter_name);
+
+    if (current_directives.IsReset()) {
+      if (parent == LayoutTreeBuilderTraversal::Parent(*current)) {
+        // It does not include any elements in the scope of a counter with the
+        // same name created by a counter-reset on a later sibling of the
+        // element.
+        break;
+      }
+      current =
+          LayoutTreeBuilderTraversal::NextSkippingChildren(*current, parent);
+      continue;
+    }
+
+    int increment_negated = 0;
+    if (current_directives.HasIncrement()) {
+      increment_negated = -current_directives.IncrementValue();
+    } else if (counter_name == list_item_name && IsA<HTMLLIElement>(current)) {
+      increment_negated = 1;
+    }
+    if (increment_negated != 0) {
+      last_non_zero_increment_negated = increment_negated;
+    }
+    if (current_directives.HasSet()) {
+      initial_value += current_directives.SetValue();
+      break;
+    }
+    initial_value += increment_negated;
+    current = LayoutTreeBuilderTraversal::Next(*current, parent);
+  }
+  initial_value += last_non_zero_increment_negated;
+  return base::saturated_cast<int>(initial_value);
+}
+
 CountersAttachmentContext CountersAttachmentContext::DeepClone() const {
   CountersAttachmentContext clone(*this);
   clone.counter_inheritance_table_ =
@@ -121,7 +195,10 @@ CountersAttachmentContext CountersAttachmentContext::DeepClone() const {
   for (auto& [counter_name, stack] : *clone.counter_inheritance_table_) {
     stack = MakeGarbageCollected<CounterStack>(*stack);
     for (Member<CounterEntry>& entry : *stack) {
-      entry = MakeGarbageCollected<CounterEntry>(*entry);
+      // Containment boundaries are nullptr.
+      if (entry) {
+        entry = MakeGarbageCollected<CounterEntry>(*entry);
+      }
     }
   }
   return clone;
@@ -137,7 +214,7 @@ void CountersAttachmentContext::EnterObject(const LayoutObject& layout_object,
   if (counter_directives) {
     for (auto& [counter_name, directives] : *counter_directives) {
       std::optional<std::pair<unsigned, int>> type_and_value =
-          DetermineCounterTypeAndValue(layout_object, directives);
+          DetermineCounterTypeAndValue(layout_object, counter_name, directives);
       if (!type_and_value.has_value()) {
         continue;
       }
@@ -193,7 +270,7 @@ void CountersAttachmentContext::LeaveObject(const LayoutObject& layout_object,
   if (counter_directives) {
     for (auto& [counter_name, directives] : *counter_directives) {
       std::optional<std::pair<unsigned, int>> type_and_value =
-          DetermineCounterTypeAndValue(layout_object, directives);
+          DetermineCounterTypeAndValue(layout_object, counter_name, directives);
       if (!type_and_value.has_value()) {
         continue;
       }
@@ -229,9 +306,11 @@ void CountersAttachmentContext::MaybeCreateListItemCounter(
   DCHECK(layout_object);
   RemoveStaleCounters(*layout_object, list_item_);
   if (ListItemOrdinal* ordinal = ListItemOrdinal::Get(element)) {
-    if (const auto& explicit_value = ordinal->ExplicitValue()) {
-      CreateCounter(*layout_object, list_item_, explicit_value.value());
-      return;
+    if (!RuntimeEnabledFeatures::CSSListCounterAccountingEnabled()) {
+      if (const auto& explicit_value = ordinal->ExplicitValue()) {
+        CreateCounter(*layout_object, list_item_, explicit_value.value());
+        return;
+      }
     }
     int value = ListItemOrdinal::IsInReversedOrderedList(element) ? -1 : 1;
     unsigned type_mask =
@@ -240,8 +319,13 @@ void CountersAttachmentContext::MaybeCreateListItemCounter(
     return;
   }
   if (auto* olist = DynamicTo<HTMLOListElement>(element)) {
-    int value = base::ClampAdd(olist->StartConsideringItemCount(),
-                               olist->IsReversed() ? 1 : -1);
+    int value;
+    if (RuntimeEnabledFeatures::CSSListCounterAccountingEnabled()) {
+      value = base::saturated_cast<int>(olist->InitialCounter());
+    } else {
+      value =
+          base::ClampAdd(olist->InitialCounter(), olist->IsReversed() ? 1 : -1);
+    }
     CreateCounter(*layout_object, list_item_, value);
     return;
   }
@@ -418,8 +502,8 @@ void CountersAttachmentContext::CreateCounter(const LayoutObject& layout_object,
       const auto* current =
           To<Element>(counter_stack.back()->layout_object->GetNode());
       DCHECK(current);
-      if (LayoutTreeBuilderTraversal::ParentElement(*current) ==
-          LayoutTreeBuilderTraversal::ParentElement(*element)) {
+      if (LayoutTreeBuilderTraversal::LayoutParentElement(*current) ==
+          LayoutTreeBuilderTraversal::LayoutParentElement(*element)) {
         counter_stack.pop_back();
       }
     }
@@ -459,7 +543,7 @@ void CountersAttachmentContext::RemoveStaleCounters(
     const LayoutObject& last_object = *entry->layout_object;
     if (const auto* last_element = DynamicTo<Element>(last_object.GetNode())) {
       const Element* parent =
-          LayoutTreeBuilderTraversal::ParentElement(*last_element);
+          LayoutTreeBuilderTraversal::LayoutParentElement(*last_element);
       // We pop all elements whose parent is not ancestor of `element`.
       if (!parent || IsAncestorOf(*parent, *element)) {
         break;
@@ -497,12 +581,25 @@ void CountersAttachmentContext::RemoveCounterIfAncestorExists(
     return;
   }
   const LayoutObject& previous_object = *previous_entry->layout_object;
-  if (const auto* element = DynamicTo<Element>(layout_object.GetNode())) {
-    const auto* previous_element =
-        DynamicTo<Element>(previous_object.GetNode());
-    if (previous_element && IsAncestorOf(*previous_element, *element)) {
-      counter_stack.pop_back();
-    }
+  const auto* previous_element = DynamicTo<Element>(previous_object.GetNode());
+  const auto* element = DynamicTo<Element>(layout_object.GetNode());
+  if (!previous_element || !element) {
+    return;
+  }
+  // If previous element is ancestor to current element or previous element is
+  // previous sibling of an ancestor to current element, remove last counter
+  // from stack, as it will never be inherited, since we always inherit from
+  // ancestor first, so previous counter will always be inherited instead of
+  // last one.
+  if (IsAncestorOf(*previous_element, *element)) {
+    counter_stack.pop_back();
+    return;
+  }
+  const Element* parent =
+      LayoutTreeBuilderTraversal::LayoutParentElement(*previous_element);
+  if (parent && IsAncestorOf(*parent, *element) &&
+      parent != LayoutTreeBuilderTraversal::LayoutParentElement(*element)) {
+    counter_stack.pop_back();
   }
 }
 

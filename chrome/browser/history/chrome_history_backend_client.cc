@@ -4,11 +4,9 @@
 
 #include "chrome/browser/history/chrome_history_backend_client.h"
 
-#include "chrome/common/channel_info.h"
 #include "components/bookmarks/browser/history_bookmark_model.h"
 #include "components/bookmarks/browser/model_loader.h"
 #include "components/bookmarks/browser/url_and_title.h"
-#include "components/version_info/version_info.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "url/gurl.h"
 
@@ -16,8 +14,7 @@ ChromeHistoryBackendClient::ChromeHistoryBackendClient(
     scoped_refptr<bookmarks::ModelLoader> model_loader)
     : model_loader_(std::move(model_loader)) {}
 
-ChromeHistoryBackendClient::~ChromeHistoryBackendClient() {
-}
+ChromeHistoryBackendClient::~ChromeHistoryBackendClient() = default;
 
 bool ChromeHistoryBackendClient::IsPinnedURL(const GURL& url) {
   if (!model_loader_)
@@ -52,5 +49,5 @@ std::vector<history::URLAndTitle> ChromeHistoryBackendClient::GetPinnedURLs() {
 
 bool ChromeHistoryBackendClient::IsWebSafe(const GURL& url) {
   return content::ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
-      url.scheme());
+      url.GetScheme());
 }

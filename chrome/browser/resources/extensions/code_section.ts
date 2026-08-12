@@ -24,7 +24,7 @@ function visibleLineCount(totalCount: number, oppositeCount: number): number {
 
 export interface ExtensionsCodeSectionElement {
   $: {
-    'scroll-container': HTMLElement,
+    scrollContainer: HTMLElement,
   };
 }
 
@@ -73,16 +73,16 @@ export class ExtensionsCodeSectionElement extends
     };
   }
 
-  code: chrome.developerPrivate.RequestFileSourceResponse|null = null;
-  isActive?: boolean;
-  couldNotDisplayCode: string = '';
-  protected highlighted_: string = '';
-  protected before_: string = '';
-  protected after_: string = '';
-  protected highlightDescription_: string = '';
-  protected lineNumbers_: string = '';
-  protected truncatedBefore_: number = 0;
-  protected truncatedAfter_: number = 0;
+  accessor code: chrome.developerPrivate.RequestFileSourceResponse|null = null;
+  accessor isActive: boolean|undefined;
+  accessor couldNotDisplayCode: string = '';
+  protected accessor highlighted_: string = '';
+  protected accessor before_: string = '';
+  protected accessor after_: string = '';
+  protected accessor highlightDescription_: string = '';
+  protected accessor lineNumbers_: string = '';
+  protected accessor truncatedBefore_: number = 0;
+  protected accessor truncatedAfter_: number = 0;
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     super.willUpdate(changedProperties);
@@ -93,9 +93,7 @@ export class ExtensionsCodeSectionElement extends
   }
 
   private async onCodeChanged_() {
-    if (!this.code ||
-        (!this.code.beforeHighlight && !this.code.highlight &&
-         !this.code.afterHighlight)) {
+    if (!(this.code?.source)) {
       this.highlighted_ = '';
       this.highlightDescription_ = '';
       this.before_ = '';
@@ -104,9 +102,9 @@ export class ExtensionsCodeSectionElement extends
       return;
     }
 
-    const before = this.code.beforeHighlight;
-    const highlight = this.code.highlight;
-    const after = this.code.afterHighlight;
+    const before = this.code.source.beforeHighlight;
+    const highlight = this.code.source.highlight;
+    const after = this.code.source.afterHighlight;
 
     const linesBefore = before ? before.split('\n') : [];
     const linesAfter = after ? after.split('\n') : [];
@@ -168,7 +166,7 @@ export class ExtensionsCodeSectionElement extends
     // Find the position to show the highlight roughly in the middle.
     const targetTop = highlightTop - this.clientHeight * 0.5;
 
-    this.$['scroll-container'].scrollTo({top: targetTop});
+    this.$.scrollContainer.scrollTo({top: targetTop});
   }
 
   private getAccessibilityHighlightDescription_(

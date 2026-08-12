@@ -28,8 +28,8 @@
 #include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
+#include "components/safe_browsing/buildflags.h"
 #include "media/media_buildflags.h"
 
 class BackgroundModeManager;
@@ -64,11 +64,13 @@ class OriginTrialsSettingsStorage;
 namespace network {
 class NetworkQualityTracker;
 class SharedURLLoaderFactory;
-}
+}  // namespace network
 
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 namespace safe_browsing {
 class SafeBrowsingService;
 }
+#endif
 
 namespace signin {
 class ActivePrimaryAccountsMetricsRecorder;
@@ -78,8 +80,16 @@ namespace subresource_filter {
 class RulesetService;
 }
 
+namespace supervised_user {
+class DeviceParentalControls;
+}  // namespace supervised_user
+
 namespace variations {
 class VariationsService;
+}
+
+namespace activity_reporter {
+class ActivityReporter;
 }
 
 namespace component_updater {
@@ -105,23 +115,27 @@ class NetworkTimeTracker;
 namespace os_crypt_async {
 class KeyProvider;
 class OSCryptAsync;
-}
+}  // namespace os_crypt_async
 
 namespace policy {
 class ChromeBrowserPolicyConnector;
 class PolicyService;
-}
+}  // namespace policy
 
 namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
 class PrintPreviewDialogController;
-}
+}  // namespace printing
 
 namespace resource_coordinator {
 class ResourceCoordinatorParts;
 class TabManager;
-}
+}  // namespace resource_coordinator
+
+namespace ui {
+class UnownedUserDataHost;
+}  // namespace ui
 
 // NOT THREAD SAFE, call only from the main thread.
 // These functions shouldn't return NULL unless otherwise noted.
@@ -134,15 +148,17 @@ class BrowserProcess {
 
   virtual ~BrowserProcess();
 
+  // Returns the UnownedUserDataHost associated with this browser process. This
+  // is used to retrieve arbitrary features from the browser process without
+  // requiring BrowserProcess to have knowledge of them.
+  virtual ui::UnownedUserDataHost& GetUnownedUserDataHost() = 0;
+  virtual const ui::UnownedUserDataHost& GetUnownedUserDataHost() const = 0;
+
   // Invoked when the user is logging out/shutting down. When logging off we may
   // not have enough time to do a normal shutdown. This method is invoked prior
   // to normal shutdown and saves any state that must be saved before system
   // shutdown.
   virtual void EndSession() = 0;
-
-  // Ensures |local_state()| was flushed to disk and then posts |reply| back on
-  // the current sequence.
-  virtual void FlushLocalStateAndReply(base::OnceClosure reply) = 0;
 
   // Gets the manager for the various metrics-related services, constructing it
   // if necessary.
@@ -200,9 +216,17 @@ class BrowserProcess {
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
   virtual printing::PrintPreviewDialogController*
-      print_preview_dialog_controller() = 0;
+  print_preview_dialog_controller() = 0;
   virtual printing::BackgroundPrintingManager*
-      background_printing_manager() = 0;
+  background_printing_manager() = 0;
+
+  // Returns a handle to the manager of device parental controls, which
+  // are independent from the profile. This handler is member of browser process
+  // directly and cannot be moved to GlobalFeatures, because it is also required
+  // early to initialize the pref service on Android.
+  // Platforms not implementing device parental control return a no-op stub.
+  virtual supervised_user::DeviceParentalControls&
+  device_parental_controls() = 0;
 
 #if !BUILDFLAG(IS_ANDROID)
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
@@ -215,7 +239,12 @@ class BrowserProcess {
   //
   // Setting the locale updates a few core places where this information is
   // stored, but does not reload any resources or refresh any UI.
+
+  // DEPRECATED: Please use GetFeatures()->application_locale_storage()->Get().
+  // TODO(crbug.com/407832571): Replace existing usages and remove this.
   virtual const std::string& GetApplicationLocale() = 0;
+  // DEPRECATED: Please use GetFeatures()->application_locale_storage()->Set().
+  // TODO(crbug.com/407832571): Replace existing usages and remove this.
   virtual void SetApplicationLocale(const std::string& actual_locale) = 0;
 
   virtual DownloadStatusUpdater* download_status_updater() = 0;
@@ -233,26 +262,21 @@ class BrowserProcess {
   // on this platform (or this is a unit test).
   virtual StatusTray* status_tray() = 0;
 
+#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   // Returns the SafeBrowsing service.
   virtual safe_browsing::SafeBrowsingService* safe_browsing_service() = 0;
+#endif
 
   // Returns the service providing versioned storage for rules used by the Safe
   // Browsing subresource filter.
   virtual subresource_filter::RulesetService*
   subresource_filter_ruleset_service() = 0;
 
-  // Returns the service providing versioned storage for rules used by the
-  // Fingerprinting Protection subresource filter.
-  virtual subresource_filter::RulesetService*
-  fingerprinting_protection_ruleset_service() = 0;
-
   // Returns the StartupData which owns any pre-created objects in //chrome
   // before the full browser starts.
   virtual StartupData* startup_data() = 0;
 
-// TODO(crbug.com/40118868): Revisit once build flag switch of lacros-chrome is
-// complete.
-#if BUILDFLAG(IS_WIN) || (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
   // browser. Note that restart code will strip some of the command line keys
@@ -263,9 +287,13 @@ class BrowserProcess {
   virtual void StartAutoupdateTimer() = 0;
 #endif
 
+  virtual activity_reporter::ActivityReporter* activity_reporter() = 0;
+
   virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
+#if BUILDFLAG(IS_CHROMEOS)
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
+#endif
 
   virtual WebRtcLogUploader* webrtc_log_uploader() = 0;
 
@@ -284,18 +312,22 @@ class BrowserProcess {
   virtual resource_coordinator::ResourceCoordinatorParts*
   resource_coordinator_parts() = 0;
 
-#if !BUILDFLAG(IS_ANDROID)
   // Returns the object which keeps track of serial port permissions configured
   // through the policy engine.
   virtual SerialPolicyAllowedPorts* serial_policy_allowed_ports() = 0;
 
+#if !BUILDFLAG(IS_ANDROID)
   // Returns the object which maintains Human Interface Device (HID) system tray
   // icon.
   virtual HidSystemTrayIcon* hid_system_tray_icon() = 0;
+  virtual void set_hid_system_tray_icon_for_test(
+      std::unique_ptr<HidSystemTrayIcon> icon) = 0;
 
   // Returns the object which maintains Universal Serial Bus (USB) system tray
   // icon.
   virtual UsbSystemTrayIcon* usb_system_tray_icon() = 0;
+  virtual void set_usb_system_tray_icon_for_test(
+      std::unique_ptr<UsbSystemTrayIcon> icon) = 0;
 #endif
 
   // Obtain the browser instance of OSCryptAsync, which should be used for data

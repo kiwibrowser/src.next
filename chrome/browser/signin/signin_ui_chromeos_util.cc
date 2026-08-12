@@ -4,72 +4,68 @@
 
 #include "chrome/browser/signin/signin_ui_chromeos_util.h"
 
-#include "components/account_manager_core/account_manager_facade.h"
+#include "base/notreached.h"
 #include "components/signin/public/base/signin_metrics.h"
 
 namespace signin_ui_util {
 
-account_manager::AccountManagerFacade::AccountAdditionSource
-GetAddAccountSourceFromAccessPoint(signin_metrics::AccessPoint access_point) {
+account_manager::AccountAdditionSource GetAddAccountSourceFromAccessPoint(
+    signin_metrics::AccessPoint access_point) {
   switch (access_point) {
-    case signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
+    case signin_metrics::AccessPoint::kSettings:
+    case signin_metrics::AccessPoint::kSettingsYourSavedInfo:
+    case signin_metrics::AccessPoint::kSettingsAutofillAndPasswords:
+      return account_manager::AccountAdditionSource::
           kChromeSettingsTurnOnSyncButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
+    case signin_metrics::AccessPoint::kAvatarBubbleSignIn:
+      return account_manager::AccountAdditionSource::
           kAvatarBubbleTurnOnSyncAddAccount;
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeExtensionAddAccount;
-    case signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_RECENT_TABS:
-    case signin_metrics::AccessPoint::ACCESS_POINT_TAB_ORGANIZATION:
-    case signin_metrics::AccessPoint::ACCESS_POINT_SEARCH_COMPANION:
-    case signin_metrics::AccessPoint::ACCESS_POINT_WEBAUTHN_MODAL_DIALOG:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSyncPromoAddAccount;
-    case signin_metrics::AccessPoint::ACCESS_POINT_MENU:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeMenuTurnOnSync;
-    case signin_metrics::AccessPoint::ACCESS_POINT_AUTOFILL_DROPDOWN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
+    case signin_metrics::AccessPoint::kExtensions:
+      return account_manager::AccountAdditionSource::kChromeExtensionAddAccount;
+    case signin_metrics::AccessPoint::kBookmarkBubble:
+    case signin_metrics::AccessPoint::kPasswordBubble:
+    case signin_metrics::AccessPoint::kExtensionInstallBubble:
+    case signin_metrics::AccessPoint::kRecentTabs:
+    case signin_metrics::AccessPoint::kWebauthnModalDialog:
+      return account_manager::AccountAdditionSource::kChromeSyncPromoAddAccount;
+    case signin_metrics::AccessPoint::kMenu:
+      return account_manager::AccountAdditionSource::kChromeMenuTurnOnSync;
+    case signin_metrics::AccessPoint::kAutofillDropdown:
+      return account_manager::AccountAdditionSource::
           kChromeSigninPromoAddAccount;
+    case signin_metrics::AccessPoint::kGlicLaunchButton:
+      return account_manager::AccountAdditionSource::kGeminiInChromeReauth;
     default:
       NOTREACHED() << "Add account is requested from an unknown access point "
                    << static_cast<int>(access_point);
   }
 }
 
-account_manager::AccountManagerFacade::AccountAdditionSource
-GetAccountReauthSourceFromAccessPoint(
+account_manager::AccountAdditionSource GetAccountReauthSourceFromAccessPoint(
     signin_metrics::AccessPoint access_point) {
   switch (access_point) {
-    case signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
+    case signin_metrics::AccessPoint::kSettings:
+    case signin_metrics::AccessPoint::kSettingsYourSavedInfo:
+    case signin_metrics::AccessPoint::kSettingsAutofillAndPasswords:
+      return account_manager::AccountAdditionSource::
           kChromeSettingsReauthAccountButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
+    case signin_metrics::AccessPoint::kAvatarBubbleSignIn:
+      return account_manager::AccountAdditionSource::
           kAvatarBubbleReauthAccountButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeExtensionReauth;
-    case signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_RECENT_TABS:
-    case signin_metrics::AccessPoint::ACCESS_POINT_TAB_ORGANIZATION:
-    case signin_metrics::AccessPoint::ACCESS_POINT_SEARCH_COMPANION:
-    case signin_metrics::AccessPoint::ACCESS_POINT_WEBAUTHN_MODAL_DIALOG:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSyncPromoReauth;
-    case signin_metrics::AccessPoint::ACCESS_POINT_WEB_SIGNIN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kContentAreaReauth;
-    case signin_metrics::AccessPoint::ACCESS_POINT_MENU:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeMenuTurnOnSync;
+    case signin_metrics::AccessPoint::kExtensions:
+      return account_manager::AccountAdditionSource::kChromeExtensionReauth;
+    case signin_metrics::AccessPoint::kBookmarkBubble:
+    case signin_metrics::AccessPoint::kPasswordBubble:
+    case signin_metrics::AccessPoint::kExtensionInstallBubble:
+    case signin_metrics::AccessPoint::kRecentTabs:
+    case signin_metrics::AccessPoint::kWebauthnModalDialog:
+      return account_manager::AccountAdditionSource::kChromeSyncPromoReauth;
+    case signin_metrics::AccessPoint::kWebSignin:
+      return account_manager::AccountAdditionSource::kContentAreaReauth;
+    case signin_metrics::AccessPoint::kMenu:
+      return account_manager::AccountAdditionSource::kChromeMenuTurnOnSync;
+    case signin_metrics::AccessPoint::kGlicLaunchButton:
+      return account_manager::AccountAdditionSource::kGeminiInChromeReauth;
     default:
       NOTREACHED() << "Reauth is requested from an unknown access point "
                    << static_cast<int>(access_point);

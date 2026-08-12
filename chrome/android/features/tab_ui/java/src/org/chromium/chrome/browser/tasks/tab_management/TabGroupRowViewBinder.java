@@ -6,18 +6,21 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.CLUSTER_DATA;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.COLOR_INDEX;
-import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.CREATION_MILLIS;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.DELETE_RUNNABLE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.DISPLAY_AS_SHARED;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.LEAVE_RUNNABLE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.OPEN_RUNNABLE;
+import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.ROW_CLICK_RUNNABLE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.SHARED_IMAGE_TILES_VIEW;
+import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.TIMESTAMP_EVENT;
 import static org.chromium.chrome.browser.tasks.tab_management.TabGroupRowProperties.TITLE_DATA;
 
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Forwards changed property values to the view. */
+@NullMarked
 public class TabGroupRowViewBinder {
     /** Propagates one key from the model to the view. */
     public static void bind(PropertyModel model, TabGroupRowView view, PropertyKey propertyKey) {
@@ -29,8 +32,8 @@ public class TabGroupRowViewBinder {
             view.setColorIndex(model.get(COLOR_INDEX));
         } else if (propertyKey == TITLE_DATA) {
             view.setTitleData(model.get(TITLE_DATA));
-        } else if (propertyKey == CREATION_MILLIS) {
-            view.setCreationMillis(model.get(CREATION_MILLIS));
+        } else if (propertyKey == TIMESTAMP_EVENT) {
+            view.setTimestampEvent(model.get(TIMESTAMP_EVENT));
         } else if (propertyKey == OPEN_RUNNABLE
                 || propertyKey == DELETE_RUNNABLE
                 || propertyKey == LEAVE_RUNNABLE) {
@@ -38,6 +41,8 @@ public class TabGroupRowViewBinder {
                     model.get(OPEN_RUNNABLE),
                     model.get(DELETE_RUNNABLE),
                     model.get(LEAVE_RUNNABLE));
+        } else if (propertyKey == ROW_CLICK_RUNNABLE) {
+            view.setRowClickRunnable(model.get(ROW_CLICK_RUNNABLE));
         } else if (propertyKey == SHARED_IMAGE_TILES_VIEW) {
             view.setSharedImageTilesView(model.get(SHARED_IMAGE_TILES_VIEW));
         }

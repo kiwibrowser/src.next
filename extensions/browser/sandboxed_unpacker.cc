@@ -2,31 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "extensions/browser/sandboxed_unpacker.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/containers/to_vector.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
-#include "base/json/json_string_value_serializer.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/timer/elapsed_timer.h"
@@ -44,6 +44,7 @@
 #include "extensions/browser/install/crx_install_error.h"
 #include "extensions/browser/install/sandboxed_unpacker_failure_reason.h"
 #include "extensions/browser/install_stage.h"
+#include "extensions/browser/json_file_sanitizer.h"
 #include "extensions/browser/ruleset_parse_result.h"
 #include "extensions/browser/verified_contents.h"
 #include "extensions/browser/zipfile_installer.h"
@@ -84,10 +85,11 @@ base::FilePath NormalizeFilePath(const base::FilePath& path) {
 }
 
 // Work horse for FindWritableTempLocation. Creates a temp file in the folder
-// tries to normalize the path.
+// and tries to normalize the path.
 bool VerifyWritableTempLocation(base::FilePath* temp_dir) {
-  if (temp_dir->empty())
+  if (temp_dir->empty()) {
     return false;
+  }
 
   base::FilePath temp_file;
   if (!base::CreateTemporaryFileInDir(*temp_dir, &temp_file)) {
@@ -95,18 +97,10 @@ bool VerifyWritableTempLocation(base::FilePath* temp_dir) {
     return false;
   }
 
-  // NormalizeFilePath requires a non-empty file, so write some data.
-  // If you change the exit points of this function please make sure all
-  // exit points delete this temp file!
-  if (!base::WriteFile(temp_file, ".")) {
-    base::DeleteFile(temp_file);
-    return false;
-  }
-
-  *temp_dir = NormalizeFilePath(temp_file).DirName();
   // Clean up the temp file.
   base::DeleteFile(temp_file);
 
+  *temp_dir = NormalizeFilePath(*temp_dir);
   return true;
 }
 
@@ -131,9 +125,9 @@ bool FindWritableTempLocation(const base::FilePath& extensions_dir,
   if (VerifyWritableTempLocation(temp_dir)) {
     return true;
   }
-  // Neither paths is link free chances are good installation will fail.
-  LOG(ERROR) << "Both the %TEMP% folder and the profile seem to be on "
-             << "remote drives or read-only. Installation can not complete!";
+  // Neither path is writable, installation will fail.
+  LOG(ERROR) << "Both the %TEMP% folder and the profile seem to be read-only. "
+                "Installation can not complete!";
   return false;
 }
 
@@ -179,7 +173,6 @@ class SandboxedUnpacker::IOThreadState {
   void CleanUp() {
     image_sanitizer_.reset();
     json_file_sanitizer_.reset();
-    json_parser_.reset();
   }
 
   data_decoder::DataDecoder* GetDataDecoder() { return &data_decoder_; }
@@ -197,48 +190,24 @@ class SandboxedUnpacker::IOThreadState {
   }
 
   void CreateJsonFileSanitizer(
-      const std::set<base::FilePath>& message_catalog_paths,
+      std::set<base::FilePath> message_catalog_paths,
       JsonFileSanitizer::Callback callback,
       const scoped_refptr<base::SequencedTaskRunner>& unpacker_io_task_runner) {
     json_file_sanitizer_ = JsonFileSanitizer::CreateAndStart(
-        GetDataDecoder(), message_catalog_paths, std::move(callback),
+        std::move(message_catalog_paths), std::move(callback),
         unpacker_io_task_runner);
-  }
-
-  data_decoder::mojom::JsonParser* GetJsonParserPtr(
-      SandboxedUnpacker* unpacker) {
-    if (!json_parser_) {
-      data_decoder_.GetService()->BindJsonParser(
-          json_parser_.BindNewPipeAndPassReceiver());
-      json_parser_.set_disconnect_handler(base::BindOnce(
-          &SandboxedUnpacker::ReportFailure, unpacker,
-          SandboxedUnpackerFailureReason::
-              UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL,
-          l10n_util::GetStringFUTF16(
-              IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
-              u"UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL") +
-              u". " +
-              l10n_util::GetStringUTF16(
-                  IDS_EXTENSION_INSTALL_PROCESS_CRASHED)));
-    }
-
-    return json_parser_.get();
   }
 
  private:
   // Controls our own lazily started, isolated instance of the Data Decoder
   // service so that multiple decode operations related to this
-  // SandboxedUnpacker can share a single instance.
+  // SandboxedUnpacker can share a single instance. Only used for image
+  // sanitization.
   data_decoder::DataDecoder data_decoder_;
-
-  // The JSONParser remote from the data decoder service.
-  mojo::Remote<data_decoder::mojom::JsonParser> json_parser_;
 
   // The ImageSanitizer used to clean-up images.
   std::unique_ptr<ImageSanitizer> image_sanitizer_;
 
-  // Used during the message catalog rewriting phase to sanitize the extension
-  // provided message catalogs.
   std::unique_ptr<JsonFileSanitizer> json_file_sanitizer_;
 };
 
@@ -256,8 +225,7 @@ void SandboxedUnpackerClient::ShouldComputeHashesForOffWebstoreExtension(
 
 void SandboxedUnpackerClient::GetContentVerifierKey(
     base::OnceCallback<void(ContentVerifierKey)> callback) {
-  std::move(callback).Run(ContentVerifierKey(kWebstoreSignaturesPublicKey,
-                                             kWebstoreSignaturesPublicKeySize));
+  std::move(callback).Run(kWebstoreSignaturesPublicKey);
 }
 
 SandboxedUnpacker::ScopedVerifierFormatOverrideForTest::
@@ -286,8 +254,8 @@ SandboxedUnpacker::SandboxedUnpacker(
       format_verifier_override_(g_verifier_format_override_for_test),
       unpacker_io_task_runner_(unpacker_io_task_runner),
       io_thread_state_(std::make_unique<IOThreadState>()) {
-  // Tracking for crbug.com/692069. The location must be valid. If it's invalid,
-  // the utility process kills itself for a bad IPC.
+  // Tracking for crbug.com/41301792. The location must be valid. If it's
+  // invalid, the utility process kills itself for a bad IPC.
   CHECK_GT(location, mojom::ManifestLocation::kInvalidLocation);
   CHECK_LE(location, mojom::ManifestLocation::kMaxValue);
 }
@@ -327,8 +295,9 @@ void SandboxedUnpacker::StartWithCrx(const CRXFileInfo& crx_info) {
     expected_hash = base::ToLowerASCII(crx_info.expected_hash);
   }
 
-  if (!CreateTempDirectory())
+  if (!CreateTempDirectory()) {
     return;  // ReportFailure() already called.
+  }
 
   // Initialize the path that will eventually contain the unpacked extension.
   extension_root_ = temp_dir_.GetPath().AppendASCII(kTempExtensionName);
@@ -382,8 +351,9 @@ void SandboxedUnpacker::StartWithDirectory(const ExtensionId& extension_id,
 
   extension_id_ = extension_id;
   public_key_ = public_key;
-  if (!CreateTempDirectory())
+  if (!CreateTempDirectory()) {
     return;  // ReportFailure() already called.
+  }
 
   extension_root_ = temp_dir_.GetPath().AppendASCII(kTempExtensionName);
 
@@ -460,8 +430,7 @@ void SandboxedUnpacker::OnVerifiedContentsUncompressed(
   }
   // Make a copy, since |result| may store data in shared memory, accessible by
   // some other processes.
-  std::vector<uint8_t> verified_contents(result->data(),
-                                         result->data() + result->size());
+  std::vector<uint8_t> verified_contents = base::ToVector(*result);
 
   client_->GetContentVerifierKey(
       base::BindOnce(&SandboxedUnpacker::StoreVerifiedContentsInExtensionDir,
@@ -516,49 +485,49 @@ void SandboxedUnpacker::Unpack(const base::FilePath& directory) {
 
   base::FilePath manifest_path = extension_root_.Append(kManifestFilename);
 
-  ParseJsonFile(manifest_path,
-                base::BindOnce(&SandboxedUnpacker::ReadManifestDone, this));
+  // This calls `ReadManifestDone()` on completion.
+  ParseJsonFile(manifest_path);
 }
 
 void SandboxedUnpacker::ReadManifestDone(
-    std::optional<base::Value> manifest,
-    const std::optional<std::string>& error) {
+    base::expected<base::Value, std::u16string> result) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  if (error) {
-    ReportUnpackExtensionFailed(*error);
+  if (!result.has_value()) {
+    ReportUnpackExtensionFailed(result.error());
     return;
   }
-  if (!manifest || !manifest->is_dict()) {
+  const base::DictValue* dict = result->GetIfDict();
+  if (!dict) {
     ReportUnpackExtensionFailed(manifest_errors::kInvalidManifest);
     return;
   }
 
-  std::string error_msg;
+  std::u16string error;
   scoped_refptr<Extension> extension(
-      Extension::Create(extension_root_, location_, manifest->GetDict(),
-                        creation_flags_, extension_id_, &error_msg));
+      Extension::Create(extension_root_, location_, *dict, creation_flags_,
+                        extension_id_, &error));
   if (!extension) {
-    ReportUnpackExtensionFailed(error_msg);
+    ReportUnpackExtensionFailed(error);
     return;
   }
 
   std::vector<InstallWarning> warnings;
-  if (!file_util::ValidateExtension(extension.get(), &error_msg, &warnings)) {
-    ReportUnpackExtensionFailed(error_msg);
+  if (!file_util::ValidateExtension(extension.get(), &error, &warnings)) {
+    ReportUnpackExtensionFailed(error);
     return;
   }
   extension->AddInstallWarnings(std::move(warnings));
 
-  UnpackExtensionSucceeded(std::move(manifest.value()).TakeDict());
+  UnpackExtensionSucceeded(std::move(result).value().TakeDict());
 }
 
-void SandboxedUnpacker::UnpackExtensionSucceeded(base::Value::Dict manifest) {
+void SandboxedUnpacker::UnpackExtensionSucceeded(base::DictValue manifest) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
 
-  std::optional<base::Value::Dict> final_manifest(
-      RewriteManifestFile(manifest));
-  if (!final_manifest)
+  std::optional<base::DictValue> final_manifest(RewriteManifestFile(manifest));
+  if (!final_manifest) {
     return;
+  }
 
   // Create an extension object that refers to the temporary location the
   // extension was unpacked to. We use this until the extension is finally
@@ -581,13 +550,14 @@ void SandboxedUnpacker::UnpackExtensionSucceeded(base::Value::Dict manifest) {
     return;
   }
 
+  std::u16string utf16_error;
   extension_ =
       Extension::Create(extension_root_, location_, final_manifest.value(),
-                        Extension::REQUIRE_KEY | creation_flags_, &utf8_error);
+                        Extension::REQUIRE_KEY | creation_flags_, &utf16_error);
 
   if (!extension_.get()) {
     ReportFailure(SandboxedUnpackerFailureReason::INVALID_MANIFEST,
-                  u"Manifest is invalid: " + ASCIIToUTF16(utf8_error));
+                  u"Manifest is invalid: " + utf16_error);
     return;
   }
 
@@ -621,8 +591,9 @@ data_decoder::DataDecoder* SandboxedUnpacker::GetDataDecoder() {
 
 void SandboxedUnpacker::OnImageDecoded(const base::FilePath& path,
                                        SkBitmap image) {
-  if (path == install_icon_path_)
+  if (path == install_icon_path_) {
     install_icon_ = image;
+  }
 }
 
 void SandboxedUnpacker::OnImageSanitizationDone(
@@ -678,8 +649,7 @@ void SandboxedUnpacker::OnImageSanitizationDone(
 void SandboxedUnpacker::ReadMessageCatalogs() {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
   if (LocaleInfo::GetDefaultLocale(extension_.get()).empty()) {
-    MessageCatalogsSanitized(JsonFileSanitizer::Status::kSuccess,
-                             std::string());
+    MessageCatalogsSanitized(base::ok());
     return;
   }
 
@@ -696,6 +666,7 @@ void SandboxedUnpacker::ReadMessageCatalogs() {
 void SandboxedUnpacker::SanitizeMessageCatalogs(
     const std::set<base::FilePath>& message_catalog_paths) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
+
   io_thread_state_->CreateJsonFileSanitizer(
       message_catalog_paths,
       base::BindOnce(&SandboxedUnpacker::MessageCatalogsSanitized, this),
@@ -703,10 +674,9 @@ void SandboxedUnpacker::SanitizeMessageCatalogs(
 }
 
 void SandboxedUnpacker::MessageCatalogsSanitized(
-    JsonFileSanitizer::Status status,
-    const std::string& error_msg) {
+    base::expected<void, JsonFileSanitizer::Error> result) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  if (status == JsonFileSanitizer::Status::kSuccess) {
+  if (result.has_value()) {
     IndexAndPersistJSONRulesetsIfNeeded();
     return;
   }
@@ -714,27 +684,25 @@ void SandboxedUnpacker::MessageCatalogsSanitized(
   SandboxedUnpackerFailureReason failure_reason =
       SandboxedUnpackerFailureReason::UNPACKER_CLIENT_FAILED;
   std::u16string error;
-  switch (status) {
-    case JsonFileSanitizer::Status::kFileReadError:
-    case JsonFileSanitizer::Status::kDecodingError:
+  switch (result.error()) {
+    case JsonFileSanitizer::Error::kFileReadError:
+    case JsonFileSanitizer::Error::kDecodingError:
       failure_reason = SandboxedUnpackerFailureReason::INVALID_CATALOG_DATA;
       error = l10n_util::GetStringFUTF16(IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
                                          u"INVALID_CATALOG_DATA");
       break;
-    case JsonFileSanitizer::Status::kSerializingError:
+    case JsonFileSanitizer::Error::kSerializingError:
       failure_reason =
           SandboxedUnpackerFailureReason::ERROR_SERIALIZING_CATALOG;
       error = l10n_util::GetStringFUTF16(IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
                                          u"ERROR_SERIALIZING_CATALOG");
       break;
-    case JsonFileSanitizer::Status::kFileDeleteError:
-    case JsonFileSanitizer::Status::kFileWriteError:
+    case JsonFileSanitizer::Error::kFileDeleteError:
+    case JsonFileSanitizer::Error::kFileWriteError:
       failure_reason = SandboxedUnpackerFailureReason::ERROR_SAVING_CATALOG;
       error = l10n_util::GetStringFUTF16(IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
                                          u"ERROR_SAVING_CATALOG");
       break;
-    default:
-      NOTREACHED();
   }
 
   ReportFailure(failure_reason, error);
@@ -767,8 +735,9 @@ void SandboxedUnpacker::OnJSONRulesetsIndexed(RulesetParseResult result) {
     return;
   }
 
-  if (!result.warnings.empty())
+  if (!result.warnings.empty()) {
     extension_->AddInstallWarnings(std::move(result.warnings));
+  }
 
   ruleset_install_prefs_ = std::move(result.ruleset_install_prefs);
 
@@ -814,16 +783,12 @@ void SandboxedUnpacker::MaybeComputeHashes(bool should_compute) {
   ReportSuccess();
 }
 
-data_decoder::mojom::JsonParser* SandboxedUnpacker::GetJsonParserPtr() {
+void SandboxedUnpacker::ReportUnpackExtensionFailed(
+    const std::u16string& error) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  return io_thread_state_->GetJsonParserPtr(this);
-}
-
-void SandboxedUnpacker::ReportUnpackExtensionFailed(std::string_view error) {
-  DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  ReportFailure(SandboxedUnpackerFailureReason::UNPACKER_CLIENT_FAILED,
-                l10n_util::GetStringFUTF16(IDS_EXTENSION_PACKAGE_ERROR_MESSAGE,
-                                           base::UTF8ToUTF16(error)));
+  ReportFailure(
+      SandboxedUnpackerFailureReason::UNPACKER_CLIENT_FAILED,
+      l10n_util::GetStringFUTF16(IDS_EXTENSION_PACKAGE_ERROR_MESSAGE, error));
 }
 
 std::u16string SandboxedUnpacker::FailureReasonToString16(
@@ -1012,7 +977,7 @@ void SandboxedUnpacker::ReportSuccess() {
   // Client takes ownership of temporary directory, manifest, and extension.
   client_->OnUnpackSuccess(
       temp_dir_.Take(), extension_root_,
-      std::make_unique<base::Value::Dict>(std::move(manifest_.value())),
+      std::make_unique<base::DictValue>(std::move(manifest_.value())),
       extension_.get(), install_icon_, std::move(ruleset_install_prefs_));
 
   // Interestingly, the C++ standard doesn't guarantee that a moved-from vector
@@ -1024,15 +989,15 @@ void SandboxedUnpacker::ReportSuccess() {
   Cleanup();
 }
 
-std::optional<base::Value::Dict> SandboxedUnpacker::RewriteManifestFile(
-    const base::Value::Dict& manifest) {
+std::optional<base::DictValue> SandboxedUnpacker::RewriteManifestFile(
+    const base::DictValue& manifest) {
   constexpr int64_t kMaxFingerprintSize = 1024;
 
   // Add the public key extracted earlier to the parsed manifest and overwrite
   // the original manifest. We do this to ensure the manifest doesn't contain an
   // exploitable bug that could be used to compromise the browser.
   DCHECK(!public_key_.empty());
-  base::Value::Dict final_manifest = manifest.Clone();
+  base::DictValue final_manifest = manifest.Clone();
   final_manifest.Set(manifest_keys::kPublicKey, public_key_);
 
   {
@@ -1045,10 +1010,9 @@ std::optional<base::Value::Dict> SandboxedUnpacker::RewriteManifestFile(
     }
   }
 
-  std::string manifest_json;
-  JSONStringValueSerializer serializer(&manifest_json);
-  serializer.set_pretty_print(true);
-  if (!serializer.Serialize(final_manifest)) {
+  std::optional<std::string> manifest_json = base::WriteJsonWithOptions(
+      final_manifest, base::JSONWriter::OPTIONS_PRETTY_PRINT);
+  if (!manifest_json) {
     // Error serializing manifest.json.
     ReportFailure(
         SandboxedUnpackerFailureReason::ERROR_SERIALIZING_MANIFEST_JSON,
@@ -1058,7 +1022,7 @@ std::optional<base::Value::Dict> SandboxedUnpacker::RewriteManifestFile(
   }
 
   base::FilePath manifest_path = extension_root_.Append(kManifestFilename);
-  if (!base::WriteFile(manifest_path, manifest_json)) {
+  if (!base::WriteFile(manifest_path, *manifest_json)) {
     // Error saving manifest.json.
     ReportFailure(
         SandboxedUnpackerFailureReason::ERROR_SAVING_MANIFEST_JSON,
@@ -1080,20 +1044,21 @@ void SandboxedUnpacker::Cleanup() {
   io_thread_state_->CleanUp();
 }
 
-void SandboxedUnpacker::ParseJsonFile(
-    const base::FilePath& path,
-    data_decoder::mojom::JsonParser::ParseCallback callback) {
+void SandboxedUnpacker::ParseJsonFile(const base::FilePath& path) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
   std::string contents;
   if (!base::ReadFileToString(path, &contents)) {
-    std::move(callback).Run(
-        /*value=*/std::nullopt,
-        /*error=*/std::optional<std::string>("File doesn't exist."));
+    ReadManifestDone(base::unexpected(u"File doesn't exist."));
     return;
   }
 
-  GetJsonParserPtr()->Parse(contents, base::JSON_PARSE_CHROMIUM_EXTENSIONS,
-                            std::move(callback));
+  base::JSONReader::Result result =
+      base::JSONReader::ReadAndReturnValueWithError(
+          contents, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+  ReadManifestDone(std::move(result).transform_error(
+      [](const base::JSONReader::Error& error) {
+        return base::UTF8ToUTF16(error.ToString());
+      }));
 }
 
 }  // namespace extensions

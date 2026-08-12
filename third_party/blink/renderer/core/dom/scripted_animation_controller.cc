@@ -45,14 +45,14 @@ namespace blink {
 bool ScriptedAnimationController::InsertToPerFrameEventsMap(
     const Event* event) {
   HashSet<const StringImpl*>& set =
-      per_frame_events_.insert(event->target(), HashSet<const StringImpl*>())
+      per_frame_events_.insert(event->RawTarget(), HashSet<const StringImpl*>())
           .stored_value->value;
   return set.insert(event->type().Impl()).is_new_entry;
 }
 
 void ScriptedAnimationController::EraseFromPerFrameEventsMap(
     const Event* event) {
-  EventTarget* target = event->target();
+  EventTarget* target = event->RawTarget();
   PerFrameEventsMap::iterator it = per_frame_events_.find(target);
   if (it != per_frame_events_.end()) {
     HashSet<const StringImpl*>& set = it->value;
@@ -83,8 +83,8 @@ void ScriptedAnimationController::ContextLifecycleStateChanged(
     ScheduleAnimationIfNeeded();
 }
 
-void ScriptedAnimationController::DispatchEventsAndCallbacksForPrinting() {
-  DispatchEvents(WTF::BindRepeating([](Event* event) {
+void ScriptedAnimationController::DispatchMediaQueryListEventsAndCallbacks() {
+  DispatchEvents(BindRepeating([](Event* event) {
     return event->InterfaceName() ==
            event_interface_names::kMediaQueryListEvent;
   }));
@@ -94,7 +94,7 @@ void ScriptedAnimationController::DispatchEventsAndCallbacksForPrinting() {
 void ScriptedAnimationController::ScheduleVideoFrameCallbacksExecution(
     ExecuteVfcCallback execute_vfc_callback) {
   vfc_execution_queue_.push_back(std::move(execute_vfc_callback));
-  ScheduleAnimationIfNeeded();
+  ScheduleAnimationIfNeeded(cc::BeginMainFrameReason::kVideoFrameCallback);
 }
 
 ScriptedAnimationController::CallbackId
@@ -104,7 +104,7 @@ ScriptedAnimationController::RegisterFrameCallback(FrameCallback* callback) {
     return 0;
   }
   CallbackId id = callback_collection_.RegisterFrameCallback(callback);
-  ScheduleAnimationIfNeeded();
+  ScheduleAnimationIfNeeded(cc::BeginMainFrameReason::kRAF);
   return id;
 }
 
@@ -146,7 +146,7 @@ bool ScriptedAnimationController::DispatchEvents(DispatchFilter filter) {
 
   for (const auto& event : events) {
     did_dispatch = true;
-    EventTarget* event_target = event->target();
+    EventTarget* event_target = event->RawTarget();
     // FIXME: we should figure out how to make dispatchEvent properly virtual to
     // avoid special casting window.
     // FIXME: We should not fire events for nodes that are no longer in the
@@ -211,8 +211,8 @@ void ScriptedAnimationController::EnqueueTask(base::OnceClosure task) {
 }
 
 void ScriptedAnimationController::EnqueueEvent(Event* event) {
-  event->async_task_context()->Schedule(event->target()->GetExecutionContext(),
-                                        event->type());
+  event->async_task_context()->Schedule(
+      event->RawTarget()->GetExecutionContext(), event->type());
   event_queue_.push_back(event);
   ScheduleAnimationIfNeeded();
 }
@@ -226,9 +226,8 @@ void ScriptedAnimationController::EnqueuePerFrameEvent(Event* event) {
 void ScriptedAnimationController::EnqueueMediaQueryChangeListeners(
     HeapVector<Member<MediaQueryListListener>>& listeners) {
   for (const auto& listener : listeners) {
-    if (!media_query_list_listeners_set_.Contains(listener)) {
+    if (media_query_list_listeners_set_.insert(listener).is_new_entry) {
       media_query_list_listeners_.push_back(listener);
-      media_query_list_listeners_set_.insert(listener);
     }
   }
   DCHECK_EQ(media_query_list_listeners_.size(),
@@ -236,7 +235,8 @@ void ScriptedAnimationController::EnqueueMediaQueryChangeListeners(
   ScheduleAnimationIfNeeded();
 }
 
-void ScriptedAnimationController::ScheduleAnimationIfNeeded() {
+void ScriptedAnimationController::ScheduleAnimationIfNeeded(
+    cc::BeginMainFrameReason reason) {
   if (!GetExecutionContext() || GetExecutionContext()->IsContextPaused())
     return;
 
@@ -245,7 +245,7 @@ void ScriptedAnimationController::ScheduleAnimationIfNeeded() {
     return;
 
   if (HasScheduledFrameTasks()) {
-    frame->View()->ScheduleAnimation();
+    frame->View()->ScheduleAnimation(reason);
     return;
   }
 }

@@ -5,9 +5,10 @@
 #include "chrome/browser/signin/signin_util.h"
 
 #include <memory>
+#include <string_view>
 
 #include "base/barrier_closure.h"
-#include "base/containers/contains.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -16,18 +17,17 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/profile_management/profile_management_features.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
-#include "chrome/browser/policy/cloud/user_policy_signin_service_internal.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/sync/sync_service_factory.h"
+#include "chrome/browser/ui/webui/signin/signin_utils_desktop.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/google/core/common/google_util.h"
 #include "components/policy/core/browser/signin/profile_separation_policies.h"
 #include "components/prefs/pref_service.h"
@@ -36,15 +36,29 @@
 #include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_managed_status_finder.h"
 #include "components/signin/public/identity_manager/accounts_mutator.h"
+#include "components/signin/public/identity_manager/tribool.h"
+#include "components/sync/base/user_selectable_type.h"
+#include "components/sync/service/sync_service.h"
+#include "components/sync/service/sync_user_settings.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "net/cookies/canonical_cookie.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
+#include "components/strings/grit/components_strings.h"
+#include "ui/base/interaction/element_identifier.h"
+#include "ui/base/models/dialog_model.h"
+#endif  // BUILDFLAG(IS_LINUX) ||  BUILDFLAG(IS_MAC) ||  BUILDFLAG(IS_WIN)
+
 namespace signin_util {
+
 namespace {
+
 enum ForceSigninPolicyCache {
   NOT_CACHED = 0,
   ENABLE,
@@ -57,6 +71,9 @@ void SetForceSigninPolicy(bool enable) {
 
 }  // namespace
 
+DEFINE_ELEMENT_IDENTIFIER_VALUE(kSigninErrorDialogId);
+DEFINE_ELEMENT_IDENTIFIER_VALUE(kSigninErrorDialogOkButtonId);
+
 ScopedForceSigninSetterForTesting::ScopedForceSigninSetterForTesting(
     bool enable) {
   SetForceSigninForTesting(enable);  // IN-TEST
@@ -66,7 +83,7 @@ ScopedForceSigninSetterForTesting::~ScopedForceSigninSetterForTesting() {
   ResetForceSigninForTesting();  // IN-TEST
 }
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
 CookiesMover::CookiesMover(base::WeakPtr<Profile> source_profile,
                            base::WeakPtr<Profile> destination_profile,
                            base::OnceCallback<void()> callback)
@@ -97,7 +114,7 @@ void CookiesMover::StartMovingCookies() {
   source_profile_->GetDefaultStoragePartition()
       ->GetCookieManagerForBrowserProcess()
       ->GetCookieList(url_, net::CookieOptions::MakeAllInclusive(),
-                      net::CookiePartitionKeyCollection::Todo(),
+                      net::CookiePartitionKeyCollection(),
                       base::BindOnce(&CookiesMover::OnCookiesReceived,
                                      weak_pointer_factory_.GetWeakPtr()));
 }
@@ -133,15 +150,16 @@ void CookiesMover::OnCookiesReceived(
 void CookiesMover::OnCookiesMoved() {
   std::move(callback_).Run();
 }
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
 
 bool IsForceSigninEnabled() {
   if (g_is_force_signin_enabled_cache == NOT_CACHED) {
     PrefService* prefs = g_browser_process->local_state();
-    if (prefs)
+    if (prefs) {
       SetForceSigninPolicy(prefs->GetBoolean(prefs::kForceBrowserSignin));
-    else
+    } else {
       return false;
+    }
   }
   return (g_is_force_signin_enabled_cache == ENABLE);
 }
@@ -155,13 +173,11 @@ void ResetForceSigninForTesting() {
 }
 
 bool IsProfileDeletionAllowed(Profile* profile) {
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  return !profile->IsMainProfile();
-#elif BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return false;
 #else
   return true;
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -250,7 +266,7 @@ bool IsAccountExemptedFromEnterpriseProfileSeparation(
   const std::string domain = gaia::ExtractDomainName(email);
   const auto& allowed_domains = profile->GetPrefs()->GetList(
       prefs::kProfileSeparationDomainExceptionList);
-  return base::Contains(allowed_domains, base::Value(domain));
+  return allowed_domains.contains(domain);
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
@@ -268,7 +284,7 @@ void RecordEnterpriseProfileCreationUserChoice(bool enforced_by_policy,
 PrimaryAccountError SetPrimaryAccountWithInvalidToken(
     Profile* profile,
     const std::string& user_email,
-    const std::string& gaia_id,
+    const GaiaId& gaia_id,
     bool is_under_advanced_protection,
     signin_metrics::AccessPoint access_point,
     signin_metrics::SourceForRefreshTokenOperation source) {
@@ -296,7 +312,7 @@ PrimaryAccountError SetPrimaryAccountWithInvalidToken(
 
   auto set_primary_account_result =
       identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
-          account_id, signin::ConsentLevel::kSignin);
+          account_id, signin::ConsentLevel::kSignin, access_point);
   DVLOG(1) << "Operation of setting account id <" << account_id.ToString()
            << "> received the following result: "
            << static_cast<int>(set_primary_account_result);
@@ -314,6 +330,10 @@ bool IsSigninPending(signin::IdentityManager* identity_manager) {
 
 SignedInState GetSignedInState(
     const signin::IdentityManager* identity_manager) {
+  if (!identity_manager) {
+    return SignedInState::kSignedOut;
+  }
+
   if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
     if (identity_manager->HasAccountWithRefreshTokenInPersistentErrorState(
             identity_manager->GetPrimaryAccountId(
@@ -323,19 +343,10 @@ SignedInState GetSignedInState(
     return SignedInState::kSyncing;
   }
 
-  // If explicit browser signin is not enabled, this returns `kSignedIn`
-  // regardless of the error state of the refresh token. There might for example
-  // be an error in the following two cases: (a) The account is managed. (b) The
-  // account is not managed, but the `SigninManager` has not been notified yet,
-  // which would sign the user out.
-  //
-  // If the error state of the primary account is relevant, then it needs to be
-  // checked in addition to this state.
   if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
     return identity_manager->HasAccountWithRefreshTokenInPersistentErrorState(
                identity_manager->GetPrimaryAccountId(
-                   signin::ConsentLevel::kSignin)) &&
-                   switches::IsExplicitBrowserSigninUIOnDesktopEnabled()
+                   signin::ConsentLevel::kSignin))
                ? SignedInState::kSignInPending
                : SignedInState::kSignedIn;
   }
@@ -346,6 +357,297 @@ SignedInState GetSignedInState(
   }
 
   return SignedInState::kSignedOut;
+}
+
+std::string SignedInStateToString(SignedInState state) {
+  switch (state) {
+    case SignedInState::kSignedOut:
+      return "Signed Out";
+    case SignedInState::kSignedIn:
+      return "Signed In";
+    case SignedInState::kSyncing:
+      return "Syncing";
+    case SignedInState::kSignInPending:
+      return "Sign-in Pending";
+    case SignedInState::kWebOnlySignedIn:
+      return "Web Only Signed In";
+    case SignedInState::kSyncPaused:
+      return "Sync Paused";
+    default:
+      NOTREACHED();
+  }
+}
+
+bool IsSyncingUserSelectableTypesAllowedByPolicy(
+    const syncer::SyncService* sync_service,
+    const syncer::UserSelectableTypeSet& types) {
+  if (!sync_service) {
+    return false;
+  }
+
+  if (sync_service->HasDisableReason(
+          syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY)) {
+    return false;
+  }
+
+  for (auto type : types) {
+    if (sync_service->GetUserSettings()->IsTypeManagedByPolicy(type) ||
+        sync_service->GetUserSettings()->IsTypeManagedByCustodian(type)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+bool HasExplicitlyDisabledHistorySync(
+    const syncer::SyncService* sync_service,
+    const signin::IdentityManager* identity_manager) {
+  switch (GetSignedInState(identity_manager)) {
+    case SignedInState::kSignedOut:
+    case SignedInState::kWebOnlySignedIn:
+      // If the user is signed out, we cannot know if the toggles were
+      // interacted with or not.
+      NOTREACHED();
+    case SignedInState::kSignedIn:
+    case SignedInState::kSyncing:
+    case SignedInState::kSignInPending:
+    case SignedInState::kSyncPaused:
+      break;
+  }
+
+  if (!sync_service) {
+    return false;
+  }
+
+  for (auto type :
+       {syncer::UserSelectableType::kHistory, syncer::UserSelectableType::kTabs,
+        syncer::UserSelectableType::kSavedTabGroups}) {
+    if (sync_service->GetUserSettings()->GetTypePrefStateForAccount(type) ==
+        syncer::SyncUserSettings::UserSelectableTypePrefState::kDisabled) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+ShouldShowHistorySyncOptinResult ShouldShowHistorySyncOptinScreen(
+    Profile& profile) {
+  if (GetSignedInState(IdentityManagerFactory::GetForProfile(&profile)) !=
+      signin_util::SignedInState::kSignedIn) {
+    return ShouldShowHistorySyncOptinResult::kSkipUserNotSignedIn;
+  }
+
+  syncer::UserSelectableTypeSet required_types(
+      {syncer::UserSelectableType::kHistory,
+       syncer::UserSelectableType::kTabs});
+  syncer::SyncService* sync_service =
+      SyncServiceFactory::GetForProfile(&profile);
+  if (!IsSyncingUserSelectableTypesAllowedByPolicy(sync_service,
+                                                   required_types)) {
+    return ShouldShowHistorySyncOptinResult::kSkipSyncForbidden;
+  }
+
+  // Sync service must exist, otherwise the method would have exited already.
+  CHECK(sync_service);
+  // Note: Post migration these preferences will be set by a single
+  // settings toggle and are expected to have the same value.
+  bool all_types_enabled =
+      sync_service->GetUserSettings()->GetSelectedTypes().HasAll(
+          required_types);
+  if (all_types_enabled) {
+    return ShouldShowHistorySyncOptinResult::kSkipUserAlreadyOptedIn;
+  }
+
+  return ShouldShowHistorySyncOptinResult::kShow;
+}
+
+void EnableHistorySync(syncer::SyncService* sync_service) {
+  CHECK(sync_service);
+
+  sync_service->GetUserSettings()->SetSelectedType(
+      syncer::UserSelectableType::kHistory, /*is_type_on=*/true);
+  sync_service->GetUserSettings()->SetSelectedType(
+      syncer::UserSelectableType::kTabs, /*is_type_on=*/true);
+  sync_service->GetUserSettings()->SetSelectedType(
+      syncer::UserSelectableType::kSavedTabGroups, /*is_type_on=*/true);
+}
+
+bool IsValidAccessPointForHistoryOptinScreen(
+    signin_metrics::AccessPoint access_point) {
+  switch (access_point) {
+    case signin_metrics::AccessPoint::kExtensionInstallBubble:
+    case signin_metrics::AccessPoint::kBookmarkBubble:
+    case signin_metrics::AccessPoint::kRecentTabs:
+    case signin_metrics::AccessPoint::kCollaborationJoinTabGroup:
+    case signin_metrics::AccessPoint::kCollaborationShareTabGroup:
+    case signin_metrics::AccessPoint::kPasswordBubble:
+    case signin_metrics::AccessPoint::kAddressBubble:
+    case signin_metrics::AccessPoint::kSearchAIModeBubble:
+    case signin_metrics::AccessPoint::kIosAppBar:
+    case signin_metrics::AccessPoint::kIosGeminiButtonToolbar:
+    case signin_metrics::AccessPoint::kIndigo:
+    case signin_metrics::AccessPoint::kLevelUp:
+      return false;
+    case signin_metrics::AccessPoint::kStartPage:
+    case signin_metrics::AccessPoint::kMenu:
+    case signin_metrics::AccessPoint::kSettings:
+    case signin_metrics::AccessPoint::kSettingsYourSavedInfo:
+    case signin_metrics::AccessPoint::kSettingsAutofillAndPasswords:
+    case signin_metrics::AccessPoint::kExtensions:
+    case signin_metrics::AccessPoint::kBookmarkManager:
+    case signin_metrics::AccessPoint::kAvatarBubbleSignIn:
+    case signin_metrics::AccessPoint::kUserManager:
+    case signin_metrics::AccessPoint::kFullscreenSigninPromo:
+    case signin_metrics::AccessPoint::kAutofillDropdown:
+    case signin_metrics::AccessPoint::kResigninInfobar:
+    case signin_metrics::AccessPoint::kMachineLogon:
+    case signin_metrics::AccessPoint::kForcedSignin:
+    case signin_metrics::AccessPoint::kWebSignin:
+    case signin_metrics::AccessPoint::kSafetyCheck:
+    case signin_metrics::AccessPoint::kSigninInterceptFirstRunExperience:
+    case signin_metrics::AccessPoint::kSendTabToSelfPromo:
+    case signin_metrics::AccessPoint::kNtpFeedTopPromo:
+    case signin_metrics::AccessPoint::kSettingsSyncOffRow:
+    case signin_metrics::AccessPoint::kPostDeviceRestoreSigninPromo:
+    case signin_metrics::AccessPoint::kPostDeviceRestoreBackgroundSignin:
+    case signin_metrics::AccessPoint::kNtpSignedOutIcon:
+    case signin_metrics::AccessPoint::kNtpFeedCardMenuPromo:
+    case signin_metrics::AccessPoint::kNtpFeedBottomPromo:
+    case signin_metrics::AccessPoint::kDesktopSigninManager:
+    case signin_metrics::AccessPoint::kForYouFre:
+    case signin_metrics::AccessPoint::kCreatorFeedFollow:
+    case signin_metrics::AccessPoint::kReadingList:
+    case signin_metrics::AccessPoint::kReauthInfoBar:
+    case signin_metrics::AccessPoint::kAccountConsistencyService:
+    case signin_metrics::AccessPoint::kSetUpList:
+    case signin_metrics::AccessPoint::kSaveToPhotosIos:
+    case signin_metrics::AccessPoint::kChromeSigninInterceptBubble:
+    case signin_metrics::AccessPoint::kRestorePrimaryAccountOnProfileLoad:
+    case signin_metrics::AccessPoint::kSaveToDriveIos:
+    case signin_metrics::AccessPoint::kTipsNotification:
+    case signin_metrics::AccessPoint::kNotificationsOptInScreenContentToggle:
+    case signin_metrics::AccessPoint::kSigninChoiceRemembered:
+    case signin_metrics::AccessPoint::kProfileMenuSignoutConfirmationPrompt:
+    case signin_metrics::AccessPoint::kSettingsSignoutConfirmationPrompt:
+    case signin_metrics::AccessPoint::kOidcRedirectionInterception:
+    case signin_metrics::AccessPoint::kWebauthnModalDialog:
+    case signin_metrics::AccessPoint::kAvatarBubbleSignInWithSyncPromo:
+    case signin_metrics::AccessPoint::kAccountMenuSwitchAccount:
+    case signin_metrics::AccessPoint::kProductSpecifications:
+    case signin_metrics::AccessPoint::kAccountMenuSwitchAccountFailed:
+    case signin_metrics::AccessPoint::kCctAccountMismatchNotification:
+    case signin_metrics::AccessPoint::kDriveFilePickerIos:
+    case signin_metrics::AccessPoint::kGlicLaunchButton:
+    case signin_metrics::AccessPoint::kHistoryPage:
+    case signin_metrics::AccessPoint::kHistorySyncOptinExpansionPillOnStartup:
+    case signin_metrics::AccessPoint::kWidget:
+    case signin_metrics::AccessPoint::kCollaborationLeaveOrDeleteTabGroup:
+    case signin_metrics::AccessPoint::kHistorySyncEducationalTip:
+    case signin_metrics::AccessPoint::kManagedProfileAutoSigninIos:
+    case signin_metrics::AccessPoint::kNonModalSigninPasswordPromo:
+    case signin_metrics::AccessPoint::kNonModalSigninBookmarkPromo:
+    case signin_metrics::AccessPoint::kUserManagerWithPrefilledEmail:
+    case signin_metrics::AccessPoint::kEnterpriseManagementDisclaimerAtStartup:
+    case signin_metrics::AccessPoint::
+        kEnterpriseManagementDisclaimerAfterBrowserFocus:
+    case signin_metrics::AccessPoint::
+        kEnterpriseManagementDisclaimerAfterSignin:
+    case signin_metrics::AccessPoint::kNtpFeaturePromo:
+    case signin_metrics::AccessPoint::kEnterpriseDialogAfterSigninInterception:
+    case signin_metrics::AccessPoint::kCredentialExchangeImport:
+    case signin_metrics::AccessPoint::kSetSyncConsentFromSyncInternals:
+    case signin_metrics::AccessPoint::kIosChromeWebView:
+    case signin_metrics::AccessPoint::kAshChromeSessionManager:
+    case signin_metrics::AccessPoint::kAshUserSessionManager:
+    case signin_metrics::AccessPoint::kAvatarPillExpandPromo:
+    case signin_metrics::AccessPoint::kIosPageActionMenu:
+    case signin_metrics::AccessPoint::kDeepLinkDefault:
+    case signin_metrics::AccessPoint::kAgeMismatchSignout:
+    case signin_metrics::AccessPoint::kOverflowMenu:
+      return true;
+  }
+}
+
+bool ShouldShowAvatarSyncPromo(Profile* profile) {
+  CHECK(switches::IsAvatarSyncPromoFeatureEnabled());
+
+  // Do not show the promo for users that are not signed in. (E.g. Signed out,
+  // Signin Pending or already syncing).
+  if (GetSignedInState(IdentityManagerFactory::GetForProfile(profile)) !=
+      signin_util::SignedInState::kSignedIn) {
+    return false;
+  }
+
+  // SyncService should be usable.
+  syncer::SyncService* sync_service =
+      SyncServiceFactory::GetForProfile(profile);
+  if (!sync_service) {
+    return false;
+  }
+  if (sync_service->HasDisableReason(
+          syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY)) {
+    return false;
+  }
+
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  CHECK(identity_manager->AreRefreshTokensLoaded());
+  AccountInfo account_info = identity_manager->FindExtendedAccountInfo(
+      identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin));
+  // Do not show the promo for non signed in accounts, or managed accounts.
+  if (account_info.IsEmpty() ||
+      account_info.IsManaged() != signin::Tribool::kFalse) {
+    return false;
+  }
+
+  // Do not show the promo if there was a previously syncing account that does
+  // not match the currently signed in one.
+  PrefService* pref_service = profile->GetPrefs();
+  GaiaId previously_syncing_gaia_id =
+      GaiaId(pref_service->GetString(prefs::kGoogleServicesLastSyncingGaiaId));
+  if (IsCrossAccountError(profile, account_info.gaia)) {
+    return false;
+  }
+
+  // Do not show the promo for users that have been signed for a short period of
+  // time.
+  const base::Time last_changed = base::Time::FromSecondsSinceUnixEpoch(
+      pref_service->GetDouble(prefs::kGaiaCookieChangedTime));
+  if (last_changed.is_null() ||
+      (base::Time::Now() - last_changed <
+       switches::GetAvatarSyncPromoFeatureMinimumCookeAgeParam())) {
+    return false;
+  }
+
+  return true;
+}
+
+void ShowErrorDialogWithMessage(Browser* browser, int error_message_id) {
+  if (!browser) {
+    return;
+  }
+
+  auto dialog_model =
+      ui::DialogModel::Builder()
+          .AddParagraph(ui::DialogModelLabel(error_message_id),
+                        /*header=*/std::u16string(), kSigninErrorDialogId)
+          .AddOkButton(base::DoNothing(),
+                       ui::DialogModel::Button::Params()
+                           .SetLabel(l10n_util::GetStringUTF16(IDS_OK))
+                           .SetId(kSigninErrorDialogOkButtonId))
+          .Build();
+
+  chrome::ShowBrowserModal(browser, std::move(dialog_model));
+}
+
+#endif  // BUILDFLAG(IS_LINUX) ||  BUILDFLAG(IS_MAC) ||  BUILDFLAG(IS_WIN)
+
+std::vector<net::SchemefulSite> GetDeviceBoundSessionRestrictedSites() {
+  return {net::SchemefulSite(GURL("https://google.com")),
+          net::SchemefulSite(GURL("https://youtube.com"))};
 }
 
 }  // namespace signin_util

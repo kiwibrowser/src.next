@@ -15,22 +15,16 @@ namespace android {
 MockDownloadController::MockDownloadController()
     : approve_file_access_request_(true) {}
 
-MockDownloadController::~MockDownloadController() {}
+MockDownloadController::~MockDownloadController() = default;
 
 void MockDownloadController::OnDownloadStarted(
     download::DownloadItem* download_item) {}
 
 void MockDownloadController::StartContextMenuDownload(
+    const GURL& url,
     const content::ContextMenuParams& params,
     content::WebContents* web_contents,
-    bool is_link) {}
-
-void MockDownloadController::AcquireFileAccessPermission(
-    const content::WebContents::Getter& wc_getter,
-    DownloadControllerBase::AcquireFileAccessPermissionCallback cb) {
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(cb), approve_file_access_request_));
-}
+    bool is_media) {}
 
 void MockDownloadController::SetApproveFileAccessRequestForTesting(
     bool approve) {

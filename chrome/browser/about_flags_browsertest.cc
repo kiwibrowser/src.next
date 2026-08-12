@@ -10,7 +10,6 @@
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/unexpire_flags.h"
@@ -19,7 +18,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/flags_ui/feature_entry_macros.h"
+#include "components/webui/flags/feature_entry_macros.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -235,7 +234,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, PRE_OriginFlagDisabled) {
             GetOriginListText(contents, kFlagName));
 }
 
-// Flaky. http://crbug.com/1010678
+// Flaky. http://crbug.com/40651256
 IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_OriginFlagDisabled) {
   // Even though the feature is disabled, the switch is set directly via command
   // line.
@@ -275,7 +274,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, PRE_OriginFlagEnabled) {
   // non-ChromeOS.
   ToggleEnableDropdown(contents, kFlagName, true);
 
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
   // On non-ChromeOS, the command line is not modified until restart.
   EXPECT_EQ(kInitialSwitches,
             base::CommandLine::ForCurrentProcess()->GetSwitches());
@@ -294,9 +293,9 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, PRE_OriginFlagEnabled) {
             GetOriginListText(contents, kFlagName));
 }
 
-// Flaky. http://crbug.com/1010678
+// Flaky. http://crbug.com/40651256
 IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_OriginFlagEnabled) {
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
   // On non-ChromeOS, the command line is modified after restart.
   EXPECT_EQ(
       GetSanitizedInputAndCommandLine(),
@@ -315,7 +314,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_OriginFlagEnabled) {
   EXPECT_EQ(GetSanitizedInputAndCommandLine(),
             GetOriginListText(contents, kFlagName));
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // ChromeOS doesn't read chrome://flags values on startup so we explicitly
   // need to disable and re-enable the flag here.
   ToggleEnableDropdown(contents, kFlagName, true);
@@ -334,7 +333,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, ExpiryHidesFlag) {
   EXPECT_FALSE(IsFlagPresent(contents, kExpiredFlagName));
 }
 
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#if !BUILDFLAG(IS_CHROMEOS)
 IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, PRE_ExpiredFlagDoesntApply) {
   NavigateToFlagsPage();
   content::WebContents* contents =
@@ -345,7 +344,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, PRE_ExpiredFlagDoesntApply) {
   ToggleEnableDropdown(contents, kExpiredFlagName, true);
 }
 
-// Flaky everywhere: https://crbug.com/1024028
+// Flaky everywhere: https://crbug.com/40107269
 IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_ExpiredFlagDoesntApply) {
   NavigateToFlagsPage();
   content::WebContents* contents =
@@ -357,7 +356,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_ExpiredFlagDoesntApply) {
 }
 #endif
 
-// Regression test for https://crbug.com/1101828:
+// Regression test for https://crbug.com/40703779:
 // Test that simply setting a flag (without the backing feature) is sufficient
 // to consider a flag unexpired. This test checks that by using a flag with the
 // expected unexpire name, but wired to a dummy switch rather than the usual
@@ -390,7 +389,7 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, FormRestore) {
   // change event for it. This simulates what happens during form restoration in
   // Blink, when navigating back and then forward to the flags page. This test
   // ensures that that does not crash the browser.
-  // See https://crbug.com/1038638 for more details.
+  // See https://crbug.com/40666411 for more details.
   EXPECT_TRUE(content::ExecJs(
       contents,
       base::StringPrintf(

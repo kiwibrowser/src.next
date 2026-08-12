@@ -8,13 +8,15 @@
 
 #include <iphlpapi.h>
 
+#include <optional>
 #include <utility>
 
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
@@ -34,18 +36,45 @@ namespace {
 // Time between NotifyAddrChange retries, on failure.
 const int kWatchForAddressChangeRetryIntervalMs = 500;
 
+decltype(&GetNetworkConnectivityHint) GetGetNetworkConnectivityHint() {
+  HMODULE hmod = LoadLibraryW(L"IPHLPAPI.DLL");
+  CHECK(hmod);
+  // GetNetworkConnectivityHint is not present on Windows < 19041 so allow
+  // this to return nullptr on failure to lookup.
+  return reinterpret_cast<decltype(&GetNetworkConnectivityHint)>(
+      GetProcAddress(hmod, "GetNetworkConnectivityHint"));
+}
+
 }  // namespace
 
 NetworkChangeNotifierWin::NetworkChangeNotifierWin()
-    : NetworkChangeNotifier(NetworkChangeCalculatorParamsWin()),
+    : NetworkChangeNotifierWin(nullptr) {}
+
+NetworkChangeNotifierWin::NetworkChangeNotifierWin(
+    SystemDnsConfigChangeNotifier* dns_config_notifier)
+    : NetworkChangeNotifier(NetworkChangeCalculatorParamsWin(),
+                            dns_config_notifier),
+      addr_overlapped_(),
       blocking_task_runner_(
           base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()})),
-      last_computed_connection_type_(RecomputeCurrentConnectionType()),
-      last_announced_offline_(last_computed_connection_type_ ==
-                              CONNECTION_NONE),
+      // When kDeferConnectionTypeAtStartup is enabled, CONNECTION_UNKNOWN is
+      // used as the initial value instead of calling
+      // RecomputeCurrentConnectionType() synchronously, which makes a
+      // cross-process call that can block the UI thread for ~50ms during
+      // startup. The actual connection type is computed asynchronously in
+      // WatchForAddressChange(). Callers that query before the async
+      // computation completes will see CONNECTION_UNKNOWN, meaning "connected,
+      // type not yet determined" -- IsOffline() will return false.
+      last_computed_connection_type_(
+          base::FeatureList::IsEnabled(features::kDeferConnectionTypeAtStartup)
+              ? CONNECTION_UNKNOWN
+              : RecomputeCurrentConnectionType()),
+      last_announced_offline_(
+          base::FeatureList::IsEnabled(features::kDeferConnectionTypeAtStartup)
+              ? false
+              : (last_computed_connection_type_ == CONNECTION_NONE)),
       sequence_runner_for_registration_(
           base::SequencedTaskRunner::GetCurrentDefault()) {
-  memset(&addr_overlapped_, 0, sizeof addr_overlapped_);
   addr_overlapped_.hEvent = WSACreateEvent();
 
   cost_change_notifier_ = NetworkCostChangeNotifierWin::CreateInstance(
@@ -79,20 +108,16 @@ NetworkChangeNotifierWin::NetworkChangeCalculatorParamsWin() {
 // static
 NetworkChangeNotifier::ConnectionType
 NetworkChangeNotifierWin::RecomputeCurrentConnectionTypeModern() {
-  using GetNetworkConnectivityHintType =
-      decltype(&::GetNetworkConnectivityHint);
-
   // This API is only available on Windows 10 Build 19041. However, it works
-  // inside the Network Service Sandbox, so is preferred. See
-  GetNetworkConnectivityHintType get_network_connectivity_hint =
-      reinterpret_cast<GetNetworkConnectivityHintType>(::GetProcAddress(
-          ::GetModuleHandleA("iphlpapi.dll"), "GetNetworkConnectivityHint"));
-  if (!get_network_connectivity_hint) {
+  // inside the Network Service Sandbox, so is preferred.
+  static decltype(&GetNetworkConnectivityHint)
+      get_network_connectivity_hint_fn = GetGetNetworkConnectivityHint();
+  if (!get_network_connectivity_hint_fn) {
     return NetworkChangeNotifier::CONNECTION_UNKNOWN;
   }
   NL_NETWORK_CONNECTIVITY_HINT hint;
   // https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getnetworkconnectivityhint.
-  auto ret = get_network_connectivity_hint(&hint);
+  auto ret = get_network_connectivity_hint_fn(&hint);
   if (ret != NO_ERROR) {
     return NetworkChangeNotifier::CONNECTION_UNKNOWN;
   }
@@ -196,7 +221,7 @@ NetworkChangeNotifierWin::RecomputeCurrentConnectionType() {
   // Allocate 256 bytes for name, it should be enough for most cases.
   // If the name is longer, it is OK as we will check the code returned and
   // set correct network status.
-  char result_buffer[sizeof(WSAQUERYSET) + 256] = {0};
+  char result_buffer[sizeof(WSAQUERYSET) + 256] = {};
   DWORD length = sizeof(result_buffer);
   reinterpret_cast<WSAQUERYSET*>(&result_buffer[0])->dwSize =
       sizeof(WSAQUERYSET);
@@ -297,13 +322,14 @@ void NetworkChangeNotifierWin::NotifyObservers(ConnectionType connection_type) {
   // Calling GetConnectionType() at this very moment is likely to give
   // the wrong result, so we delay that until a little bit later.
   //
-  // The one second delay chosen here was determined experimentally
-  // by adamk on Windows 7.
-  // If after one second we determine we are still offline, we will
-  // delay again.
-  offline_polls_ = 0;
-  timer_.Start(FROM_HERE, base::Seconds(1), this,
-               &NetworkChangeNotifierWin::NotifyParentOfConnectionTypeChange);
+  // The one second delay chosen here was determined experimentally by adamk on
+  // Windows 7, though seems to often be insufficient, hence the polling.
+  timer_.Start(
+      FROM_HERE, base::Seconds(1),
+      base::BindOnce(&NetworkChangeNotifierWin::PollConnectionType,
+                     base::Unretained(this),
+                     /*last_notified_connection_type_for_event=*/std::nullopt,
+                     /*num_polls_completed=*/0));
 }
 
 void NetworkChangeNotifierWin::WatchForAddressChange() {
@@ -328,8 +354,20 @@ void NetworkChangeNotifierWin::WatchForAddressChange() {
   // network change event, since network changes were not being observed in
   // that interval.
   if (sequential_failures_ > 0) {
+    initial_connection_type_initialized_ = true;
     RecomputeCurrentConnectionTypeOnBlockingSequence(
         base::BindOnce(&NetworkChangeNotifierWin::NotifyObservers,
+                       weak_factory_.GetWeakPtr()));
+  } else if (!initial_connection_type_initialized_ &&
+             base::FeatureList::IsEnabled(
+                 features::kDeferConnectionTypeAtStartup)) {
+    // Compute the initial connection type asynchronously to avoid blocking
+    // startup. The constructor defers this work since
+    // RecomputeCurrentConnectionType() makes a cross-process call that can
+    // take ~50ms.
+    initial_connection_type_initialized_ = true;
+    RecomputeCurrentConnectionTypeOnBlockingSequence(
+        base::BindOnce(&NetworkChangeNotifierWin::SetCurrentConnectionType,
                        weak_factory_.GetWeakPtr()));
   }
 
@@ -350,36 +388,90 @@ bool NetworkChangeNotifierWin::WatchForAddressChangeInternal() {
   return true;
 }
 
-void NetworkChangeNotifierWin::NotifyParentOfConnectionTypeChange() {
+void NetworkChangeNotifierWin::PollConnectionType(
+    std::optional<ConnectionType> last_notified_connection_type_for_event,
+    int num_polls_completed) {
   RecomputeCurrentConnectionTypeOnBlockingSequence(base::BindOnce(
-      &NetworkChangeNotifierWin::NotifyParentOfConnectionTypeChangeImpl,
-      weak_factory_.GetWeakPtr()));
+      &NetworkChangeNotifierWin::OnConnectionTypePolled,
+      weak_factory_.GetWeakPtr(), last_notified_connection_type_for_event,
+      num_polls_completed));
 }
 
-void NetworkChangeNotifierWin::NotifyParentOfConnectionTypeChangeImpl(
+void NetworkChangeNotifierWin::OnConnectionTypePolled(
+    std::optional<ConnectionType> last_notified_connection_type_for_event,
+    int num_polls_completed,
     ConnectionType connection_type) {
-  SetCurrentConnectionType(connection_type);
-  bool current_offline = IsOffline();
-  offline_polls_++;
-  // If we continue to appear offline, delay sending out the notification in
-  // case we appear to go online within 20 seconds.  UMA histogram data shows
-  // we may not detect the transition to online state after 1 second but within
-  // 20 seconds we generally do.
-  if (last_announced_offline_ && current_offline && offline_polls_ <= 20) {
-    timer_.Start(FROM_HERE, base::Seconds(1), this,
-                 &NetworkChangeNotifierWin::NotifyParentOfConnectionTypeChange);
-    return;
-  }
-  if (last_announced_offline_)
-    UMA_HISTOGRAM_CUSTOM_COUNTS("NCN.OfflinePolls", offline_polls_, 1, 50, 50);
-  last_announced_offline_ = current_offline;
+  ++num_polls_completed;
 
-  NotifyObserversOfConnectionTypeChange();
-  double max_bandwidth_mbps = 0.0;
-  ConnectionType max_connection_type = CONNECTION_NONE;
-  GetCurrentMaxBandwidthAndConnectionType(&max_bandwidth_mbps,
-                                          &max_connection_type);
-  NotifyObserversOfMaxBandwidthChange(max_bandwidth_mbps, max_connection_type);
+  // At most `kNumPollsOnAddressChange` polls should be completed without
+  // restarting the poll count.
+  CHECK_LE(num_polls_completed, kNumPollsOnAddressChange);
+  // Whether or this is the final expected poll result. Each address change
+  // triggers `kNumPollsOnAddressChange` polls.
+  bool is_final_poll = (num_polls_completed >= kNumPollsOnAddressChange);
+
+  SetCurrentConnectionType(connection_type);
+  bool is_offline = IsOffline();
+
+  // Determine whether a ConnectionTypeChange notification should be sent.
+  bool should_notify = false;
+  // If a notification of the current connection type has already been sent in
+  // response to the most recent network change that `this` has been informed
+  // of, no need to send another notification.
+  if (connection_type != last_notified_connection_type_for_event) {
+    if (is_offline) {
+      // If offline, and the last notification sent (not necessarily for this
+      // specific IP address change event) was also due to being offline, delay
+      // notification of changes to offline state until the last poll, as
+      // Windows tends to show a transition to offline state before a transition
+      // back to online state when connecting to a network / changing networks.
+      if (!last_announced_offline_ || is_final_poll) {
+        should_notify = true;
+      }
+    } else {
+      // If the device appears online, send a signal immediately, regardless of
+      // whether the connection state has changed. Note that "immediately" means
+      // there was the initial state query, a delay, and a second poll that just
+      // completed, so there have been 2 "polls".
+      //
+      // Also signal a change if the current non-offline connection state is
+      // different from the previously polled state, send a notification as
+      // well. In some cases of an online->offline transition, Windows will
+      // still continue returning the networks we were disconnected from for
+      // some amount of time after we've been disconnected.
+      should_notify = true;
+    }
+  }
+
+  if (should_notify) {
+    last_announced_offline_ = is_offline;
+    last_notified_connection_type_for_event = connection_type;
+    NotifyObserversOfConnectionTypeChange();
+    double max_bandwidth_mbps = 0.0;
+    ConnectionType max_connection_type = CONNECTION_NONE;
+    GetCurrentMaxBandwidthAndConnectionType(&max_bandwidth_mbps,
+                                            &max_connection_type);
+    NotifyObserversOfMaxBandwidthChange(max_bandwidth_mbps,
+                                        max_connection_type);
+
+    std::string histogram_name =
+        base::StrCat({"Net.NetworkChangeNotifier.ConnectionTypePollsWin.",
+                      is_offline ? "Offline" : "Online"});
+    base::UmaHistogramCustomCounts(histogram_name, num_polls_completed, 1,
+                                   kNumPollsOnAddressChange,
+                                   kNumPollsOnAddressChange);
+  }
+
+  // If the timer hasn't been started again in the time since
+  // PollConnectionTypeWithBackoff() was invoked, and this isn't the final poll,
+  // schedule another poll.
+  if (!is_final_poll && !timer_.IsRunning()) {
+    timer_.Start(FROM_HERE, base::Seconds(1),
+                 base::BindOnce(&NetworkChangeNotifierWin::PollConnectionType,
+                                base::Unretained(this),
+                                last_notified_connection_type_for_event,
+                                num_polls_completed));
+  }
 }
 
 }  // namespace net

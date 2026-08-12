@@ -6,12 +6,18 @@
 #include <atomic>
 #include <optional>
 
+#include "base/check.h"
 #include "base/feature_list.h"
+#include "base/no_destructor.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/strcat.h"
+#include "base/types/pass_key.h"
 #include "base/unguessable_token.h"
 #include "base/values.h"
 #include "net/base/features.h"
 #include "net/base/net_export.h"
 #include "net/base/network_isolation_key.h"
+#include "net/base/network_isolation_partition.h"
 #include "net/base/schemeful_site.h"
 #include "net/cookies/site_for_cookies.h"
 
@@ -27,117 +33,152 @@ bool g_partition_by_default = false;
 // `g_partition_by_default` cannot be changed.
 constinit std::atomic<bool> g_partition_by_default_locked = false;
 
+std::optional<NetworkIsolationPartition> ValueToNetworkIsolationPartition(
+    const base::Value& value) {
+  if (!value.is_int()) {
+    return std::nullopt;
+  }
+
+  int partition_int = value.GetInt();
+  if (partition_int < 0 ||
+      partition_int >
+          base::strict_cast<int32_t>(NetworkIsolationPartition::kMaxValue)) {
+    return std::nullopt;
+  }
+
+  return static_cast<NetworkIsolationPartition>(partition_int);
+}
+
 }  // namespace
 
-NetworkAnonymizationKey::NetworkAnonymizationKey(
-    const SchemefulSite& top_frame_site,
-    bool is_cross_site,
-    std::optional<base::UnguessableToken> nonce)
-    : top_frame_site_(top_frame_site),
-      is_cross_site_(is_cross_site),
-      nonce_(nonce) {
-  DCHECK(top_frame_site_.has_value());
+NetworkAnonymizationKey::NetworkAnonymizationKey()
+    : data_(Data::GetEmptyData()) {}
+
+// static
+NetworkAnonymizationKey NetworkAnonymizationKey::CreateEmptyWithPartition(
+    NetworkIsolationPartition network_isolation_partition) {
+  return NetworkAnonymizationKey(
+      /*top_frame_site=*/std::nullopt, /*is_cross_site=*/false,
+      /*nonce=*/std::nullopt, network_isolation_partition);
 }
+
+NetworkAnonymizationKey::NetworkAnonymizationKey(
+    const NetworkAnonymizationKey& network_anonymization_key) = default;
+
+NetworkAnonymizationKey::NetworkAnonymizationKey(
+    NetworkAnonymizationKey&& network_anonymization_key) = default;
+
+NetworkAnonymizationKey& NetworkAnonymizationKey::operator=(
+    const NetworkAnonymizationKey& network_anonymization_key) = default;
+
+NetworkAnonymizationKey& NetworkAnonymizationKey::operator=(
+    NetworkAnonymizationKey&& network_anonymization_key) = default;
+
+NetworkAnonymizationKey::NetworkAnonymizationKey(
+    std::optional<SchemefulSite> top_frame_site,
+    bool is_cross_site,
+    std::optional<base::UnguessableToken> nonce,
+    NetworkIsolationPartition network_isolation_partition)
+    : data_(base::MakeRefCounted<Data>(std::move(top_frame_site),
+                                       is_cross_site,
+                                       std::move(nonce),
+                                       network_isolation_partition)) {}
+
+NetworkAnonymizationKey::~NetworkAnonymizationKey() = default;
 
 NetworkAnonymizationKey NetworkAnonymizationKey::CreateFromFrameSite(
     const SchemefulSite& top_frame_site,
     const SchemefulSite& frame_site,
-    std::optional<base::UnguessableToken> nonce) {
+    std::optional<base::UnguessableToken> nonce,
+    NetworkIsolationPartition network_isolation_partition) {
   bool is_cross_site = top_frame_site != frame_site;
-  return NetworkAnonymizationKey(top_frame_site, is_cross_site, nonce);
+  return NetworkAnonymizationKey(top_frame_site, is_cross_site, nonce,
+                                 network_isolation_partition);
 }
 
 NetworkAnonymizationKey NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
     const net::NetworkIsolationKey& network_isolation_key) {
-  // We cannot create a valid NetworkAnonymizationKey from a NetworkIsolationKey
-  // that is not fully populated.
-  if (!network_isolation_key.IsFullyPopulated()) {
-    return NetworkAnonymizationKey();
-  }
-
-  return CreateFromFrameSite(
-      network_isolation_key.GetTopFrameSite().value(),
-      network_isolation_key
-          .GetFrameSiteForNetworkAnonymizationKey(
-              NetworkIsolationKey::NetworkAnonymizationKeyPassKey())
-          .value(),
-      network_isolation_key.GetNonce());
+  return NetworkAnonymizationKey(
+      network_isolation_key.GetTopFrameSite(),
+      network_isolation_key.GetTopFrameSite() !=
+          network_isolation_key.GetFrameSiteForNetworkAnonymizationKey(
+              base::PassKey<NetworkAnonymizationKey>()),
+      network_isolation_key.GetNonce(),
+      network_isolation_key.GetNetworkIsolationPartition());
 }
-
-NetworkAnonymizationKey::NetworkAnonymizationKey()
-    : top_frame_site_(std::nullopt),
-      is_cross_site_(false),
-      nonce_(std::nullopt) {}
-
-NetworkAnonymizationKey::NetworkAnonymizationKey(
-    const NetworkAnonymizationKey& network_anonymization_key) = default;
-
-NetworkAnonymizationKey::NetworkAnonymizationKey(
-    NetworkAnonymizationKey&& network_anonymization_key) = default;
-
-NetworkAnonymizationKey::~NetworkAnonymizationKey() = default;
-
-NetworkAnonymizationKey& NetworkAnonymizationKey::operator=(
-    const NetworkAnonymizationKey& network_anonymization_key) = default;
-
-NetworkAnonymizationKey& NetworkAnonymizationKey::operator=(
-    NetworkAnonymizationKey&& network_anonymization_key) = default;
 
 NetworkAnonymizationKey NetworkAnonymizationKey::CreateTransient() {
   SchemefulSite site_with_opaque_origin;
-  return NetworkAnonymizationKey(site_with_opaque_origin, false);
+  return NetworkAnonymizationKey(std::move(site_with_opaque_origin),
+                                 /*is_cross_site=*/false);
 }
 
 std::string NetworkAnonymizationKey::ToDebugString() const {
-  if (!IsFullyPopulated()) {
-    return "null";
+  std::string partition =
+      network_isolation_partition() == NetworkIsolationPartition::kGeneral
+          ? ""
+          : base::StrCat({" (",
+                          NetworkIsolationPartitionToDebugString(
+                              network_isolation_partition()),
+                          ")"});
+
+  if (IsEmpty()) {
+    return base::StrCat({"null", partition});
   }
 
-  std::string str = GetSiteDebugString(top_frame_site_);
-  str += IsCrossSite() ? " cross_site" : " same_site";
+  std::string top_frame_site = GetSiteDebugString(GetTopFrameSite());
+  std::string_view is_cross_site = IsCrossSite() ? " cross_site" : " same_site";
 
   // Currently, if the NAK has a nonce it will be marked transient. For debug
   // purposes we will print the value but if called via
   // `NetworkAnonymizationKey::ToString` we will have already returned "".
-  if (nonce_.has_value()) {
-    str += " (with nonce " + nonce_->ToString() + ")";
-  }
+  std::string nonce =
+      GetNonce().has_value()
+          ? base::StrCat({" (with nonce ", GetNonce()->ToString(), ")"})
+          : "";
 
-  return str;
+  return base::StrCat({top_frame_site, is_cross_site, nonce, partition});
 }
 
 bool NetworkAnonymizationKey::IsEmpty() const {
-  return !top_frame_site_.has_value();
-}
-
-bool NetworkAnonymizationKey::IsFullyPopulated() const {
-  return top_frame_site_.has_value();
+  return data_->is_empty();
 }
 
 bool NetworkAnonymizationKey::IsTransient() const {
-  if (!IsFullyPopulated())
+  if (IsEmpty()) {
     return true;
+  }
 
-  return top_frame_site_->opaque() || nonce_.has_value();
+  return GetTopFrameSite()->opaque() || GetNonce().has_value();
 }
 
 bool NetworkAnonymizationKey::ToValue(base::Value* out_value) const {
   if (IsEmpty()) {
-    *out_value = base::Value(base::Value::Type::LIST);
+    // Empty kGeneral partition NAKs just use an empty list, while empty NAKs
+    // for other partitions are represented as single-element lists.
+    base::ListValue list;
+    if (network_isolation_partition() != NetworkIsolationPartition::kGeneral) {
+      list.Append(base::strict_cast<int32_t>(network_isolation_partition()));
+    }
+    *out_value = base::Value(std::move(list));
     return true;
   }
 
-  if (IsTransient())
+  if (IsTransient()) {
     return false;
+  }
 
   std::optional<std::string> top_frame_value =
-      SerializeSiteWithNonce(*top_frame_site_);
-  if (!top_frame_value)
+      SerializeSiteWithNonce(*GetTopFrameSite());
+  if (!top_frame_value) {
     return false;
-  base::Value::List list;
+  }
+  base::ListValue list;
   list.Append(std::move(top_frame_value).value());
 
   list.Append(IsCrossSite());
+
+  list.Append(base::strict_cast<int32_t>(network_isolation_partition()));
 
   *out_value = base::Value(std::move(list));
   return true;
@@ -150,14 +191,31 @@ bool NetworkAnonymizationKey::FromValue(
     return false;
   }
 
-  const base::Value::List& list = value.GetList();
+  const base::ListValue& list = value.GetList();
   if (list.empty()) {
     *network_anonymization_key = NetworkAnonymizationKey();
     return true;
   }
 
+  if (list.size() == 1) {
+    std::optional<NetworkIsolationPartition> network_isolation_partition =
+        ValueToNetworkIsolationPartition(list[0]);
+    if (!network_isolation_partition) {
+      return false;
+    }
+    *network_anonymization_key =
+        NetworkAnonymizationKey::CreateEmptyWithPartition(
+            *network_isolation_partition);
+    return true;
+  }
+
   // Check the format.
-  if (list.size() != 2 || !list[0].is_string() || !list[1].is_bool()) {
+  // While migrating to using NetworkIsolationPartition, continue supporting
+  // values of length 2 for a few months.
+  // TODO(abigailkatcoff): Stop support for lists of length 2 after a few
+  // months.
+  CHECK_GE(list.size(), 2u);
+  if (list.size() > 3 || !list[0].is_string() || !list[1].is_bool()) {
     return false;
   }
 
@@ -171,8 +229,20 @@ bool NetworkAnonymizationKey::FromValue(
 
   bool is_cross_site = list[1].GetBool();
 
-  *network_anonymization_key =
-      NetworkAnonymizationKey(top_frame_site.value(), is_cross_site);
+  NetworkIsolationPartition network_isolation_partition =
+      NetworkIsolationPartition::kGeneral;
+  if (list.size() == 3) {
+    std::optional<NetworkIsolationPartition> parsed_partition =
+        ValueToNetworkIsolationPartition(list[2]);
+    if (!parsed_partition) {
+      return false;
+    }
+    network_isolation_partition = *parsed_partition;
+  }
+
+  *network_anonymization_key = NetworkAnonymizationKey(
+      std::move(top_frame_site), is_cross_site, /*nonce=*/std::nullopt,
+      network_isolation_partition);
   return true;
 }
 
@@ -216,5 +286,31 @@ NET_EXPORT std::ostream& operator<<(std::ostream& os,
   os << nak.ToDebugString();
   return os;
 }
+
+// static
+scoped_refptr<NetworkAnonymizationKey::Data>
+NetworkAnonymizationKey::Data::GetEmptyData() {
+  static base::NoDestructor<scoped_refptr<NetworkAnonymizationKey::Data>>
+      empty_data(base::MakeRefCounted<Data>(base::PassKey<Data>()));
+  return *empty_data;
+}
+
+NetworkAnonymizationKey::Data::Data(base::PassKey<Data>)
+    : is_cross_site_(false),
+      network_isolation_partition_(NetworkIsolationPartition::kGeneral) {
+  CHECK(is_empty());
+}
+
+NetworkAnonymizationKey::Data::Data(
+    std::optional<SchemefulSite> top_frame_site,
+    bool is_cross_site,
+    std::optional<base::UnguessableToken> nonce,
+    NetworkIsolationPartition network_isolation_partition)
+    : top_frame_site_(std::move(top_frame_site)),
+      is_cross_site_(is_cross_site),
+      nonce_(std::move(nonce)),
+      network_isolation_partition_(network_isolation_partition) {}
+
+NetworkAnonymizationKey::Data::~Data() = default;
 
 }  // namespace net

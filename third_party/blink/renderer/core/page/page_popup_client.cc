@@ -30,12 +30,13 @@
 
 #include "third_party/blink/renderer/core/page/page_popup_client.h"
 
+#include "base/compiler_specific.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page_popup_controller.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -56,110 +57,107 @@ float PagePopupClient::ScaledZoomFactor() {
   return ZoomFactor() / scale_factor;
 }
 
-#define addLiteral(literal, data) data.Append(literal, sizeof(literal) - 1)
-
 void PagePopupClient::AddJavaScriptString(const StringView& str,
                                           SegmentedBuffer& data) {
-  addLiteral("\"", data);
   StringBuilder builder;
-  builder.ReserveCapacity(str.length());
+  builder.ReserveCapacity(str.length() + 2);
+  builder.Append('"');
   for (unsigned i = 0; i < str.length(); ++i) {
-    if (str[i] == '\r') {
+    // SAFETY: index checked against length in loop body.
+    UChar ch = UNSAFE_BUFFERS(str[i]);
+    if (ch == '\r') {
       builder.Append("\\r");
-    } else if (str[i] == '\n') {
+    } else if (ch == '\n') {
       builder.Append("\\n");
-    } else if (str[i] == '\\' || str[i] == '"') {
+    } else if (ch == '\\' || ch == '"') {
       builder.Append('\\');
-      builder.Append(str[i]);
-    } else if (str[i] == '<') {
+      builder.Append(ch);
+    } else if (ch == '<') {
       // Need to avoid to add "</script>" because the resultant string is
       // typically embedded in <script>.
       builder.Append("\\x3C");
-    } else if (str[i] < 0x20 || str[i] == kLineSeparator ||
-               str[i] == kParagraphSeparator) {
-      builder.AppendFormat("\\u%04X", str[i]);
+    } else if (ch < 0x20 || ch == uchar::kLineSeparator ||
+               ch == uchar::kParagraphSeparator) {
+      builder.AppendFormat("\\u%04X", ch);
     } else {
-      builder.Append(str[i]);
+      builder.Append(ch);
     }
   }
-  AddString(builder.ToString(), data);
-  addLiteral("\"", data);
+  builder.Append('"');
+  AddString(builder, data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   const StringView& value,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": ", data);
+  data.Append(name);
+  AddLiteral(": ", data);
   AddJavaScriptString(value, data);
-  addLiteral(",\n", data);
+  AddLiteral(",\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   int value,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": ", data);
+  data.Append(name);
+  AddLiteral(": ", data);
   AddString(String::Number(value), data);
-  addLiteral(",\n", data);
+  AddLiteral(",\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   unsigned value,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": ", data);
+  data.Append(name);
+  AddLiteral(": ", data);
   AddString(String::Number(value), data);
-  addLiteral(",\n", data);
+  AddLiteral(",\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   bool value,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": ", data);
-  if (value)
-    addLiteral("true", data);
-  else
-    addLiteral("false", data);
-  addLiteral(",\n", data);
+  data.Append(name);
+  AddLiteral(": ", data);
+  AddLiteral(value ? "true" : "false", data);
+  AddLiteral(",\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   double value,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": ", data);
+  data.Append(name);
+  AddLiteral(": ", data);
   AddString(String::Number(value), data);
-  addLiteral(",\n", data);
+  AddLiteral(",\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   const Vector<String>& values,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": [", data);
+  data.Append(name);
+  AddLiteral(": [", data);
   for (unsigned i = 0; i < values.size(); ++i) {
     if (i)
-      addLiteral(",", data);
+      AddLiteral(",", data);
     AddJavaScriptString(values[i], data);
   }
-  addLiteral("],\n", data);
+  AddLiteral("],\n", data);
 }
 
-void PagePopupClient::AddProperty(const char* name,
+void PagePopupClient::AddProperty(std::string_view name,
                                   const gfx::Rect& rect,
                                   SegmentedBuffer& data) {
-  data.Append(name, strlen(name));
-  addLiteral(": {", data);
+  data.Append(name);
+  AddLiteral(": {", data);
   AddProperty("x", rect.x(), data);
   AddProperty("y", rect.y(), data);
   AddProperty("width", rect.width(), data);
   AddProperty("height", rect.height(), data);
-  addLiteral("},\n", data);
+  AddLiteral("},\n", data);
 }
 
-void PagePopupClient::AddLocalizedProperty(const char* name,
+void PagePopupClient::AddLocalizedProperty(std::string_view name,
                                            int resource_id,
                                            SegmentedBuffer& data) {
   AddProperty(name, GetLocale().QueryString(resource_id), data);

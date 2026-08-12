@@ -8,14 +8,13 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_interface_binders.h"
+#include "chrome/browser/chrome_browser_interface_binders_webui.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
 #include "chrome/browser/content_settings/content_settings_manager_delegate.h"
 #include "chrome/browser/headless/headless_mode_util.h"
-#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/net_benchmarking.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
@@ -29,9 +28,6 @@
 #include "chrome/common/chrome_features.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/content_capture/browser/onscreen_content_provider.h"
-#include "components/fingerprinting_protection_filter/browser/throttle_manager.h"
-#include "components/fingerprinting_protection_filter/common/fingerprinting_protection_filter_features.h"
-#include "components/fingerprinting_protection_filter/mojom/fingerprinting_protection_filter.mojom.h"
 #include "components/metrics/call_stacks/call_stack_profile_collector.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/page_load_metrics/browser/metrics_web_contents_observer.h"
@@ -42,10 +38,13 @@
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
 #include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
+#include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/service_worker_version_base_info.h"
+#include "content/public/common/buildflags.h"
 #include "media/mojo/buildflags.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "pdf/buildflags.h"
@@ -54,28 +53,19 @@
 #include "third_party/widevine/cdm/buildflags.h"
 
 #if BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/download/android/available_offline_content_provider.h"
 #include "chrome/browser/plugins/plugin_observer_android.h"
 #elif BUILDFLAG(IS_WIN)
 #include "chrome/browser/win/conflicts/module_database.h"
 #include "chrome/browser/win/conflicts/module_event_sink_impl.h"
-#elif BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/ash/mojo_service_manager/utility_process_bridge.h"
+#elif BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/ash/components/mojo_service_manager/utility_process_bridge.h"
 #include "chromeos/components/cdm_factory_daemon/cdm_factory_daemon_proxy_ash.h"
 #include "components/performance_manager/public/performance_manager.h"
-#if defined(ARCH_CPU_X86_64)
-#include "chrome/browser/performance_manager/mechanisms/userspace_swap_chromeos.h"
-#endif  // defined(ARCH_CPU_X86_64)
-#elif BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/components/cdm_factory_daemon/cdm_factory_daemon_proxy_lacros.h"
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS)
-#include "chrome/browser/chromeos/printing/print_preview/print_view_manager_cros.h"
-#include "chrome/browser/chromeos/printing/print_preview/print_view_manager_cros_basic.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+#include "chrome/browser/extensions/chrome_extensions_browser_interface_binders.h"
+#include "content/public/browser/site_instance.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -87,6 +77,7 @@
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #include "chrome/browser/media/output_protection_impl.h"
+#include "services/metrics/ukm_recorder_factory_impl.h"
 #endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
 #if BUILDFLAG(ENABLE_MOJO_CDM) && BUILDFLAG(IS_ANDROID)
@@ -94,7 +85,6 @@
 #endif
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
-#include "chrome/browser/spellchecker/spell_check_host_chrome_impl.h"
 #include "chrome/browser/spellchecker/spell_check_initialization_host_impl.h"
 #include "components/spellcheck/common/spellcheck.mojom.h"
 #if BUILDFLAG(HAS_SPELLCHECK_PANEL)
@@ -104,7 +94,11 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/badging/badge_manager.h"
+#include "chrome/browser/indigo/onboarding/indigo_onboarding_dialog.h"
+#include "chrome/browser/record_replay/chrome_record_replay_client.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
+#include "chrome/common/indigo/indigo.mojom.h"
+#include "components/record_replay/core/common/record_replay.mojom.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -171,6 +165,8 @@ void MaybeCreateSafeBrowsingForRenderer(
       std::move(receiver));
 }
 
+// TODO(crbug.com/486154580): Switch to ENABLE_EXTENSIONS_CORE when safe
+// browsing is better supported on desktop Android.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 void MaybeCreateExtensionWebRequestReporterForRenderer(
     int process_id,
@@ -227,7 +223,7 @@ void ChromeContentBrowserClient::ExposeInterfacesToRenderer(
         base::BindRepeating(
             &NetBenchmarking::Create,
             loading_predictor ? loading_predictor->GetWeakPtr() : nullptr,
-            render_process_host->GetID()),
+            render_process_host->GetDeprecatedID()),
         ui_task_runner);
   }
 
@@ -235,15 +231,18 @@ void ChromeContentBrowserClient::ExposeInterfacesToRenderer(
   if (safe_browsing_service_) {
     registry->AddInterface<safe_browsing::mojom::SafeBrowsing>(
         base::BindRepeating(
-            &MaybeCreateSafeBrowsingForRenderer, render_process_host->GetID(),
+            &MaybeCreateSafeBrowsingForRenderer,
+            render_process_host->GetDeprecatedID(),
             base::BindRepeating(
                 &ChromeContentBrowserClient::GetSafeBrowsingUrlCheckerDelegate,
                 base::Unretained(this))),
         ui_task_runner);
+// TODO(crbug.com/486154580): Switch to ENABLE_EXTENSIONS_CORE when safe
+// browsing is better supported on desktop Android.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     registry->AddInterface<safe_browsing::mojom::ExtensionWebRequestReporter>(
         base::BindRepeating(&MaybeCreateExtensionWebRequestReporterForRenderer,
-                            render_process_host->GetID()),
+                            render_process_host->GetDeprecatedID()),
         ui_task_runner);
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   }
@@ -262,7 +261,7 @@ void ChromeContentBrowserClient::ExposeInterfacesToRenderer(
           return host->GetProcess().Duplicate();
         return base::Process();
       },
-      render_process_host->GetID());
+      render_process_host->GetDeprecatedID());
   registry->AddInterface<mojom::ModuleEventSink>(
       base::BindRepeating(
           &ModuleEventSinkImpl::Create, std::move(get_process),
@@ -270,31 +269,17 @@ void ChromeContentBrowserClient::ExposeInterfacesToRenderer(
           base::BindRepeating(&ModuleDatabase::HandleModuleLoadEvent)),
       ui_task_runner);
 #endif
-#if BUILDFLAG(IS_ANDROID)
-  registry->AddInterface<chrome::mojom::AvailableOfflineContentProvider>(
-      base::BindRepeating(&android::AvailableOfflineContentProvider::Create,
-                          render_process_host->GetID()),
-      content::GetUIThreadTaskRunner({}));
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#if defined(ARCH_CPU_X86_64)
-  if (performance_manager::mechanism::userspace_swap::
-          UserspaceSwapInitializationImpl::UserspaceSwapSupportedAndEnabled()) {
-    registry
-        ->AddInterface<::userspace_swap::mojom::UserspaceSwapInitialization>(
-            base::BindRepeating(
-                &performance_manager::mechanism::userspace_swap::
-                    UserspaceSwapInitializationImpl::Create,
-                render_process_host->GetID()),
-            performance_manager::PerformanceManager::GetTaskRunner());
-  }
-#endif  // defined(ARCH_CPU_X86_64)
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   for (auto& ep : extra_parts_) {
     ep->ExposeInterfacesToRenderer(registry, associated_registry,
                                    render_process_host);
+  }
+}
+
+void ChromeContentBrowserClient::ExposeInterfacesToChild(
+    mojo::BinderMapWithContext<content::BrowserChildProcessHost*>* map) {
+  for (auto& ep : extra_parts_) {
+    ep->ExposeInterfacesToChild(map);
   }
 }
 
@@ -304,6 +289,12 @@ void ChromeContentBrowserClient::BindMediaServiceReceiver(
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
   if (auto r = receiver.As<media::mojom::OutputProtection>()) {
     OutputProtectionImpl::Create(render_frame_host, std::move(r));
+    return;
+  }
+
+  if (auto r = receiver.As<ukm::mojom::UkmRecorderFactory>()) {
+    metrics::UkmRecorderFactoryImpl::Create(ukm::UkmRecorder::Get(),
+                                            std::move(r));
     return;
   }
 #endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
@@ -329,25 +320,19 @@ void ChromeContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
   chrome::internal::PopulateChromeFrameBinders(map, render_frame_host);
   chrome::internal::PopulateChromeWebUIFrameBinders(map, render_frame_host);
 
-#if BUILDFLAG(ENABLE_SPELLCHECK)
-  map->Add<spellcheck::mojom::SpellCheckHost>(base::BindRepeating(
-      [](content::RenderFrameHost* frame_host,
-         mojo::PendingReceiver<spellcheck::mojom::SpellCheckHost> receiver) {
-        SpellCheckHostChromeImpl::Create(frame_host->GetProcess()->GetID(),
-                                         std::move(receiver));
-      }));
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK)
-
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
-  const GURL& site = render_frame_host->GetSiteInstance()->GetSiteURL();
-  if (!site.SchemeIs(extensions::kExtensionScheme))
+  if (!render_frame_host->GetSiteInstance()->GetSecurityPrincipal().SchemeIs(
+          extensions::kExtensionScheme)) {
     return;
+  }
 
   content::BrowserContext* browser_context =
       render_frame_host->GetProcess()->GetBrowserContext();
   auto* extension = extensions::ExtensionRegistry::Get(browser_context)
                         ->enabled_extensions()
-                        .GetByID(site.host());
+                        .GetByID(render_frame_host->GetSiteInstance()
+                                     ->GetSecurityPrincipal()
+                                     .GetHost());
   if (!extension)
     return;
   extensions::ExtensionsBrowserClient::Get()
@@ -356,9 +341,14 @@ void ChromeContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
 #endif
 }
 
-void ChromeContentBrowserClient::RegisterWebUIInterfaceBrokers(
+void ChromeContentBrowserClient::RegisterTrustedWebUIInterfaceBrokers(
     content::WebUIBrowserInterfaceBrokerRegistry& registry) {
-  chrome::internal::PopulateChromeWebUIFrameInterfaceBrokers(registry);
+  chrome::internal::PopulateTrustedChromeWebUIFrameInterfaceBrokers(registry);
+}
+
+void ChromeContentBrowserClient::RegisterUntrustedWebUIInterfaceBrokers(
+    content::WebUIBrowserInterfaceBrokerRegistry& registry) {
+  chrome::internal::PopulateUntrustedChromeWebUIFrameInterfaceBrokers(registry);
 }
 
 void ChromeContentBrowserClient::
@@ -369,8 +359,23 @@ void ChromeContentBrowserClient::
         mojo::BinderMapWithContext<
             const content::ServiceWorkerVersionBaseInfo&>* map) {
 #if !BUILDFLAG(IS_ANDROID)
-  map->Add<blink::mojom::BadgeService>(
-      base::BindRepeating(&BindBadgeServiceForServiceWorker));
+  map->Add<blink::mojom::BadgeService>(&BindBadgeServiceForServiceWorker);
+#endif
+
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+  const GURL& site = service_worker_version_info.scope;
+  if (!site.SchemeIs(extensions::kExtensionScheme)) {
+    return;
+  }
+
+  auto* extension = extensions::ExtensionRegistry::Get(browser_context)
+                        ->enabled_extensions()
+                        .GetByID(site.GetHost());
+  if (!extension) {
+    return;
+  }
+  extensions::PopulateChromeServiceWorkerBindersForExtension(
+      map, browser_context, extension);
 #endif
 }
 
@@ -416,6 +421,11 @@ void ChromeContentBrowserClient::
             BindPasswordManagerDriver(std::move(receiver), render_frame_host);
       },
       &render_frame_host));
+#if !BUILDFLAG(IS_ANDROID)
+  associated_registry.AddInterface<record_replay::mojom::RecordReplayDriver>(
+      base::BindRepeating(&ChromeRecordReplayClient::BindRecordReplayDriver,
+                          &render_frame_host));
+#endif
   associated_registry.AddInterface<chrome::mojom::NetworkDiagnostics>(
       base::BindRepeating(
           [](content::RenderFrameHost* render_frame_host,
@@ -530,14 +540,16 @@ void ChromeContentBrowserClient::
           },
           &render_frame_host));
 #if BUILDFLAG(ENABLE_PDF)
-  associated_registry.AddInterface<pdf::mojom::PdfHost>(base::BindRepeating(
-      [](content::RenderFrameHost* render_frame_host,
-         mojo::PendingAssociatedReceiver<pdf::mojom::PdfHost> receiver) {
-        pdf::PDFDocumentHelper::BindPdfHost(
-            std::move(receiver), render_frame_host,
-            std::make_unique<ChromePDFDocumentHelperClient>());
-      },
-      &render_frame_host));
+  if (render_frame_host.GetProcess()->IsPdf()) {
+    associated_registry.AddInterface<pdf::mojom::PdfHost>(base::BindRepeating(
+        [](content::RenderFrameHost* render_frame_host,
+           mojo::PendingAssociatedReceiver<pdf::mojom::PdfHost> receiver) {
+          pdf::PDFDocumentHelper::BindPdfHost(
+              std::move(receiver), render_frame_host,
+              std::make_unique<ChromePDFDocumentHelperClient>());
+        },
+        &render_frame_host));
+  }
 #endif  // BUILDFLAG(ENABLE_PDF)
 #if !BUILDFLAG(IS_ANDROID)
   associated_registry.AddInterface<search::mojom::EmbeddedSearchConnector>(
@@ -560,20 +572,6 @@ void ChromeContentBrowserClient::
               headless::HeadlessPrintManager::BindPrintManagerHost(
                   std::move(receiver), render_frame_host);
             } else {
-#if BUILDFLAG(IS_CHROMEOS)
-              if (base::FeatureList::IsEnabled(
-                      ::features::kPrintPreviewCrosPrimary)) {
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
-                chromeos::PrintViewManagerCros::BindPrintManagerHost(
-                    std::move(receiver), render_frame_host);
-#else
-                chromeos::PrintViewManagerCrosBasic::BindPrintManagerHost(
-                    std::move(receiver), render_frame_host);
-#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
-                return;
-              }
-#endif  // BUILDFLAG(CHROMEOS)
-
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
               printing::PrintViewManager::BindPrintManagerHost(
                   std::move(receiver), render_frame_host);
@@ -603,20 +601,7 @@ void ChromeContentBrowserClient::
             BindReceiver(std::move(receiver), render_frame_host);
       },
       &render_frame_host));
-  if (fingerprinting_protection_filter::features::
-          IsFingerprintingProtectionFeatureEnabled()) {
-    associated_registry.AddInterface<
-        fingerprinting_protection_filter::mojom::FingerprintingProtectionHost>(
-        base::BindRepeating(
-            [](content::RenderFrameHost* render_frame_host,
-               mojo::PendingAssociatedReceiver<
-                   fingerprinting_protection_filter::mojom::
-                       FingerprintingProtectionHost> receiver) {
-              fingerprinting_protection_filter::ThrottleManager::BindReceiver(
-                  std::move(receiver), render_frame_host);
-            },
-            &render_frame_host));
-  }
+
   associated_registry
       .AddInterface<supervised_user::mojom::SupervisedUserCommands>(
           base::BindRepeating(
@@ -627,6 +612,20 @@ void ChromeContentBrowserClient::
                     std::move(receiver), render_frame_host);
               },
               &render_frame_host));
+
+#if !BUILDFLAG(IS_ANDROID)
+  if (base::FeatureList::IsEnabled(features::kIndigo)) {
+    associated_registry.AddInterface<chrome::mojom::IndigoOnboardingDialogHost>(
+        base::BindRepeating(
+            [](content::RenderFrameHost* render_frame_host,
+               mojo::PendingAssociatedReceiver<
+                   chrome::mojom::IndigoOnboardingDialogHost> receiver) {
+              indigo::IndigoOnboardingDialog::BindOnboardingDialogHost(
+                  std::move(receiver), render_frame_host);
+            },
+            &render_frame_host));
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 void ChromeContentBrowserClient::BindGpuHostReceiver(
@@ -636,27 +635,25 @@ void ChromeContentBrowserClient::BindGpuHostReceiver(
     return;
   }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (auto r = receiver.As<chromeos::cdm::mojom::BrowserCdmFactory>())
     chromeos::CdmFactoryDaemonProxyAsh::Create(std::move(r));
-#elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (auto r = receiver.As<chromeos::cdm::mojom::BrowserCdmFactory>())
-    chromeos::CdmFactoryDaemonProxyLacros::Create(std::move(r));
 #endif
 }
 
 void ChromeContentBrowserClient::BindUtilityHostReceiver(
+    const std::string& service_name,
     mojo::GenericPendingReceiver receiver) {
   if (auto r = receiver.As<metrics::mojom::CallStackProfileCollector>()) {
     metrics::CallStackProfileCollector::Create(std::move(r));
     return;
   }
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (auto service_manager_receiver =
           receiver
               .As<chromeos::mojo_service_manager::mojom::ServiceManager>()) {
     ash::mojo_service_manager::EstablishUtilityProcessBridge(
-        std::move(service_manager_receiver));
+        service_name, std::move(service_manager_receiver));
     return;
   }
 #endif
@@ -676,25 +673,18 @@ void ChromeContentBrowserClient::BindHostReceiverForRenderer(
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   if (auto host_receiver =
           receiver.As<spellcheck::mojom::SpellCheckInitializationHost>()) {
-    SpellCheckInitializationHostImpl::Create(render_process_host->GetID(),
-                                             std::move(host_receiver));
+    SpellCheckInitializationHostImpl::Create(
+        render_process_host->GetDeprecatedID(), std::move(host_receiver));
     return;
   }
 
 #if BUILDFLAG(HAS_SPELLCHECK_PANEL)
   if (auto host_receiver =
           receiver.As<spellcheck::mojom::SpellCheckPanelHost>()) {
-    SpellCheckPanelHostImpl::Create(render_process_host->GetID(),
+    SpellCheckPanelHostImpl::Create(render_process_host->GetDeprecatedID(),
                                     std::move(host_receiver));
     return;
   }
 #endif  // BUILDFLAG(HAS_SPELLCHECK_PANEL)
 #endif  // BUILDFLAG(ENABLE_SPELLCHECK)
-
-#if BUILDFLAG(ENABLE_PLUGINS)
-  if (auto host_receiver = receiver.As<chrome::mojom::MetricsService>()) {
-    ChromeMetricsServiceAccessor::BindMetricsServiceReceiver(
-        std::move(host_receiver));
-  }
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
 }

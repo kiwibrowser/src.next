@@ -40,6 +40,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/unloaded_extension_reason.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_paths.h"
@@ -52,16 +53,17 @@
 #include "services/network/test/test_url_loader_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
+namespace extensions {
+namespace {
 
 using extensions::ExtensionRegistry;
 using network::mojom::URLLoader;
 using testing::_;
 using testing::StrictMock;
-
-namespace extensions {
-namespace {
 
 constexpr char kValidTrialToken1[] = "valid_token_1";
 constexpr char kValidTrialToken2[] = "valid_token_2";
@@ -75,105 +77,80 @@ base::FilePath GetTestPath(const std::string& name) {
 
 base::FilePath GetContentVerifierTestPath() {
   base::FilePath path;
-  EXPECT_TRUE(base::PathService::Get(DIR_TEST_DATA, &path));
-  return path.AppendASCII("content_hash_fetcher")
+  EXPECT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &path));
+  return path.AppendASCII("extensions")
+      .AppendASCII("content_hash_fetcher")
       .AppendASCII("different_sized_files");
 }
 
 scoped_refptr<const Extension> CreateTestExtension(const std::string& name,
-                                                   bool incognito_split_mode,
-                                                   int manifest_version) {
+                                                   bool incognito_split_mode) {
   return ExtensionBuilder(name)
-      .SetManifestVersion(manifest_version)
+      .SetManifestVersion(3)
       .SetManifestKey("incognito", incognito_split_mode ? "split" : "spanning")
       .SetPath(GetTestPath("response_headers"))
       .SetLocation(mojom::ManifestLocation::kInternal)
       .Build();
 }
 
-scoped_refptr<const Extension> CreateWebStoreExtension(int manifest_version) {
+scoped_refptr<const Extension> CreateWebStoreExtension() {
   base::FilePath path;
   EXPECT_TRUE(base::PathService::Get(chrome::DIR_RESOURCES, &path));
   path = path.AppendASCII("web_store");
 
   return ExtensionBuilder("WebStore")
-      .SetManifestVersion(manifest_version)
+      .SetManifestVersion(3)
       .SetManifestKey("icons",
-                      base::Value::Dict().Set("16", "webstore_icon_16.png"))
+                      base::DictValue().Set("16", "webstore_icon_16.png"))
       .SetManifestKey(
           "web_accessible_resources",
-          manifest_version == 3
-              ? base::Value::List().Append(
-                    base::Value::Dict()
-                        .Set("resources",
-                             base::Value::List().Append("webstore_icon_16.png"))
-                        .Set("matches", base::Value::List().Append("*://*/*")))
-              : base::Value::List().Append("webstore_icon_16.png"))
+          base::ListValue().Append(
+              base::DictValue()
+                  .Set("resources",
+                       base::ListValue().Append("webstore_icon_16.png"))
+                  .Set("matches", base::ListValue().Append("*://*/*"))))
       .SetPath(path)
       .SetLocation(mojom::ManifestLocation::kComponent)
       .Build();
 }
 
-scoped_refptr<const Extension> CreateTestResponseHeaderExtension(
-    int manifest_version) {
-  if (manifest_version == 3) {
-    return ExtensionBuilder("An extension with web-accessible resources")
-        .SetManifestVersion(3)
-        .SetManifestKey(
-            "web_accessible_resources",
-            base::Value::List().Append(
-                base::Value::Dict()
-                    .Set("resources", base::Value::List().Append("test.dat"))
-                    .Set("matches", base::Value::List().Append("*://*/*"))))
-        .SetManifestKey("background", base::Value::Dict().Set("service_worker",
-                                                              "background.js"))
-        .SetManifestKey("trial_tokens", base::Value::List()
-                                            .Append(kValidTrialToken1)
-                                            .Append(kValidTrialToken2))
-        .SetPath(GetTestPath("response_headers"))
-        .Build();
-  }
+scoped_refptr<const Extension> CreateTestResponseHeaderExtension() {
   return ExtensionBuilder("An extension with web-accessible resources")
-      .SetManifestVersion(manifest_version)
-      .SetManifestKey("web_accessible_resources",
-                      base::Value::List().Append("test.dat"))
+      .SetManifestVersion(3)
       .SetManifestKey(
-          "background",
-          base::Value::Dict().Set("scripts",
-                                  base::Value::List().Append("background.js")))
+          "web_accessible_resources",
+          base::ListValue().Append(
+              base::DictValue()
+                  .Set("resources", base::ListValue()
+                                        .Append("test.dat")
+                                        .Append("mime_type_sniffer_test.gif1"))
+                  .Set("matches", base::ListValue().Append("*://*/*"))))
+      .SetManifestKey("background",
+                      base::DictValue().Set("service_worker", "background.js"))
+      .SetManifestKey(
+          "trial_tokens",
+          base::ListValue().Append(kValidTrialToken1).Append(kValidTrialToken2))
       .SetPath(GetTestPath("response_headers"))
       .Build();
 }
 
-scoped_refptr<const Extension> CreateTestModuleResponseHeaderExtension(
-    int manifest_version) {
+scoped_refptr<const Extension> CreateTestModuleResponseHeaderExtension() {
   return ExtensionBuilder("A module extension")
-      .SetManifestVersion(manifest_version)
-      .SetManifestKey("export", base::Value::Dict())
+      .SetManifestVersion(3)
+      .SetManifestKey("export", base::DictValue())
       .SetPath(GetTestPath("response_headers"))
       .Build();
 }
 
 scoped_refptr<const Extension> CreateTestModuleImporterResponseHeaderExtension(
-    int manifest_version,
     const std::string& module_extension_id) {
-  if (manifest_version == 3) {
-    return ExtensionBuilder("A module importer extension")
-        .SetManifestVersion(3)
-        .SetManifestKey("import",
-                        base::Value::List().Append(
-                            base::Value::Dict().Set("id", module_extension_id)))
-        .SetManifestKey("trial_tokens", base::Value::List()
-                                            .Append(kValidTrialToken1)
-                                            .Append(kValidTrialToken2))
-        .SetPath(GetTestPath("response_headers"))
-        .Build();
-  }
   return ExtensionBuilder("A module importer extension")
-      .SetManifestVersion(manifest_version)
-      .SetManifestKey("import",
-                      base::Value::List().Append(
-                          base::Value::Dict().Set("id", module_extension_id)))
+      .SetManifestVersion(3)
+      .SetManifestKey("import", base::ListValue().Append(base::DictValue().Set(
+                                    "id", module_extension_id)))
+      .SetManifestKey(
+          "trial_tokens",
+          base::ListValue().Append(kValidTrialToken1).Append(kValidTrialToken2))
       .SetPath(GetTestPath("response_headers"))
       .Build();
 }
@@ -243,12 +220,12 @@ class GetResult {
 // This test lives in src/chrome instead of src/extensions because it tests
 // functionality delegated back to Chrome via ChromeExtensionsBrowserClient.
 // See chrome/browser/extensions/chrome_url_request_util.cc.
-class ExtensionProtocolsTestBase : public testing::Test,
-                                   public testing::WithParamInterface<int> {
+class ExtensionProtocolsTestBase : public testing::Test {
  public:
   explicit ExtensionProtocolsTestBase(bool force_incognito)
       : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
-        rvh_test_enabler_(new content::RenderViewHostTestEnabler()),
+        rvh_test_enabler_(
+            std::make_unique<content::RenderViewHostTestEnabler>()),
         force_incognito_(force_incognito) {}
 
   void SetUp() override {
@@ -261,7 +238,7 @@ class ExtensionProtocolsTestBase : public testing::Test,
     command_line->AppendSwitchASCII(
         switches::kExtensionContentVerification,
         switches::kExtensionContentVerificationEnforce);
-    content_verifier_ = new ContentVerifier(
+    content_verifier_ = base::MakeRefCounted<ContentVerifier>(
         browser_context(),
         std::make_unique<ChromeContentVerifierDelegate>(browser_context()));
     content_verifier_->Start();
@@ -274,6 +251,7 @@ class ExtensionProtocolsTestBase : public testing::Test,
   void TearDown() override {
     loader_factory_.reset();
     content_verifier_->Shutdown();
+    content_verifier_.reset();
     // Shut down the PowerMonitor if initialized.
     base::PowerMonitor::GetInstance()->ShutdownForTesting();
   }
@@ -310,7 +288,7 @@ class ExtensionProtocolsTestBase : public testing::Test,
                    /*incognito_enabled=*/false,
                    /*notifications_disabled=*/false);
     }
-    return RequestOrLoad(extension->GetResourceURL(relative_path),
+    return RequestOrLoad(extension->ResolveExtensionURL(relative_path),
                          network::mojom::RequestDestination::kDocument);
   }
 
@@ -385,24 +363,11 @@ class ExtensionProtocolsIncognitoTest : public ExtensionProtocolsTestBase {
       : ExtensionProtocolsTestBase(true /*force_incognito*/) {}
 };
 
-// A specialization that will only run on MV3 extensions.
-using ExtensionProtocolsMV3Test = ExtensionProtocolsTest;
-
-INSTANTIATE_TEST_SUITE_P(MV2, ExtensionProtocolsTest, ::testing::Values(2));
-INSTANTIATE_TEST_SUITE_P(MV3, ExtensionProtocolsTest, ::testing::Values(3));
-INSTANTIATE_TEST_SUITE_P(MV2,
-                         ExtensionProtocolsIncognitoTest,
-                         ::testing::Values(2));
-INSTANTIATE_TEST_SUITE_P(MV3,
-                         ExtensionProtocolsIncognitoTest,
-                         ::testing::Values(3));
-INSTANTIATE_TEST_SUITE_P(MV3, ExtensionProtocolsMV3Test, ::testing::Values(3));
-
 // Tests that making a chrome-extension request in an incognito context is
 // only allowed under the right circumstances (if the extension is allowed
 // in incognito, and it's either a non-main-frame request or a split-mode
 // extension).
-TEST_P(ExtensionProtocolsIncognitoTest, IncognitoRequest) {
+TEST_F(ExtensionProtocolsIncognitoTest, IncognitoRequest) {
   struct TestCase {
     // Inputs.
     std::string name;
@@ -419,8 +384,8 @@ TEST_P(ExtensionProtocolsIncognitoTest, IncognitoRequest) {
   };
 
   for (const auto& test_case : test_cases) {
-    scoped_refptr<const Extension> extension = CreateTestExtension(
-        test_case.name, test_case.incognito_split_mode, GetParam());
+    scoped_refptr<const Extension> extension =
+        CreateTestExtension(test_case.name, test_case.incognito_split_mode);
     AddExtension(extension, test_case.incognito_enabled, false);
 
     // First test a main frame request.
@@ -446,9 +411,8 @@ TEST_P(ExtensionProtocolsIncognitoTest, IncognitoRequest) {
 
 // Tests getting a resource for a component extension works correctly, both when
 // the extension is enabled and when it is disabled.
-TEST_P(ExtensionProtocolsTest, ComponentResourceRequest) {
-  scoped_refptr<const Extension> extension =
-      CreateWebStoreExtension(GetParam());
+TEST_F(ExtensionProtocolsTest, ComponentResourceRequest) {
+  scoped_refptr<const Extension> extension = CreateWebStoreExtension();
   AddExtension(extension, false, false);
 
   // First test it with the extension enabled.
@@ -480,9 +444,9 @@ TEST_P(ExtensionProtocolsTest, ComponentResourceRequest) {
 
 // Tests that a URL request for resource from an extension returns a few
 // expected response headers.
-TEST_P(ExtensionProtocolsTest, ResourceRequestResponseHeaders) {
+TEST_F(ExtensionProtocolsTest, ResourceRequestResponseHeaders) {
   scoped_refptr<const Extension> extension =
-      CreateTestResponseHeaderExtension(GetParam());
+      CreateTestResponseHeaderExtension();
   AddExtension(extension, false, false);
 
   {
@@ -525,10 +489,9 @@ TEST_P(ExtensionProtocolsTest, ResourceRequestResponseHeaders) {
 
 // Tests that request for background script returns a few expected response
 // headers.
-TEST_P(ExtensionProtocolsTest, BackgroundScriptRequestResponseHeaders) {
-  const int manifest_version = GetParam();
+TEST_F(ExtensionProtocolsTest, BackgroundScriptRequestResponseHeaders) {
   scoped_refptr<const Extension> extension =
-      CreateTestResponseHeaderExtension(manifest_version);
+      CreateTestResponseHeaderExtension();
   AddExtension(extension, false, false);
 
   {
@@ -550,12 +513,8 @@ TEST_P(ExtensionProtocolsTest, BackgroundScriptRequestResponseHeaders) {
 
     // Only background service worker script should be allowed to load as a
     // service worker.
-    if (manifest_version == 3) {
-      EXPECT_EQ("/",
-                get_result.GetResponseHeaderByName("Service-Worker-Allowed"));
-    } else {
-      EXPECT_FALSE(get_result.HeaderIsPresent("Service-Worker-Allowed"));
-    }
+    EXPECT_EQ("/",
+              get_result.GetResponseHeaderByName("Service-Worker-Allowed"));
 
     // COEP header does not make sense in non-document responses.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Embedder-Policy"));
@@ -565,34 +524,11 @@ TEST_P(ExtensionProtocolsTest, BackgroundScriptRequestResponseHeaders) {
     // scripts for when this changes.
     // See also
     // https://github.com/w3c/webappsec-csp/issues/336#issuecomment-1274730655
-    if (manifest_version == 3) {
-      EXPECT_EQ("script-src 'self';",
-                get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    } else {
-      EXPECT_EQ(
-          "script-src 'self' blob: filesystem:; object-src 'self' blob: "
-          "filesystem:;",
-          get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    }
+    EXPECT_EQ("script-src 'self';",
+              get_result.GetResponseHeaderByName("Content-Security-Policy"));
 
     // COOP header does not make sense in non-document responses.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Opener-Policy"));
-  }
-}
-
-// Tests that request for background service worker returns Origin-Trial
-// response header.
-TEST_P(ExtensionProtocolsMV3Test, BackgroundScriptRequestResponseHeaders) {
-  EXPECT_EQ(3, GetParam());
-  scoped_refptr<const Extension> extension =
-      CreateTestResponseHeaderExtension(GetParam());
-  AddExtension(extension, false, false);
-
-  {
-    auto get_result =
-        RequestOrLoad(extension->GetResourceURL("background.js"),
-                      network::mojom::RequestDestination::kServiceWorker);
-    EXPECT_EQ(net::OK, get_result.result());
 
     // In MV3-style service workers origin trail tokens are served via service
     // worker Origin-Trial header.
@@ -606,10 +542,9 @@ TEST_P(ExtensionProtocolsMV3Test, BackgroundScriptRequestResponseHeaders) {
 //   generated background page fails
 // - when no background is specified, requesting generated background page fails
 
-TEST_P(ExtensionProtocolsTest, BackgroundPageRequestResponseHeaders) {
-  const int manifest_version = GetParam();
+TEST_F(ExtensionProtocolsTest, BackgroundPageRequestResponseHeaders) {
   scoped_refptr<const Extension> extension =
-      CreateTestResponseHeaderExtension(manifest_version);
+      CreateTestResponseHeaderExtension();
   AddExtension(extension, false, false);
 
   {
@@ -635,15 +570,8 @@ TEST_P(ExtensionProtocolsTest, BackgroundPageRequestResponseHeaders) {
     // header.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Embedder-Policy"));
 
-    if (manifest_version == 3) {
-      EXPECT_EQ("script-src 'self';",
-                get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    } else {
-      EXPECT_EQ(
-          "script-src 'self' blob: filesystem:; object-src 'self' blob: "
-          "filesystem:;",
-          get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    }
+    EXPECT_EQ("script-src 'self';",
+              get_result.GetResponseHeaderByName("Content-Security-Policy"));
 
     // COOP header does not make sense in non-document responses.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Opener-Policy"));
@@ -652,13 +580,11 @@ TEST_P(ExtensionProtocolsTest, BackgroundPageRequestResponseHeaders) {
 
 // Tests that resources from imported module extensions get appropriately
 // loaded with proper headers or rejected
-TEST_P(ExtensionProtocolsTest, ModuleRequestResponseHeaders) {
-  const int manifest_version = GetParam();
+TEST_F(ExtensionProtocolsTest, ModuleRequestResponseHeaders) {
   scoped_refptr<const Extension> module_extension =
-      CreateTestModuleResponseHeaderExtension(manifest_version);
+      CreateTestModuleResponseHeaderExtension();
   scoped_refptr<const Extension> importer_extension =
-      CreateTestModuleImporterResponseHeaderExtension(manifest_version,
-                                                      module_extension->id());
+      CreateTestModuleImporterResponseHeaderExtension(module_extension->id());
   AddExtension(module_extension, false, false);
   AddExtension(importer_extension, false, false);
 
@@ -703,42 +629,11 @@ TEST_P(ExtensionProtocolsTest, ModuleRequestResponseHeaders) {
     // header.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Embedder-Policy"));
 
-    if (manifest_version == 3) {
-      EXPECT_EQ("script-src 'self';",
-                get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    } else {
-      EXPECT_EQ(
-          "script-src 'self' blob: filesystem:; object-src 'self' blob: "
-          "filesystem:;",
-          get_result.GetResponseHeaderByName("Content-Security-Policy"));
-    }
+    EXPECT_EQ("script-src 'self';",
+              get_result.GetResponseHeaderByName("Content-Security-Policy"));
 
     // COOP header does not make sense in non-document responses.
     EXPECT_FALSE(get_result.HeaderIsPresent("Cross-Origin-Opener-Policy"));
-  }
-}
-
-// Tests that request for background service worker returns Origin-Trial
-// response header.
-TEST_P(ExtensionProtocolsMV3Test, ModuleRequestResponseHeaders) {
-  EXPECT_EQ(3, GetParam());
-  const int manifest_version = GetParam();
-  scoped_refptr<const Extension> module_extension =
-      CreateTestModuleResponseHeaderExtension(manifest_version);
-  scoped_refptr<const Extension> importer_extension =
-      CreateTestModuleImporterResponseHeaderExtension(manifest_version,
-                                                      module_extension->id());
-  AddExtension(module_extension, false, false);
-  AddExtension(importer_extension, false, false);
-
-  // Imported resources get loaded with proper headers (inherited from
-  // importer).
-  {
-    auto get_result =
-        RequestOrLoad(importer_extension->GetResourceURL(
-                          "_modules/" + module_extension->id() + "/test.dat"),
-                      network::mojom::RequestDestination::kDocument);
-    EXPECT_EQ(net::OK, get_result.result());
 
     // Origin-Trial header should contain trials inherited from importer.
     EXPECT_EQ(kTrialTokensHeaderValue,
@@ -746,10 +641,9 @@ TEST_P(ExtensionProtocolsMV3Test, ModuleRequestResponseHeaders) {
   }
 }
 
-TEST_P(ExtensionProtocolsTest, InvalidBackgroundScriptRequest) {
-  const int manifest_version = GetParam();
+TEST_F(ExtensionProtocolsTest, InvalidBackgroundScriptRequest) {
   scoped_refptr<const Extension> extension =
-      CreateTestResponseHeaderExtension(manifest_version);
+      CreateTestResponseHeaderExtension();
   AddExtension(extension, false, false);
 
   // Requesting script from background key with invalid destination is
@@ -762,9 +656,6 @@ TEST_P(ExtensionProtocolsTest, InvalidBackgroundScriptRequest) {
       network::mojom::RequestDestination::kStyle,
       network::mojom::RequestDestination::kVideo,
   };
-  if (!base::FeatureList::IsEnabled(blink::features::kPlzDedicatedWorker)) {
-    destinations.push_back(network::mojom::RequestDestination::kWorker);
-  }
   for (network::mojom::RequestDestination destination : destinations) {
     auto get_result =
         RequestOrLoad(extension->GetResourceURL("background.js"), destination);
@@ -773,10 +664,9 @@ TEST_P(ExtensionProtocolsTest, InvalidBackgroundScriptRequest) {
 }
 
 // Tests that a URL request for main frame or subframe from an extension
-// succeeds, but subresources fail. See http://crbug.com/312269.
-TEST_P(ExtensionProtocolsTest, AllowFrameRequests) {
-  scoped_refptr<const Extension> extension =
-      CreateTestExtension("foo", false, GetParam());
+// succeeds, but subresources fail. See http://crbug.com/40338742.
+TEST_F(ExtensionProtocolsTest, AllowFrameRequests) {
+  scoped_refptr<const Extension> extension = CreateTestExtension("foo", false);
   AddExtension(extension, false, false);
 
   // All MAIN_FRAME requests should succeed. SUB_FRAME requests that are not
@@ -803,9 +693,9 @@ TEST_P(ExtensionProtocolsTest, AllowFrameRequests) {
 
 // Make sure requests for paths ending with a separator aren't allowed. See
 // https://crbug.com/356878412.
-TEST_P(ExtensionProtocolsTest, PathsWithTrailingSeparatorsAreNotAllowed) {
+TEST_F(ExtensionProtocolsTest, PathsWithTrailingSeparatorsAreNotAllowed) {
   base::FilePath extension_dir = GetTestPath("simple_with_file");
-  std::string error;
+  std::u16string error;
   scoped_refptr<Extension> extension = file_util::LoadExtension(
       extension_dir, mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
       &error);
@@ -821,11 +711,36 @@ TEST_P(ExtensionProtocolsTest, PathsWithTrailingSeparatorsAreNotAllowed) {
             DoRequestOrLoad(extension, relative_path.AsUTF8Unsafe()).result());
 }
 
+// Make sure requests for paths ending with a dot or a space aren't resolved to
+// the corresponding file without the ending dot or space, as it normally would
+// on Windows. See https://crbug.com/400119351.
+TEST_F(ExtensionProtocolsTest, PathsWithTrailingDotSpaceAreNotAllowed) {
+  base::FilePath extension_dir = GetTestPath("simple_with_file");
+  std::u16string error;
+  scoped_refptr<Extension> extension = file_util::LoadExtension(
+      extension_dir, mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
+      &error);
+  ASSERT_NE(extension.get(), nullptr) << "error: " << error;
+
+  // Loading "/file.html" should succeed.
+  EXPECT_EQ(net::OK, DoRequestOrLoad(extension, "file.html").result());
+
+  // Loading "/file.html." and "/file.html " should fail.
+  for (const std::string suffix : {".", "%20"}) {
+    // Add the suffix manually, as `ResolveExtensionURL` strips trailing spaces.
+    GURL url =
+        GURL(extension->ResolveExtensionURL("file.html").spec() + suffix);
+    EXPECT_EQ(net::ERR_FILE_NOT_FOUND,
+              RequestOrLoad(url, network::mojom::RequestDestination::kDocument)
+                  .result());
+  }
+}
+
 // Make sure directories with an index.html file aren't serving the file, i.e.
 // index.html doesn't get any special treatment.
-TEST_P(ExtensionProtocolsTest, DirectoryWithIndexHtml) {
+TEST_F(ExtensionProtocolsTest, DirectoryWithIndexHtml) {
   base::FilePath extension_dir = GetTestPath("simple_with_index_html");
-  std::string error;
+  std::u16string error;
   scoped_refptr<Extension> extension = file_util::LoadExtension(
       extension_dir, mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
       &error);
@@ -847,9 +762,9 @@ TEST_P(ExtensionProtocolsTest, DirectoryWithIndexHtml) {
             DoRequestOrLoad(extension, relative_path.AsUTF8Unsafe()).result());
 }
 
-TEST_P(ExtensionProtocolsTest, MetadataFolder) {
+TEST_F(ExtensionProtocolsTest, MetadataFolder) {
   base::FilePath extension_dir = GetTestPath("metadata_folder");
-  std::string error;
+  std::u16string error;
   scoped_refptr<Extension> extension = file_util::LoadExtension(
       extension_dir, mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
       &error);
@@ -874,7 +789,7 @@ TEST_P(ExtensionProtocolsTest, MetadataFolder) {
 
 // Tests that unreadable files and deleted files correctly go through
 // ContentVerifyJob.
-TEST_P(ExtensionProtocolsTest, VerificationSeenForFileAccessErrors) {
+TEST_F(ExtensionProtocolsTest, VerificationSeenForFileAccessErrors) {
   // Unzip extension containing verification hashes to a temporary directory.
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -922,7 +837,7 @@ TEST_P(ExtensionProtocolsTest, VerificationSeenForFileAccessErrors) {
 }
 
 // Tests that zero byte files correctly go through ContentVerifyJob.
-TEST_P(ExtensionProtocolsTest, VerificationSeenForZeroByteFile) {
+TEST_F(ExtensionProtocolsTest, VerificationSeenForZeroByteFile) {
   const std::string kEmptyJs("empty.js");
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -971,18 +886,19 @@ TEST_P(ExtensionProtocolsTest, VerificationSeenForZeroByteFile) {
   }
 }
 
-TEST_P(ExtensionProtocolsTest, VerifyScriptListedAsIcon) {
+TEST_F(ExtensionProtocolsTest, VerifyScriptListedAsIcon) {
   const std::string kBackgroundJs("background.js");
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath unzipped_path = temp_dir.GetPath();
 
   base::FilePath path;
-  EXPECT_TRUE(base::PathService::Get(DIR_TEST_DATA, &path));
+  EXPECT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &path));
 
   scoped_refptr<Extension> extension =
       content_verifier_test_utils::UnzipToDirAndLoadExtension(
-          path.AppendASCII("content_hash_fetcher")
+          path.AppendASCII("extensions")
+              .AppendASCII("content_hash_fetcher")
               .AppendASCII("manifest_mislabeled_script")
               .AppendASCII("source.zip"),
           unzipped_path);
@@ -1011,16 +927,8 @@ TEST_P(ExtensionProtocolsTest, VerifyScriptListedAsIcon) {
 }
 
 // Tests that mime types are properly set for returned extension resources.
-TEST_P(ExtensionProtocolsTest, MimeTypesForKnownFiles) {
+TEST_F(ExtensionProtocolsTest, MimeTypesForKnownFiles) {
   TestExtensionDir test_dir;
-  const int manifest_version = GetParam();
-  constexpr char kManifestV2[] = R"(
-      {
-        "name": "Test Ext",
-        "manifest_version": 2,
-        "version": "1",
-        "web_accessible_resources": ["*"]
-      })";
   constexpr char kManifestV3[] = R"(
       {
         "name": "Test Ext",
@@ -1031,9 +939,8 @@ TEST_P(ExtensionProtocolsTest, MimeTypesForKnownFiles) {
           "matches": [ "*://*/*" ]
         }]
       })";
-  const char* kManifest = manifest_version == 3 ? kManifestV3 : kManifestV2;
-  test_dir.WriteManifest(kManifest);
-  base::Value::Dict manifest = base::test::ParseJsonDict(kManifest);
+  test_dir.WriteManifest(kManifestV3);
+  base::DictValue manifest = base::test::ParseJsonDict(kManifestV3);
   ASSERT_FALSE(manifest.empty());
 
   test_dir.WriteFile(FILE_PATH_LITERAL("json_file.json"), "{}");
@@ -1073,10 +980,10 @@ TEST_P(ExtensionProtocolsTest, MimeTypesForKnownFiles) {
 
 // Tests that requests for extension resources (including the generated
 // background page) are not aborted on system suspend.
-TEST_P(ExtensionProtocolsTest, ExtensionRequestsNotAborted) {
+TEST_F(ExtensionProtocolsTest, ExtensionRequestsNotAborted) {
   base::FilePath extension_dir =
       GetTestPath("common").AppendASCII("background_script");
-  std::string error;
+  std::u16string error;
   scoped_refptr<Extension> extension = file_util::LoadExtension(
       extension_dir, mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
       &error);
@@ -1093,6 +1000,22 @@ TEST_P(ExtensionProtocolsTest, ExtensionRequestsNotAborted) {
   // Request the background.js file. Ensure the request completes successfully.
   EXPECT_EQ(net::OK,
             DoRequestOrLoad(extension.get(), "background.js").result());
+}
+
+// Tests that mime type sniffing is not performed for extension resources.
+TEST_F(ExtensionProtocolsTest, MimeTypeSniffingNotPerformed) {
+  scoped_refptr<const Extension> extension =
+      CreateTestResponseHeaderExtension();
+  AddExtension(extension, false, false);
+
+  auto get_result =
+      RequestOrLoad(extension->GetResourceURL("mime_type_sniffer_test.gif1"),
+                    network::mojom::RequestDestination::kDocument);
+  EXPECT_EQ(net::OK, get_result.result());
+
+  // With mime sniffing, the content type would be image/gif.
+  EXPECT_EQ("application/octet-stream",
+            get_result.GetResponseHeaderByName("Content-Type"));
 }
 
 }  // namespace extensions

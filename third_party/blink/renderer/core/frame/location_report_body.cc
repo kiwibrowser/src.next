@@ -22,7 +22,7 @@ LocationReportBody::ReportLocation LocationReportBody::CreateReportLocation(
 
 // static
 LocationReportBody::ReportLocation LocationReportBody::CreateReportLocation(
-    std::unique_ptr<SourceLocation> location) {
+    SourceLocation* location) {
   return location->IsUnknown()
              ? ReportLocation{}
              : ReportLocation{location->Url(), location->LineNumber(),
@@ -47,8 +47,8 @@ unsigned LocationReportBody::MatchId() const {
   const std::optional<uint32_t> line = lineNumber(), column = columnNumber();
 
   unsigned hash = sourceFile().IsNull() ? 0 : sourceFile().Impl()->GetHash();
-  hash = WTF::HashInts(hash, line ? WTF::GetHash(*line) : 0);
-  hash = WTF::HashInts(hash, column ? WTF::GetHash(*column) : 0);
+  hash = HashInts(hash, line ? blink::GetHash(*line) : 0);
+  hash = HashInts(hash, column ? blink::GetHash(*column) : 0);
   return hash;
 }
 

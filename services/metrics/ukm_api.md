@@ -4,7 +4,7 @@ This document describes how to write client code to collect UKM data. Before
 you add new metrics, you should file a proposal. See [go/ukm](http://go/ukm)
 for more information.
 
-Last proofread and updated on 2024/07/17.
+Last proofread and updated on 2025/12/18.
 
 [TOC]
 
@@ -15,27 +15,33 @@ Any events and metrics you collect need to be defined in
 
 ### Required Details
 
-* Metric `owner`: the email of someone who can answer questions about how this
-  metric is recorded, what it means, and how it should be used. This can include
-  multiple people and/or a team alias.
-* A `summary` of the event about which you are recording details, including a
-  description of when the event will be recorded.
-* For each metric in the event: a `summary` of the data and what it means.
-* The `enum` type if the metric is enumerated which ensures that every value is
-  accounted independently with no attempt to "bucket" the results. The enum uses
-  the
-  [//tools/metrics/histograms/enums.xml](https://cs.chromium.org/chromium/src/tools/metrics/histograms/enums.xml)
-  file for definitions. Note this is the same file for UMA histogram definitions
-  so these can ideally be reused.
-* If the metric is numeric, then its unit should be stated in the `summary`.
-  For example, "seconds", "ms", "KiB". If a bucketing scheme is used, you should
-  explain that too so that it's clear to people reading query results.
-* If an event will only happen once per Navigation, it can be marked
-  `singular="true"` so that the generated proto definition defines the field as
-  "optional" instead of "repeated". If multiple such events are attempted, it's
-  undefined which one will be kept.
+*   Metric `owner`: the email of someone who can answer questions about how this
+    metric is recorded, what it means, and how it should be used. This can
+    include multiple people and/or a team alias.
+*   A `summary` of the event about which you are recording details, including a
+    description of when the event will be recorded.
+*   For each metric in the event: a `summary` of the data and what it means.
+*   The `enum` type if the metric is enumerated which ensures that every value
+    is accounted independently with no attempt to "bucket" the results. The enum
+    uses the
+    [//tools/metrics/histograms/enums.xml](https://cs.chromium.org/chromium/src/tools/metrics/histograms/enums.xml)
+    file for definitions. Note this is the same file for UMA histogram
+    definitions so these can ideally be reused.
+*   If the metric is numeric, then its unit should be described in the
+    `summary`. For example, "seconds", "ms", "KiB". For metrics that denote time
+    durations, the metric name should have a unit suffix, e.g.
+    "FirstRequestConnectDelayMs" instead of "FirstRequestConnectDelay". If a
+    bucketing scheme is used, you should explain that too so that it's clear to
+    people reading query results. Precise measurements of user actions timing,
+    e.g. in milliseconds, require bucketing to be applied, for instance using
+    [GetExponentialBucketMinForFineUserTiming](https://source.chromium.org/chromium/chromium/src/+/main:services/metrics/public/cpp/metrics_utils.h;l=22;drc=098756533733ea50b2dcb1c40d9a9e18d49febbe).
+*   If an event will only happen once per Navigation, it can be marked
+    `singular="true"` so that the generated proto definition defines the field
+    as "optional" instead of "repeated". If multiple such events are attempted,
+    it's undefined which one will be kept.
 
 ### Example
+
 ```xml
 <event name="Goat.Teleported">
   <owner>teleporter@chromium.org</owner>
@@ -58,13 +64,23 @@ Any events and metrics you collect need to be defined in
 
 ### Controlling the Aggregation of Metrics
 
-Control of which metrics are included in the
-[History](http://go/aggregated-ukm#history-table) table (the table behind the
-main UKM dashboard) is done via the same
+Aggregation of metrics is an optional setting for making them available in the
+[History](http://go/aggregated-ukm#history-table) table and consequently
+viewable on the [UKM dashboard](http://go/ukm-dash).
+
+To have a metric aggregated, `<history>`, `<aggregation>` and `<statistics>`
+tags need to be added along with the type of statistic to be generated in the
+event definition
 [`tools/metrics/ukm/ukm.xml`](https://cs.chromium.org/chromium/src/tools/metrics/ukm/ukm.xml)
-file in the Chromium codebase. To have a metric aggregated, `<history>`,
-`<aggregation>` and `<statistics>` tags need to be added along with the type of
-statistic to be generated.
+file in the Chromium codebase.
+
+Adding the `<aggregation>` tag does not change how the events and metrics are
+stored unaggregated in reports and logs.
+
+However, it increases the workload for UKM data processing pipelines. The
+computation can be especially costly for frequently emitted events. Therefore,
+please only add aggregations when necessary. This tag can be added to an
+existing metric later or removed any time.
 
 ```xml
 <event name="Goat.Teleported">
@@ -86,7 +102,7 @@ statistic to be generated.
 Supported statistic types are:
 
 *   `<quantiles type="std-percentiles"/>`: Calculates the "standard percentiles"
-    for the values which are 1, 5, 10, 25, 50, 75, 90, 95, and 99%ile.
+    for the values which are 1, 5, 10, 25, 50, 75, 90, 95, and 99 percentiles.
 *   `<enumeration/>`: Calculates the proportions of all values individually. The
     proportions indicate the relative frequency of each bucket and are
     calculated independently for each metric over each aggregation. (Details
@@ -296,7 +312,7 @@ If the event name in the XML contains a period (`.`), it is replaced with an und
 
 To avoid having UKM report becoming unbounded in size, an upper limit is placed on the number of events recorded for each event type. Events that are recorded too frequently may be subject to downsampling on the Stable and Beta channels (see [go/ukm-downsampling](http://go/ukm-downsampling)). As a rule of thumb, it is recommended that most events be recorded at most once per 100 page loads on average to limit data volume. In addition, if an event type is observed to be spammy, is heavily downsampled, or to account for more than 10% of all recorded UKM events combined on any platform, you will be asked to reduce the event emission frequency.
 
-For data quality purposes, if you have the option to record an event from either the browser process or a renderer process, prefer the former. Because renderer processes are not trusted, events recorded in them are more complex to attribute to the corresponding browser-side navigations using the `DocumentCreated` event (see [go/ukm-readable-guide](http://go/ukm-readable-guide#processing-events-attached-to-blink-document-sources)). Joining using the `DocumentCreated` method also has limitations, such as partial availability of the event due to downsampling, and query performance impacted by the additional join operation.
+For data quality purposes, if you have the option to record an event from either the browser process or a renderer process, prefer the former. Because renderer processes are not trusted, events recorded in them are more complex to attribute to the corresponding browser-side navigations. Prior to Chrome version 149.0.7812.0, this was done using the `DocumentCreated` event. Starting from Chrome version 149.0.7812.0, sources representing blink Documents directly contain their parent navigation URLs in the `resolved_urls` field (and the `DocumentCreated` event is no longer sent to server or recorded in UKM logs). This allows direct, simplified attribution without the limitations and query performance overhead of the legacy `DocumentCreated` join method (see [go/ukm-readable-guide](http://go/ukm-readable-guide#processing-events-attached-to-blink-document-sources)).
 
 ### Singular UKM Events
 
@@ -333,7 +349,7 @@ Additional documentation can be found [here](https://cs.chromium.org/chromium/sr
 
 Build Chromium and run it with flags `--force-enable-metrics-reporting --metrics-upload-interval=N`. The first flag overrides metrics collection to be ON. The second flag means that locally collected metrics will be populated in a UKM report and uploaded every `N` seconds; You may want some small `N` if you are interested in seeing this behavior.
 
-Then in the browser, go to `chrome://settings/syncSetup` and toggle "Make searches and browsing better" to be ON. If you're unabled to do this, you can pass the command line flag `--force-msbb-setting-on-for-ukm` instead.
+Then in the browser, go to `chrome://settings/syncSetup` and toggle "Make searches and browsing better" to be ON. If you're unable to do this, you can pass the command line flag `--force-msbb-setting-on-for-ukm` instead.
 
 You should now be seeing "Metrics Collection is ENABLED. MSBB consent is ENABLED" at the top of the `chrome://ukm` debugging page:
 
@@ -367,7 +383,6 @@ that UKM events are recorded when the tab is closed or the page leaves the BF Ca
 ![Use Counter Metrics Events](./ukm-use-counter.png)
 In the above screenshot, the value in the right column is the web feature id.
 
-
 ## Unit Testing
 
 You can pass your code a `TestUkmRecorder` (see [//components/ukm/test_ukm_recorder.h](https://cs.chromium.org/chromium/src/components/ukm/test_ukm_recorder.h)) and then use the methods it provides to test that your data records correctly.
@@ -386,12 +401,11 @@ The full metrics will not be keyed off the subframe URL. Rather, the subframe UR
 
 ### Example
 
-
 ```xml
 <event name="WebFrameworkPerformance">
   <owner>owner@chromium.org</owner>
   <summary>
-    Recorded when a page uses on of a list of known web frameworks. This records various performance measurements.
+    Recorded when a page uses one of the known web frameworks. This records various performance measurements.
   </summary>
   <metric name="WebFramework" enum="WebFrameworkName">
     <summary>
@@ -406,7 +420,7 @@ The full metrics will not be keyed off the subframe URL. Rather, the subframe UR
 </event>
 ```
 
-And in the UKM enum.xml:
+And in the UKM enums.xml:
 
 ```xml
 <enum name="WebFrameworkName">
@@ -417,4 +431,4 @@ And in the UKM enum.xml:
 </enum>
 ```
 
-In this example, if a known framework was loaded with a time of 150ms, we could record the framework name and the load time, tied together with the main frame URL. Note that there will need to be custom logic to map the provider to the enum. It’s possible this logic may be reusable across UKM clients, please verify if some similar recording is being done elsewhere.
+In this example, if a known framework was loaded with a time of 150ms, we could record the framework name and the load time, tied together with the main frame URL. Note that there will need to be custom logic to map the provider to the enum. It's possible this logic may be reusable across UKM clients, please verify if some similar recording is being done elsewhere.

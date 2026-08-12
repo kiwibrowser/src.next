@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 
 namespace blink {
+struct PaintInfo;
 
 class LayoutCustomScrollbarPart;
 class WebMouseEvent;
@@ -47,7 +48,11 @@ class CustomScrollbarTheme final : public ScrollbarTheme {
     return GetTheme().NativeThemeHasButtons();
   }
 
-  void PaintScrollCorner(GraphicsContext&,
+  int NativeThemeMinimumThumbLength(const Scrollbar& scrollbar) {
+    return GetTheme().MinimumThumbLength(scrollbar);
+  }
+
+  void PaintScrollCorner(const PaintInfo&,
                          const ScrollableArea&,
                          const DisplayItemClient&,
                          const gfx::Rect& corner_rect) override;
@@ -81,7 +86,7 @@ class CustomScrollbarTheme final : public ScrollbarTheme {
   static CustomScrollbarTheme* GetCustomScrollbarTheme();
 
   static void PaintIntoRect(const LayoutCustomScrollbarPart&,
-                            GraphicsContext&,
+                            const PaintInfo&,
                             const PhysicalRect&);
 
  protected:
@@ -94,17 +99,17 @@ class CustomScrollbarTheme final : public ScrollbarTheme {
   gfx::Rect ForwardButtonRect(const Scrollbar&) const override;
   gfx::Rect TrackRect(const Scrollbar&) const override;
 
-  void PaintTrackBackgroundAndButtons(GraphicsContext&,
+  void PaintTrackBackgroundAndButtons(const PaintInfo&,
                                       const Scrollbar&,
                                       const gfx::Rect&) override;
-  void PaintButton(GraphicsContext&,
+  void PaintButton(const PaintInfo&,
                    const Scrollbar&,
                    const gfx::Rect&,
                    ScrollbarPart) override;
-  void PaintThumb(GraphicsContext&,
+  void PaintThumb(const PaintInfo&,
                   const Scrollbar&,
                   const gfx::Rect&) override;
-  void PaintTickmarks(GraphicsContext&,
+  void PaintTickmarks(const PaintInfo&,
                       const Scrollbar&,
                       const gfx::Rect&) override;
 
@@ -113,7 +118,7 @@ class CustomScrollbarTheme final : public ScrollbarTheme {
 
  private:
   gfx::Rect ButtonRect(const Scrollbar&, ScrollbarPart) const;
-  void PaintPart(GraphicsContext&,
+  void PaintPart(const PaintInfo&,
                  const Scrollbar&,
                  const gfx::Rect&,
                  ScrollbarPart);

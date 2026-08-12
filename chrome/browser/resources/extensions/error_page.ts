@@ -10,7 +10,7 @@ import 'chrome://resources/cr_elements/icons.html.js';
 import './code_section.js';
 import './shared_style.css.js';
 
-import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
 import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
@@ -33,6 +33,8 @@ export interface ErrorPageDelegate {
 
   requestFileSource(args: chrome.developerPrivate.RequestFileSourceProperties):
       Promise<chrome.developerPrivate.RequestFileSourceResponse>;
+
+  openDevToolsForError(error: chrome.developerPrivate.RuntimeError): void;
 }
 
 /**
@@ -40,9 +42,10 @@ export interface ErrorPageDelegate {
  * unassociated with the extension, this will be the full url.
  */
 function getRelativeUrl(
-    url: string, error: ManifestError|RuntimeError): string {
-  const fullUrl = 'chrome-extension://' + error.extensionId + '/';
-  return url.startsWith(fullUrl) ? url.substring(fullUrl.length) : url;
+    url: string, error: ManifestError|RuntimeError|null): string {
+  const fullUrl = error ? `chrome-extension://${error.extensionId}/` : '';
+  return (fullUrl && url.startsWith(fullUrl)) ? url.substring(fullUrl.length) :
+                                                url;
 }
 
 /**
@@ -53,7 +56,8 @@ function getErrorSeverityText(
     item: ManifestError|RuntimeError, log: string, warn: string,
     error: string): string {
   if (item.type === chrome.developerPrivate.ErrorType.RUNTIME) {
-    switch ((item as RuntimeError).severity) {
+    const severity = (item as RuntimeError).severity;
+    switch (severity) {
       case chrome.developerPrivate.ErrorLevel.LOG:
         return log;
       case chrome.developerPrivate.ErrorLevel.WARN:
@@ -61,7 +65,7 @@ function getErrorSeverityText(
       case chrome.developerPrivate.ErrorLevel.ERROR:
         return error;
       default:
-        assertNotReached();
+        assertNotReachedCase(severity);
     }
   }
   assert(item.type === chrome.developerPrivate.ErrorType.MANIFEST);
@@ -109,19 +113,15 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     };
   }
 
-  data?: chrome.developerPrivate.ExtensionInfo;
-  delegate?: ErrorPageDelegate&ItemDelegate;
-  inDevMode: boolean = false;
-  protected entries_: Array<ManifestError|RuntimeError> = [];
-  protected code_: chrome.developerPrivate.RequestFileSourceResponse|null =
-      null;
-  private selectedEntry_: number = -1;
-  private selectedStackFrame_: chrome.developerPrivate.StackFrame|null = null;
-
-  override firstUpdated() {
-    this.addEventListener('view-enter-start', this.onViewEnterStart_);
-    FocusOutlineManager.forDocument(document);
-  }
+  accessor data: chrome.developerPrivate.ExtensionInfo|undefined;
+  accessor delegate: ErrorPageDelegate&ItemDelegate|undefined;
+  accessor inDevMode: boolean = false;
+  protected accessor entries_: Array<ManifestError|RuntimeError> = [];
+  protected accessor code_: chrome.developerPrivate.RequestFileSourceResponse|
+      null = null;
+  private accessor selectedEntry_: number = -1;
+  private accessor selectedStackFrame_: chrome.developerPrivate.StackFrame|
+      null = null;
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     super.willUpdate(changedProperties);
@@ -137,6 +137,11 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     }
   }
 
+  override firstUpdated() {
+    this.addEventListener('view-enter-start', this.onViewEnterStart_);
+    FocusOutlineManager.forDocument(document);
+  }
+
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
 
@@ -145,8 +150,9 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     }
   }
 
-  getSelectedError(): ManifestError|RuntimeError {
-    return this.entries_[this.selectedEntry_]!;
+  getSelectedError(): ManifestError|RuntimeError|null {
+    return this.selectedEntry_ === -1 ? null :
+                                        this.entries_[this.selectedEntry_]!;
   }
 
   /**
@@ -186,7 +192,7 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
         loadTimeData.getString('errorLevel'));
   }
 
-  protected onDeleteErrorAction_(e: Event) {
+  protected onDeleteErrorClick_(e: Event) {
     const id = Number((e.currentTarget as HTMLElement).dataset['errorId']);
     assert(this.data);
     assert(this.delegate);
@@ -204,7 +210,8 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
       return;
     }
 
-    const error = this.getSelectedError();
+    // Safe to use ! here because we check for selectedEntry_ < 0 above.
+    const error = this.getSelectedError()!;
     const args: chrome.developerPrivate.RequestFileSourceProperties = {
       extensionId: error.extensionId,
       message: error.message,
@@ -225,7 +232,7 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
         } catch (e) {
           // Swallow the invalid URL error and return early. This prevents the
           // uncaught error from causing a runtime error as seen in
-          // crbug.com/1257170.
+          // crbug.com/40200545.
           return;
         }
         args.lineNumber =
@@ -237,6 +244,8 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
             runtimeError.stackTrace[0] :
             null;
         break;
+      default:
+        assertNotReachedCase(error.type);
     }
     assert(this.delegate);
     this.delegate.requestFileSource(args).then(code => this.code_ = code);
@@ -289,6 +298,7 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     this.selectedStackFrame_ = frame;
 
     const selectedError = this.getSelectedError();
+    assert(selectedError);
     assert(this.delegate);
     this.delegate
         .requestFileSource({
@@ -367,8 +377,18 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     return this.isOpened_(index).toString();
   }
 
-  protected onErrorItemAction_(e: KeyboardEvent) {
-    if (e.type === 'keydown' && !((e.code === 'Space' || e.code === 'Enter'))) {
+  protected onErrorItemClick_(e: MouseEvent) {
+    this.onErrorItemAction_(e);
+  }
+
+  protected onErrorItemKeydown_(e: KeyboardEvent) {
+    this.onErrorItemAction_(e);
+  }
+
+  protected onErrorItemAction_(e: Event) {
+    if (e.type === 'keydown' &&
+        !((e as KeyboardEvent).code === 'Space' ||
+          (e as KeyboardEvent).code === 'Enter')) {
       return;
     }
 
@@ -387,6 +407,34 @@ export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
 
   protected onReloadClick_() {
     this.reloadItem().catch((loadError) => this.fire('load-error', loadError));
+  }
+
+  /**
+   * Handle the 'View in DevTools' button click for a runtime error.
+   * If the error can be inspected (canInspect: true), opens DevTools for the
+   * error context. Otherwise, logs a warning that DevTools cannot be opened.
+   *
+   * @param e The click event containing the error index in the dataset.
+   */
+  protected onViewInDevToolsClick_(e: Event) {
+    if (!this.data || !this.entries_) {
+      return;
+    }
+
+    const target = e.currentTarget as HTMLElement;
+    const errorIndex = Number(target.dataset['errorIndex']);
+    const error =
+        this.entries_[errorIndex] as chrome.developerPrivate.RuntimeError;
+
+    if (error.canInspect) {
+      assert(this.delegate);
+      this.delegate.openDevToolsForError(error);
+      return;
+    }
+
+    // Cannot inspect this error - DevTools cannot be opened for this context.
+    console.warn('Cannot open DevTools for this error context.');
+    return;
   }
 }
 

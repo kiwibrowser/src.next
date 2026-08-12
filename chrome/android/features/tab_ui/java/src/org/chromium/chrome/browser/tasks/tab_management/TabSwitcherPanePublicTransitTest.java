@@ -9,34 +9,33 @@ import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
 import static androidx.test.espresso.assertion.ViewAssertions.matches;
 import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 
-import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
+import static org.chromium.base.ThreadUtils.runOnUiThreadBlocking;
+
 import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.filters.MediumTest;
 
-import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.ImportantFormFactors;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.transit.BlankCTATabInitialStatePublicTransitRule;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.transit.hub.IncognitoTabSwitcherStation;
 import org.chromium.chrome.test.transit.hub.RegularTabSwitcherStation;
 import org.chromium.chrome.test.transit.hub.TabSwitcherListEditorFacility;
-import org.chromium.chrome.test.transit.hub.TabSwitcherStation;
 import org.chromium.chrome.test.transit.ntp.IncognitoNewTabPageStation;
-import org.chromium.chrome.test.transit.page.PageStation;
+import org.chromium.chrome.test.transit.page.CtaPageStation;
 import org.chromium.chrome.test.transit.page.WebPageStation;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -47,27 +46,27 @@ import org.chromium.ui.base.DeviceFormFactor;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @Batch(Batch.PER_CLASS)
-@ImportantFormFactors(DeviceFormFactor.TABLET)
+@ImportantFormFactors(DeviceFormFactor.ONLY_TABLET)
 public class TabSwitcherPanePublicTransitTest {
-    @ClassRule
-    public static ChromeTabbedActivityTestRule sActivityTestRule =
-            new ChromeTabbedActivityTestRule();
-
     @Rule
-    public BlankCTATabInitialStatePublicTransitRule mInitialStateRule =
-            new BlankCTATabInitialStatePublicTransitRule(sActivityTestRule);
+    public AutoResetCtaTransitTestRule mCtaTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
 
     @Test
     @MediumTest
+    // TODO(crbug.com/457847264): Change to @Restriction(DeviceFormFactor.PHONE) after launch
+    @DisableFeatures(ChromeFeatureList.ANDROID_OPEN_INCOGNITO_AS_WINDOW)
     public void testSwitchTabModel_ScrollToSelectedTab() {
-        WebPageStation firstPage = mInitialStateRule.startOnBlankPage();
-        ChromeTabbedActivity cta = sActivityTestRule.getActivity();
+        WebPageStation firstPage = mCtaTestRule.startOnBlankPage();
+        ChromeTabbedActivity cta = mCtaTestRule.getActivity();
 
-        PageStation page = firstPage;
+        CtaPageStation page = firstPage;
         for (int i = 1; i < 10; i++) {
             page = page.openNewTabFast();
         }
-        assertEquals(9, cta.getCurrentTabModel().index());
+
+        int index = runOnUiThreadBlocking(() -> cta.getCurrentTabModel().index());
+        assertEquals(9, index);
         IncognitoNewTabPageStation incognitoNtp = page.openNewIncognitoTabFast();
         assertTrue(cta.getCurrentTabModel().isIncognito());
 
@@ -75,15 +74,10 @@ public class TabSwitcherPanePublicTransitTest {
         RegularTabSwitcherStation regularTabSwitcher =
                 incognitoTabSwitcher.closeTabAtIndex(0, RegularTabSwitcherStation.class);
 
-        onView(TabSwitcherStation.TAB_LIST_RECYCLER_VIEW.getViewMatcher())
-                .check(
-                        (v, noMatchException) -> {
-                            if (noMatchException != null) throw noMatchException;
-                            assertThat(v, instanceOf(RecyclerView.class));
-                            LinearLayoutManager layoutManager =
-                                    (LinearLayoutManager) ((RecyclerView) v).getLayoutManager();
-                            assertEquals(9, layoutManager.findLastVisibleItemPosition());
-                        });
+        LinearLayoutManager layoutManager =
+                (LinearLayoutManager)
+                        regularTabSwitcher.recyclerViewElement.value().getLayoutManager();
+        assertEquals(9, layoutManager.findLastVisibleItemPosition());
 
         // Go back to a tab to cleanup tab state
         regularTabSwitcher.selectTabAtIndex(0, WebPageStation.newBuilder());
@@ -92,13 +86,13 @@ public class TabSwitcherPanePublicTransitTest {
     @Test
     @MediumTest
     public void testTabListEditor_EnterAndExit() {
-        WebPageStation firstPage = mInitialStateRule.startOnBlankPage();
+        WebPageStation firstPage = mCtaTestRule.startOnBlankPage();
 
         RegularTabSwitcherStation regularTabSwitcher = firstPage.openRegularTabSwitcher();
         TabSwitcherListEditorFacility listEditor =
                 regularTabSwitcher.openAppMenu().clickSelectTabs();
 
-        listEditor.pressBackToExit();
+        listEditor.pressBackTo().exitFacility();
 
         // Go back to a tab to cleanup tab state
         regularTabSwitcher.selectTabAtIndex(0, WebPageStation.newBuilder());
@@ -106,29 +100,29 @@ public class TabSwitcherPanePublicTransitTest {
 
     @Test
     @MediumTest
+    // TODO(crbug.com/457847264): Test disabled for Incognito windowing.
+    @DisableFeatures(ChromeFeatureList.ANDROID_OPEN_INCOGNITO_AS_WINDOW)
     public void testEmptyStateView() {
-        WebPageStation firstPage = mInitialStateRule.startOnBlankPage();
-        ChromeTabbedActivity cta = sActivityTestRule.getActivity();
+        WebPageStation firstPage = mCtaTestRule.startOnBlankPage();
+        ChromeTabbedActivity cta = mCtaTestRule.getActivity();
 
         IncognitoNewTabPageStation incognitoNtp = firstPage.openNewIncognitoTabFast();
         assertTrue(cta.getCurrentTabModel().isIncognito());
 
         IncognitoTabSwitcherStation incognitoTabSwitcher = incognitoNtp.openIncognitoTabSwitcher();
-        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT.getViewMatcher()).check(doesNotExist());
+        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT).check(doesNotExist());
 
-        RegularTabSwitcherStation regularTabSwitcher = incognitoTabSwitcher.selectRegularTabList();
+        RegularTabSwitcherStation regularTabSwitcher = incognitoTabSwitcher.selectRegularTabsPane();
 
         regularTabSwitcher = regularTabSwitcher.closeTabAtIndex(0, RegularTabSwitcherStation.class);
-        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT.getViewMatcher())
-                .check(matches(isDisplayed()));
+        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT).check(matches(isDisplayed()));
 
-        incognitoTabSwitcher = regularTabSwitcher.selectIncognitoTabList();
-        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT.getViewMatcher()).check(doesNotExist());
+        incognitoTabSwitcher = regularTabSwitcher.selectIncognitoTabsPane();
+        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT).check(doesNotExist());
 
         regularTabSwitcher =
                 incognitoTabSwitcher.closeTabAtIndex(0, RegularTabSwitcherStation.class);
-        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT.getViewMatcher())
-                .check(matches(isDisplayed()));
+        onView(RegularTabSwitcherStation.EMPTY_STATE_TEXT).check(matches(isDisplayed()));
 
         // Go back to a tab to cleanup tab state
         regularTabSwitcher.openAppMenu().openNewTab();

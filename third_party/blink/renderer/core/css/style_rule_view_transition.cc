@@ -4,9 +4,10 @@
 
 #include "third_party/blink/renderer/core/css/style_rule_view_transition.h"
 
-#include "base/auto_reset.h"
 #include "base/memory/values_equivalent.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/css/cascade_layer.h"
+#include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
@@ -20,10 +21,14 @@ Vector<String> ExtractTypesFromCSSValue(const CSSValue* types) {
     return Vector<String>();
   }
 
-  const CSSValueList* list = To<CSSValueList>(types);
+  const CSSValueList* list = DynamicTo<CSSValueList>(types);
+  if (!list) {
+    return Vector<String>();
+  }
+
   Vector<String> result;
   for (const CSSValue* value : *list) {
-    result.push_back(value->CssText());
+    result.push_back(To<CSSCustomIdentValue>(value)->Value());
   }
   return result;
 }
@@ -33,22 +38,40 @@ StyleRuleViewTransition::StyleRuleViewTransition(
     CSSPropertyValueSet& properties)
     : StyleRuleBase(kViewTransition),
       navigation_(properties.GetPropertyCSSValue(CSSPropertyID::kNavigation)),
-      types_(ExtractTypesFromCSSValue(
-          properties.GetPropertyCSSValue(CSSPropertyID::kTypes))) {}
+      types_value_(properties.GetPropertyCSSValue(CSSPropertyID::kTypes)),
+      types_(ExtractTypesFromCSSValue(types_value_.Get())) {}
 
 StyleRuleViewTransition::StyleRuleViewTransition(
     const StyleRuleViewTransition&) = default;
 
 StyleRuleViewTransition::~StyleRuleViewTransition() = default;
 
-const CSSValue* StyleRuleViewTransition::GetNavigation() const {
-  return navigation_.Get();
+StyleRuleViewTransition::NavigationType StyleRuleViewTransition::GetNavigation()
+    const {
+  if (!navigation_) {
+    return NavigationType::kUnspecified;
+  }
+  if (navigation_->IsIdentifierValue()) {
+    const CSSIdentifierValue* identifier =
+        To<CSSIdentifierValue>(navigation_.Get());
+    switch (identifier->GetValueID()) {
+      case CSSValueID::kNone:
+        return NavigationType::kNone;
+      case CSSValueID::kAuto:
+        return NavigationType::kAuto;
+      case CSSValueID::kPreview:
+        return NavigationType::kPreview;
+      default:
+        NOTREACHED();
+    }
+  }
+  return NavigationType::kAuto;
 }
 
 void StyleRuleViewTransition::TraceAfterDispatch(
     blink::Visitor* visitor) const {
-  visitor->Trace(layer_);
   visitor->Trace(navigation_);
+  visitor->Trace(types_value_);
   StyleRuleBase::TraceAfterDispatch(visitor);
 }
 

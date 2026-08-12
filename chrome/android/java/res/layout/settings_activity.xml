@@ -8,6 +8,7 @@ found in the LICENSE file.
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/settings_activity"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@macro/default_bg_color">
@@ -20,10 +21,26 @@ found in the LICENSE file.
         android:theme="@style/ThemeOverlay.Settings.DisableElevationOverlay"
         app:liftOnScroll="true">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/action_bar"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"/>
+            android:layout_height="wrap_content">
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/action_bar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"/>
+
+            <!-- detailed pane title placeholder.
+                 Visible only in two pane UI -->
+            <LinearLayout
+                android:id="@+id/settings_detailed_pane_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_gravity="center_vertical"
+                android:gravity="center_vertical"
+                android:visibility="gone" />
+        </FrameLayout>
+
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.fragment.app.FragmentContainerView

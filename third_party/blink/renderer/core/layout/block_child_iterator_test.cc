@@ -27,9 +27,6 @@ const BlockBreakToken* CreateBreakToken(
   BoxFragmentBuilder fragment_builder(
       node, &node.Style(), space_builder.ToConstraintSpace(), writing_direction,
       /*previous_break_token=*/nullptr);
-  DCHECK(!fragment_builder.HasBreakTokenData());
-  fragment_builder.SetBreakTokenData(
-      MakeGarbageCollected<BlockBreakTokenData>());
   if (has_seen_all_children) {
     fragment_builder.SetHasSeenAllChildren();
   }
@@ -54,9 +51,9 @@ TEST_F(BlockChildIteratorTest, NoBreakToken) {
       <div id='child2'></div>
       <div id='child3'></div>
     )HTML");
-  LayoutInputNode node1 = BlockNode(GetLayoutBoxByElementId("child1"));
-  LayoutInputNode node2 = node1.NextSibling();
-  LayoutInputNode node3 = node2.NextSibling();
+  BlockNode node1(GetLayoutBoxByElementId("child1"));
+  BlockNode node2 = node1.NextBlockSibling();
+  BlockNode node3 = node2.NextBlockSibling();
 
   // The iterator should loop through three children.
   BlockChildIterator iterator(node1, nullptr);
@@ -76,10 +73,10 @@ TEST_F(BlockChildIteratorTest, BreakTokens) {
       </div>
     )HTML");
   BlockNode container = BlockNode(GetLayoutBoxByElementId("container"));
-  LayoutInputNode node1 = container.FirstChild();
-  LayoutInputNode node2 = node1.NextSibling();
-  LayoutInputNode node3 = node2.NextSibling();
-  LayoutInputNode node4 = node3.NextSibling();
+  BlockNode node1 = To<BlockNode>(container.FirstChild());
+  BlockNode node2 = node1.NextBlockSibling();
+  BlockNode node3 = node2.NextBlockSibling();
+  BlockNode node4 = node3.NextBlockSibling();
 
   BreakTokenVector empty_tokens_list;
   const BreakToken* child_token1 = CreateBreakToken(node1);
@@ -148,7 +145,7 @@ TEST_F(BlockChildIteratorTest, SeenAllChildren) {
       </div>
     )HTML");
   BlockNode container = BlockNode(GetLayoutBoxByElementId("container"));
-  LayoutInputNode node1 = container.FirstChild();
+  BlockNode node1 = To<BlockNode>(container.FirstChild());
 
   const BlockBreakToken* child_token1 = CreateBreakToken(node1);
 
@@ -183,9 +180,9 @@ TEST_F(BlockChildIteratorTest, DeleteNodeWhileIteration) {
       <div id='child2'></div>
       <div id='child3'></div>
     )HTML");
-  LayoutInputNode node1 = BlockNode(GetLayoutBoxByElementId("child1"));
-  LayoutInputNode node2 = node1.NextSibling();
-  LayoutInputNode node3 = node2.NextSibling();
+  BlockNode node1(GetLayoutBoxByElementId("child1"));
+  BlockNode node2 = node1.NextBlockSibling();
+  BlockNode node3 = node2.NextBlockSibling();
 
   using Entry = BlockChildIterator::Entry;
   BlockChildIterator iterator(node1, nullptr);

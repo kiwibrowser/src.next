@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "extensions/common/event_filter.h"
@@ -23,16 +24,17 @@
 namespace content {
 class BrowserContext;
 class RenderProcessHost;
-}
+}  // namespace content
 
 namespace extensions {
 struct Event;
+struct WorkerId;
 
 // A listener for an extension event. A listener is essentially an endpoint
 // that an event can be dispatched to.
 //
-// This is a lazy listener if |IsLazy| is returns true, and a filtered listener
-// if |filter| is defined.
+// This is a lazy listener if `IsLazy` is returns true, and a filtered listener
+// if `filter` is defined.
 //
 // A lazy listener is added to an event to indicate that a lazy background page
 // is listening to the event. It is associated with no process, so to dispatch
@@ -42,7 +44,7 @@ class EventListener {
  public:
   // Constructs EventListeners for either an Extension or a URL.
   //
-  // |filter| represents a generic filter structure that EventFilter knows how
+  // `filter` represents a generic filter structure that EventFilter knows how
   // to filter events with. A typical filter instance will look like
   //
   // {
@@ -53,16 +55,16 @@ class EventListener {
       const std::string& event_name,
       const ExtensionId& extension_id,
       content::RenderProcessHost* process,
-      std::optional<base::Value::Dict> filter);
+      std::optional<base::DictValue> filter);
   static std::unique_ptr<EventListener> ForURL(
       const std::string& event_name,
       const GURL& listener_url,
       content::RenderProcessHost* process,
-      std::optional<base::Value::Dict> filter);
+      std::optional<base::DictValue> filter);
   // Constructs EventListener for an Extension service worker.
   // Similar to ForExtension above with the only difference that
-  // |worker_thread_id_| contains a valid worker thread, as opposed to
-  // kMainThreadId and |service_worker_version_id| contains a valid service
+  // `worker_thread_id_` contains a valid worker thread, as opposed to
+  // kMainThreadId and `service_worker_version_id` contains a valid service
   // worker version id instead of kInvalidServiceWorkerVersionId.
   static std::unique_ptr<EventListener> ForExtensionServiceWorker(
       const std::string& event_name,
@@ -72,19 +74,19 @@ class EventListener {
       const GURL& service_worker_scope,
       int64_t service_worker_version_id,
       int worker_thread_id,
-      std::optional<base::Value::Dict> filter);
+      std::optional<base::DictValue> filter);
   // Constructs a lazy listener, for an extension service worker or event page.
   // A lazy listener has these properties:
-  // |process_| = nullptr
-  // |service_worker_version_id_| = blink::mojom::kInvalidServiceWorkerVersionId
-  // |worker_thread_id_| = kMainThreadId
+  // `process_` = nullptr
+  // `service_worker_version_id_` = blink::mojom::kInvalidServiceWorkerVersionId
+  // `worker_thread_id_` = kMainThreadId
   static std::unique_ptr<EventListener> CreateLazyListener(
       const std::string& event_name,
       const ExtensionId& extension_id,
       content::BrowserContext* browser_context,
       bool is_for_service_worker,
       const GURL& service_worker_scope,
-      std::optional<base::Value::Dict> filter);
+      std::optional<base::DictValue> filter);
 
   EventListener(const EventListener&) = delete;
   EventListener& operator=(const EventListener&) = delete;
@@ -92,11 +94,12 @@ class EventListener {
   ~EventListener();
 
   bool Equals(const EventListener* other) const;
+  bool EqualsIgnoringFilter(const EventListener* other) const;
 
   std::unique_ptr<EventListener> Copy() const;
 
   // Returns true if the listener is for a lazy context: e.g. a background page
-  // or an extension service worker. This listener does not have |process_|.
+  // or an extension service worker. This listener does not have `process_`.
   bool IsLazy() const;
 
   // Returns true if this listener (lazy or not) was registered for an extension
@@ -111,7 +114,7 @@ class EventListener {
   const GURL& listener_url() const { return listener_url_; }
   content::RenderProcessHost* process() const { return process_; }
   content::BrowserContext* browser_context() const { return browser_context_; }
-  const base::Value::Dict* filter() const {
+  const base::DictValue* filter() const {
     return filter_.has_value() ? &*filter_ : nullptr;
   }
   EventFilter::MatcherID matcher_id() const { return matcher_id_; }
@@ -130,7 +133,7 @@ class EventListener {
                 bool is_for_service_worker,
                 int64_t service_worker_version_id,
                 int worker_thread_id,
-                std::optional<base::Value::Dict> filter);
+                std::optional<base::DictValue> filter);
 
   const std::string event_name_;
   const ExtensionId extension_id_;
@@ -146,11 +149,11 @@ class EventListener {
 
   // If this listener is for a service worker (i.e.
   // is_for_service_worker_ = true) and the worker is in running state, then
-  // this is the worker's thread id in the worker |process_|. For lazy service
+  // this is the worker's thread id in the worker `process_`. For lazy service
   // worker events, this will be kMainThreadId.
   int worker_thread_id_;
 
-  std::optional<base::Value::Dict> filter_;
+  std::optional<base::DictValue> filter_;
   EventFilter::MatcherID matcher_id_ = -1;
 };
 
@@ -160,13 +163,16 @@ class EventListenerMap {
  public:
   using ListenerList = std::vector<std::unique_ptr<EventListener>>;
   // The key here is an event name.
-  using ListenerMap = base::flat_map<std::string, ListenerList>;
+  // This is a std::map to guarantee iterator stability while entries are added
+  // or removed.
+  using ListenerMap = std::map<std::string, ListenerList>;
 
   class Delegate {
    public:
     virtual ~Delegate() {}
     virtual void OnListenerAdded(const EventListener* listener) = 0;
     virtual void OnListenerRemoved(const EventListener* listener) = 0;
+    virtual void OnListenerUpdated(const EventListener* listener) = 0;
   };
 
   explicit EventListenerMap(Delegate* delegate);
@@ -177,46 +183,55 @@ class EventListenerMap {
   ~EventListenerMap();
 
   // Add a listener for a particular event. GetEventListeners() will include a
-  // weak pointer to |listener| in its results if passed a relevant
+  // weak pointer to `listener` in its results if passed a relevant
   // extensions::Event.
   // Returns true if the listener was added (in the case that it has never been
   // seen before).
   bool AddListener(std::unique_ptr<EventListener> listener);
 
-  // Remove a listener that .Equals() |listener|.
+  // Remove a listener that .Equals() `listener`.
   // Returns true if the listener was removed .
   bool RemoveListener(const EventListener* listener);
+
+  // Finds an existing listener that matches `listener` ignoring its filter
+  // (see `EqualsIgnoringFilter()`) and replaces that existing listener's filter
+  // with `listener`'s, re-parsing the event matcher. The same listener stays
+  // registered, so the delegate is notified via `OnListenerUpdated()` rather
+  // than `OnListenerRemoved()` / `OnListenerAdded()`.
+  //
+  // Returns true if such a listener was found (whether its filter was updated
+  // or already equal); false if there was none.
+  bool UpdateFilter(const EventListener& listener);
 
   // Get the map of all EventListeners.
   const ListenerMap& listeners() const { return listeners_; }
 
-  // Returns the set of listeners that want to be notified of |event|.
+  // Returns the set of listeners that want to be notified of `event`.
   std::set<const EventListener*> GetEventListeners(const Event& event);
 
-  const ListenerList& GetEventListenersByName(const std::string& event_name) {
-    return listeners_[event_name];
-  }
+  const ListenerList& GetEventListenersByName(
+      const std::string& event_name) const;
 
-  // Removes all listeners with process equal to |process|.
+  // Removes all listeners with process equal to `process`.
   void RemoveListenersForProcess(const content::RenderProcessHost* process);
 
-  // Returns true if there are any listeners on the event named |event_name|.
+  // Returns true if there are any listeners on the event named `event_name`.
   bool HasListenerForEvent(const std::string& event_name) const;
 
-  // Returns true if there are any listeners on |event_name| from
-  // |extension_id|.
+  // Returns true if there are any listeners on `event_name` from
+  // `extension_id`.
   bool HasListenerForExtension(const ExtensionId& extension_id,
                                const std::string& event_name) const;
 
-  // Returns true if there are any listeners on |event_name| from |url|.
+  // Returns true if there are any listeners on `event_name` from `url`.
   bool HasListenerForURL(const GURL& url, const std::string& event_name) const;
 
   // Returns true if this map contains an EventListener that .Equals()
-  // |listener|.
+  // `listener`.
   bool HasListener(const EventListener* listener) const;
 
-  // Returns true if there is a listener for |extension_id| in |process|.
-  // |worker_thread_id| is the thread id of the service worker the listener is
+  // Returns true if there is a listener for `extension_id` in `process`.
+  // `worker_thread_id` is the thread id of the service worker the listener is
   // for, or kMainThreadId if the listener is not for a service worker.
   bool HasProcessListener(content::RenderProcessHost* process,
                           int worker_thread_id,
@@ -227,11 +242,15 @@ class EventListenerMap {
                                   const ExtensionId& extension_id,
                                   const std::string& event_name) const;
 
-  // Removes any listeners that |extension_id| has added, both lazy and regular.
+  // Removes all listeners that `extension_id` has added, both lazy and active.
   void RemoveListenersForExtension(const ExtensionId& extension_id);
 
+  // Removes any active listeners that `extension_id` has added.
+  void RemoveActiveServiceWorkerListenersForExtension(
+      const WorkerId& worker_id);
+
   // Adds unfiltered lazy listeners as described their serialised descriptions.
-  // |event_names| the names of the lazy events.
+  // `event_names` the names of the lazy events.
   // Note that we can only load lazy listeners in this fashion, because there
   // is no way to serialise a RenderProcessHost*.
   void LoadUnfilteredLazyListeners(content::BrowserContext* browser_context,
@@ -240,19 +259,24 @@ class EventListenerMap {
                                    const std::set<std::string>& event_names);
 
   // Adds filtered lazy listeners as described their serialised descriptions.
-  // |filtered| contains a map from event names to filters, each pairing
+  // `filtered` contains a map from event names to filters, each pairing
   // defining a lazy filtered listener.
   void LoadFilteredLazyListeners(content::BrowserContext* browser_context,
                                  const ExtensionId& extension_id,
                                  bool is_for_service_worker,
-                                 const base::Value::Dict& filtered);
+                                 const base::DictValue& filtered);
 
  private:
+  // Removes all listeners for `extension_id` where `removal_predicate` is true.
+  void RemoveListenersForExtensionImpl(
+      const ExtensionId& extension_id,
+      base::RepeatingCallback<bool(const ExtensionId&, EventListener*)>
+          removal_predicate);
 
   void CleanupListener(EventListener* listener);
   bool IsFilteredEvent(const Event& event) const;
   std::unique_ptr<EventMatcher> ParseEventMatcher(
-      const base::Value::Dict& filter_dict);
+      const base::DictValue& filter_dict);
 
   // Listens for removals from this map.
   const raw_ptr<Delegate> delegate_;

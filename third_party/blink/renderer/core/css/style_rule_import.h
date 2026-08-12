@@ -23,6 +23,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_RULE_IMPORT_H_
 
 #include "third_party/blink/renderer/core/css/css_origin_clean.h"
+#include "third_party/blink/renderer/core/css/css_url_data.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
@@ -33,6 +34,7 @@
 namespace blink {
 
 class MediaQuerySet;
+class StyleScope;
 class StyleSheetContents;
 
 class StyleRuleImport : public StyleRuleBase {
@@ -41,10 +43,12 @@ class StyleRuleImport : public StyleRuleBase {
  public:
   StyleRuleImport(const String& href,
                   LayerName&& layer,
+                  const StyleScope*,
                   bool supported,
                   String supports,
                   const MediaQuerySet*,
-                  OriginClean origin_clean);
+                  OriginClean origin_clean,
+                  const CSSUrlRequestModifiers& modifiers);
   ~StyleRuleImport();
 
   StyleSheetContents* ParentStyleSheet() const {
@@ -75,7 +79,10 @@ class StyleRuleImport : public StyleRuleBase {
   const LayerName& GetLayerName() const { return layer_; }
   String GetLayerNameAsString() const;
 
+  const StyleScope* GetScope() const { return scope_.Get(); }
+
   bool IsSupported() const { return supported_; }
+  const CSSUrlRequestModifiers& GetModifiers() const { return modifiers_; }
   String GetSupportsString() const { return supports_string_; }
 
   void TraceAfterDispatch(blink::Visitor*) const;
@@ -117,6 +124,7 @@ class StyleRuleImport : public StyleRuleBase {
   Member<ImportedStyleSheetClient> style_sheet_client_;
   String str_href_;
   LayerName layer_;
+  Member<const StyleScope> scope_;
   String supports_string_;
   Member<const MediaQuerySet> media_queries_;
   Member<StyleSheetContents> style_sheet_;
@@ -130,6 +138,7 @@ class StyleRuleImport : public StyleRuleBase {
   // in the stylesheet text. The position is used to encode accurate initiator
   // info on the stylesheet request in order to report accurate failures.
   std::optional<TextPosition> position_hint_;
+  CSSUrlRequestModifiers modifiers_;
 };
 
 template <>

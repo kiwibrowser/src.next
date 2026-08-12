@@ -29,7 +29,7 @@ bool CanChangeToUrlForHistoryApi(const KURL& url,
 
   // "If targetURL's scheme is an HTTP(S) scheme, then return true. (Differences
   // in path, query, and fragment are allowed for http: and https: URLs.)"
-  if (url.ProtocolIsInHTTPFamily()) {
+  if (url.ProtocolIsInHttpFamily()) {
     return true;
   }
 
@@ -82,8 +82,7 @@ bool CanChangeToUrlForHistoryApi(const KURL& url,
   // https://url.spec.whatwg.org/#concept-url-scheme.
   CHECK(url.Protocol().Is8Bit());
   std::string protocol = url.Protocol().Ascii();
-  is_standard = url::IsStandard(
-      protocol.data(), url::Component(0, static_cast<int>(protocol.size())));
+  is_standard = url::IsStandard(protocol);
   if (is_standard) {
     return true;
   }

@@ -4,10 +4,9 @@
 
 #include "content/browser/posix_file_descriptor_info_impl.h"
 
+#include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
-#include "base/ranges/algorithm.h"
 
 namespace content {
 
@@ -67,12 +66,13 @@ bool PosixFileDescriptorInfoImpl::HasID(int id) const {
 }
 
 bool PosixFileDescriptorInfoImpl::OwnsFD(base::PlatformFile file) {
-  return base::Contains(owned_descriptors_, file);
+  return std::ranges::contains(owned_descriptors_, file, &base::ScopedFD::get);
 }
 
 base::ScopedFD PosixFileDescriptorInfoImpl::ReleaseFD(base::PlatformFile file) {
-  auto found = base::ranges::find(owned_descriptors_, file);
-  CHECK(found != owned_descriptors_.end(), base::NotFatalUntil::M131);
+  auto found =
+      std::ranges::find(owned_descriptors_, file, &base::ScopedFD::get);
+  CHECK(found != owned_descriptors_.end());
 
   base::ScopedFD fd;
   std::swap(*found, fd);

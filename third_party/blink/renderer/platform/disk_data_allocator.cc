@@ -8,9 +8,7 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/logging.h"
-#include "base/not_fatal_until.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
 #include "third_party/blink/public/common/features.h"
@@ -78,7 +76,7 @@ DiskDataMetadata DiskDataAllocator::FindFreeChunk(size_t size) {
 
 void DiskDataAllocator::ReleaseChunk(const DiskDataMetadata& metadata) {
   DiskDataMetadata chunk = metadata;
-  DCHECK(!base::Contains(free_chunks_, chunk.start_offset()));
+  DCHECK(!free_chunks_.contains(chunk.start_offset()));
 
   auto lower_bound = free_chunks_.lower_bound(chunk.start_offset());
   DCHECK(free_chunks_.upper_bound(chunk.start_offset()) ==
@@ -170,7 +168,7 @@ void DiskDataAllocator::Read(const DiskDataMetadata& metadata,
   {
     base::AutoLock locker(lock_);
     auto it = allocated_chunks_.find(metadata.start_offset());
-    CHECK(it != allocated_chunks_.end(), base::NotFatalUntil::M130);
+    CHECK(it != allocated_chunks_.end());
     DCHECK_EQ(metadata.size(), it->second);
   }
 #endif
@@ -182,7 +180,7 @@ void DiskDataAllocator::Discard(std::unique_ptr<DiskDataMetadata> metadata) {
 
 #if DCHECK_IS_ON()
   auto it = allocated_chunks_.find(metadata->start_offset());
-  CHECK(it != allocated_chunks_.end(), base::NotFatalUntil::M130);
+  CHECK(it != allocated_chunks_.end());
   DCHECK_EQ(metadata->size(), it->second);
   allocated_chunks_.erase(it);
 #endif

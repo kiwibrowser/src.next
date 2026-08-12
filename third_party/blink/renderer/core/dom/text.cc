@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/core/dom/layout_tree_builder.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_cloning_data.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text_diff_range.h"
@@ -86,7 +85,7 @@ Node* Text::MergeNextSiblingNodesIfPossible() {
     unsigned offset = length();
     String next_text_data = next_text->data();
     String old_text_data = data();
-    SetDataWithoutUpdate(data() + next_text_data);
+    SetDataWithoutUpdate(StrCat({data(), next_text_data}));
     UpdateTextLayoutObject(
         TextDiffRange::Insert(old_text_data.length(), next_text_data.length()));
 
@@ -97,7 +96,7 @@ Node* Text::MergeNextSiblingNodesIfPossible() {
     next_text->UpdateTextLayoutObject(
         TextDiffRange::Delete(0, next_text_data.length()));
 
-    // Restore nextText for mutation event.
+    // Restore nextText after any synchronous events.
     next_text->SetDataWithoutUpdate(next_text_data);
     next_text->UpdateTextLayoutObject(
         TextDiffRange::Insert(0, next_text_data.length()));
@@ -116,16 +115,16 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
   if (offset > length()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kIndexSizeError,
-        "The offset " + String::Number(offset) +
-            " is larger than the Text node's length.");
+        StrCat({"The offset ", String::Number(offset),
+                " is larger than the Text node's length."}));
     return nullptr;
   }
 
   EventQueueScope scope;
   String old_str = data();
   Text* new_text =
-      To<Text>(CloneWithData(GetDocument(), old_str.Substring(offset)));
-  SetDataWithoutUpdate(old_str.Substring(0, offset));
+      To<Text>(CloneWithData(GetDocument(), old_str.substr(offset)));
+  SetDataWithoutUpdate(old_str.substr(0, offset));
 
   DidModifyData(old_str, CharacterData::kUpdateFromNonParser);
 
@@ -135,21 +134,12 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
     return nullptr;
 
   if (LayoutText* layout_text = GetLayoutObject()) {
-    if (RuntimeEnabledFeatures::TextDiffSplitFixEnabled()) {
-      // To avoid |LayoutText| has empty text, we rebuild layout tree.
-      if (ContainsOnlyWhitespaceOrEmpty()) {
-        SetForceReattachLayoutTree();
-      } else {
-        layout_text->SetTextWithOffset(
-            data(), TextDiffRange::Delete(offset, old_str.length() - offset));
-      }
+    // To avoid |LayoutText| has empty text, we rebuild layout tree.
+    if (ContainsOnlyWhitespaceOrEmpty()) {
+      SetForceReattachLayoutTree();
     } else {
       layout_text->SetTextWithOffset(
-          data(), TextDiffRange::Delete(0, old_str.length()));
-      if (ContainsOnlyWhitespaceOrEmpty()) {
-        // To avoid |LayoutText| has empty text, we rebuild layout tree.
-        SetForceReattachLayoutTree();
-      }
+          data(), TextDiffRange::Delete(offset, old_str.length() - offset));
     }
   }
 
@@ -223,12 +213,12 @@ String Text::wholeText() const {
 Text* Text::ReplaceWholeText(const String& new_text) {
   // Remove all adjacent text nodes, and replace the contents of this one.
 
-  // Protect startText and endText against mutation event handlers removing the
-  // last ref
+  // Protect startText and endText against synchronous event handlers removing
+  // the last ref.
   Text* start_text = const_cast<Text*>(EarliestLogicallyAdjacentTextNode(this));
   Text* end_text = const_cast<Text*>(LatestLogicallyAdjacentTextNode(this));
 
-  ContainerNode* parent = parentNode();  // Protect against mutation handlers
+  ContainerNode* parent = parentNode();  // Protect against synchronous handlers
                                          // moving this node during traversal
   for (Node* n = start_text;
        n && n != this && n->IsTextNode() && n->parentNode() == parent;) {
@@ -263,7 +253,7 @@ String Text::nodeName() const {
 }
 
 static inline bool EndsWithWhitespace(const String& text) {
-  return text.length() && IsASCIISpace(text[text.length() - 1]);
+  return text.length() && IsAsciiSpace(text[text.length() - 1]);
 }
 
 static inline bool CanHaveWhitespaceChildren(
@@ -272,8 +262,9 @@ static inline bool CanHaveWhitespaceChildren(
   const LayoutObject& parent = *context.parent;
   if (parent.IsTable() || parent.IsTableRow() || parent.IsTableSection() ||
       parent.IsLayoutTableCol() || parent.IsFrameSet() ||
-      parent.IsFlexibleBox() || parent.IsLayoutGrid() || parent.IsSVGRoot() ||
-      parent.IsSVGContainer() || parent.IsSVGImage() || parent.IsSVGShape()) {
+      parent.IsFlexibleBox() || parent.IsLayoutGridOrGridLanes() ||
+      parent.IsSVGRoot() || parent.IsSVGContainer() || parent.IsSVGImage() ||
+      parent.IsSVGShape()) {
     if (!context.use_previous_in_flow || !context.previous_in_flow ||
         !context.previous_in_flow->IsText())
       return false;
@@ -443,14 +434,14 @@ static bool ShouldUpdateLayoutByReattaching(const Text& text_node,
   Node::AttachContext context;
   context.parent = text_layout_object->Parent();
   if (!text_node.TextLayoutObjectIsNeeded(context,
-                                          *text_layout_object->Style())) {
+                                          text_layout_object->StyleRef())) {
     return true;
   }
   if (text_layout_object->IsTextFragment()) {
     // Changes of |text_node| may change first letter part, so we should
     // reattach. Note: When |text_node| is empty or holds collapsed whitespaces
     // |text_fragment_layout_object| represents first-letter part but it isn't
-    // inside first-letter-pseudo element. See http://crbug.com/978947
+    // inside first-letter-pseudo-element. See http://crbug.com/978947
     const auto& text_fragment_layout_object =
         *To<LayoutTextFragment>(text_layout_object);
     return text_fragment_layout_object.GetFirstLetterPseudoElement() ||

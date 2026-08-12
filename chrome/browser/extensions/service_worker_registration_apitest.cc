@@ -7,26 +7,28 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/test_future.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/background_script_executor.h"
+#include "extensions/browser/crx_installer.h"
+#include "extensions/browser/delayed_install_manager.h"
+#include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/process_manager.h"
@@ -34,7 +36,9 @@
 #include "extensions/browser/script_result_queue.h"
 #include "extensions/browser/service_worker/service_worker_task_queue.h"
 #include "extensions/browser/service_worker/service_worker_test_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/mojom/manifest.mojom.h"
 #include "extensions/test/extension_background_page_waiter.h"
@@ -44,18 +48,17 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+
 namespace extensions {
 
 using service_worker_test_utils::TestServiceWorkerTaskQueueObserver;
 
 namespace {
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 constexpr char kNTPTestExtensionId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
-
-enum class BackgroundType {
-  kPersistentPage,
-  kLazyPage,
-};
+#endif
 
 // Convenience method for checking true/false counts of boolean histograms.
 void CheckBooleanHistogramCounts(const char* histogram_name,
@@ -68,10 +71,6 @@ void CheckBooleanHistogramCounts(const char* histogram_name,
   histogram_tester.ExpectBucketCount(histogram_name,
                                      /*sample=*/false,
                                      /*expected_count=*/false_count);
-}
-
-GURL new_tab_url() {
-  return GURL("chrome://newtab");
 }
 
 // Allows test to wait for the attempt to register and unregister a worker to
@@ -103,6 +102,8 @@ class ExtensionRegistrationAndUnregistrationWaiter
     WaitForWorkerUnregistrationAttemptCompleted();
   }
 
+  bool registration_delayed() const { return registration_delayed_; }
+
  private:
   void WaitForWorkerUnregistrationAttemptCompleted() {
     SCOPED_TRACE("Waiting for worker unregistration attempt to complete");
@@ -121,9 +122,16 @@ class ExtensionRegistrationAndUnregistrationWaiter
     }
   }
 
+  void OnWorkerRegistrationDelayed(const ExtensionId& extension_id) override {
+    if (extension_id == expected_extension_id_) {
+      registration_delayed_ = true;
+    }
+  }
+
   const ExtensionId expected_extension_id_;
   base::RunLoop registration_attempt_runloop;
   base::RunLoop unregistration_attempt_runloop;
+  bool registration_delayed_ = false;
 };
 
 }  // namespace
@@ -394,7 +402,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
 
 // Tests updating an extension and installing it immediately while it has an
 // active new tab page override and a new tab is open.
-// Regression test for https://crbug.com/1498035.
+// Regression test for https://crbug.com/40939356.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
                        ImmediateUpdateWithNewTabPageOverrideActive) {
   // An extension manifest with a service worker and a new tab page override.
@@ -462,7 +470,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
   const Extension* extension = nullptr;
   {
     ExtensionTestMessageListener listener("v1 ready");
-    extension = InstallExtension(crx_v1, 1);
+    extension = InstallExtensionWithPermissionsGranted(crx_v1, 1);
     ASSERT_TRUE(listener.WaitUntilSatisfied());
   }
 
@@ -473,15 +481,10 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
 
   // Open a new tab. The extension overrides the NTP, so this is the extension's
   // page.
-  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL("chrome://newtab/"),
-      WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+  ASSERT_TRUE(NavigateToURLInNewTab(GURL("chrome://newtab/")));
 
-  EXPECT_EQ(
-      "This is a page",
-      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
-                      "document.body.innerText;"));
+  EXPECT_EQ("This is a page", content::EvalJs(GetActiveWebContents(),
+                                              "document.body.innerText;"));
 
   // Verify the service worker is at v1.
   EXPECT_EQ(base::Value(1), GetVersionFlagFromBackgroundContext(id));
@@ -496,7 +499,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
     // This also mimics update behavior if a user clicks "Update" in the
     // chrome://extensions page.
     scoped_refptr<CrxInstaller> crx_installer =
-        CrxInstaller::Create(extension_service(), /*prompt=*/nullptr);
+        CrxInstaller::Create(profile(), /*client=*/nullptr);
     crx_installer->set_error_on_unsupported_requirements(true);
     crx_installer->set_off_store_install_allow_reason(
         CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
@@ -652,7 +655,7 @@ IN_PROC_BROWSER_TEST_F(
 
 // Verifies that a service worker registration associated with an extension's
 // manifest cannot be removed via the `chrome.browsingData` API.
-// Regression test for https://crbug.com/1392498.
+// Regression test for https://crbug.com/40247767.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
                        RegistrationCannotBeRemovedByBrowsingDataAPI) {
   // Load two extensions: one with a service worker-based background context and
@@ -711,9 +714,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
   ASSERT_TRUE(browsing_data_extension);
 
   auto open_new_tab = [this](const GURL& url) {
-    ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+    ASSERT_TRUE(NavigateToURLInNewTab(url));
   };
 
   // Verify the initial state. The service worker-based extension should have a
@@ -756,12 +757,20 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
 // Tests that modifying local files for an unpacked extension does not result
 // in the service worker being seen as "updated" (which would result in a
 // "waiting" service worker, violating expectations in the extensions system).
-// https://crbug.com/1271154.
+// https://crbug.com/40805401.
+// TODO(crbug.com/355339195): Re-enable this test
+#if BUILDFLAG(IS_LINUX) && defined(ADDRESS_SANITIZER)
+#define MAYBE_ModifyingLocalFilesForUnpackedExtensions \
+  DISABLED_ModifyingLocalFilesForUnpackedExtensions
+#else
+#define MAYBE_ModifyingLocalFilesForUnpackedExtensions \
+  ModifyingLocalFilesForUnpackedExtensions
+#endif
 IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
-                       ModifyingLocalFilesForUnpackedExtensions) {
+                       MAYBE_ModifyingLocalFilesForUnpackedExtensions) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   const double kUpdateDelayInMilliseconds =
-      content::ServiceWorkerContext::GetUpdateDelay().InMillisecondsF();
+      content::ServiceWorkerContext::kUpdateDelay.InMillisecondsF();
   // Assert that whatever our update delay is, it's less than 5 seconds. If it
   // were more, the test would risk timing out. If we ever need to exceed this
   // in practice, we could introduce a test setter for a different amount of
@@ -823,9 +832,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
     // an extension page will be closed later in the test when the extension
     // reloads, and we need to make sure there's at least one tab left in the
     // browser.
-    EXPECT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
-        browser(), page_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+    EXPECT_TRUE(NavigateToURLInNewTab(page_url));
     return result_queue.GetNextResult();
   };
 
@@ -868,6 +875,67 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest,
   EXPECT_EQ("storage changed version 2: count 4", open_tab_and_get_result());
 }
 
+// Tests that installing an extension with a service worker immediately after
+// uninstalling it does not result in the service worker not being registered.
+// Regression test for crbug.com/463925496.
+IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationApiTest, ExtensionReinstall) {
+  const ExtensionId test_extension_id("iegclhlplifhodhkoafiokenjoapiobj");
+  base::HistogramTester histogram_tester;
+  auto SetupExtension = [&](ExtensionBuilder& builder,
+                            TestExtensionDir& test_dir) {
+    static constexpr char kSwJs[] = "chrome.test.sendMessage('ready');";
+    test_dir.WriteFile(FILE_PATH_LITERAL("sw.js"), kSwJs);
+
+    auto manifest = base::DictValue()
+                        .Set("name", "Extension SW reinstall test")
+                        .Set("version", "0.1")
+                        .Set("manifest_version", 3)
+                        .Set("background",
+                             base::DictValue().Set("service_worker", "sw.js"));
+    builder.SetManifest(std::move(manifest));
+    builder.SetPath(test_dir.UnpackedPath());
+    builder.SetID(test_extension_id);
+  };
+
+  ExtensionBuilder builder;
+  TestExtensionDir test_dir;
+  SetupExtension(builder, test_dir);
+
+  ExtensionBuilder reinstalled_builder;
+  SetupExtension(reinstalled_builder, test_dir);
+
+  ExtensionRegistrationAndUnregistrationWaiter registration_waiter(
+      test_extension_id);
+  scoped_refptr<const Extension> extension(builder.Build());
+  extension_registrar()->AddExtension(extension.get());
+  {
+    SCOPED_TRACE("waiting for extension registration to finish");
+    registration_waiter.WaitForWorkerRegistrationAttemptCompleted();
+    EXPECT_EQ(content::ServiceWorkerCapability::SERVICE_WORKER_NO_FETCH_HANDLER,
+              GetServiceWorkerRegistrationState(*extension));
+  }
+
+  UninstallExtension(extension->id());
+
+  ExtensionRegistrationAndUnregistrationWaiter registration_waiter2(
+      test_extension_id);
+  scoped_refptr<const Extension> reinstalled_extension(
+      reinstalled_builder.Build());
+  extension_registrar()->AddExtension(reinstalled_extension.get());
+  // Expect the service worker to be registered again.
+  {
+    SCOPED_TRACE("waiting for extension re-registration to finish");
+    registration_waiter2.WaitForWorkerRegistrationAttemptCompleted();
+    EXPECT_EQ(content::ServiceWorkerCapability::SERVICE_WORKER_NO_FETCH_HANDLER,
+              GetServiceWorkerRegistrationState(*reinstalled_extension));
+  }
+
+  EXPECT_TRUE(registration_waiter2.registration_delayed());
+}
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+// TODO(crbug.com/469417243): Port to desktop Android. Currently fails to
+// reliably override the NTP, likely because it is native UI on Android.
 class ServiceWorkerExtensionUpdateOnBrowserRestartRegistrationApiTest
     : public ServiceWorkerRegistrationApiTest {
  protected:
@@ -878,11 +946,6 @@ class ServiceWorkerExtensionUpdateOnBrowserRestartRegistrationApiTest
     // confirm the update works as expected.
     set_open_about_blank_on_browser_launch(false);
 
-    // Create the observer now because the browser will be started after we call
-    // `ServiceWorkerRegistrationApiTest::SetUp()`.
-    browser_start_new_tab_observer_ =
-        std::make_unique<ui_test_utils::UrlLoadObserver>(new_tab_url());
-
     ServiceWorkerRegistrationApiTest::SetUp();
   }
 
@@ -892,7 +955,7 @@ class ServiceWorkerExtensionUpdateOnBrowserRestartRegistrationApiTest
     {
       SCOPED_TRACE(
           "waiting for the initial new tab to open after browser start");
-      browser_start_new_tab_observer_->Wait();
+      EXPECT_TRUE(content::WaitForLoadStop(GetActiveWebContents()));
     }
   }
 
@@ -906,13 +969,6 @@ class ServiceWorkerExtensionUpdateOnBrowserRestartRegistrationApiTest
     ServiceWorkerRegistrationApiTest::CreatedBrowserMainParts(main_parts);
   }
 
-  void TearDownOnMainThread() override {
-    ServiceWorkerRegistrationApiTest::TearDownOnMainThread();
-
-    // Prevent dangling pointer on test teardown.
-    browser_start_new_tab_observer_.reset();
-  }
-
   // Ensure any new tab that is opened defaults goes to chrome://newtab.
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ServiceWorkerRegistrationApiTest::SetUpCommandLine(command_line);
@@ -922,20 +978,17 @@ class ServiceWorkerExtensionUpdateOnBrowserRestartRegistrationApiTest
 
   // Get the NTP javascript's version.
   content::EvalJsResult GetVersionOfNTPScript() {
-    return content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
-                           "self.currentVersion;");
+    return content::EvalJs(GetActiveWebContents(), "self.currentVersion;");
   }
 
   // Request the version of the background context script from the perspective
   // of the NTP js.
   content::EvalJsResult GetBackgroundContextVersionFromNTPPage() {
-    return content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+    return content::EvalJs(GetActiveWebContents(),
                            "getCurrentVersionOfBackgroundContext();");
   }
 
-  // Observes that chrome://newtab loads on test start.
-  std::unique_ptr<ui_test_utils::UrlLoadObserver>
-      browser_start_new_tab_observer_;
+  GURL new_tab_url() const { return GURL("chrome://newtab"); }
 
   std::unique_ptr<ExtensionTestMessageListener> v2_install_listener_;
   std::unique_ptr<base::HistogramTester> v2_update_histogram_tester_;
@@ -958,7 +1011,8 @@ IN_PROC_BROWSER_TEST_F(
   const Extension* extension_v1 = nullptr;
   {
     ExtensionTestMessageListener v1_install_listener_("v1 installed");
-    extension_v1 = InstallExtension(crx_v1_path, /*expected_change=*/1);
+    extension_v1 = InstallExtensionWithPermissionsGranted(
+        crx_v1_path, /*expected_change=*/1);
     SCOPED_TRACE("waiting for version 1 of the extension to install");
     ASSERT_TRUE(v1_install_listener_.WaitUntilSatisfied());
     ASSERT_EQ("1", extension_v1->version().GetString());
@@ -971,11 +1025,11 @@ IN_PROC_BROWSER_TEST_F(
 
   // Navigate current tab to new tab to engage v1 of the NTP extension to stay
   // non-idle.
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), new_tab_url()));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), new_tab_url()));
 
   // Verify v1 of extension is responding to messages in the tab.
   std::u16string first_new_tab_title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &first_new_tab_title);
+  GetCurrentTabTitle(&first_new_tab_title);
   ASSERT_EQ(u"Custom NTP test v1", first_new_tab_title);
 
   ASSERT_EQ(base::Value(1), GetVersionOfNTPScript());
@@ -999,9 +1053,8 @@ IN_PROC_BROWSER_TEST_F(
         UpdateExtensionWaitForIdle(kNTPTestExtensionId, crx_v2_path,
                                    /*expected_change=*/0);
   }
-  ExtensionService* service = extension_service();
-  ASSERT_TRUE(service);
-  ASSERT_EQ(1u, service->delayed_installs()->size());
+  ASSERT_EQ(1u,
+            DelayedInstallManager::Get(profile())->delayed_installs().size());
   // v2 won't install though since v1 isn't idle (NTP page is still open) yet so
   // we're given the original `extension_v1` object.
   ASSERT_TRUE(extension_update);
@@ -1015,7 +1068,7 @@ IN_PROC_BROWSER_TEST_F(
   // Confirm the existing NTP we opened is still responding as v1 of the
   // extension.
   std::u16string second_new_tab_title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &second_new_tab_title);
+  GetCurrentTabTitle(&second_new_tab_title);
   ASSERT_EQ(u"Custom NTP test v1", second_new_tab_title);
   ASSERT_EQ(base::Value(1), GetVersionOfNTPScript());
   {
@@ -1025,9 +1078,9 @@ IN_PROC_BROWSER_TEST_F(
 
   // Navigate again to new tab so we can confirm v1 is still running and v2
   // hasn't taken over future new tabs.
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), new_tab_url()));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), new_tab_url()));
   std::u16string third_new_tab_title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &third_new_tab_title);
+  GetCurrentTabTitle(&third_new_tab_title);
   ASSERT_EQ(u"Custom NTP test v1", third_new_tab_title);
   ASSERT_EQ(base::Value(1), GetVersionOfNTPScript());
   {
@@ -1073,7 +1126,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Verify that v2 of extension is responding to NTP requests.
   std::u16string browser_start_new_tab_title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &browser_start_new_tab_title);
+  GetCurrentTabTitle(&browser_start_new_tab_title);
   ASSERT_EQ(u"Custom NTP test v2", browser_start_new_tab_title);
   EXPECT_EQ(base::Value(2), GetVersionOfNTPScript());
   {
@@ -1083,9 +1136,9 @@ IN_PROC_BROWSER_TEST_F(
 
   // Navigate to new tab page so we can confirm v2 is still running and v1
   // hasn't taken over future new tabs loads.
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), new_tab_url()));
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), new_tab_url()));
   std::u16string new_tab_title;
-  ui_test_utils::GetCurrentTabTitle(browser(), &new_tab_title);
+  GetCurrentTabTitle(&new_tab_title);
   ASSERT_EQ(u"Custom NTP test v2", new_tab_title);
   ASSERT_EQ(base::Value(2), GetVersionOfNTPScript());
   {
@@ -1121,6 +1174,7 @@ IN_PROC_BROWSER_TEST_F(
       "Extensions.ServiceWorkerBackground.Registration_FailStatus",
       /*expected_count=*/0);
 }
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 // Registration and unregistration metrics tests.
 
@@ -1129,22 +1183,13 @@ IN_PROC_BROWSER_TEST_F(
 //   * sw registered manually via web API to sw background
 //   * sw background context to sw background context
 
-class ServiceWorkerManifestVersionBrowserTest
-    : public ExtensionBrowserTest,
-      public testing::WithParamInterface<int> {
+class ServiceWorkerManifestVersionBrowserTest : public ExtensionBrowserTest {
  public:
-  void InstallMv2OrMv3Extension() {
-    const char* test_extension_subpath;
-    if (GetParam() == 2) {
-      test_extension_subpath = "service_worker/registration/mv2_service_worker";
-    } else if (GetParam() == 3) {
-      test_extension_subpath = "service_worker/registration/mv3_service_worker";
-    } else {
-      FAIL() << "Invalid test parameter: \"" << GetParam()
-             << "\" manifest version must be 2 or 3.";
-    }
+  void InstallExtension() {
+    static constexpr char kTestExtensionSubpath[] =
+        "service_worker/registration/mv3_service_worker";
     const Extension* extension =
-        LoadExtension(test_data_dir_.AppendASCII(test_extension_subpath),
+        LoadExtension(test_data_dir_.AppendASCII(kTestExtensionSubpath),
                       {.wait_for_registration_stored = true});
     ASSERT_TRUE(extension);
     extension_ = extension;
@@ -1161,7 +1206,7 @@ class ServiceWorkerManifestVersionBrowserTest
   }
 
  private:
-  raw_ptr<const Extension> extension_;
+  raw_ptr<const Extension> extension_ = nullptr;
 };
 
 using ServiceWorkerRegistrationInstallMetricBrowserTest =
@@ -1169,10 +1214,10 @@ using ServiceWorkerRegistrationInstallMetricBrowserTest =
 
 // Tests that installing an extension emits metrics for registering the service
 // worker.
-IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationInstallMetricBrowserTest,
+IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationInstallMetricBrowserTest,
                        ExtensionInstall) {
   base::HistogramTester histogram_tester;
-  ASSERT_NO_FATAL_FAILURE(InstallMv2OrMv3Extension());
+  ASSERT_NO_FATAL_FAILURE(InstallExtension());
 
   CheckBooleanHistogramCounts(
       "Extensions.ServiceWorkerBackground.WorkerRegistrationState",
@@ -1216,9 +1261,9 @@ class ServiceWorkerTaskQueueRegistrationObserver
 
 // Tests that uninstalling an extension emits metrics for unregistering the
 // service worker.
-IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationInstallMetricBrowserTest,
+IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationInstallMetricBrowserTest,
                        ExtensionUninstall) {
-  ASSERT_NO_FATAL_FAILURE(InstallMv2OrMv3Extension());
+  ASSERT_NO_FATAL_FAILURE(InstallExtension());
 
   base::HistogramTester histogram_tester;
   // Uninstall extension and wait for the unregistration metrics to have been
@@ -1228,12 +1273,11 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationInstallMetricBrowserTest,
   ServiceWorkerTaskQueueRegistrationObserver register_observer(
       extension()->id());
   task_queue->SetObserverForTest(&register_observer);
-  ExtensionSystem* system = ExtensionSystem::Get(profile());
   const ExtensionId extension_id = extension()->id();
   // Uninstalling frees `extension_` so we must free it here to prevent dangling
   // ptr between the uninstall and until the test is torn down.
   ReleaseExtension();
-  system->extension_service()->UninstallExtension(
+  ExtensionRegistrar::Get(profile())->UninstallExtension(
       extension_id, UNINSTALL_REASON_FOR_TESTING, nullptr);
   {
     SCOPED_TRACE(
@@ -1275,9 +1319,9 @@ using ServiceWorkerRegistrationRestartMetricBrowserTest =
 // registering the service worker.
 //
 // TODO(crbug.com/349683323): Fix flakiness
-IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationRestartMetricBrowserTest,
+IN_PROC_BROWSER_TEST_F(ServiceWorkerRegistrationRestartMetricBrowserTest,
                        DISABLED_ExtensionRestart) {
-  ASSERT_NO_FATAL_FAILURE(InstallMv2OrMv3Extension());
+  ASSERT_NO_FATAL_FAILURE(InstallExtension());
 
   base::HistogramTester histogram_tester;
   // Disable and then re-enable the extension.
@@ -1286,11 +1330,12 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationRestartMetricBrowserTest,
   ServiceWorkerTaskQueueRegistrationObserver register_observer(
       extension()->id());
   task_queue->SetObserverForTest(&register_observer);
-  ExtensionSystem* system = ExtensionSystem::Get(profile());
+
+  auto* extension_registrar = ExtensionRegistrar::Get(profile());
 
   // Disable extension and wait for worker to be unregistered.
-  system->extension_service()->DisableExtension(
-      extension()->id(), disable_reason::DISABLE_USER_ACTION);
+  extension_registrar->DisableExtension(extension()->id(),
+                                        {disable_reason::DISABLE_USER_ACTION});
   {
     SCOPED_TRACE(
         "waiting for worker to be unregistered after disabling extension");
@@ -1298,7 +1343,7 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationRestartMetricBrowserTest,
   }
 
   // Enable extension and wait for registration metric should have been emitted.
-  system->extension_service()->EnableExtension(extension()->id());
+  extension_registrar->EnableExtension(extension()->id());
   {
     SCOPED_TRACE(
         "waiting for worker to be registered after enabling extension");
@@ -1339,167 +1384,19 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerRegistrationRestartMetricBrowserTest,
       /*expected_count=*/0);
 }
 
-class MV2BackgroundsToMV3WorkerRegistrationMetricBrowserTest
-    : public ServiceWorkerRegistrationApiTest,
-      public testing::WithParamInterface<BackgroundType> {
- protected:
-  const char* GetMV2ManifestBackgroundSectionForBackgroundType() {
-    switch (GetParam()) {
-      case BackgroundType::kLazyPage:
-        return R"(
-        "background": {
-           "scripts": ["background.js"],
-           "persistent": false
-        }
-      )";
-      case BackgroundType::kPersistentPage:
-        return R"(
-        "background": {
-           "scripts": ["background.js"],
-           "persistent": true
-        }
-      )";
-    }
-  }
-};
-
-// Tests that MV2 extensions of all background types, when updated, emit the
-// metrics for previous worker unregistration and new worker registration.
-IN_PROC_BROWSER_TEST_P(MV2BackgroundsToMV3WorkerRegistrationMetricBrowserTest,
-                       ExtensionUpdate) {
-  static constexpr char kManifestMv2Template[] =
-      R"({
-         "name": "MV2 extension with non-SW background",
-         "version": "1",
-         "manifest_version": 2,
-         %s
-       })";
-
-  static constexpr char kManifestMv3[] =
-      R"({
-         "name": "MV3 extension with service worker",
-         "version": "2",
-         "manifest_version": 3,
-         "background": {
-           "service_worker": "background.js"
-         }
-       })";
-
-  constexpr char kBackgroundTemplate[] =
-      R"(
-        self.currentVersion = %d;
-
-        chrome.runtime.onInstalled.addListener((details) => {
-          chrome.test.sendMessage('v' + self.currentVersion + ' ready');
-        });
-      )";
-
-  const char* ManifestMv2BackgroundSection =
-      GetMV2ManifestBackgroundSectionForBackgroundType();
-
-  // Write and package the first version of the extension.
-  TestExtensionDir extension_dir;
-  extension_dir.WriteManifest(
-      base::StringPrintf(kManifestMv2Template, ManifestMv2BackgroundSection));
-  extension_dir.WriteFile(
-      FILE_PATH_LITERAL("background.js"),
-      base::StringPrintf(kBackgroundTemplate, /*self.currentVersion=*/1));
-  base::FilePath crx_v1_path = extension_dir.Pack("v1.crx");
-
-  // Install the MV2 extension.
-  const Extension* extension_v1 = nullptr;
-  {
-    ExtensionTestMessageListener listener("v1 ready");
-    extension_v1 = InstallExtension(crx_v1_path, /*expected_change=*/1);
-    SCOPED_TRACE("waiting for extension to be installed");
-    ASSERT_TRUE(listener.WaitUntilSatisfied());
-  }
-
-  ASSERT_TRUE(extension_v1);
-  EXPECT_EQ("1", extension_v1->version().GetString());
-  const ExtensionId extension_v1_id = extension_v1->id();
-
-  // Verify the first version of the extension is at v1.
-  EXPECT_EQ(base::Value(1),
-            GetVersionFlagFromBackgroundContext(extension_v1_id));
-
-  // Write and package the second version of the extension.
-  extension_dir.WriteManifest(kManifestMv3);
-  extension_dir.WriteFile(
-      FILE_PATH_LITERAL("background.js"),
-      base::StringPrintf(kBackgroundTemplate, /*self.currentVersion=*/2));
-  base::FilePath crx_v2_path = extension_dir.Pack("v2.crx");
-
-  // Update to the second (MV3) version of the extension with a worker.
-  const Extension* extension_v2 = nullptr;
-  base::HistogramTester histogram_tester;  // Monitors metrics during update.
-  {
-    ExtensionTestMessageListener listener("v2 ready");
-    // `extension_v1` will be unsafe to use after update.
-    extension_v2 =
-        UpdateExtension(extension_v1_id, crx_v2_path, /*expected_change=*/0);
-    SCOPED_TRACE("waiting for extension to be updated");
-    ASSERT_TRUE(listener.WaitUntilSatisfied());
-  }
-
-  ASSERT_TRUE(extension_v2);
-  EXPECT_EQ("2", extension_v2->version().GetString());
-  EXPECT_EQ(extension_v1_id, extension_v2->id());
-  ASSERT_TRUE(HasActiveServiceWorker(extension_v2->id()));
-
-  // The service worker context should be that of the new version.
-  EXPECT_EQ(base::Value(2),
-            GetVersionFlagFromBackgroundContext(extension_v2->id()));
-
-  // First the old worker registration is unregistered. It is unregistered
-  // twice: once when removing the extension (ServiceWorkerTaskQueue) and then
-  // (redundantly) again before adding the new version of the extension. The
-  // redundant removal is meant to handle the case where a
-  // non-ServiceWorkerTaskQueue-tracked worker is registered for the extension
-  // (example: an MV2 extension that registered a worker via the web API).
-
-  // When updating from an MV2 worker we try to unregister the previous worker
-  // version first.
-  CheckBooleanHistogramCounts(
-      "Extensions.ServiceWorkerBackground.WorkerUnregistrationState",
-      /*true_count=*/1, /*false_count=*/0, histogram_tester);
-  histogram_tester.ExpectTotalCount(
-      "Extensions.ServiceWorkerBackground.WorkerUnregistrationState_"
-      "DeactivateExtension",
-      /*expected_count=*/0);
-  // We unsuccessfully try to unregister it again to handle workers that are
-  // registered via the web API. This is an expected failure.
-  CheckBooleanHistogramCounts(
-      "Extensions.ServiceWorkerBackground.WorkerUnregistrationState_"
-      "AddExtension",
-      /*true_count=*/1, /*false_count=*/0, histogram_tester);
-  histogram_tester.ExpectTotalCount(
-      "Extensions.ServiceWorkerBackground.WorkerUnregistrationFailureStatus4",
-      /*expected_count=*/0);
-
-  // Then the new worker registration is registered.
-  CheckBooleanHistogramCounts(
-      "Extensions.ServiceWorkerBackground.WorkerRegistrationState",
-      /*true_count=*/1, /*false_count=*/0, histogram_tester);
-  histogram_tester.ExpectTotalCount(
-      "Extensions.ServiceWorkerBackground.Registration_FailStatus",
-      /*expected_count=*/0);
-}
-
-class WorkerBackgroundToWorkerBackgroundRegistrationMetricTest
-    : public ServiceWorkerRegistrationApiTest,
-      public testing::WithParamInterface<std::pair<int, int>> {};
+using WorkerBackgroundToWorkerBackgroundRegistrationMetricTest =
+    ServiceWorkerRegistrationApiTest;
 
 // Tests that extensions of either manifest type can update to a worker from a
 // previous worker version and emit metrics for unregistering the previous
 // worker and registering the new worker version.
-IN_PROC_BROWSER_TEST_P(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
+IN_PROC_BROWSER_TEST_F(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
                        ExtensionUpdate) {
-  const char kManifestV1Template[] =
+  static constexpr char kManifestV1Template[] =
       R"({
          "name": "Version 1 extension with service worker",
          "version": "1",
-         "manifest_version": %d,
+         "manifest_version": 3,
          "background": {
            "service_worker": "background.js"
          }
@@ -1509,13 +1406,13 @@ IN_PROC_BROWSER_TEST_P(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
       R"({
          "name": "Version 2 extension with service worker",
          "version": "2",
-         "manifest_version": %d,
+         "manifest_version": 3,
          "background": {
            "service_worker": "background.js"
          }
        })";
 
-  constexpr char kBackgroundTemplate[] =
+  static constexpr char kBackgroundTemplate[] =
       R"(
         self.currentVersion = %d;
 
@@ -1526,8 +1423,7 @@ IN_PROC_BROWSER_TEST_P(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
 
   // Write and package the first version of the extension.
   TestExtensionDir extension_dir;
-  extension_dir.WriteManifest(base::StringPrintf(
-      kManifestV1Template, /*manifest_version*/ GetParam().first));
+  extension_dir.WriteManifest(kManifestV1Template);
   extension_dir.WriteFile(
       FILE_PATH_LITERAL("background.js"),
       base::StringPrintf(kBackgroundTemplate, /*self.currentVersion=*/1));
@@ -1551,9 +1447,8 @@ IN_PROC_BROWSER_TEST_P(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
   EXPECT_EQ(base::Value(1),
             GetVersionFlagFromBackgroundContext(extension_v1_id));
 
-  // Write and package the first version of the extension.
-  extension_dir.WriteManifest(base::StringPrintf(
-      kManifestV2Template, /*manifest_version*/ GetParam().second));
+  // Write and package the second version of the extension.
+  extension_dir.WriteManifest(kManifestV2Template);
   extension_dir.WriteFile(
       FILE_PATH_LITERAL("background.js"),
       base::StringPrintf(kBackgroundTemplate, /*self.currentVersion=*/2));
@@ -1617,42 +1512,5 @@ IN_PROC_BROWSER_TEST_P(WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
       "Extensions.ServiceWorkerBackground.Registration_FailStatus",
       /*expected_count=*/0);
 }
-
-INSTANTIATE_TEST_SUITE_P(MV2,
-                         ServiceWorkerRegistrationInstallMetricBrowserTest,
-                         testing::Values(2));
-INSTANTIATE_TEST_SUITE_P(MV3,
-                         ServiceWorkerRegistrationInstallMetricBrowserTest,
-                         testing::Values(3));
-
-INSTANTIATE_TEST_SUITE_P(MV2,
-                         ServiceWorkerRegistrationRestartMetricBrowserTest,
-                         testing::Values(2));
-INSTANTIATE_TEST_SUITE_P(MV3,
-                         ServiceWorkerRegistrationRestartMetricBrowserTest,
-                         testing::Values(3));
-
-INSTANTIATE_TEST_SUITE_P(MV2EventPageToMV3Worker,
-                         MV2BackgroundsToMV3WorkerRegistrationMetricBrowserTest,
-                         testing::Values(BackgroundType::kLazyPage));
-
-INSTANTIATE_TEST_SUITE_P(MV2PersistentPageToMV3Worker,
-                         MV2BackgroundsToMV3WorkerRegistrationMetricBrowserTest,
-                         testing::Values(BackgroundType::kPersistentPage));
-
-INSTANTIATE_TEST_SUITE_P(
-    Mv2ToMv2,
-    WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
-    testing::Values(std::pair<int, int>(2, 2)));
-
-INSTANTIATE_TEST_SUITE_P(
-    Mv2ToMv3,
-    WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
-    testing::Values(std::pair<int, int>(2, 3)));
-
-INSTANTIATE_TEST_SUITE_P(
-    Mv3ToMv3,
-    WorkerBackgroundToWorkerBackgroundRegistrationMetricTest,
-    testing::Values(std::pair<int, int>(3, 3)));
 
 }  // namespace extensions

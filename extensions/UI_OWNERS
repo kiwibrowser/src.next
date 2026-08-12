@@ -1,0 +1,7 @@
+# Extension UI owners are a superset of extensions owners (listed in
+# //extensions/OWNERS).
+file://extensions/OWNERS
+
+nya@chromium.org
+massan@google.com
+evasu@chromium.org

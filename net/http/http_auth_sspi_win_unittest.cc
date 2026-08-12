@@ -55,8 +55,7 @@ TEST(HttpAuthSSPITest, SplitUserAndDomain) {
 }
 
 TEST(HttpAuthSSPITest, DetermineMaxTokenLength_Normal) {
-  SecPkgInfoW package_info;
-  memset(&package_info, 0x0, sizeof(package_info));
+  SecPkgInfoW package_info = {};
   package_info.cbMaxToken = 1337;
 
   MockSSPILibrary mock_library{L"NTLM"};
@@ -230,7 +229,8 @@ TEST(HttpAuthSSPITest, GenerateAuthToken_FullHandshake_AmbientCreds_Logging) {
         "security_status": 0
        }
     }
-  )");
+  )",
+                                         base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   EXPECT_EQ(expected, entries[1].params);
 
   entries = net_log_observer.GetEntriesWithType(
@@ -246,7 +246,8 @@ TEST(HttpAuthSSPITest, GenerateAuthToken_FullHandshake_AmbientCreds_Logging) {
        },
        "spn": "HTTP/intranet.google.com"
     }
-  )");
+  )",
+                                    base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   EXPECT_EQ(expected, entries[0].params);
 
   expected = base::JSONReader::Read(R"(
@@ -268,7 +269,8 @@ TEST(HttpAuthSSPITest, GenerateAuthToken_FullHandshake_AmbientCreds_Logging) {
          "security_status": 0
       }
     }
-  )");
+  )",
+                                    base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   EXPECT_EQ(expected, entries[1].params);
 
   expected = base::JSONReader::Read(R"(
@@ -290,7 +292,79 @@ TEST(HttpAuthSSPITest, GenerateAuthToken_FullHandshake_AmbientCreds_Logging) {
          "security_status": 0
       }
     }
-  )");
+  )",
+                                    base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   EXPECT_EQ(expected, entries[3].params);
 }
+
+TEST(HttpAuthSSPITest, GenerateAuthToken_Negotiate_WithDelegation) {
+  RecordingNetLogObserver net_log_observer;
+  NetLogWithSource net_log_with_source =
+      NetLogWithSource::Make(NetLogSourceType::NONE);
+  MockSSPILibrary mock_library{NEGOSSP_NAME};
+  HttpAuthSSPI auth_sspi(&mock_library, HttpAuth::AUTH_SCHEME_NEGOTIATE);
+  auth_sspi.SetDelegation(HttpAuth::DelegationType::kUnconstrained);
+  HttpAuthChallengeTokenizer first_challenge("Negotiate");
+  ASSERT_EQ(HttpAuth::AUTHORIZATION_RESULT_ACCEPT,
+            auth_sspi.ParseChallenge(&first_challenge));
+
+  std::string auth_token;
+  ASSERT_EQ(OK,
+            auth_sspi.GenerateAuthToken(
+                nullptr, "HTTP/intranet.google.com", std::string(), &auth_token,
+                net_log_with_source, base::BindOnce(&UnexpectedCallback)));
+
+  auto entries = net_log_observer.GetEntriesWithType(
+      NetLogEventType::AUTH_LIBRARY_INIT_SEC_CTX);
+  ASSERT_GE(entries.size(), 1u);
+
+  auto expected = base::JSONReader::Read(R"(
+    {
+       "flags": {
+          "delegated": true,
+          "mutual": true,
+          "value": "0x00000003"
+       },
+       "spn": "HTTP/intranet.google.com"
+    }
+  )",
+                                         base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+  EXPECT_EQ(expected, entries[0].params);
+}
+
+TEST(HttpAuthSSPITest, GenerateAuthToken_NTLM_WithDelegation) {
+  RecordingNetLogObserver net_log_observer;
+  NetLogWithSource net_log_with_source =
+      NetLogWithSource::Make(NetLogSourceType::NONE);
+  MockSSPILibrary mock_library{L"NTLM"};
+  HttpAuthSSPI auth_sspi(&mock_library, HttpAuth::AUTH_SCHEME_NTLM);
+  auth_sspi.SetDelegation(HttpAuth::DelegationType::kUnconstrained);
+  HttpAuthChallengeTokenizer first_challenge("NTLM");
+  ASSERT_EQ(HttpAuth::AUTHORIZATION_RESULT_ACCEPT,
+            auth_sspi.ParseChallenge(&first_challenge));
+
+  std::string auth_token;
+  ASSERT_EQ(OK,
+            auth_sspi.GenerateAuthToken(
+                nullptr, "HTTP/intranet.google.com", std::string(), &auth_token,
+                net_log_with_source, base::BindOnce(&UnexpectedCallback)));
+
+  auto entries = net_log_observer.GetEntriesWithType(
+      NetLogEventType::AUTH_LIBRARY_INIT_SEC_CTX);
+  ASSERT_GE(entries.size(), 1u);
+
+  auto expected = base::JSONReader::Read(R"(
+    {
+       "flags": {
+          "delegated": false,
+          "mutual": false,
+          "value": "0x00000000"
+       },
+       "spn": "HTTP/intranet.google.com"
+    }
+  )",
+                                         base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+  EXPECT_EQ(expected, entries[0].params);
+}
+
 }  // namespace net

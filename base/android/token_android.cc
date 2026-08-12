@@ -4,22 +4,15 @@
 
 #include "base/android/token_android.h"
 
-#include "build/robolectric_buildflags.h"
-
-#if BUILDFLAG(IS_ROBOLECTRIC)
-#include "base/base_robolectric_jni/TokenBase_jni.h"  // nogncheck
-#include "base/base_robolectric_jni/Token_jni.h"      // nogncheck
-#else
-#include "base/base_jni/TokenBase_jni.h"
-#include "base/base_jni/Token_jni.h"
-#endif
+#include "base/token_jni/TokenBase_jni.h"
+#include "base/token_jni/Token_jni.h"
 
 namespace base::android {
 
 ScopedJavaLocalRef<jobject> TokenAndroid::Create(JNIEnv* env,
                                                  const base::Token& token) {
-  return Java_Token_Constructor(env, static_cast<jlong>(token.high()),
-                                static_cast<jlong>(token.low()));
+  return Java_Token_Constructor(env, static_cast<int64_t>(token.high()),
+                                static_cast<int64_t>(token.low()));
 }
 
 base::Token TokenAndroid::FromJavaToken(JNIEnv* env,
@@ -36,3 +29,6 @@ static base::Token JNI_Token_CreateRandom(JNIEnv* env) {
 }
 
 }  // namespace base::android
+
+DEFINE_JNI(Token)
+DEFINE_JNI(TokenBase)

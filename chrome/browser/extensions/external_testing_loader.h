@@ -11,6 +11,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/external_loader.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -34,7 +37,7 @@ class ExternalTestingLoader : public ExternalLoader {
   ~ExternalTestingLoader() override;
 
   base::FilePath fake_base_path_;
-  base::Value::Dict testing_prefs_;
+  base::DictValue testing_prefs_;
 };
 
 }  // namespace extensions

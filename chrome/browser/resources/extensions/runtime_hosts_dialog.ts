@@ -124,8 +124,6 @@ export class ExtensionsRuntimeHostsDialogElement extends
 
   static override get properties() {
     return {
-      ...super.properties,
-
       itemId: {type: String},
 
       /**
@@ -154,12 +152,12 @@ export class ExtensionsRuntimeHostsDialogElement extends
     };
   }
 
-  itemId: string = '';
-  currentSite: string|null = null;
-  updateHostAccess: boolean = false;
-  protected site_: string = '';
-  protected inputInvalid_: boolean = false;
-  protected matchingRestrictedSites_: string[] = [];
+  accessor itemId: string = '';
+  accessor currentSite: string|null = null;
+  accessor updateHostAccess: boolean = false;
+  protected accessor site_: string = '';
+  protected accessor inputInvalid_: boolean = false;
+  protected accessor matchingRestrictedSites_: string[] = [];
 
   override connectedCallback() {
     super.connectedCallback();
@@ -186,10 +184,14 @@ export class ExtensionsRuntimeHostsDialogElement extends
     return this.$.dialog.open;
   }
 
+  protected onInput_() {
+    this.validate_();
+  }
+
   /**
    * Validates that the pattern entered is valid.
    */
-  protected validate_() {
+  private validate_() {
     // If input is empty, disable the action button, but don't show the red
     // invalid message.
     if (this.site_.trim().length === 0) {
@@ -200,7 +202,7 @@ export class ExtensionsRuntimeHostsDialogElement extends
     this.inputInvalid_ = !runtimeHostsPatternRegExp.test(this.site_);
   }
 
-  protected onSiteChanged_(e: CustomEvent<{value: string}>) {
+  protected onSiteValueChanged_(e: CustomEvent<{value: string}>) {
     this.site_ = e.detail.value;
   }
 

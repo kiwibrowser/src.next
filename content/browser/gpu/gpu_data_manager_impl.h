@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/no_destructor.h"
@@ -34,6 +35,7 @@
 #include "ui/gfx/gpu_extra_info.h"
 
 #if BUILDFLAG(IS_WIN)
+#include "base/win/windows_types.h"
 #include "ui/gfx/mojom/dxgi_info.mojom.h"
 #endif
 
@@ -52,13 +54,10 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
  public:
   enum GpuInfoRequest {
     kGpuInfoRequestDirectX = 1 << 0,
-    kGpuInfoRequestVulkan = 1 << 1,
-    kGpuInfoRequestDawnInfo = 1 << 2,
-    kGpuInfoRequestDirectXVulkan =
-        kGpuInfoRequestVulkan | kGpuInfoRequestDirectX,
-    kGpuInfoRequestVideo = 1 << 3,
-    kGpuInfoRequestAll = kGpuInfoRequestDirectX | kGpuInfoRequestVulkan |
-                         kGpuInfoRequestDawnInfo | kGpuInfoRequestVideo,
+    kGpuInfoRequestDawnInfo = 1 << 1,
+    kGpuInfoRequestVideo = 1 << 2,
+    kGpuInfoRequestAll =
+        kGpuInfoRequestDirectX | kGpuInfoRequestDawnInfo | kGpuInfoRequestVideo,
   };
 
   // Getter for the singleton. This will return NULL on failure.
@@ -86,10 +85,12 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   void RemoveObserver(GpuDataManagerObserver* observer) override;
   void DisableHardwareAcceleration() override;
   bool HardwareAccelerationEnabled() override;
+  bool IsGpuRasterizationForUIEnabled() override;
   void AppendGpuCommandLine(base::CommandLine* command_line,
                             GpuProcessKind kind) override;
   void BlocklistWebGLForTesting() override;
   void SetSkiaGraphiteEnabledForTesting(bool enabled) override;
+  void SetInitializedForTesting(bool initialized) override;
 
   // Start a timer that occasionally reports UMA metrics. This is explicitly
   // started because unit tests may create and use a GpuDataManager but they do
@@ -98,9 +99,8 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   void StartUmaTimer();
 
   // Requests complete GPU info if it has not already been requested
-  void RequestDx12VulkanVideoGpuInfoIfNeeded(
-      GpuDataManagerImpl::GpuInfoRequest request,
-      bool delayed);
+  void RequestGpuInfoIfNeeded(GpuDataManagerImpl::GpuInfoRequest request,
+                              bool delayed);
 
   bool IsDx12VulkanVersionAvailable() const;
   bool IsGpuFeatureInfoAvailable() const;
@@ -111,15 +111,19 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
 #if BUILDFLAG(IS_WIN)
   void UpdateDirectXInfo(uint32_t d3d12_feature_level,
                          uint32_t directml_feature_level);
-  void UpdateVulkanInfo(uint32_t vulkan_version);
   void UpdateDevicePerfInfo(const gpu::DevicePerfInfo& device_perf_info);
   void UpdateOverlayInfo(const gpu::OverlayInfo& overlay_info);
   void UpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info);
   void UpdateDirectXRequestStatus(bool request_continues);
-  void UpdateVulkanRequestStatus(bool request_continues);
   bool DirectXRequested() const;
-  bool VulkanRequested() const;
   void TerminateInfoCollectionGpuProcess();
+
+  // Information to Get/Set the LUID that the GPU Process should be launched on.
+  // Predominantly used by XR, so that we can ensure the GL context is created
+  // on the GPU that the headset is actually plugged into.
+  void SetUseAdapterLuid(const CHROME_LUID& luid);
+  void ClearUseAdapterLuid();
+  std::optional<CHROME_LUID> GetUseAdapterLuid() const;
 #endif
   // Called from BrowserMainLoop::PostCreateThreads().
   // TODO(content/browser/gpu/OWNERS): This should probably use a
@@ -169,19 +173,18 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
 
   void ProcessCrashed();
 
-  // Returns a base::Value::List with the log messages.
-  base::Value::List GetLogMessages() const;
+  // Returns a base::ListValue with the log messages.
+  base::ListValue GetLogMessages() const;
 
   // Called when switching GPUs.
   void HandleGpuSwitch();
 
   // Maintenance of domains requiring explicit user permission before
-  // using client-facing 3D APIs (WebGL, Pepper 3D), either because
-  // the domain has caused the GPU to reset, or because too many GPU
-  // resets have been observed globally recently, and system stability
-  // might be compromised. A set of URLs is passed because in the
-  // situation where the GPU process crashes, the implementation needs
-  // to know that these URLs all came from the same crash.
+  // using client-facing 3D APIs (WebGL), either because the domain has caused
+  // the GPU to reset, or because too many GPU resets have been observed
+  // globally recently, and system stability might be compromised. A set of URLs
+  // is passed because in the situation where the GPU process crashes, the
+  // implementation needs to know that these URLs all came from the same crash.
   //
   // In the set, each URL may be a partial URL (including at least the
   // host) or a full URL to a page.
@@ -197,11 +200,15 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   // Return mode describing what the GPU process will be launched to run.
   gpu::GpuMode GetGpuMode() const;
 
-  // Called when GPU process initialization failed or the GPU process has
-  // crashed repeatedly. This will try to disable hardware acceleration and then
-  // SwiftShader WebGL. It will also crash the browser process as a last resort
-  // on Android and Chrome OS.
+  // Called when GPU process initialization failed. This will try to disable
+  // hardware acceleration and then SwiftShader WebGL. It will also crash the
+  // browser process as a last resort on Android and Chrome OS.
   void FallBackToNextGpuMode();
+
+  // Called when the GPU process has crashed repeatedly. Will try other gpu
+  // modes (like FallBackToNextGpuMode) but may skip software acceleration based
+  // on features.
+  void FallBackToNextGpuModeDueToCrash();
 
   // Check if there is at least one fallback option available.
   bool CanFallback() const;
@@ -222,7 +229,6 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
 
 #if BUILDFLAG(IS_LINUX)
   bool IsGpuMemoryBufferNV12Supported();
-  void SetGpuMemoryBufferNV12Supported(bool supported);
 #endif  // BUILDFLAG(IS_LINUX)
 
   // Binds a new Mojo receiver to handle requests from a renderer.

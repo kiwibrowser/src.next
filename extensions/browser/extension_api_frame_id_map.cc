@@ -10,6 +10,7 @@
 
 #include "base/check_op.h"
 #include "base/functional/bind.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/uuid.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,15 +24,6 @@
 #include "extensions/common/constants.h"
 
 namespace extensions {
-
-namespace {
-
-// The map is accessed on the IO and UI thread, so construct it once and never
-// delete it.
-base::LazyInstance<ExtensionApiFrameIdMap>::Leaky g_map_instance =
-    LAZY_INSTANCE_INITIALIZER;
-
-}  // namespace
 
 const int ExtensionApiFrameIdMap::kInvalidFrameId = -1;
 const int ExtensionApiFrameIdMap::kTopFrameId = 0;
@@ -75,7 +67,10 @@ ExtensionApiFrameIdMap::~ExtensionApiFrameIdMap() = default;
 
 // static
 ExtensionApiFrameIdMap* ExtensionApiFrameIdMap::Get() {
-  return g_map_instance.Pointer();
+  // The map is accessed on the IO and UI thread, so construct it once and never
+  // delete it.
+  static base::NoDestructor<ExtensionApiFrameIdMap> instance;
+  return instance.get();
 }
 
 // static
@@ -170,7 +165,7 @@ content::RenderFrameHost* ExtensionApiFrameIdMap::GetRenderFrameHostByFrameId(
   CHECK_GE(frame_id, 1);
 
   content::RenderFrameHost* render_frame_host = nullptr;
-  for (auto iter : document_id_map_) {
+  for (const auto& iter : document_id_map_) {
     if (frame_id ==
         ExtensionApiFrameIdMap::GetFrameId(&iter.second->render_frame_host())) {
       render_frame_host = &iter.second->render_frame_host();
@@ -359,7 +354,7 @@ void ExtensionApiFrameIdMap::OnRenderFrameDeleted(
   DCHECK(render_frame_host);
 
   const content::GlobalRenderFrameHostId key(render_frame_host->GetGlobalId());
-  // TODO(http://crbug.com/522129): This is necessary right now because beacon
+  // TODO(http://crbug.com/40431900): This is necessary right now because beacon
   // requests made in window.onunload may start after this has been called.
   // Delay the RemoveFrameData() call, so we will still have the frame data
   // cached when the beacon request comes in.

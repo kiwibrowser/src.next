@@ -2,32 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/extension_garbage_collector.h"
+
 #include <stddef.h>
 
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_garbage_collector.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/install_tracker.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/common/buildflags.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/install_tracker.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_id.h"
-#include "ppapi/buildflags/buildflags.h"
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/public/browser/plugin_service.h"
 #endif
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -43,7 +46,7 @@ class ExtensionGarbageCollectorUnitTest : public ExtensionServiceTestBase {
   // ExtensionGarbageCollector's constructor. But, as the test won't wait for
   // the delayed task to be called, we have to call it manually instead.
   void GarbageCollectExtensions() {
-    ExtensionGarbageCollector::Get(profile_.get())
+    ExtensionGarbageCollector::Get(profile())
         ->GarbageCollectExtensionsForTest();
     // Wait for GarbageCollectExtensions task to complete.
     content::RunAllTasksUntilIdle();
@@ -72,11 +75,11 @@ TEST_F(ExtensionGarbageCollectorUnitTest,
   // Simulate that the extensions was partially deleted (no longer considered
   // installed) by clearing its pref.
   {
-    ScopedDictPrefUpdate update(profile_->GetPrefs(), pref_names::kExtensions);
+    ScopedDictPrefUpdate update(profile()->GetPrefs(), pref_names::kExtensions);
     update->Remove(kExtensionId);
   }
 
-  service_->Init();
+  service()->Init();
   GarbageCollectExtensions();
 
   base::FileEnumerator dirs(unpacked_install_dir(),
@@ -102,21 +105,21 @@ TEST_F(ExtensionGarbageCollectorUnitTest,
 
   // Update the path of the installed extension to be accurate for the test.
   {
-    ScopedDictPrefUpdate update(profile_->GetPrefs(), pref_names::kExtensions);
-    base::Value::Dict& update_dict = update.Get();
+    ScopedDictPrefUpdate update(profile()->GetPrefs(), pref_names::kExtensions);
+    base::DictValue& update_dict = update.Get();
     // An unpacked extension installed in the profile dir in production usually
     // has it's full install path written to the "path" key, but since we don't
     // know what the path is during the test (due to variation of test directory
     // location) we need to manually set it during the test. The garbage
     // collection checks this path to determine whether to delete the
     // installation directory.
-    base::Value::Dict* extension_entry = update_dict.FindDict(kExtensionId);
+    base::DictValue* extension_entry = update_dict.FindDict(kExtensionId);
     ASSERT_TRUE(extension_entry);
     extension_entry->Set("path",
                          base::Value(zipped_extension_dir.MaybeAsASCII()));
   }
 
-  service_->Init();
+  service()->Init();
   GarbageCollectExtensions();
 
   // Unpacked extension dir should not be deleted.
@@ -133,16 +136,15 @@ TEST_F(ExtensionGarbageCollectorUnitTest, NoCleanupDuringInstall) {
 
   // Simulate that one of them got partially deleted by clearing its pref.
   {
-    ScopedDictPrefUpdate update(profile_->GetPrefs(), pref_names::kExtensions);
+    ScopedDictPrefUpdate update(profile()->GetPrefs(), pref_names::kExtensions);
     update->Remove(kExtensionId);
   }
 
-  service_->Init();
+  service()->Init();
 
   // Simulate a CRX installation.
-  auto installer = CrxInstaller::CreateSilent(service_);
-  InstallTracker::Get(profile_.get())
-      ->OnBeginCrxInstall(*installer, kExtensionId);
+  InstallTrackerFactory::GetForBrowserContext(profile())->OnBeginCrxInstall(
+      kExtensionId);
 
   GarbageCollectExtensions();
 
@@ -152,8 +154,8 @@ TEST_F(ExtensionGarbageCollectorUnitTest, NoCleanupDuringInstall) {
   ASSERT_TRUE(base::PathExists(extension_dir));
 
   // Finish CRX installation and re-run garbage collection.
-  InstallTracker::Get(profile_.get())
-      ->OnFinishCrxInstall(*installer, kExtensionId, false);
+  InstallTrackerFactory::GetForBrowserContext(profile())->OnFinishCrxInstall(
+      base::FilePath(), kExtensionId, nullptr, false);
   GarbageCollectExtensions();
 
   // extension1 dir should be gone
@@ -203,7 +205,7 @@ TEST_F(ExtensionGarbageCollectorUnitTest, UpdateOnStartup) {
   ASSERT_TRUE(base::PathExists(extensions_install_dir().AppendASCII(
       "hpiknbiabeeppbpihjehijgoemciehgk/3")));
 
-  service_->Init();
+  service()->Init();
   GarbageCollectExtensions();
 
   // Verify that the pending update for the first extension got installed.
@@ -217,9 +219,9 @@ TEST_F(ExtensionGarbageCollectorUnitTest, UpdateOnStartup) {
       "hpiknbiabeeppbpihjehijgoemciehgk/3")));
 
   // Make sure update information got deleted.
-  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_.get());
-  EXPECT_FALSE(
-      prefs->GetDelayedInstallInfo("bjafgdebaacbbbecmhlhpofkepfkgcpa"));
+  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
+  EXPECT_FALSE(prefs->GetDelayedInstallExtensionInfo(
+      "bjafgdebaacbbbecmhlhpofkepfkgcpa"));
 }
 
 }  // namespace extensions

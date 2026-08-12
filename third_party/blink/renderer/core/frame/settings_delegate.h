@@ -57,7 +57,6 @@ class CORE_EXPORT SettingsDelegate {
     kViewportPaintProperties,
     kDNSPrefetching,
     kImageLoading,
-    kTextAutosizing,
     kFontFamily,
     kAcceleratedCompositing,
     kMediaQuery,
@@ -73,6 +72,9 @@ class CORE_EXPORT SettingsDelegate {
     kUniversalAccess,
     kVisionDeficiency,
     kForcedColors,
+    kFontScaleFactor,
+    kAcceptLanguages,
+    kTextTrackStyle,
   };
 
   virtual void SettingsChanged(ChangeType) = 0;

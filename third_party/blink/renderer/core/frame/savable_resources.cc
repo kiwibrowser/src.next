@@ -75,9 +75,10 @@ void GetSavableResourceLinkForElement(Element* element,
   // Ignore those URLs which are not standard protocols. Because FTP
   // protocol does no have cache mechanism, we will skip all
   // sub-resources if they use FTP protocol.
-  if (!element_url.ProtocolIsInHTTPFamily() &&
-      !element_url.ProtocolIs(url::kFileScheme))
+  if (!element_url.ProtocolIsInHttpFamily() &&
+      !element_url.ProtocolIs(url::kFileScheme)) {
     return;
+  }
 
   result->AppendResourceLink(element_url);
 }
@@ -144,8 +145,8 @@ String SavableResources::GetSubResourceLinkFromElement(Element* element) {
     // If the link element is not linked to css, ignore it.
     String type = element->getAttribute(html_names::kTypeAttr);
     String rel = element->getAttribute(html_names::kRelAttr);
-    if (EqualIgnoringASCIICase(type, "text/css") ||
-        EqualIgnoringASCIICase(rel, "stylesheet")) {
+    if (EqualIgnoringAsciiCase(type, "text/css") ||
+        EqualIgnoringAsciiCase(rel, "stylesheet")) {
       // TODO(jnd): Add support for extracting links of sub-resources which
       // are inside style-sheet such as @import, url(), etc.
       // See bug: http://b/issue?id=1111667.
@@ -158,8 +159,9 @@ String SavableResources::GetSubResourceLinkFromElement(Element* element) {
   // If value has content and not start with "javascript:" then return it,
   // otherwise return an empty string.
   if (!value.IsNull() && !value.empty() &&
-      !value.StartsWith("javascript:", kTextCaseASCIIInsensitive))
+      !value.StartsWithIgnoringAsciiCase("javascript:")) {
     return value;
+  }
 
   return String();
 }

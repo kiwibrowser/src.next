@@ -12,6 +12,10 @@ import android.view.WindowManager;
 
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.ui.base.WindowDelegate;
 
 /**
@@ -20,15 +24,16 @@ import org.chromium.ui.base.WindowDelegate;
  * <p>There are no Android APIs to determine the visibility of a soft keyboard, so this class
  * aggressively detects signals that might indicate the keyboard has been hidden.
  */
+@NullMarked
 class KeyboardHideHelper implements ViewTreeObserver.OnGlobalLayoutListener {
     private static final long SOFT_KEYBOARD_HIDDEN_TIMEOUT_MS = 1000;
 
     private final View mView;
     private final Runnable mOnHideCallback;
-    private final Runnable mClearListenerDelayedTask;
-    private final Rect mTempRect;
+    private final Runnable mClearListenerDelayedTask = this::cleanUp;
+    private final Rect mTempRect = new Rect();
 
-    private WindowDelegate mWindowDelegate;
+    private @Nullable WindowDelegate mWindowDelegate;
     private boolean mIsLayoutListenerAttached;
     private int mInitialViewportHeight;
 
@@ -41,14 +46,6 @@ class KeyboardHideHelper implements ViewTreeObserver.OnGlobalLayoutListener {
     public KeyboardHideHelper(View view, Runnable onHideCallback) {
         mView = view;
         mOnHideCallback = onHideCallback;
-        mClearListenerDelayedTask =
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        cleanUp();
-                    }
-                };
-        mTempRect = new Rect();
     }
 
     /** Initialize the delegate that allows interaction with the Window. */
@@ -85,7 +82,8 @@ class KeyboardHideHelper implements ViewTreeObserver.OnGlobalLayoutListener {
         mIsLayoutListenerAttached = true;
 
         mInitialViewportHeight = availableWindowHeight();
-        mView.postDelayed(mClearListenerDelayedTask, SOFT_KEYBOARD_HIDDEN_TIMEOUT_MS);
+        PostTask.postDelayedTask(
+                TaskTraits.UI_DEFAULT, mClearListenerDelayedTask, SOFT_KEYBOARD_HIDDEN_TIMEOUT_MS);
     }
 
     @Override
@@ -112,7 +110,6 @@ class KeyboardHideHelper implements ViewTreeObserver.OnGlobalLayoutListener {
 
     private void cleanUp() {
         if (!mIsLayoutListenerAttached) return;
-        mView.removeCallbacks(mClearListenerDelayedTask);
         mView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
         mIsLayoutListenerAttached = false;
     }

@@ -45,13 +45,12 @@ Attr* NamedNodeMap::getNamedItemNS(const AtomicString& namespace_uri,
 
 Attr* NamedNodeMap::removeNamedItem(const AtomicString& name,
                                     ExceptionState& exception_state) {
-  WTF::AtomicStringTable::WeakResult hint =
-      element_->WeakLowercaseIfNecessary(name);
+  AtomicStringTable::WeakResult hint = element_->WeakLowercaseIfNecessary(name);
   wtf_size_t index = element_->Attributes().FindIndexHinted(name, hint);
   if (index == kNotFound) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotFoundError,
-        "No item with name '" + name + "' was found.");
+        StrCat({"No item with name '", name, "' was found."}));
     return nullptr;
   }
   return element_->DetachAttribute(index);
@@ -63,9 +62,10 @@ Attr* NamedNodeMap::removeNamedItemNS(const AtomicString& namespace_uri,
   wtf_size_t index = element_->Attributes().FindIndex(
       QualifiedName(g_null_atom, local_name, namespace_uri));
   if (index == kNotFound) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kNotFoundError,
-                                      "No item with name '" + namespace_uri +
-                                          "::" + local_name + "' was found.");
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotFoundError,
+        StrCat({"No item with name '", namespace_uri, "::", local_name,
+                "' was found."}));
     return nullptr;
   }
   return element_->DetachAttribute(index);
@@ -109,8 +109,8 @@ void NamedNodeMap::NamedPropertyEnumerator(Vector<String>& names,
   names.ReserveInitialCapacity(attributes.size());
   if (element_->IsHTMLElement() && IsA<HTMLDocument>(element_->GetDocument())) {
     for (const Attribute& attribute : attributes) {
-      if ((attribute.Prefix() == attribute.Prefix().LowerASCII()) &&
-          (attribute.LocalName() == attribute.LocalName().LowerASCII())) {
+      if (attribute.Prefix().ContainsNoAsciiUpper() &&
+          attribute.LocalName().ContainsNoAsciiUpper()) {
         names.UncheckedAppend(attribute.GetName().ToString());
       }
     }
@@ -131,7 +131,7 @@ bool NamedNodeMap::NamedPropertyQuery(const AtomicString& name,
 void NamedNodeMap::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   ScriptWrappable::Trace(visitor);
-  ElementRareDataField::Trace(visitor);
+  NodeRareDataField::Trace(visitor);
 }
 
 }  // namespace blink

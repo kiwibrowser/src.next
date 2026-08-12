@@ -15,7 +15,6 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -522,9 +521,9 @@ int MediaValues::CalculateHorizontalViewportSegments(LocalFrame* frame) {
     return 1;
   }
 
-  WebVector<gfx::Rect> viewport_segments =
+  std::vector<gfx::Rect> viewport_segments =
       frame->GetWidgetForLocalRoot()->ViewportSegments();
-  WTF::HashSet<int> unique_x;
+  HashSet<int> unique_x;
   for (const auto& segment : viewport_segments) {
     // HashSet can't have 0 as a key, so add 1 to all the values we see.
     unique_x.insert(segment.x() + 1);
@@ -538,9 +537,9 @@ int MediaValues::CalculateVerticalViewportSegments(LocalFrame* frame) {
     return 1;
   }
 
-  WebVector<gfx::Rect> viewport_segments =
+  std::vector<gfx::Rect> viewport_segments =
       frame->GetWidgetForLocalRoot()->ViewportSegments();
-  WTF::HashSet<int> unique_y;
+  HashSet<int> unique_y;
   for (const auto& segment : viewport_segments) {
     // HashSet can't have 0 as a key, so add 1 to all the values we see.
     unique_y.insert(segment.y() + 1);

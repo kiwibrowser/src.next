@@ -49,14 +49,15 @@ void ViewPainterFixedBackgroundTest::RunFixedBackgroundTest(
 
   ScrollOffset scroll_offset(200, 150);
   layout_viewport->SetScrollOffset(scroll_offset,
-                                   mojom::blink::ScrollType::kUser);
+                                   mojom::blink::ScrollType::kUser,
+                                   cc::ScrollSourceType::kNone);
   frame_view->UpdateAllLifecyclePhasesForTest();
 
   const auto& display_items = GetPersistentData().GetDisplayItemList();
   const auto& background_client = prefer_compositing_to_lcd_text
                                       ? GetLayoutView()
                                       : ViewScrollingBackgroundClient();
-  const DisplayItem* background_display_item = &display_items[0];
+  const DisplayItem* background_display_item = UNSAFE_TODO(&display_items[0]);
   EXPECT_THAT(
       *background_display_item,
       IsSameId(background_client.Id(), DisplayItem::kDocumentBackground));
@@ -199,7 +200,7 @@ TEST_P(ViewPainterTest, TouchActionRect) {
     <div id='forcescroll' style='width: 0; height: 2900px;'></div>
   )HTML");
 
-  GetFrame().DomWindow()->scrollBy(0, 100);
+  GetFrame().DomWindow()->scrollByForTesting(0, 100);
   UpdateAllLifecyclePhasesForTest();
 
   auto* view = &GetLayoutView();
@@ -208,7 +209,6 @@ TEST_P(ViewPainterTest, TouchActionRect) {
   auto* view_hit_test_data = MakeGarbageCollected<HitTestData>();
   view_hit_test_data->touch_action_rects = {
       {gfx::Rect(0, 0, 800, 600), TouchAction::kPinchZoom}};
-  auto* html = GetDocument().documentElement()->GetLayoutBox();
   auto scrolling_properties = view->FirstFragment().ContentsProperties();
   auto* scrolling_hit_test_data = MakeGarbageCollected<HitTestData>();
   scrolling_hit_test_data->touch_action_rects = {
@@ -230,18 +230,15 @@ TEST_P(ViewPainterTest, TouchActionRect) {
                   1, 1, PaintChunk::Id(view->Id(), DisplayItem::kScrollHitTest),
                   non_scrolling_properties, scroll_hit_test_data,
                   gfx::Rect(0, 0, 800, 600)));
-  EXPECT_THAT(
-      ContentPaintChunks(),
-      ElementsAre(IsPaintChunk(
-          1, 1,
-          RuntimeEnabledFeatures::HitTestOpaquenessEnabled()
-              ? PaintChunk::Id(view->GetScrollableArea()
-                                   ->GetScrollingBackgroundDisplayItemClient()
-                                   .Id(),
-                               DisplayItem::kDocumentBackground)
-              : PaintChunk::Id(html->Layer()->Id(), DisplayItem::kLayerChunk),
-          scrolling_properties, scrolling_hit_test_data,
-          gfx::Rect(0, 0, 800, 3000))));
+  EXPECT_THAT(ContentPaintChunks(),
+              ElementsAre(IsPaintChunk(
+                  1, 1,
+                  PaintChunk::Id(view->GetScrollableArea()
+                                     ->GetScrollingBackgroundDisplayItemClient()
+                                     .Id(),
+                                 DisplayItem::kDocumentBackground),
+                  scrolling_properties, scrolling_hit_test_data,
+                  gfx::Rect(0, 0, 800, 3000))));
 }
 
 }  // namespace

@@ -36,13 +36,19 @@ String CSSViewTransitionRule::cssText() const {
     result.Append("; ");
   }
 
+  if (const CSSValue* types_value = view_transition_rule_->GetTypesValue()) {
+    result.Append("types: ");
+    result.Append(types_value->CssText());
+    result.Append("; ");
+  }
+
   result.Append("}");
 
   return result.ReleaseString();
 }
 
 String CSSViewTransitionRule::navigation() const {
-  if (const CSSValue* value = view_transition_rule_->GetNavigation()) {
+  if (const CSSValue* value = view_transition_rule_->GetNavigationValue()) {
     return value->CssText();
   }
 

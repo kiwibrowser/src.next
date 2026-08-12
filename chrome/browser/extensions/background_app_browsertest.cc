@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/gtest_prod_util.h"
-#include "chrome/browser/background/background_mode_manager.h"
+#include "chrome/browser/background/extensions/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -37,7 +37,7 @@ IN_PROC_BROWSER_TEST_F(BackgroundAppBrowserTest, ReloadBackgroundApp) {
 
 // Make sure that the background mode notification is sent for an app install,
 // but not again on browser restart. Regression test for
-// https://crbug.com/1008890
+// https://crbug.com/40650240
 IN_PROC_BROWSER_TEST_F(BackgroundAppBrowserTest, PRE_InstallBackgroundApp) {
   InstallExtension(test_data_dir_.AppendASCII("background_app"), 1);
   EXPECT_EQ(1, g_browser_process->background_mode_manager()
@@ -47,9 +47,9 @@ IN_PROC_BROWSER_TEST_F(BackgroundAppBrowserTest, PRE_InstallBackgroundApp) {
 IN_PROC_BROWSER_TEST_F(BackgroundAppBrowserTest, InstallBackgroundApp) {
   // Verify the installed extension is still here.
   const ExtensionSet& extensions = extension_registry()->enabled_extensions();
-  EXPECT_TRUE(base::Contains(extensions,
-                             "A simple app with background permission set.",
-                             &Extension::description));
+  EXPECT_TRUE(std::ranges::contains(
+      extensions, "A simple app with background permission set.",
+      &Extension::description));
   // Verify the installed extension did not pop up a background mode
   // notification.
   EXPECT_EQ(0, g_browser_process->background_mode_manager()

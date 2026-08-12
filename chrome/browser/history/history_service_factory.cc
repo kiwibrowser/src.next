@@ -8,7 +8,6 @@
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/channel_info.h"
-#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/content/browser/history_database_helper.h"
 #include "components/history/core/browser/history_database_params.h"
@@ -24,7 +23,8 @@ std::unique_ptr<KeyedService> BuildHistoryService(
   auto history_service = std::make_unique<history::HistoryService>(
       std::make_unique<ChromeHistoryClient>(
           BookmarkModelFactory::GetForBrowserContext(context)),
-      std::make_unique<history::ContentVisitDelegate>(context));
+      std::make_unique<history::ContentVisitDelegate>(context),
+      /*device_info_tracker=*/nullptr, /*local_device_info_provider=*/nullptr);
   if (!history_service->Init(history::HistoryDatabaseParamsForPath(
           context->GetPath(), chrome::GetChannel()))) {
     return nullptr;

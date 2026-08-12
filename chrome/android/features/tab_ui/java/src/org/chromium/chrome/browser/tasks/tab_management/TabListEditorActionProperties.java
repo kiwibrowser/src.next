@@ -6,8 +6,11 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
+import android.view.View.OnClickListener;
 
 import org.chromium.base.Callback;
+import org.chromium.base.lifetime.Destroyable;
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.ReadableIntPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
@@ -17,6 +20,7 @@ import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 import java.util.List;
 
 /** Properties of the {@link TabListEditorAction}. */
+@NullMarked
 public class TabListEditorActionProperties {
     public static final ReadableIntPropertyKey MENU_ITEM_ID = new ReadableIntPropertyKey();
     public static final ReadableIntPropertyKey SHOW_MODE = new ReadableIntPropertyKey();
@@ -28,8 +32,8 @@ public class TabListEditorActionProperties {
     public static final WritableBooleanPropertyKey TITLE_IS_PLURAL =
             new WritableBooleanPropertyKey();
     public static final WritableObjectPropertyKey<Integer> CONTENT_DESCRIPTION_RESOURCE_ID =
-            new WritableObjectPropertyKey();
-    public static final WritableObjectPropertyKey<String> TITLE = new WritableObjectPropertyKey();
+            new WritableObjectPropertyKey<>();
+    public static final WritableObjectPropertyKey<String> TITLE = new WritableObjectPropertyKey<>();
     public static final WritableObjectPropertyKey<String> CONTENT_DESCRIPTION =
             new WritableObjectPropertyKey<>();
     public static final WritableObjectPropertyKey<Drawable> ICON =
@@ -43,12 +47,18 @@ public class TabListEditorActionProperties {
     public static final WritableObjectPropertyKey<ColorStateList> ICON_TINT =
             new WritableObjectPropertyKey<>();
 
-    public static final WritableObjectPropertyKey<Runnable> ON_CLICK_LISTENER =
-            new WritableObjectPropertyKey<>();
+    public static final WritableObjectPropertyKey<TabListEditorMenuItem.OnClickRunnable>
+            ON_CLICK_LISTENER = new WritableObjectPropertyKey<>();
     public static final WritableBooleanPropertyKey SHOULD_DISMISS_MENU =
             new WritableBooleanPropertyKey();
-    public static final WritableObjectPropertyKey<Callback<List<Integer>>>
+    public static final WritableObjectPropertyKey<Callback<List<TabListEditorItemSelectionId>>>
             ON_SELECTION_STATE_CHANGE = new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<Destroyable> DESTROYABLE =
+            new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<OnClickListener> CLICK_LISTENER =
+            new WritableObjectPropertyKey<>();
 
     /** Keys for the {@link TabListEditorAction}. */
     public static final PropertyKey[] ACTION_KEYS = {
@@ -67,7 +77,8 @@ public class TabListEditorActionProperties {
         ICON_TINT,
         ON_CLICK_LISTENER,
         SHOULD_DISMISS_MENU,
-        ON_SELECTION_STATE_CHANGE
+        ON_SELECTION_STATE_CHANGE,
+        DESTROYABLE
     };
 
     /** Keys for the {@link TabListEditorMenuItem}. */
@@ -79,6 +90,7 @@ public class TabListEditorActionProperties {
         ICON,
         ICON_TINT,
         ENABLED,
-        ITEM_COUNT
+        ITEM_COUNT,
+        CLICK_LISTENER
     };
 }

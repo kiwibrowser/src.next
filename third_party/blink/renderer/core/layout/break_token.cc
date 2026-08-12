@@ -14,7 +14,6 @@ namespace blink {
 namespace {
 
 struct SameSizeAsBreakToken : GarbageCollected<BreakToken> {
-  Member<void*> member;
   unsigned flags;
 };
 
@@ -92,8 +91,6 @@ void BreakToken::Trace(Visitor* visitor) const {
   NOTREACHED();
 }
 
-void BreakToken::TraceAfterDispatch(Visitor* visitor) const {
-  visitor->Trace(box_);
-}
+void BreakToken::TraceAfterDispatch(Visitor*) const {}
 
 }  // namespace blink

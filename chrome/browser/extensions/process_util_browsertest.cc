@@ -153,7 +153,7 @@ IN_PROC_BROWSER_TEST_F(ProcessUtilBrowserTest,
 }
 
 // Tests that GetPersistentBackgroundPageState() returns kInvalid for
-// non-persitent extension types.
+// non-persistent extension types.
 IN_PROC_BROWSER_TEST_F(ProcessUtilBrowserTest,
                        BackgroundPageLoading_NonPersistent) {
   constexpr char kEventPageManifest[] =

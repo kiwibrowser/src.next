@@ -26,9 +26,9 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -49,6 +49,7 @@ class HTMLAreaElement;
 class HTMLMediaElement;
 class HitTestLocation;
 class Image;
+class ImageResourceContent;
 class KURL;
 class LocalFrame;
 class MediaSourceHandle;
@@ -61,7 +62,7 @@ class CORE_EXPORT HitTestResult {
   DISALLOW_NEW();
 
  public:
-  typedef HeapLinkedHashSet<Member<Node>> NodeSet;
+  using NodeSet = GCedHeapLinkedHashSet<Member<Node>>;
 
   HitTestResult();
   HitTestResult(const HitTestRequest&, const HitTestLocation&);
@@ -89,6 +90,11 @@ class CORE_EXPORT HitTestResult {
   }
   CompositorElementId GetScrollableContainer() const;
   Element* InnerElement() const { return inner_element_.Get(); }
+  // Returns the hit-testable pseudo-element (::scroll-marker, ::scroll-button,
+  // ::interest-button, etc.) if one was hit, otherwise falls back to
+  // InnerElement(). Use this for hover/active state updates and event dispatch
+  // so that activation-behavior pseudos receive events correctly.
+  Element* InnerPossiblyPseudoElement() const;
 
   // If innerNode is an image map or image map area, return the associated image
   // node.
@@ -216,6 +222,7 @@ class CORE_EXPORT HitTestResult {
   std::tuple<bool, ListBasedHitTestBehavior>
   AddNodeToListBasedTestResultInternal(Node* node,
                                        const HitTestLocation& location);
+  static const ImageResourceContent* GetImageContent(const Node* node);
 
   HitTestRequest hit_test_request_;
   bool cacheable_;

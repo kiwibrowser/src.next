@@ -5,7 +5,6 @@
 package org.chromium.base;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -14,22 +13,28 @@ import android.provider.MediaStore;
 import android.system.Os;
 import android.text.TextUtils;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
 import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
 
 import org.chromium.base.task.AsyncTask;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.build.annotations.RequiresNonNull;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** This class provides the path related methods for the native library. */
+@SuppressWarnings("NullAway") // Too hard to annotate this class.
+@NullMarked
 public abstract class PathUtils {
     private static final String TAG = "PathUtils";
     private static final String THUMBNAIL_DIRECTORY_NAME = "textures";
@@ -39,15 +44,15 @@ public abstract class PathUtils {
     private static final int CACHE_DIRECTORY = 2;
     private static final int NUM_DIRECTORIES = 3;
     private static final AtomicBoolean sInitializationStarted = new AtomicBoolean();
-    private static FutureTask<String[]> sDirPathFetchTask;
+    private static @Nullable FutureTask<String[]> sDirPathFetchTask;
 
     // If the FutureTask started in setPrivateDataDirectorySuffix() fails to complete by the time we
     // need the values, we will need the suffix so that we can restart the task synchronously on
     // the UI thread.
-    private static String sDataDirectorySuffix;
-    private static String sCacheSubDirectory;
-    private static String sDataDirectoryBasePath;
-    private static String sCacheDirectoryBasePath;
+    private static @Nullable String sDataDirectorySuffix;
+    private static @Nullable String sCacheSubDirectory;
+    private static @Nullable String sDataDirectoryBasePath;
+    private static @Nullable String sCacheDirectoryBasePath;
 
     // Prevent instantiation.
     private PathUtils() {}
@@ -69,6 +74,7 @@ public abstract class PathUtils {
      * above to guarantee thread-safety as part of the initialization-on-demand holder idiom.
      */
     private static String[] getOrComputeDirectoryPaths() {
+        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
         if (!sDirPathFetchTask.isDone()) {
             try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
                 // No-op if already ran.
@@ -90,19 +96,49 @@ public abstract class PathUtils {
         }
     }
 
-    // TODO(crbug.com/41484704): Merge the Chrome and WebView implementations
-    // of isPathUnderAppDir into one.
-    @RequiresApi(Build.VERSION_CODES.N)
-    public static boolean isPathUnderAppDir(String path, Context context) {
-        File file = new File(path);
-        File dataDir = context.getDataDir();
-        File externalDir = ContextUtils.getApplicationContext().getExternalFilesDir(null);
-        try {
-            return (file.toPath().toRealPath().startsWith(dataDir.toPath().toRealPath())
-                    || file.toPath().toRealPath().startsWith(externalDir.toPath().toRealPath()));
-        } catch (Exception e) {
+    /**
+     * A path is canonical if it starts with a slash, does not contain null, and each component
+     * between slashes is not empty or a single dot (/./) or a double dot (/../).
+     *
+     * @path path Path to test for canonical form.
+     * @return whether the path is in canonical form.
+     */
+    public static boolean isPathCanonical(String path) {
+        if (path == null || path.isEmpty() || path.charAt(0) != '/' || path.indexOf('\0') != -1) {
             return false;
         }
+        if (path.equals("/")) {
+            return true;
+        }
+        while (true) {
+            int nextSlash = path.indexOf('/', 1);
+            int endComponent = nextSlash == -1 ? path.length() : nextSlash;
+            String component = path.substring(1, endComponent);
+            if (component.isEmpty() || component.equals(".") || component.equals("..")) {
+                return false;
+            }
+            if (nextSlash == -1) {
+                return true;
+            }
+            path = path.substring(nextSlash);
+        }
+    }
+
+    // TODO(crbug.com/41484704): Merge the Chrome and WebView implementations
+    // of isPathUnderAppDir into one.
+    public static boolean isPathUnderAppDir(String path, Context context) {
+        // Assume path is malicious and return true if path is not canonical.
+        if (!isPathCanonical(path)) {
+            return true;
+        }
+        File dataDir = context.getDataDir();
+        File externalDir = ContextUtils.getApplicationContext().getExternalFilesDir(null);
+        // Assume that dataDir and externalDir are already canonical paths and do simple
+        // String.startsWith() checks.  Also assume that the path input is not a symlink that clank
+        // will resolve to an internal file. Avoid File.getCanonicalPath() which blocks, or
+        // Path.getRealPath() which blocks and throws for non-existent paths.
+        return path.startsWith(dataDir.toString())
+                || (externalDir != null && path.startsWith(externalDir.toString()));
     }
 
     /**
@@ -113,6 +149,7 @@ public abstract class PathUtils {
      *
      * @see Context#getDir(String, int)
      */
+    @RequiresNonNull("sDataDirectorySuffix")
     private static String[] setPrivateDirectoryPathInternal() {
         String[] paths = new String[NUM_DIRECTORIES];
         File dataDir = null;
@@ -170,7 +207,10 @@ public abstract class PathUtils {
      * @see Context#getDir(String, int)
      */
     public static void setPrivateDirectoryPath(
-            String dataBasePath, String cacheBasePath, String dataDirSuffix, String cacheSubDir) {
+            @Nullable String dataBasePath,
+            @Nullable String cacheBasePath,
+            String dataDirSuffix,
+            @Nullable String cacheSubDir) {
         // This method should only be called once, but many tests end up calling it multiple times,
         // so adding a guard here.
         if (!sInitializationStarted.getAndSet(true)) {
@@ -210,7 +250,7 @@ public abstract class PathUtils {
      * @param cacheSubDir The subdirectory in the cache directory to use, if non-null.
      * @see Context#getDir(String, int)
      */
-    public static void setPrivateDataDirectorySuffix(String suffix, String cacheSubDir) {
+    public static void setPrivateDataDirectorySuffix(String suffix, @Nullable String cacheSubDir) {
         setPrivateDirectoryPath(null, null, suffix, cacheSubDir);
     }
 
@@ -231,8 +271,7 @@ public abstract class PathUtils {
      * @return the private directory that is used to store application data.
      */
     @CalledByNative
-    public static String getDataDirectory() {
-        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
+    public static @JniType("std::string") String getDataDirectory() {
         return getDirectoryPath(DATA_DIRECTORY);
     }
 
@@ -240,17 +279,35 @@ public abstract class PathUtils {
      * @return the cache directory.
      */
     @CalledByNative
-    public static String getCacheDirectory() {
-        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
+    public static @JniType("std::string") String getCacheDirectory() {
         return getDirectoryPath(CACHE_DIRECTORY);
     }
 
     // Should not be called from WebView, since it does not support being used in a multiprocess
     // environment.
     @CalledByNative
-    public static String getThumbnailCacheDirectory() {
-        assert sDirPathFetchTask != null : "setDataDirectorySuffix must be called first.";
+    public static @JniType("std::string") String getThumbnailCacheDirectory() {
         return getDirectoryPath(THUMBNAIL_DIRECTORY);
+    }
+
+    private static String sDownloadsDirectoryForTesting;
+    private static String[] sAllPrivateDownloadsDirectoriesForTesting;
+    private static String[] sExternalDownloadVolumesNamesForTesting;
+
+    public static void setDownloadsDirectoryForTesting(String downloadsDirectory) {
+        sDownloadsDirectoryForTesting = downloadsDirectory;
+        ResettersForTesting.register(() -> sDownloadsDirectoryForTesting = null);
+    }
+
+    public static void setAllPrivateDownloadsDirectoriesForTesting(
+            String[] allPrivateDownloadsDirectories) {
+        sAllPrivateDownloadsDirectoriesForTesting = allPrivateDownloadsDirectories;
+        ResettersForTesting.register(() -> sAllPrivateDownloadsDirectoriesForTesting = null);
+    }
+
+    public static void setExternalDownloadVolumesNamesForTesting(String[] externalDownloadVolumes) {
+        sExternalDownloadVolumesNamesForTesting = externalDownloadVolumes;
+        ResettersForTesting.register(() -> sExternalDownloadVolumesNamesForTesting = null);
     }
 
     /**
@@ -261,31 +318,27 @@ public abstract class PathUtils {
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    public static @NonNull String getDownloadsDirectory() {
+    public static @JniType("std::string") String getDownloadsDirectory() {
+        if (sDownloadsDirectoryForTesting != null) return sDownloadsDirectoryForTesting;
         // TODO(crbug.com/41187555): Move calls to getDownloadsDirectory() to background thread.
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // https://developer.android.com/preview/privacy/scoped-storage
-                // In Q+, Android has begun sandboxing external storage. Chrome may not have
-                // permission to write to Environment.getExternalStoragePublicDirectory(). Instead
-                // using Context.getExternalFilesDir() will return a path to sandboxed external
-                // storage for which no additional permissions are required.
-                String[] dirs = getAllPrivateDownloadsDirectories();
-                assert dirs != null;
-                return dirs.length == 0 ? "" : dirs[0];
-            }
-            return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    .getPath();
+            // https://developer.android.com/preview/privacy/scoped-storage
+            String[] dirs = getAllPrivateDownloadsDirectories();
+            assert dirs != null;
+            return dirs.length == 0 ? "" : dirs[0];
         }
     }
 
     /**
      * @return Download directories including the default storage directory on SD card, and a
-     * private directory on external SD card.
+     *     private directory on external SD card.
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    public static @NonNull String[] getAllPrivateDownloadsDirectories() {
+    public static String[] getAllPrivateDownloadsDirectories() {
+        if (sAllPrivateDownloadsDirectoriesForTesting != null) {
+            return sAllPrivateDownloadsDirectoriesForTesting;
+        }
         List<File> files = new ArrayList<>();
         try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
             File[] externalDirs =
@@ -304,7 +357,10 @@ public abstract class PathUtils {
      */
     @RequiresApi(Build.VERSION_CODES.R)
     @CalledByNative
-    public static @NonNull String[] getExternalDownloadVolumesNames() {
+    public static String[] getExternalDownloadVolumesNames() {
+        if (sExternalDownloadVolumesNamesForTesting != null) {
+            return sExternalDownloadVolumesNamesForTesting;
+        }
         ArrayList<File> files = new ArrayList<>();
         Set<String> volumes =
                 MediaStore.getExternalVolumeNames(ContextUtils.getApplicationContext());
@@ -336,7 +392,26 @@ public abstract class PathUtils {
         return toAbsolutePathStrings(files);
     }
 
-    private static @NonNull String[] toAbsolutePathStrings(@NonNull List<File> files) {
+    /**
+     * @return The cache quota allocated to the app by the Android framework in bytes. If the app
+     *     uses more cache than its quota, the app is at a higher risk of having its cache entries
+     *     evicted. Return value of -1 depicts an error.
+     */
+    @CalledByNative
+    public static long getCacheQuotaBytes() {
+        try {
+            StorageManager storageManager =
+                    ContextUtils.getApplicationContext().getSystemService(StorageManager.class);
+            UUID storageUuid = storageManager.getUuidForPath(new File(getCacheDirectory()));
+            // This can throw `SecurityException` if the app doesn't have sufficient privileges.
+            // See crbug.com/422174715
+            return storageManager.getCacheQuotaBytes(storageUuid);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String[] toAbsolutePathStrings(List<File> files) {
         ArrayList<String> absolutePaths = new ArrayList<String>();
         for (File file : files) {
             if (file == null || TextUtils.isEmpty(file.getAbsolutePath())) continue;
@@ -347,26 +422,11 @@ public abstract class PathUtils {
     }
 
     /**
-     * @return the path to native libraries.
-     */
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private static String getNativeLibraryDirectory() {
-        ApplicationInfo ai = ContextUtils.getApplicationContext().getApplicationInfo();
-        if ((ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                || (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
-            return ai.nativeLibraryDir;
-        }
-
-        return "/system/lib/";
-    }
-
-    /**
      * @return the external storage directory.
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    public static String getExternalStorageDirectory() {
+    public static @JniType("std::string") String getExternalStorageDirectory() {
         return Environment.getExternalStorageDirectory().getAbsolutePath();
     }
 }

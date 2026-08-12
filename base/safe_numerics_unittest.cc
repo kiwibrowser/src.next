@@ -2,14 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include <stddef.h>
 #include <stdint.h>
 
+#include <concepts>
 #include <limits>
 #include <type_traits>
 
@@ -42,133 +38,108 @@
 #include <mmintrin.h>
 #endif
 
-namespace base {
-namespace internal {
+namespace base::numerics_internal {
 
 using std::numeric_limits;
 
 // This is a helper function for finding the maximum value in Src that can be
-// wholy represented as the destination floating-point type.
-template <typename Dst, typename Src>
-Dst GetMaxConvertibleToFloat() {
-  using DstLimits = numeric_limits<Dst>;
-  using SrcLimits = numeric_limits<Src>;
-  static_assert(SrcLimits::is_specialized, "Source must be numeric.");
-  static_assert(DstLimits::is_specialized, "Destination must be numeric.");
-  CHECK(DstLimits::is_iec559);
-
-  if (SrcLimits::digits <= DstLimits::digits &&
-      MaxExponent<Src>::value <= MaxExponent<Dst>::value)
+// wholly represented as the destination floating-point type.
+template <typename Dst,
+          typename Src,
+          typename DstLimits = std::numeric_limits<Dst>,
+          typename SrcLimits = std::numeric_limits<Src>>
+  requires(DstLimits::is_specialized && SrcLimits::is_specialized &&
+           DstLimits::is_iec559)
+constexpr Dst GetMaxConvertibleToFloat() {
+  if constexpr (SrcLimits::digits <= DstLimits::digits &&
+                kMaxExponent<Src> <= kMaxExponent<Dst>) {
     return SrcLimits::max();
-  Src max = SrcLimits::max() / 2 + (SrcLimits::is_integer ? 1 : 0);
-  while (max != static_cast<Src>(static_cast<Dst>(max))) {
-    max /= 2;
+  } else {
+    Src max = SrcLimits::max() / 2 + (SrcLimits::is_integer ? 1 : 0);
+    while (max != static_cast<Src>(static_cast<Dst>(max))) {
+      max /= 2;
+    }
+    return static_cast<Dst>(max);
   }
-  return static_cast<Dst>(max);
 }
 
 // Test corner case promotions used
-static_assert(IsIntegerArithmeticSafe<int32_t, int8_t, int8_t>::value, "");
-static_assert(IsIntegerArithmeticSafe<int32_t, int16_t, int8_t>::value, "");
-static_assert(IsIntegerArithmeticSafe<int32_t, int8_t, int16_t>::value, "");
-static_assert(!IsIntegerArithmeticSafe<int32_t, int32_t, int8_t>::value, "");
-static_assert(BigEnoughPromotion<int16_t, int8_t>::is_contained, "");
-static_assert(BigEnoughPromotion<int32_t, uint32_t>::is_contained, "");
-static_assert(BigEnoughPromotion<intmax_t, int8_t>::is_contained, "");
-static_assert(!BigEnoughPromotion<uintmax_t, int8_t>::is_contained, "");
+static_assert(kIsIntegerArithmeticSafe<int32_t, int8_t, int8_t>);
+static_assert(kIsIntegerArithmeticSafe<int32_t, int16_t, int8_t>);
+static_assert(kIsIntegerArithmeticSafe<int32_t, int8_t, int16_t>);
+static_assert(!kIsIntegerArithmeticSafe<int32_t, int32_t, int8_t>);
+static_assert(kIsBigEnoughPromotionContained<int16_t, int8_t>);
+static_assert(kIsBigEnoughPromotionContained<int32_t, uint32_t>);
+static_assert(kIsBigEnoughPromotionContained<intmax_t, int8_t>);
+static_assert(!kIsBigEnoughPromotionContained<uintmax_t, int8_t>);
+static_assert(std::same_as<BigEnoughPromotion<int16_t, int8_t>, int16_t>);
+static_assert(std::same_as<BigEnoughPromotion<int32_t, uint32_t>, int64_t>);
+static_assert(std::same_as<BigEnoughPromotion<intmax_t, int8_t>, intmax_t>);
+static_assert(std::same_as<BigEnoughPromotion<uintmax_t, int8_t>, uintmax_t>);
+static_assert(kIsBigEnoughPromotionContained<int16_t, int8_t>);
+static_assert(kIsBigEnoughPromotionContained<int32_t, uint32_t>);
+static_assert(kIsBigEnoughPromotionContained<intmax_t, int8_t>);
+static_assert(!kIsBigEnoughPromotionContained<uintmax_t, int8_t>);
 static_assert(
-    std::is_same_v<BigEnoughPromotion<int16_t, int8_t>::type, int16_t>,
-    "");
+    std::same_as<FastIntegerArithmeticPromotion<int16_t, int8_t>, int32_t>);
 static_assert(
-    std::is_same_v<BigEnoughPromotion<int32_t, uint32_t>::type, int64_t>,
-    "");
+    std::same_as<FastIntegerArithmeticPromotion<int32_t, uint32_t>, int64_t>);
 static_assert(
-    std::is_same_v<BigEnoughPromotion<intmax_t, int8_t>::type, intmax_t>,
-    "");
+    std::same_as<FastIntegerArithmeticPromotion<intmax_t, int8_t>, intmax_t>);
 static_assert(
-    std::is_same_v<BigEnoughPromotion<uintmax_t, int8_t>::type, uintmax_t>,
-    "");
-static_assert(BigEnoughPromotion<int16_t, int8_t>::is_contained, "");
-static_assert(BigEnoughPromotion<int32_t, uint32_t>::is_contained, "");
-static_assert(BigEnoughPromotion<intmax_t, int8_t>::is_contained, "");
-static_assert(!BigEnoughPromotion<uintmax_t, int8_t>::is_contained, "");
-static_assert(
-    std::is_same_v<FastIntegerArithmeticPromotion<int16_t, int8_t>::type,
-                   int32_t>,
-    "");
-static_assert(
-    std::is_same_v<FastIntegerArithmeticPromotion<int32_t, uint32_t>::type,
-                   int64_t>,
-    "");
-static_assert(
-    std::is_same_v<FastIntegerArithmeticPromotion<intmax_t, int8_t>::type,
-                   intmax_t>,
-    "");
-static_assert(
-    std::is_same_v<FastIntegerArithmeticPromotion<uintmax_t, int8_t>::type,
-                   uintmax_t>,
-    "");
-static_assert(FastIntegerArithmeticPromotion<int16_t, int8_t>::is_contained,
-              "");
-static_assert(FastIntegerArithmeticPromotion<int32_t, uint32_t>::is_contained,
-              "");
-static_assert(!FastIntegerArithmeticPromotion<intmax_t, int8_t>::is_contained,
-              "");
-static_assert(!FastIntegerArithmeticPromotion<uintmax_t, int8_t>::is_contained,
-              "");
+    std::same_as<FastIntegerArithmeticPromotion<uintmax_t, int8_t>, uintmax_t>);
+static_assert(kIsFastIntegerArithmeticPromotionContained<int16_t, int8_t>);
+static_assert(kIsFastIntegerArithmeticPromotionContained<int32_t, uint32_t>);
+static_assert(!kIsFastIntegerArithmeticPromotionContained<intmax_t, int8_t>);
+static_assert(!kIsFastIntegerArithmeticPromotionContained<uintmax_t, int8_t>);
 
 // Test compile-time (constexpr) evaluation of checking and saturation.
 constexpr int32_t kIntOne = 1;
-static_assert(1 == checked_cast<uint8_t>(kIntOne), "");
-static_assert(1 == saturated_cast<uint8_t>(kIntOne), "");
-static_assert(2U == MakeClampedNum(kIntOne) + 1, "");
-static_assert(2U == (MakeCheckedNum(kIntOne) + 1).ValueOrDie(), "");
-static_assert(0U == MakeClampedNum(kIntOne) - 1, "");
-static_assert(0U == (MakeCheckedNum(kIntOne) - 1).ValueOrDie(), "");
-static_assert(-1 == -MakeClampedNum(kIntOne), "");
-static_assert(-1 == (-MakeCheckedNum(kIntOne)).ValueOrDie(), "");
-static_assert(1U == MakeClampedNum(kIntOne) * 1, "");
-static_assert(1U == (MakeCheckedNum(kIntOne) * 1).ValueOrDie(), "");
-static_assert(1U == MakeClampedNum(kIntOne) / 1, "");
-static_assert(1U == (MakeCheckedNum(kIntOne) / 1).ValueOrDie(), "");
-static_assert(1 == MakeClampedNum(-kIntOne).Abs(), "");
-static_assert(1 == MakeCheckedNum(-kIntOne).Abs().ValueOrDie(), "");
-static_assert(1U == MakeClampedNum(kIntOne) % 2, "");
-static_assert(1U == (MakeCheckedNum(kIntOne) % 2).ValueOrDie(), "");
-static_assert(0U == MakeClampedNum(kIntOne) >> 1U, "");
-static_assert(0U == (MakeCheckedNum(kIntOne) >> 1U).ValueOrDie(), "");
-static_assert(2U == MakeClampedNum(kIntOne) << 1U, "");
-static_assert(2U == (MakeCheckedNum(kIntOne) << 1U).ValueOrDie(), "");
-static_assert(1 == MakeClampedNum(kIntOne) & 1U, "");
-static_assert(1 == (MakeCheckedNum(kIntOne) & 1U).ValueOrDie(), "");
-static_assert(1 == MakeClampedNum(kIntOne) | 1U, "");
-static_assert(1 == (MakeCheckedNum(kIntOne) | 1U).ValueOrDie(), "");
-static_assert(0 == MakeClampedNum(kIntOne) ^ 1U, "");
-static_assert(0 == (MakeCheckedNum(kIntOne) ^ 1U).ValueOrDie(), "");
+static_assert(1 == checked_cast<uint8_t>(kIntOne));
+static_assert(1 == saturated_cast<uint8_t>(kIntOne));
+static_assert(2U == ClampedNumeric(kIntOne) + 1);
+static_assert(2U == (CheckedNumeric(kIntOne) + 1).ValueOrDie());
+static_assert(0U == ClampedNumeric(kIntOne) - 1);
+static_assert(0U == (CheckedNumeric(kIntOne) - 1).ValueOrDie());
+static_assert(-1 == -ClampedNumeric(kIntOne));
+static_assert(-1 == (-CheckedNumeric(kIntOne)).ValueOrDie());
+static_assert(1U == ClampedNumeric(kIntOne) * 1);
+static_assert(1U == (CheckedNumeric(kIntOne) * 1).ValueOrDie());
+static_assert(1U == ClampedNumeric(kIntOne) / 1);
+static_assert(1U == (CheckedNumeric(kIntOne) / 1).ValueOrDie());
+static_assert(1 == ClampedNumeric(-kIntOne).Abs());
+static_assert(1 == CheckedNumeric(-kIntOne).Abs().ValueOrDie());
+static_assert(1U == ClampedNumeric(kIntOne) % 2);
+static_assert(1U == (CheckedNumeric(kIntOne) % 2).ValueOrDie());
+static_assert(0U == ClampedNumeric(kIntOne) >> 1U);
+static_assert(0U == (CheckedNumeric(kIntOne) >> 1U).ValueOrDie());
+static_assert(2U == ClampedNumeric(kIntOne) << 1U);
+static_assert(2U == (CheckedNumeric(kIntOne) << 1U).ValueOrDie());
+static_assert(1 == (ClampedNumeric(kIntOne) & 1U));
+static_assert(1 == (CheckedNumeric(kIntOne) & 1U).ValueOrDie());
+static_assert(1 == (ClampedNumeric(kIntOne) | 1U));
+static_assert(1 == (CheckedNumeric(kIntOne) | 1U).ValueOrDie());
+static_assert(0 == (ClampedNumeric(kIntOne) ^ 1U));
+static_assert(0 == (CheckedNumeric(kIntOne) ^ 1U).ValueOrDie());
 constexpr float kFloatOne = 1.0;
-static_assert(1 == int{checked_cast<int8_t>(kFloatOne)}, "");
-static_assert(1 == int{saturated_cast<int8_t>(kFloatOne)}, "");
-static_assert(2U == unsigned{MakeClampedNum(kFloatOne) + 1}, "");
+static_assert(1 == int{checked_cast<int8_t>(kFloatOne)});
+static_assert(1 == int{saturated_cast<int8_t>(kFloatOne)});
+static_assert(2U == unsigned{ClampedNumeric(kFloatOne) + 1});
 static_assert(2U ==
-                  (MakeCheckedNum(kFloatOne) + 1).Cast<unsigned>().ValueOrDie(),
-              "");
-static_assert(0U == unsigned{MakeClampedNum(kFloatOne) - 1}, "");
+              (CheckedNumeric(kFloatOne) + 1).Cast<unsigned>().ValueOrDie());
+static_assert(0U == unsigned{ClampedNumeric(kFloatOne) - 1});
 static_assert(0U ==
-                  (MakeCheckedNum(kFloatOne) - 1).Cast<unsigned>().ValueOrDie(),
-              "");
-static_assert(-1 == int{-MakeClampedNum(kFloatOne)}, "");
-static_assert(-1 == (-MakeCheckedNum(kFloatOne)).Cast<int>().ValueOrDie(), "");
-static_assert(1U == unsigned{MakeClampedNum(kFloatOne) * 1}, "");
+              (CheckedNumeric(kFloatOne) - 1).Cast<unsigned>().ValueOrDie());
+static_assert(-1 == int{-ClampedNumeric(kFloatOne)});
+static_assert(-1 == (-CheckedNumeric(kFloatOne)).Cast<int>().ValueOrDie());
+static_assert(1U == unsigned{ClampedNumeric(kFloatOne) * 1});
 static_assert(1U ==
-                  (MakeCheckedNum(kFloatOne) * 1).Cast<unsigned>().ValueOrDie(),
-              "");
-static_assert(1U == unsigned{MakeClampedNum(kFloatOne) / 1}, "");
+              (CheckedNumeric(kFloatOne) * 1).Cast<unsigned>().ValueOrDie());
+static_assert(1U == unsigned{ClampedNumeric(kFloatOne) / 1});
 static_assert(1U ==
-                  (MakeCheckedNum(kFloatOne) / 1).Cast<unsigned>().ValueOrDie(),
-              "");
-static_assert(1 == int{MakeClampedNum(-kFloatOne).Abs()}, "");
-static_assert(1 == MakeCheckedNum(-kFloatOne).Abs().Cast<int>().ValueOrDie(),
-              "");
+              (CheckedNumeric(kFloatOne) / 1).Cast<unsigned>().ValueOrDie());
+static_assert(1 == int{ClampedNumeric(-kFloatOne).Abs()});
+static_assert(1 == CheckedNumeric(-kFloatOne).Abs().Cast<int>().ValueOrDie());
 
 template <typename U>
 U GetNumericValueForTest(const CheckedNumeric<U>& src) {
@@ -245,10 +216,10 @@ void TestStrictPointerMath() {
   Dst dummy_value = 0;
   Dst* dummy_ptr = &dummy_value;
   static const Dst kDummyOffset = 2;  // Don't want to go too far.
-  EXPECT_EQ(dummy_ptr + kDummyOffset,
-            dummy_ptr + StrictNumeric<Dst>(kDummyOffset));
-  EXPECT_EQ(dummy_ptr - kDummyOffset,
-            dummy_ptr - StrictNumeric<Dst>(kDummyOffset));
+  EXPECT_EQ(UNSAFE_TODO(dummy_ptr + kDummyOffset),
+            UNSAFE_TODO(dummy_ptr + StrictNumeric<Dst>(kDummyOffset)));
+  EXPECT_EQ(UNSAFE_TODO(dummy_ptr - kDummyOffset),
+            UNSAFE_TODO(dummy_ptr - StrictNumeric<Dst>(kDummyOffset)));
   EXPECT_NE(dummy_ptr, dummy_ptr + StrictNumeric<Dst>(kDummyOffset));
   EXPECT_NE(dummy_ptr, dummy_ptr - StrictNumeric<Dst>(kDummyOffset));
   EXPECT_DEATH_IF_SUPPORTED(
@@ -258,18 +229,14 @@ void TestStrictPointerMath() {
 
 // Signed integer arithmetic.
 template <typename Dst>
-static void TestSpecializedArithmetic(
-    const char* dst,
-    int line,
-    std::enable_if_t<numeric_limits<Dst>::is_integer &&
-                         numeric_limits<Dst>::is_signed,
-                     int> = 0) {
+  requires std::signed_integral<Dst>
+static void TestSpecializedArithmetic(const char* dst, int line) {
   using DstLimits = SaturationDefaultLimits<Dst>;
   TEST_EXPECTED_FAILURE(-CheckedNumeric<Dst>(DstLimits::lowest()));
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(DstLimits::lowest()).Abs());
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(-1).Abs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeCheckedNum(-DstLimits::max()).Abs());
+                      CheckedNumeric(-DstLimits::max()).Abs());
 
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
                       -ClampedNumeric<Dst>(DstLimits::lowest()));
@@ -277,7 +244,7 @@ static void TestSpecializedArithmetic(
                       ClampedNumeric<Dst>(DstLimits::lowest()).Abs());
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(-1).Abs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeClampedNum(-DstLimits::max()).Abs());
+                      ClampedNumeric(-DstLimits::max()).Abs());
 
   TEST_EXPECTED_SUCCESS(CheckedNumeric<Dst>(DstLimits::max()) + -1);
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(DstLimits::lowest()) + -1);
@@ -327,9 +294,9 @@ static void TestSpecializedArithmetic(
                       CheckedNumeric<Dst>(1) * Dst(DstLimits::lowest()));
   TEST_EXPECTED_VALUE(
       typename std::make_unsigned<Dst>::type(0) - DstLimits::lowest(),
-      MakeCheckedNum(DstLimits::lowest()).UnsignedAbs());
+      CheckedNumeric(DstLimits::lowest()).UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeCheckedNum(DstLimits::max()).UnsignedAbs());
+                      CheckedNumeric(DstLimits::max()).UnsignedAbs());
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(0).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(-1).UnsignedAbs());
@@ -349,9 +316,9 @@ static void TestSpecializedArithmetic(
                       ClampedNumeric<Dst>(1) * Dst(DstLimits::lowest()));
   TEST_EXPECTED_VALUE(
       typename std::make_unsigned<Dst>::type(0) - DstLimits::lowest(),
-      MakeClampedNum(DstLimits::lowest()).UnsignedAbs());
+      ClampedNumeric(DstLimits::lowest()).UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeClampedNum(DstLimits::max()).UnsignedAbs());
+                      ClampedNumeric(DstLimits::max()).UnsignedAbs());
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(0).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(-1).UnsignedAbs());
@@ -389,21 +356,19 @@ static void TestSpecializedArithmetic(
   volatile Dst negative_one = -1;
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) << negative_one);
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1)
-                        << (IntegerBitsPlusSign<Dst>::value - 1));
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(0)
-                        << IntegerBitsPlusSign<Dst>::value);
+                        << (kIntegerBitsPlusSign<Dst> - 1));
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(0) << kIntegerBitsPlusSign<Dst>);
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(DstLimits::max()) << 1);
-  TEST_EXPECTED_VALUE(
-      static_cast<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 2),
-      CheckedNumeric<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 2));
+  TEST_EXPECTED_VALUE(static_cast<Dst>(1) << (kIntegerBitsPlusSign<Dst> - 2),
+                      CheckedNumeric<Dst>(1)
+                          << (kIntegerBitsPlusSign<Dst> - 2));
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(0)
-                             << (IntegerBitsPlusSign<Dst>::value - 1));
+                             << (kIntegerBitsPlusSign<Dst> - 1));
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1) << 0);
   TEST_EXPECTED_VALUE(2, CheckedNumeric<Dst>(1) << 1);
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >>
-                        IntegerBitsPlusSign<Dst>::value);
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >> kIntegerBitsPlusSign<Dst>);
   TEST_EXPECTED_VALUE(
-      0, CheckedNumeric<Dst>(1) >> (IntegerBitsPlusSign<Dst>::value - 1));
+      0, CheckedNumeric<Dst>(1) >> (kIntegerBitsPlusSign<Dst> - 1));
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >> negative_one);
 
   // Modulus is legal only for integers.
@@ -437,38 +402,34 @@ static void TestSpecializedArithmetic(
   // Test bit shifts.
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
                       ClampedNumeric<Dst>(1)
-                          << (IntegerBitsPlusSign<Dst>::value - 1U));
+                          << (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(Dst(0), ClampedNumeric<Dst>(0)
-                                  << (IntegerBitsPlusSign<Dst>::value + 0U));
+                                  << (kIntegerBitsPlusSign<Dst> + 0U));
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
                       ClampedNumeric<Dst>(DstLimits::max()) << 1U);
-  TEST_EXPECTED_VALUE(
-      static_cast<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 2U),
-      ClampedNumeric<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 2U));
+  TEST_EXPECTED_VALUE(static_cast<Dst>(1) << (kIntegerBitsPlusSign<Dst> - 2U),
+                      ClampedNumeric<Dst>(1)
+                          << (kIntegerBitsPlusSign<Dst> - 2U));
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(0)
-                             << (IntegerBitsPlusSign<Dst>::value - 1U));
+                             << (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1) << 0U);
   TEST_EXPECTED_VALUE(2, ClampedNumeric<Dst>(1) << 1U);
   TEST_EXPECTED_VALUE(
-      0, ClampedNumeric<Dst>(1) >> (IntegerBitsPlusSign<Dst>::value + 0U));
+      0, ClampedNumeric<Dst>(1) >> (kIntegerBitsPlusSign<Dst> + 0U));
   TEST_EXPECTED_VALUE(
-      0, ClampedNumeric<Dst>(1) >> (IntegerBitsPlusSign<Dst>::value - 1U));
+      0, ClampedNumeric<Dst>(1) >> (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(
-      -1, ClampedNumeric<Dst>(-1) >> (IntegerBitsPlusSign<Dst>::value - 1U));
+      -1, ClampedNumeric<Dst>(-1) >> (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(-1, ClampedNumeric<Dst>(DstLimits::lowest()) >>
-                              (IntegerBitsPlusSign<Dst>::value - 0U));
+                              (kIntegerBitsPlusSign<Dst> - 0U));
 
   TestStrictPointerMath<Dst>();
 }
 
 // Unsigned integer arithmetic.
 template <typename Dst>
-static void TestSpecializedArithmetic(
-    const char* dst,
-    int line,
-    std::enable_if_t<numeric_limits<Dst>::is_integer &&
-                         !numeric_limits<Dst>::is_signed,
-                     int> = 0) {
+  requires std::unsigned_integral<Dst>
+static void TestSpecializedArithmetic(const char* dst, int line) {
   using DstLimits = SaturationDefaultLimits<Dst>;
   TEST_EXPECTED_SUCCESS(-CheckedNumeric<Dst>(DstLimits::lowest()));
   TEST_EXPECTED_SUCCESS(CheckedNumeric<Dst>(DstLimits::lowest()).Abs());
@@ -482,9 +443,9 @@ static void TestSpecializedArithmetic(
           std::numeric_limits<typename std::make_signed<Dst>::type>::lowest())
           .UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::lowest(),
-                      MakeCheckedNum(DstLimits::lowest()).UnsignedAbs());
+                      CheckedNumeric(DstLimits::lowest()).UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeCheckedNum(DstLimits::max()).UnsignedAbs());
+                      CheckedNumeric(DstLimits::max()).UnsignedAbs());
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(0).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1).UnsignedAbs());
 
@@ -505,9 +466,9 @@ static void TestSpecializedArithmetic(
           std::numeric_limits<typename std::make_signed<Dst>::type>::lowest())
           .UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::lowest(),
-                      MakeClampedNum(DstLimits::lowest()).UnsignedAbs());
+                      ClampedNumeric(DstLimits::lowest()).UnsignedAbs());
   TEST_EXPECTED_VALUE(DstLimits::max(),
-                      MakeClampedNum(DstLimits::max()).UnsignedAbs());
+                      ClampedNumeric(DstLimits::max()).UnsignedAbs());
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(0).UnsignedAbs());
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1).UnsignedAbs());
 
@@ -525,32 +486,28 @@ static void TestSpecializedArithmetic(
   TEST_EXPECTED_VALUE(0, checked_dst %= 1);
   // Test that div by 0 is avoided but returns invalid result.
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) % 0);
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1)
-                        << IntegerBitsPlusSign<Dst>::value);
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) << kIntegerBitsPlusSign<Dst>);
   // Test bit shifts.
   volatile int negative_one = -1;
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) << negative_one);
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1)
-                        << IntegerBitsPlusSign<Dst>::value);
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(0)
-                        << IntegerBitsPlusSign<Dst>::value);
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) << kIntegerBitsPlusSign<Dst>);
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(0) << kIntegerBitsPlusSign<Dst>);
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(DstLimits::max()) << 1);
-  TEST_EXPECTED_VALUE(
-      static_cast<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 1),
-      CheckedNumeric<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 1));
+  TEST_EXPECTED_VALUE(static_cast<Dst>(1) << (kIntegerBitsPlusSign<Dst> - 1),
+                      CheckedNumeric<Dst>(1)
+                          << (kIntegerBitsPlusSign<Dst> - 1));
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1) << 0);
   TEST_EXPECTED_VALUE(2, CheckedNumeric<Dst>(1) << 1);
-  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >>
-                        IntegerBitsPlusSign<Dst>::value);
+  TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >> kIntegerBitsPlusSign<Dst>);
   TEST_EXPECTED_VALUE(
-      0, CheckedNumeric<Dst>(1) >> (IntegerBitsPlusSign<Dst>::value - 1));
+      0, CheckedNumeric<Dst>(1) >> (kIntegerBitsPlusSign<Dst> - 1));
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(1) >> negative_one);
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1) & 1);
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(1) & 0);
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(0) & 1);
   TEST_EXPECTED_VALUE(0, CheckedNumeric<Dst>(1) & 0);
   TEST_EXPECTED_VALUE(std::numeric_limits<Dst>::max(),
-                      MakeCheckedNum(DstLimits::max()) & -1);
+                      CheckedNumeric(DstLimits::max()) & -1);
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1) | 1);
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(1) | 0);
   TEST_EXPECTED_VALUE(1, CheckedNumeric<Dst>(0) | 1);
@@ -582,26 +539,26 @@ static void TestSpecializedArithmetic(
   // Test bit shifts.
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
                       ClampedNumeric<Dst>(1)
-                          << as_unsigned(IntegerBitsPlusSign<Dst>::value));
-  TEST_EXPECTED_VALUE(Dst(0), ClampedNumeric<Dst>(0) << as_unsigned(
-                                  IntegerBitsPlusSign<Dst>::value));
+                          << as_unsigned(kIntegerBitsPlusSign<Dst>));
+  TEST_EXPECTED_VALUE(Dst(0), ClampedNumeric<Dst>(0)
+                                  << as_unsigned(kIntegerBitsPlusSign<Dst>));
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
                       ClampedNumeric<Dst>(DstLimits::max()) << 1U);
-  TEST_EXPECTED_VALUE(
-      static_cast<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 1U),
-      ClampedNumeric<Dst>(1) << (IntegerBitsPlusSign<Dst>::value - 1U));
+  TEST_EXPECTED_VALUE(static_cast<Dst>(1) << (kIntegerBitsPlusSign<Dst> - 1U),
+                      ClampedNumeric<Dst>(1)
+                          << (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1) << 0U);
   TEST_EXPECTED_VALUE(2, ClampedNumeric<Dst>(1) << 1U);
-  TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(1) >>
-                             as_unsigned(IntegerBitsPlusSign<Dst>::value));
   TEST_EXPECTED_VALUE(
-      0, ClampedNumeric<Dst>(1) >> (IntegerBitsPlusSign<Dst>::value - 1U));
+      0, ClampedNumeric<Dst>(1) >> as_unsigned(kIntegerBitsPlusSign<Dst>));
+  TEST_EXPECTED_VALUE(
+      0, ClampedNumeric<Dst>(1) >> (kIntegerBitsPlusSign<Dst> - 1U));
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1) & 1);
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(1) & 0);
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(0) & 1);
   TEST_EXPECTED_VALUE(0, ClampedNumeric<Dst>(1) & 0);
   TEST_EXPECTED_VALUE(std::numeric_limits<Dst>::max(),
-                      MakeClampedNum(DstLimits::max()) & -1);
+                      ClampedNumeric(DstLimits::max()) & -1);
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1) | 1);
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(1) | 0);
   TEST_EXPECTED_VALUE(1, ClampedNumeric<Dst>(0) | 1);
@@ -621,10 +578,8 @@ static void TestSpecializedArithmetic(
 
 // Floating point arithmetic.
 template <typename Dst>
-void TestSpecializedArithmetic(
-    const char* dst,
-    int line,
-    std::enable_if_t<numeric_limits<Dst>::is_iec559, int> = 0) {
+  requires std::numeric_limits<Dst>::is_iec559
+void TestSpecializedArithmetic(const char* dst, int line) {
   using DstLimits = SaturationDefaultLimits<Dst>;
   TEST_EXPECTED_SUCCESS(-CheckedNumeric<Dst>(DstLimits::lowest()));
 
@@ -680,11 +635,11 @@ static void TestArithmetic(const char* dst, int line) {
 
   // Test C++17 class template argument deduction
   static_assert(
-      std::is_same_v<Dst, typename decltype(CheckedNumeric(Dst{0}))::type>);
+      std::same_as<Dst, typename decltype(CheckedNumeric(Dst{0}))::type>);
   static_assert(
-      std::is_same_v<Dst, typename decltype(ClampedNumeric(Dst{0}))::type>);
+      std::same_as<Dst, typename decltype(ClampedNumeric(Dst{0}))::type>);
   static_assert(
-      std::is_same_v<Dst, typename decltype(StrictNumeric(Dst{0}))::type>);
+      std::same_as<Dst, typename decltype(StrictNumeric(Dst{0}))::type>);
 
   EXPECT_EQ(true, CheckedNumeric<Dst>().IsValid());
   EXPECT_EQ(false, CheckedNumeric<Dst>(CheckedNumeric<Dst>(DstLimits::max()) *
@@ -741,7 +696,7 @@ static void TestArithmetic(const char* dst, int line) {
   TEST_EXPECTED_VALUE(1, clamped_dst /= 1);
 
   // Generic negation.
-  if (DstLimits::is_signed) {
+  if constexpr (DstLimits::is_signed) {
     TEST_EXPECTED_VALUE(0, -CheckedNumeric<Dst>());
     TEST_EXPECTED_VALUE(-1, -CheckedNumeric<Dst>(1));
     TEST_EXPECTED_VALUE(1, -CheckedNumeric<Dst>(-1));
@@ -758,21 +713,21 @@ static void TestArithmetic(const char* dst, int line) {
     // gets evaluated at compile-time. Making this test volatile forces the
     // compiler to generate code rather than fold constant expressions.
     volatile Dst value = Dst(0);
-    TEST_EXPECTED_VALUE(0, -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(0, -ClampedNumeric(value));
     value = Dst(1);
-    TEST_EXPECTED_VALUE(-1, -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(-1, -ClampedNumeric(value));
     value = Dst(2);
-    TEST_EXPECTED_VALUE(-2, -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(-2, -ClampedNumeric(value));
     value = Dst(-1);
-    TEST_EXPECTED_VALUE(1, -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(1, -ClampedNumeric(value));
     value = Dst(-2);
-    TEST_EXPECTED_VALUE(2, -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(2, -ClampedNumeric(value));
     value = DstLimits::max();
-    TEST_EXPECTED_VALUE(Dst(DstLimits::max() * -1), -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(Dst(DstLimits::max() * -1), -ClampedNumeric(value));
     value = Dst(-1 * DstLimits::max());
-    TEST_EXPECTED_VALUE(DstLimits::max(), -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(DstLimits::max(), -ClampedNumeric(value));
     value = DstLimits::lowest();
-    TEST_EXPECTED_VALUE(DstLimits::max(), -MakeClampedNum(value));
+    TEST_EXPECTED_VALUE(DstLimits::max(), -ClampedNumeric(value));
   }
 
   // Generic absolute value.
@@ -789,16 +744,18 @@ static void TestArithmetic(const char* dst, int line) {
   // Generic addition.
   TEST_EXPECTED_VALUE(1, (CheckedNumeric<Dst>() + 1));
   TEST_EXPECTED_VALUE(2, (CheckedNumeric<Dst>(1) + 1));
-  if (numeric_limits<Dst>::is_signed)
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>(-1) + 1));
+  }
   TEST_EXPECTED_SUCCESS(CheckedNumeric<Dst>(DstLimits::lowest()) + 1);
   TEST_EXPECTED_FAILURE(CheckedNumeric<Dst>(DstLimits::max()) +
                         DstLimits::max());
 
   TEST_EXPECTED_VALUE(1, (ClampedNumeric<Dst>() + 1));
   TEST_EXPECTED_VALUE(2, (ClampedNumeric<Dst>(1) + 1));
-  if (numeric_limits<Dst>::is_signed)
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>(-1) + 1));
+  }
   TEST_EXPECTED_VALUE(DstLimits::lowest() + 1,
                       ClampedNumeric<Dst>(DstLimits::lowest()) + 1);
   TEST_EXPECTED_VALUE(DstLimits::Overflow(),
@@ -807,7 +764,7 @@ static void TestArithmetic(const char* dst, int line) {
   // Generic subtraction.
   TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>(1) - 1));
   TEST_EXPECTED_SUCCESS(CheckedNumeric<Dst>(DstLimits::max()) - 1);
-  if (numeric_limits<Dst>::is_signed) {
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(-1, (CheckedNumeric<Dst>() - 1));
     TEST_EXPECTED_VALUE(-2, (CheckedNumeric<Dst>(-1) - 1));
   } else {
@@ -817,7 +774,7 @@ static void TestArithmetic(const char* dst, int line) {
   TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>(1) - 1));
   TEST_EXPECTED_VALUE(DstLimits::max() - 1,
                       ClampedNumeric<Dst>(DstLimits::max()) - 1);
-  if (numeric_limits<Dst>::is_signed) {
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(-1, (ClampedNumeric<Dst>() - 1));
     TEST_EXPECTED_VALUE(-2, (ClampedNumeric<Dst>(-1) - 1));
   } else {
@@ -829,7 +786,7 @@ static void TestArithmetic(const char* dst, int line) {
   TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>() * 1));
   TEST_EXPECTED_VALUE(1, (CheckedNumeric<Dst>(1) * 1));
   TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>(0) * 0));
-  if (numeric_limits<Dst>::is_signed) {
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>(-1) * 0));
     TEST_EXPECTED_VALUE(0, (CheckedNumeric<Dst>(0) * -1));
     TEST_EXPECTED_VALUE(-2, (CheckedNumeric<Dst>(-1) * 2));
@@ -844,7 +801,7 @@ static void TestArithmetic(const char* dst, int line) {
   TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>() * 1));
   TEST_EXPECTED_VALUE(1, (ClampedNumeric<Dst>(1) * 1));
   TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>(0) * 0));
-  if (numeric_limits<Dst>::is_signed) {
+  if constexpr (numeric_limits<Dst>::is_signed) {
     TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>(-1) * 0));
     TEST_EXPECTED_VALUE(0, (ClampedNumeric<Dst>(0) * -1));
     TEST_EXPECTED_VALUE(-2, (ClampedNumeric<Dst>(-1) * 2));
@@ -941,97 +898,81 @@ template <typename Dst, typename Src>
 void TestStrictComparison(const char* dst, const char* src, int line) {
   using DstLimits = numeric_limits<Dst>;
   using SrcLimits = numeric_limits<Src>;
-  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) < DstLimits::max(), "");
-  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) < SrcLimits::max(), "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) >= DstLimits::max()),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) >= SrcLimits::max()),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) <= DstLimits::max(),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) <= SrcLimits::max(),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) > DstLimits::max()),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) > SrcLimits::max()),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) > DstLimits::lowest(), "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) > SrcLimits::lowest(), "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) <= DstLimits::lowest()),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) <= SrcLimits::lowest()),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) >= DstLimits::lowest(),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) >= SrcLimits::lowest(),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) < DstLimits::lowest()),
-                "");
-  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) < SrcLimits::lowest()),
-                "");
-  static_assert(StrictNumeric<Src>(static_cast<Src>(1)) == static_cast<Dst>(1),
-                "");
-  static_assert(StrictNumeric<Src>(static_cast<Src>(1)) != static_cast<Dst>(0),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) != static_cast<Dst>(0),
-                "");
-  static_assert(StrictNumeric<Src>(SrcLimits::max()) != DstLimits::lowest(),
-                "");
+  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) < DstLimits::max());
+  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) < SrcLimits::max());
+  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) >= DstLimits::max()));
+  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) >= SrcLimits::max()));
+  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) <= DstLimits::max());
+  static_assert(StrictNumeric<Src>(SrcLimits::lowest()) <= SrcLimits::max());
+  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) > DstLimits::max()));
+  static_assert(!(StrictNumeric<Src>(SrcLimits::lowest()) > SrcLimits::max()));
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) > DstLimits::lowest());
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) > SrcLimits::lowest());
+  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) <= DstLimits::lowest()));
+  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) <= SrcLimits::lowest()));
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) >= DstLimits::lowest());
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) >= SrcLimits::lowest());
+  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) < DstLimits::lowest()));
+  static_assert(!(StrictNumeric<Src>(SrcLimits::max()) < SrcLimits::lowest()));
+  static_assert(StrictNumeric<Src>(static_cast<Src>(1)) == static_cast<Dst>(1));
+  static_assert(StrictNumeric<Src>(static_cast<Src>(1)) != static_cast<Dst>(0));
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) != static_cast<Dst>(0));
+  static_assert(StrictNumeric<Src>(SrcLimits::max()) != DstLimits::lowest());
   static_assert(
-      !(StrictNumeric<Src>(static_cast<Src>(1)) != static_cast<Dst>(1)), "");
+      !(StrictNumeric<Src>(static_cast<Src>(1)) != static_cast<Dst>(1)));
   static_assert(
-      !(StrictNumeric<Src>(static_cast<Src>(1)) == static_cast<Dst>(0)), "");
+      !(StrictNumeric<Src>(static_cast<Src>(1)) == static_cast<Dst>(0)));
 
   // Due to differences in float handling between compilers, these aren't
   // compile-time constants everywhere. So, we use run-time tests.
   EXPECT_EQ(
       SrcLimits::max(),
-      MakeCheckedNum(SrcLimits::max()).Max(DstLimits::lowest()).ValueOrDie());
+      CheckedNumeric(SrcLimits::max()).Max(DstLimits::lowest()).ValueOrDie());
   EXPECT_EQ(
       DstLimits::max(),
-      MakeCheckedNum(SrcLimits::lowest()).Max(DstLimits::max()).ValueOrDie());
+      CheckedNumeric(SrcLimits::lowest()).Max(DstLimits::max()).ValueOrDie());
   EXPECT_EQ(
       DstLimits::lowest(),
-      MakeCheckedNum(SrcLimits::max()).Min(DstLimits::lowest()).ValueOrDie());
+      CheckedNumeric(SrcLimits::max()).Min(DstLimits::lowest()).ValueOrDie());
   EXPECT_EQ(
       SrcLimits::lowest(),
-      MakeCheckedNum(SrcLimits::lowest()).Min(DstLimits::max()).ValueOrDie());
-  EXPECT_EQ(SrcLimits::lowest(), CheckMin(MakeStrictNum(1), MakeCheckedNum(0),
+      CheckedNumeric(SrcLimits::lowest()).Min(DstLimits::max()).ValueOrDie());
+  EXPECT_EQ(SrcLimits::lowest(), CheckMin(MakeStrictNum(1), CheckedNumeric(0),
                                           DstLimits::max(), SrcLimits::lowest())
                                      .ValueOrDie());
-  EXPECT_EQ(DstLimits::max(), CheckMax(MakeStrictNum(1), MakeCheckedNum(0),
+  EXPECT_EQ(DstLimits::max(), CheckMax(MakeStrictNum(1), CheckedNumeric(0),
                                        DstLimits::max(), SrcLimits::lowest())
                                   .ValueOrDie());
 
   EXPECT_EQ(SrcLimits::max(),
-            MakeClampedNum(SrcLimits::max()).Max(DstLimits::lowest()));
+            ClampedNumeric(SrcLimits::max()).Max(DstLimits::lowest()));
   EXPECT_EQ(DstLimits::max(),
-            MakeClampedNum(SrcLimits::lowest()).Max(DstLimits::max()));
+            ClampedNumeric(SrcLimits::lowest()).Max(DstLimits::max()));
   EXPECT_EQ(DstLimits::lowest(),
-            MakeClampedNum(SrcLimits::max()).Min(DstLimits::lowest()));
+            ClampedNumeric(SrcLimits::max()).Min(DstLimits::lowest()));
   EXPECT_EQ(SrcLimits::lowest(),
-            MakeClampedNum(SrcLimits::lowest()).Min(DstLimits::max()));
+            ClampedNumeric(SrcLimits::lowest()).Min(DstLimits::max()));
   EXPECT_EQ(SrcLimits::lowest(),
-            ClampMin(MakeStrictNum(1), MakeClampedNum(0), DstLimits::max(),
+            ClampMin(MakeStrictNum(1), ClampedNumeric(0), DstLimits::max(),
                      SrcLimits::lowest()));
-  EXPECT_EQ(DstLimits::max(), ClampMax(MakeStrictNum(1), MakeClampedNum(0),
+  EXPECT_EQ(DstLimits::max(), ClampMax(MakeStrictNum(1), ClampedNumeric(0),
                                        DstLimits::max(), SrcLimits::lowest()));
 
-  if (IsValueInRangeForNumericType<Dst>(SrcLimits::max())) {
-    TEST_EXPECTED_VALUE(Dst(SrcLimits::max()), (CommonMax<Dst, Src>()));
+  if constexpr (IsValueInRangeForNumericType<Dst>(SrcLimits::max())) {
+    TEST_EXPECTED_VALUE(Dst(SrcLimits::max()), (kCommonMax<Dst, Src>));
     TEST_EXPECTED_VALUE(Dst(SrcLimits::max()),
                         (CommonMaxOrMin<Dst, Src>(false)));
   } else {
-    TEST_EXPECTED_VALUE(DstLimits::max(), (CommonMax<Dst, Src>()));
+    TEST_EXPECTED_VALUE(DstLimits::max(), (kCommonMax<Dst, Src>));
     TEST_EXPECTED_VALUE(DstLimits::max(), (CommonMaxOrMin<Dst, Src>(false)));
   }
 
-  if (IsValueInRangeForNumericType<Dst>(SrcLimits::lowest())) {
-    TEST_EXPECTED_VALUE(Dst(SrcLimits::lowest()), (CommonMin<Dst, Src>()));
+  if constexpr (IsValueInRangeForNumericType<Dst>(SrcLimits::lowest())) {
+    TEST_EXPECTED_VALUE(Dst(SrcLimits::lowest()), (kCommonMin<Dst, Src>));
     TEST_EXPECTED_VALUE(Dst(SrcLimits::lowest()),
                         (CommonMaxOrMin<Dst, Src>(true)));
   } else {
-    TEST_EXPECTED_VALUE(DstLimits::lowest(), (CommonMin<Dst, Src>()));
+    TEST_EXPECTED_VALUE(DstLimits::lowest(), (kCommonMin<Dst, Src>));
     TEST_EXPECTED_VALUE(DstLimits::lowest(), (CommonMaxOrMin<Dst, Src>(true)));
   }
 }
@@ -1047,10 +988,10 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_VALUE_PRESERVING> {
                       (!(DstLimits::is_integer && SrcLimits::is_iec559) &&
                        // Same sign, same numeric, source is narrower or same.
                        ((SrcLimits::is_signed == DstLimits::is_signed &&
-                         MaxExponent<Dst>::value >= MaxExponent<Src>::value) ||
+                         kMaxExponent<Dst> >= kMaxExponent<Src>) ||
                         // Or signed destination and source is smaller
                         (DstLimits::is_signed &&
-                         MaxExponent<Dst>::value >= MaxExponent<Src>::value))),
+                         kMaxExponent<Dst> >= kMaxExponent<Src>))),
                   "Comparison must be sign preserving and value preserving");
 
     TestStrictComparison<Dst, Src>(dst, src, line);
@@ -1059,8 +1000,8 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_VALUE_PRESERVING> {
     const ClampedNumeric<Dst> clamped_dst = SrcLimits::max();
     TEST_EXPECTED_SUCCESS(checked_dst);
     TEST_EXPECTED_VALUE(Dst(SrcLimits::max()), clamped_dst);
-    if (MaxExponent<Dst>::value > MaxExponent<Src>::value) {
-      if (MaxExponent<Dst>::value >= MaxExponent<Src>::value * 2 - 1) {
+    if constexpr (kMaxExponent<Dst> > kMaxExponent<Src>) {
+      if constexpr (kMaxExponent<Dst> >= kMaxExponent<Src> * 2 - 1) {
         // At least twice larger type.
         TEST_EXPECTED_SUCCESS(SrcLimits::max() * checked_dst);
         TEST_EXPECTED_VALUE(SrcLimits::max() * clamped_dst,
@@ -1080,15 +1021,15 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_VALUE_PRESERVING> {
 
     TEST_EXPECTED_RANGE(RANGE_VALID, SrcLimits::max());
     TEST_EXPECTED_RANGE(RANGE_VALID, static_cast<Src>(1));
-    if (SrcLimits::is_iec559) {
+    if constexpr (SrcLimits::is_iec559) {
       TEST_EXPECTED_RANGE(RANGE_VALID, SrcLimits::max() * static_cast<Src>(-1));
       TEST_EXPECTED_RANGE(RANGE_OVERFLOW, SrcLimits::infinity());
       TEST_EXPECTED_RANGE(RANGE_UNDERFLOW, SrcLimits::infinity() * -1);
       TEST_EXPECTED_RANGE(RANGE_INVALID, SrcLimits::quiet_NaN());
-    } else if (numeric_limits<Src>::is_signed) {
+    } else if constexpr (numeric_limits<Src>::is_signed) {
       // This block reverses the Src to Dst relationship so we don't have to
       // complicate the test macros.
-      if (!std::is_same_v<Src, Dst>) {
+      if constexpr (!std::same_as<Src, Dst>) {
         TEST_EXPECTED_SUCCESS(CheckDiv(SrcLimits::lowest(), Dst(-1)));
       }
       TEST_EXPECTED_RANGE(RANGE_VALID, static_cast<Src>(-1));
@@ -1104,7 +1045,7 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_NARROW> {
     using DstLimits = SaturationDefaultLimits<Dst>;
     static_assert(SrcLimits::is_signed == DstLimits::is_signed,
                   "Destination and source sign must be the same");
-    static_assert(MaxExponent<Dst>::value <= MaxExponent<Src>::value,
+    static_assert(kMaxExponent<Dst> <= kMaxExponent<Src>,
                   "Destination must be narrower than source");
 
     TestStrictComparison<Dst, Src>(dst, src, line);
@@ -1130,14 +1071,14 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_NARROW> {
 
     TEST_EXPECTED_RANGE(RANGE_OVERFLOW, SrcLimits::max());
     TEST_EXPECTED_RANGE(RANGE_VALID, static_cast<Src>(1));
-    if (SrcLimits::is_iec559) {
+    if constexpr (SrcLimits::is_iec559) {
       TEST_EXPECTED_RANGE(RANGE_UNDERFLOW, SrcLimits::max() * -1);
       TEST_EXPECTED_RANGE(RANGE_VALID, static_cast<Src>(-1));
       TEST_EXPECTED_RANGE(RANGE_OVERFLOW, SrcLimits::infinity());
       TEST_EXPECTED_RANGE(RANGE_UNDERFLOW, SrcLimits::infinity() * -1);
       TEST_EXPECTED_RANGE(RANGE_INVALID, SrcLimits::quiet_NaN());
-      if (DstLimits::is_integer) {
-        if (SrcLimits::digits < DstLimits::digits) {
+      if constexpr (DstLimits::is_integer) {
+        if constexpr (SrcLimits::digits < DstLimits::digits) {
           TEST_EXPECTED_RANGE(RANGE_OVERFLOW,
                               static_cast<Src>(DstLimits::max()));
         } else {
@@ -1148,7 +1089,7 @@ struct TestNumericConversion<Dst, Src, SIGN_PRESERVING_NARROW> {
             static_cast<Src>(GetMaxConvertibleToFloat<Src, Dst>()));
         TEST_EXPECTED_RANGE(RANGE_VALID, static_cast<Src>(DstLimits::lowest()));
       }
-    } else if (SrcLimits::is_signed) {
+    } else if constexpr (SrcLimits::is_signed) {
       TEST_EXPECTED_VALUE(-1, checked_dst - static_cast<Src>(1));
       TEST_EXPECTED_VALUE(-1, clamped_dst - static_cast<Src>(1));
       TEST_EXPECTED_VALUE(Src(Src(0) - DstLimits::lowest()),
@@ -1168,7 +1109,7 @@ struct TestNumericConversion<Dst, Src, SIGN_TO_UNSIGN_WIDEN_OR_EQUAL> {
   static void Test(const char* dst, const char* src, int line) {
     using SrcLimits = SaturationDefaultLimits<Src>;
     using DstLimits = SaturationDefaultLimits<Dst>;
-    static_assert(MaxExponent<Dst>::value >= MaxExponent<Src>::value,
+    static_assert(kMaxExponent<Dst> >= kMaxExponent<Src>,
                   "Destination must be equal or wider than source.");
     static_assert(SrcLimits::is_signed, "Source must be signed");
     static_assert(!DstLimits::is_signed, "Destination must be unsigned");
@@ -1202,7 +1143,7 @@ struct TestNumericConversion<Dst, Src, SIGN_TO_UNSIGN_NARROW> {
   static void Test(const char* dst, const char* src, int line) {
     using SrcLimits = SaturationDefaultLimits<Src>;
     using DstLimits = SaturationDefaultLimits<Dst>;
-    static_assert(MaxExponent<Dst>::value < MaxExponent<Src>::value,
+    static_assert(kMaxExponent<Dst> < kMaxExponent<Src>,
                   "Destination must be narrower than source.");
     static_assert(SrcLimits::is_signed, "Source must be signed.");
     static_assert(!DstLimits::is_signed, "Destination must be unsigned.");
@@ -1240,15 +1181,15 @@ struct TestNumericConversion<Dst, Src, SIGN_TO_UNSIGN_NARROW> {
     EXPECT_EQ(DstLimits::max(), saturated_cast<Dst>(SrcLimits::max()));
     EXPECT_EQ(DstLimits::lowest(), saturated_cast<Dst>(SrcLimits::lowest()));
 
-    if (SrcLimits::is_iec559) {
+    if constexpr (SrcLimits::is_iec559) {
       EXPECT_EQ(Dst(0), saturated_cast<Dst>(SrcLimits::quiet_NaN()));
 
       TEST_EXPECTED_RANGE(RANGE_UNDERFLOW, SrcLimits::max() * -1);
       TEST_EXPECTED_RANGE(RANGE_OVERFLOW, SrcLimits::infinity());
       TEST_EXPECTED_RANGE(RANGE_UNDERFLOW, SrcLimits::infinity() * -1);
       TEST_EXPECTED_RANGE(RANGE_INVALID, SrcLimits::quiet_NaN());
-      if (DstLimits::is_integer) {
-        if (SrcLimits::digits < DstLimits::digits) {
+      if constexpr (DstLimits::is_integer) {
+        if constexpr (SrcLimits::digits < DstLimits::digits) {
           TEST_EXPECTED_RANGE(RANGE_OVERFLOW,
                               static_cast<Src>(DstLimits::max()));
         } else {
@@ -1270,7 +1211,7 @@ struct TestNumericConversion<Dst, Src, UNSIGN_TO_SIGN_NARROW_OR_EQUAL> {
   static void Test(const char* dst, const char* src, int line) {
     using SrcLimits = SaturationDefaultLimits<Src>;
     using DstLimits = SaturationDefaultLimits<Dst>;
-    static_assert(MaxExponent<Dst>::value <= MaxExponent<Src>::value,
+    static_assert(kMaxExponent<Dst> <= kMaxExponent<Src>,
                   "Destination must be narrower or equal to source.");
     static_assert(!SrcLimits::is_signed, "Source must be unsigned.");
     static_assert(DstLimits::is_signed, "Destination must be signed.");
@@ -1425,11 +1366,9 @@ size_t TestOverload(size_t) {  // Overload succeeds.
   return 0;
 }
 
-static_assert(std::is_same_v<decltype(TestOverload(StrictNumeric<int>())), int>,
-              "");
+static_assert(std::same_as<decltype(TestOverload(StrictNumeric<int>())), int>);
 static_assert(
-    std::is_same_v<decltype(TestOverload(StrictNumeric<size_t>())), size_t>,
-    "");
+    std::same_as<decltype(TestOverload(StrictNumeric<size_t>())), size_t>);
 
 template <typename T>
 struct CastTest1 {
@@ -1448,6 +1387,21 @@ struct CastTest2 {
   static constexpr T lowest() { return 1; }
   static constexpr T Underflow() { return lowest(); }
 };
+
+TEST(CheckedNumeric, AddendOutOfRange) {
+  // When adding a value that doesn't fit in the CheckedNumeric, the result
+  // should not depend on the addend's type, but should work as if the math was
+  // done without checking/clamping and then checked_cast back to the right
+  // value.
+  CheckedNumeric<int64_t> n1(std::numeric_limits<int64_t>::lowest() + 2);
+  n1 += std::numeric_limits<uint64_t>::max() - 5;
+  EXPECT_EQ(std::numeric_limits<int64_t>::max() - 3, n1.ValueOrDefault(0));
+
+  // The same procedure shouldn't work if the result wouldn't have fit, though.
+  CheckedNumeric<int64_t> n2(-2);
+  n2 += (static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 5);
+  EXPECT_FALSE(n2.IsValid());
+}
 
 TEST(SafeNumerics, CastTests) {
 // MSVC catches and warns that we're forcing saturation in these tests.
@@ -1469,6 +1423,8 @@ TEST(SafeNumerics, CastTests) {
   EXPECT_EQ(0, strict_cast<int>(static_cast<char>(0)));
   EXPECT_EQ(0, strict_cast<int>(static_cast<unsigned char>(0)));
   EXPECT_EQ(0U, strict_cast<unsigned>(static_cast<unsigned char>(0)));
+  EXPECT_EQ(0U,
+            strict_cast<unsigned>(std::integral_constant<unsigned char, 0>()));
   EXPECT_EQ(1ULL, static_cast<uint64_t>(StrictNumeric<size_t>(1U)));
   EXPECT_EQ(1ULL, static_cast<uint64_t>(SizeT(1U)));
   EXPECT_EQ(1U, static_cast<size_t>(StrictNumeric<unsigned>(1U)));
@@ -1488,12 +1444,6 @@ TEST(SafeNumerics, CastTests) {
   EXPECT_FALSE(IsValueNegative(numeric_limits<int>::max()));
   EXPECT_FALSE(IsValueNegative(numeric_limits<unsigned>::max()));
   EXPECT_FALSE(IsValueNegative(numeric_limits<double>::max()));
-
-  // These casts and coercions will fail to compile:
-  // EXPECT_EQ(0, strict_cast<int>(static_cast<size_t>(0)));
-  // EXPECT_EQ(0, strict_cast<size_t>(static_cast<int>(0)));
-  // EXPECT_EQ(1ULL, StrictNumeric<size_t>(1));
-  // EXPECT_EQ(1, StrictNumeric<size_t>(1U));
 
   // Test various saturation corner cases.
   EXPECT_EQ(saturated_cast<int>(small_negative),
@@ -1544,15 +1494,15 @@ TEST(SafeNumerics, CastTests) {
   EXPECT_EQ(0, saturated_cast<int>(not_a_number));
 
   // Test the CheckedNumeric value extractions functions.
-  auto int8_min = MakeCheckedNum(numeric_limits<int8_t>::lowest());
-  auto int8_max = MakeCheckedNum(numeric_limits<int8_t>::max());
-  auto double_max = MakeCheckedNum(numeric_limits<double>::max());
+  auto int8_min = CheckedNumeric(numeric_limits<int8_t>::lowest());
+  auto int8_max = CheckedNumeric(numeric_limits<int8_t>::max());
+  auto double_max = CheckedNumeric(numeric_limits<double>::max());
   static_assert(
-      std::is_same_v<int16_t, decltype(int8_min.ValueOrDie<int16_t>())::type>,
+      std::same_as<int16_t, decltype(int8_min.ValueOrDie<int16_t>())::type>,
       "ValueOrDie returning incorrect type.");
   static_assert(
-      std::is_same_v<int16_t,
-                     decltype(int8_min.ValueOrDefault<int16_t>(0))::type>,
+      std::same_as<int16_t,
+                   decltype(int8_min.ValueOrDefault<int16_t>(0))::type>,
       "ValueOrDefault returning incorrect type.");
   EXPECT_FALSE(IsValidForType<uint8_t>(int8_min));
   EXPECT_TRUE(IsValidForType<uint8_t>(int8_max));
@@ -1697,6 +1647,407 @@ TEST(SafeNumerics, CompoundNumericOperations) {
   EXPECT_FALSE(too_large.IsValid());
 }
 
+static bool* did_call_predicate = nullptr;
+
+class ScopedPredicateCallObserver {
+ public:
+  ScopedPredicateCallObserver() { did_call_predicate = &did_call_; }
+  ~ScopedPredicateCallObserver() { did_call_predicate = nullptr; }
+
+  bool did_call() const { return did_call_; }
+
+ private:
+  bool did_call_ = false;
+};
+
+static bool IntGreaterThanZero(int value) {
+  *did_call_predicate = true;
+  return value > 0;
+}
+
+static bool IntLessThanZero(int value) {
+  *did_call_predicate = true;
+  return value < 0;
+}
+
+static bool Int64GreaterThanZero(int64_t value) {
+  *did_call_predicate = true;
+  return value > 0;
+}
+
+static bool Int64LessThanZero(int64_t value) {
+  *did_call_predicate = true;
+  return value < 0;
+}
+
+static bool Int16GreaterThanZero(int16_t value) {
+  *did_call_predicate = true;
+  return value > 0;
+}
+
+static bool Int16LessThanZero(int16_t value) {
+  *did_call_predicate = true;
+  return value < 0;
+}
+
+TEST(SafeNumerics, IsValidAnd) {
+  {
+    const CheckedNumeric<int> invalid =
+        CheckAdd(std::numeric_limits<int>::max(), 1);
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(IntGreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(IntLessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(Int64GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(Int64LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(Int16GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(invalid.IsValidAnd(Int16LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int64_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int64_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int16_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(invalid.IsValidAnd([&](int16_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+  }
+
+  {
+    const CheckedNumeric<int> value = std::numeric_limits<int>::max();
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsValidAnd(IntGreaterThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsValidAnd(IntLessThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsValidAnd(Int64GreaterThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsValidAnd(Int64LessThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+
+    // Always invalid since `std::numeric_limits<int>::max()` does not fit in
+    // an `int16_t`.
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsValidAnd(Int16GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsValidAnd(Int16LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsValidAnd([&](int x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsValidAnd([&](int x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsValidAnd([&](int64_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsValidAnd([&](int64_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+
+    // Always invalid since `std::numeric_limits<int>::max()` does not fit in
+    // an `int16_t`.
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsValidAnd([&](int16_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsValidAnd([&](int16_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+  }
+}
+
+TEST(SafeNumerics, IsInvalidOr) {
+  {
+    const CheckedNumeric<int> invalid =
+        CheckAdd(std::numeric_limits<int>::max(), 1);
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(IntGreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(IntLessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(Int64GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(Int64LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(Int16GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(invalid.IsInvalidOr(Int16LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int64_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int64_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int16_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(invalid.IsInvalidOr([&](int16_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+  }
+
+  {
+    const CheckedNumeric<int> value = std::numeric_limits<int>::max();
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsInvalidOr(IntGreaterThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsInvalidOr(IntLessThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsInvalidOr(Int64GreaterThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_FALSE(value.IsInvalidOr(Int64LessThanZero));
+      EXPECT_TRUE(observer.did_call());
+    }
+
+    // Always invalid since `std::numeric_limits<int>::max()` does not fit in
+    // an `int16_t`.
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsInvalidOr(Int16GreaterThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+    {
+      ScopedPredicateCallObserver observer;
+      EXPECT_TRUE(value.IsInvalidOr(Int16LessThanZero));
+      EXPECT_FALSE(observer.did_call());
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsInvalidOr([&](int x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsInvalidOr([&](int x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsInvalidOr([&](int64_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_FALSE(value.IsInvalidOr([&](int64_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_TRUE(did_call);
+    }
+
+    // Always invalid since `std::numeric_limits<int>::max()` does not fit in
+    // an `int16_t`.
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsInvalidOr([&](int16_t x) {
+        did_call = true;
+        return x > 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+    {
+      bool did_call = false;
+      EXPECT_TRUE(value.IsInvalidOr([&](int16_t x) {
+        did_call = true;
+        return x < 0;
+      }));
+      EXPECT_FALSE(did_call);
+    }
+  }
+}
+
 TEST(SafeNumerics, TemplatedSafeMath) {
   // CheckMul and friends can be confusing, as they change behavior depending on
   // where the template is specified.
@@ -1739,38 +2090,38 @@ TEST(SafeNumerics, TemplatedSafeMath) {
 
 TEST(SafeNumerics, VariadicNumericOperations) {
   {  // Synthetic scope to avoid variable naming collisions.
-    auto a = CheckAdd(1, 2UL, MakeCheckedNum(3LL), 4).ValueOrDie();
+    auto a = CheckAdd(1, 2UL, CheckedNumeric(3LL), 4).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(a)::type>(10), a);
-    auto b = CheckSub(MakeCheckedNum(20.0), 2UL, 4).ValueOrDie();
+    auto b = CheckSub(CheckedNumeric(20.0), 2UL, 4).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(b)::type>(14.0), b);
-    auto c = CheckMul(20.0, MakeCheckedNum(1), 5, 3UL).ValueOrDie();
+    auto c = CheckMul(20.0, CheckedNumeric(1), 5, 3UL).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(c)::type>(300.0), c);
-    auto d = CheckDiv(20.0, 2.0, MakeCheckedNum(5LL), -4).ValueOrDie();
+    auto d = CheckDiv(20.0, 2.0, CheckedNumeric(5LL), -4).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(d)::type>(-.5), d);
-    auto e = CheckMod(MakeCheckedNum(20), 3).ValueOrDie();
+    auto e = CheckMod(CheckedNumeric(20), 3).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(e)::type>(2), e);
-    auto f = CheckLsh(1, MakeCheckedNum(2)).ValueOrDie();
+    auto f = CheckLsh(1, CheckedNumeric(2)).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(f)::type>(4), f);
-    auto g = CheckRsh(4, MakeCheckedNum(2)).ValueOrDie();
+    auto g = CheckRsh(4, CheckedNumeric(2)).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(g)::type>(1), g);
     auto h = CheckRsh(CheckAdd(1, 1, 1, 1), CheckSub(4, 2)).ValueOrDie();
     EXPECT_EQ(static_cast<decltype(h)::type>(1), h);
   }
 
   {
-    auto a = ClampAdd(1, 2UL, MakeClampedNum(3LL), 4);
+    auto a = ClampAdd(1, 2UL, ClampedNumeric(3LL), 4);
     EXPECT_EQ(static_cast<decltype(a)::type>(10), a);
-    auto b = ClampSub(MakeClampedNum(20.0), 2UL, 4);
+    auto b = ClampSub(ClampedNumeric(20.0), 2UL, 4);
     EXPECT_EQ(static_cast<decltype(b)::type>(14.0), b);
-    auto c = ClampMul(20.0, MakeClampedNum(1), 5, 3UL);
+    auto c = ClampMul(20.0, ClampedNumeric(1), 5, 3UL);
     EXPECT_EQ(static_cast<decltype(c)::type>(300.0), c);
-    auto d = ClampDiv(20.0, 2.0, MakeClampedNum(5LL), -4);
+    auto d = ClampDiv(20.0, 2.0, ClampedNumeric(5LL), -4);
     EXPECT_EQ(static_cast<decltype(d)::type>(-.5), d);
-    auto e = ClampMod(MakeClampedNum(20), 3);
+    auto e = ClampMod(ClampedNumeric(20), 3);
     EXPECT_EQ(static_cast<decltype(e)::type>(2), e);
-    auto f = ClampLsh(1, MakeClampedNum(2U));
+    auto f = ClampLsh(1, ClampedNumeric(2U));
     EXPECT_EQ(static_cast<decltype(f)::type>(4), f);
-    auto g = ClampRsh(4, MakeClampedNum(2U));
+    auto g = ClampRsh(4, ClampedNumeric(2U));
     EXPECT_EQ(static_cast<decltype(g)::type>(1), g);
     auto h = ClampRsh(ClampAdd(1, 1, 1, 1), ClampSub(4U, 2));
     EXPECT_EQ(static_cast<decltype(h)::type>(1), h);
@@ -1893,8 +2244,8 @@ TEST(SafeNumerics, Int64) {
 }
 
 template <typename T>
-void TestWrappingMathSigned() {
-  static_assert(std::is_signed_v<T>);
+  requires std::signed_integral<T>
+void TestWrappingMath() {
   constexpr T kMinusTwo = -2;
   constexpr T kMinusOne = -1;
   constexpr T kZero = 0;
@@ -1930,8 +2281,8 @@ void TestWrappingMathSigned() {
 }
 
 template <typename T>
-void TestWrappingMathUnsigned() {
-  static_assert(std::is_unsigned_v<T>);
+  requires std::unsigned_integral<T>
+void TestWrappingMath() {
   constexpr T kZero = 0;
   constexpr T kOne = 1;
   constexpr T kTwo = 2;
@@ -1958,14 +2309,14 @@ void TestWrappingMathUnsigned() {
 }
 
 TEST(SafeNumerics, WrappingMath) {
-  TestWrappingMathSigned<int8_t>();
-  TestWrappingMathUnsigned<uint8_t>();
-  TestWrappingMathSigned<int16_t>();
-  TestWrappingMathUnsigned<uint16_t>();
-  TestWrappingMathSigned<int32_t>();
-  TestWrappingMathUnsigned<uint32_t>();
-  TestWrappingMathSigned<int64_t>();
-  TestWrappingMathUnsigned<uint64_t>();
+  TestWrappingMath<int8_t>();
+  TestWrappingMath<uint8_t>();
+  TestWrappingMath<int16_t>();
+  TestWrappingMath<uint16_t>();
+  TestWrappingMath<int32_t>();
+  TestWrappingMath<uint32_t>();
+  TestWrappingMath<int64_t>();
+  TestWrappingMath<uint64_t>();
 }
 
 TEST(SafeNumerics, StrictNumeric_SupportsAssignment) {
@@ -1993,5 +2344,4 @@ TEST(SafeNumerics, StrictNumeric_SupportsAssignment) {
 #pragma clang diagnostic pop  // -Winteger-overflow
 #endif
 
-}  // namespace internal
-}  // namespace base
+}  // namespace base::numerics_internal

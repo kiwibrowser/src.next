@@ -2,20 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "net/http/http_util.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <string_view>
 
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/fuzztest/src/fuzztest/fuzztest.h"
+#include "url/gurl.h"
 
 namespace net {
 
@@ -33,7 +31,6 @@ TEST(HttpUtilTest, IsSafeHeader) {
       "accept-encoding",
       "access-control-request-headers",
       "access-control-request-method",
-      "access-control-request-private-network",
       "connection",
       "content-length",
       "cookie",
@@ -142,19 +139,31 @@ TEST(HttpUtilTest, IsSafeHeader) {
 TEST(HttpUtilTest, HeadersIterator) {
   std::string headers = "foo: 1\t\r\nbar: hello world\r\nbaz: 3 \r\n";
 
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
+  HttpUtil::HeadersIterator it(headers, "\r\n");
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("foo"), it.name());
-  EXPECT_EQ(std::string("1"), it.values());
+  EXPECT_EQ("foo", it.name());
+  EXPECT_EQ("1", it.values());
+  EXPECT_EQ(0u, it.name_begin());
+  EXPECT_EQ(3u, it.name_end());
+  EXPECT_EQ(5u, it.values_begin());
+  EXPECT_EQ(6u, it.values_end());
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("bar"), it.name());
-  EXPECT_EQ(std::string("hello world"), it.values());
+  EXPECT_EQ("bar", it.name());
+  EXPECT_EQ("hello world", it.values());
+  EXPECT_EQ(9u, it.name_begin());
+  EXPECT_EQ(12u, it.name_end());
+  EXPECT_EQ(14u, it.values_begin());
+  EXPECT_EQ(25u, it.values_end());
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("baz"), it.name());
-  EXPECT_EQ(std::string("3"), it.values());
+  EXPECT_EQ("baz", it.name());
+  EXPECT_EQ("3", it.values());
+  EXPECT_EQ(27u, it.name_begin());
+  EXPECT_EQ(30u, it.name_end());
+  EXPECT_EQ(32u, it.values_begin());
+  EXPECT_EQ(33u, it.values_end());
 
   EXPECT_FALSE(it.GetNext());
 }
@@ -162,15 +171,23 @@ TEST(HttpUtilTest, HeadersIterator) {
 TEST(HttpUtilTest, HeadersIterator_MalformedLine) {
   std::string headers = "foo: 1\n: 2\n3\nbar: 4";
 
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\n");
+  HttpUtil::HeadersIterator it(headers, "\n");
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("foo"), it.name());
-  EXPECT_EQ(std::string("1"), it.values());
+  EXPECT_EQ("foo", it.name());
+  EXPECT_EQ("1", it.values());
+  EXPECT_EQ(0u, it.name_begin());
+  EXPECT_EQ(3u, it.name_end());
+  EXPECT_EQ(5u, it.values_begin());
+  EXPECT_EQ(6u, it.values_end());
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("bar"), it.name());
-  EXPECT_EQ(std::string("4"), it.values());
+  EXPECT_EQ("bar", it.name());
+  EXPECT_EQ("4", it.values());
+  EXPECT_EQ(13u, it.name_begin());
+  EXPECT_EQ(16u, it.name_end());
+  EXPECT_EQ(18u, it.values_begin());
+  EXPECT_EQ(19u, it.values_end());
 
   EXPECT_FALSE(it.GetNext());
 }
@@ -178,7 +195,7 @@ TEST(HttpUtilTest, HeadersIterator_MalformedLine) {
 TEST(HttpUtilTest, HeadersIterator_MalformedName) {
   std::string headers = "[ignore me] /: 3\r\n";
 
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
+  HttpUtil::HeadersIterator it(headers, "\r\n");
 
   EXPECT_FALSE(it.GetNext());
 }
@@ -186,38 +203,17 @@ TEST(HttpUtilTest, HeadersIterator_MalformedName) {
 TEST(HttpUtilTest, HeadersIterator_MalformedNameFollowedByValidLine) {
   std::string headers = "[ignore me] /: 3\r\nbar: 4\n";
 
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
+  HttpUtil::HeadersIterator it(headers, "\r\n");
 
   ASSERT_TRUE(it.GetNext());
-  EXPECT_EQ(std::string("bar"), it.name());
-  EXPECT_EQ(std::string("4"), it.values());
+  EXPECT_EQ("bar", it.name());
+  EXPECT_EQ("4", it.values());
+  EXPECT_EQ(18u, it.name_begin());
+  EXPECT_EQ(21u, it.name_end());
+  EXPECT_EQ(23u, it.values_begin());
+  EXPECT_EQ(24u, it.values_end());
 
   EXPECT_FALSE(it.GetNext());
-}
-
-TEST(HttpUtilTest, HeadersIterator_AdvanceTo) {
-  std::string headers = "foo: 1\r\n: 2\r\n3\r\nbar: 4";
-
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
-  EXPECT_TRUE(it.AdvanceTo("foo"));
-  EXPECT_EQ("foo", it.name());
-  EXPECT_TRUE(it.AdvanceTo("bar"));
-  EXPECT_EQ("bar", it.name());
-  EXPECT_FALSE(it.AdvanceTo("blat"));
-  EXPECT_FALSE(it.GetNext());  // should be at end of headers
-}
-
-TEST(HttpUtilTest, HeadersIterator_Reset) {
-  std::string headers = "foo: 1\r\n: 2\r\n3\r\nbar: 4";
-  HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
-  // Search past "foo".
-  EXPECT_TRUE(it.AdvanceTo("bar"));
-  // Now try advancing to "foo".  This time it should fail since the iterator
-  // position is past it.
-  EXPECT_FALSE(it.AdvanceTo("foo"));
-  it.Reset();
-  // Now that we reset the iterator position, we should find 'foo'
-  EXPECT_TRUE(it.AdvanceTo("foo"));
 }
 
 TEST(HttpUtilTest, ValuesIterator) {
@@ -228,12 +224,18 @@ TEST(HttpUtilTest, ValuesIterator) {
 
   ASSERT_TRUE(it.GetNext());
   EXPECT_EQ("must-revalidate", it.value());
+  EXPECT_EQ(1, it.value_begin());
+  EXPECT_EQ(16, it.value_end());
 
   ASSERT_TRUE(it.GetNext());
   EXPECT_EQ("no-cache=\"foo, bar\"", it.value());
+  EXPECT_EQ(20, it.value_begin());
+  EXPECT_EQ(39, it.value_end());
 
   ASSERT_TRUE(it.GetNext());
   EXPECT_EQ("private", it.value());
+  EXPECT_EQ(42, it.value_begin());
+  EXPECT_EQ(49, it.value_end());
 
   EXPECT_FALSE(it.GetNext());
 }
@@ -244,27 +246,41 @@ TEST(HttpUtilTest, ValuesIterator_EmptyValues) {
   HttpUtil::ValuesIterator it(values, ',', /*ignore_empty_values=*/true);
   ASSERT_TRUE(it.GetNext());
   EXPECT_EQ("foopy", it.value());
+  EXPECT_EQ(2, it.value_begin());
+  EXPECT_EQ(7, it.value_end());
   EXPECT_FALSE(it.GetNext());
 
   HttpUtil::ValuesIterator it_with_empty_values(values, ',',
                                                 /*ignore_empty_values=*/false);
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(0, it_with_empty_values.value_begin());
+  EXPECT_EQ(0, it_with_empty_values.value_end());
 
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("foopy", it_with_empty_values.value());
+  EXPECT_EQ(2, it_with_empty_values.value_begin());
+  EXPECT_EQ(7, it_with_empty_values.value_end());
 
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(12, it_with_empty_values.value_begin());
+  EXPECT_EQ(12, it_with_empty_values.value_end());
 
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(13, it_with_empty_values.value_begin());
+  EXPECT_EQ(13, it_with_empty_values.value_end());
 
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(14, it_with_empty_values.value_begin());
+  EXPECT_EQ(14, it_with_empty_values.value_end());
 
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(15, it_with_empty_values.value_begin());
+  EXPECT_EQ(15, it_with_empty_values.value_end());
 
   EXPECT_FALSE(it_with_empty_values.GetNext());
 }
@@ -279,6 +295,8 @@ TEST(HttpUtilTest, ValuesIterator_Blanks) {
                                                 /*ignore_empty_values=*/false);
   ASSERT_TRUE(it_with_empty_values.GetNext());
   EXPECT_EQ("", it_with_empty_values.value());
+  EXPECT_EQ(3, it_with_empty_values.value_begin());
+  EXPECT_EQ(3, it_with_empty_values.value_end());
   EXPECT_FALSE(it_with_empty_values.GetNext());
 }
 
@@ -406,6 +424,21 @@ TEST(HttpUtilTest, LocateEndOfAdditionalHeaders) {
     EXPECT_EQ(test.expected_result, eoh);
   }
 }
+
+TEST(HttpUtilTest, LocateStartOfStatusLine) {
+  EXPECT_EQ(0u, HttpUtil::LocateStartOfStatusLine(
+                    base::byte_span_from_cstring("HTTP")));
+  EXPECT_EQ(0u, HttpUtil::LocateStartOfStatusLine(
+                    base::byte_span_from_cstring("HTTP/1.1 200 OK")));
+  EXPECT_EQ(4u, HttpUtil::LocateStartOfStatusLine(
+                    base::byte_span_from_cstring("xxxxHTTP/1.1 200 OK")));
+  EXPECT_EQ(std::string::npos,
+            HttpUtil::LocateStartOfStatusLine(
+                base::byte_span_from_cstring("xxxxxHTTP/1.1 200 OK")));
+  EXPECT_EQ(std::string::npos, HttpUtil::LocateStartOfStatusLine(
+                                   base::byte_span_from_cstring("HTT")));
+}
+
 TEST(HttpUtilTest, AssembleRawHeaders) {
   // clang-format off
   struct {
@@ -720,6 +753,12 @@ TEST(HttpUtilTest, AssembleRawHeaders) {
       "Bar: 2\n\n",
       "HTTP/1.0 200 OK|Foo: 1|Blah: 3|Bar: 2||"
     },
+
+    // Leading slop before the status line.
+    {
+      "xxxHTTP/1.0 200 OK\r\nFoo: 1\r\n\r\n",
+      "HTTP/1.0 200 OK|Foo: 1||"
+    },
   };
   // clang-format on
   for (const auto& test : tests) {
@@ -733,35 +772,42 @@ TEST(HttpUtilTest, AssembleRawHeaders) {
 
 // Test SpecForRequest().
 TEST(HttpUtilTest, RequestUrlSanitize) {
-  struct {
+  struct Tests {
     const char* const url;
     const char* const expected_spec;
-  } tests[] = {
-    { // Check that #hash is removed.
-      "http://www.google.com:78/foobar?query=1#hash",
-      "http://www.google.com:78/foobar?query=1",
-    },
-    { // The reference may itself contain # -- strip all of it.
-      "http://192.168.0.1?query=1#hash#10#11#13#14",
-      "http://192.168.0.1/?query=1",
-    },
-    { // Strip username/password.
-      "http://user:pass@google.com",
-      "http://google.com/",
-    },
-    { // https scheme
-      "https://www.google.com:78/foobar?query=1#hash",
-      "https://www.google.com:78/foobar?query=1",
-    },
-    { // WebSocket's ws scheme
-      "ws://www.google.com:78/foobar?query=1#hash",
-      "ws://www.google.com:78/foobar?query=1",
-    },
-    { // WebSocket's wss scheme
-      "wss://www.google.com:78/foobar?query=1#hash",
-      "wss://www.google.com:78/foobar?query=1",
-    }
   };
+  auto tests = std::to_array<Tests>({
+      {
+          // Check that #hash is removed.
+          "http://www.google.com:78/foobar?query=1#hash",
+          "http://www.google.com:78/foobar?query=1",
+      },
+      {
+          // The reference may itself contain # -- strip all of it.
+          "http://192.168.0.1?query=1#hash#10#11#13#14",
+          "http://192.168.0.1/?query=1",
+      },
+      {
+          // Strip username/password.
+          "http://user:pass@google.com",
+          "http://google.com/",
+      },
+      {
+          // https scheme
+          "https://www.google.com:78/foobar?query=1#hash",
+          "https://www.google.com:78/foobar?query=1",
+      },
+      {
+          // WebSocket's ws scheme
+          "ws://www.google.com:78/foobar?query=1#hash",
+          "ws://www.google.com:78/foobar?query=1",
+      },
+      {
+          // WebSocket's wss scheme
+          "wss://www.google.com:78/foobar?query=1#hash",
+          "wss://www.google.com:78/foobar?query=1",
+      },
+  });
   for (size_t i = 0; i < std::size(tests); ++i) {
     SCOPED_TRACE(i);
 
@@ -786,6 +832,13 @@ TEST(HttpUtilTest, GenerateAcceptLanguageHeader) {
   EXPECT_EQ(
       std::string("en-US,fr;q=0.9,de;q=0.8,ko;q=0.7,zh-CN;q=0.6,ja;q=0.5"),
       header);
+
+  header = HttpUtil::GenerateAcceptLanguageHeader(
+      "en,fr,de,ko,zh-CN,ja,es,it,pt,nl,sv");
+  EXPECT_EQ(std::string("en,fr;q=0.9,de;q=0.8,ko;q=0.7,zh-CN;q=0.6,"
+                        "ja;q=0.5,es;q=0.4,it;q=0.3,pt;q=0.2,nl;q=0.1,"
+                        "sv;q=0.1"),
+            header);
 }
 
 // HttpResponseHeadersTest.GetMimeType also tests ParseContentType.
@@ -1143,6 +1196,263 @@ TEST(HttpUtilTest, ParseContentRangeHeader) {
   }
 }
 
+TEST(HttpUtilTest, ParseRangeHeader) {
+  std::vector<HttpByteRange> ranges;
+  ASSERT_TRUE(HttpUtil::ParseRangeHeader("bytes=0-99", &ranges));
+  ASSERT_EQ(1u, ranges.size());
+  EXPECT_EQ(0, ranges[0].first_byte_position());
+  EXPECT_EQ(99, ranges[0].last_byte_position());
+
+  ranges.clear();
+  ASSERT_TRUE(HttpUtil::ParseRangeHeader("bytes=100-", &ranges));
+  ASSERT_EQ(1u, ranges.size());
+  EXPECT_EQ(100, ranges[0].first_byte_position());
+  EXPECT_FALSE(ranges[0].HasLastBytePosition());
+
+  ranges.clear();
+  ASSERT_TRUE(HttpUtil::ParseRangeHeader("bytes=-50", &ranges));
+  ASSERT_EQ(1u, ranges.size());
+  EXPECT_TRUE(ranges[0].IsSuffixByteRange());
+  EXPECT_EQ(50, ranges[0].suffix_length());
+
+  ranges.clear();
+  EXPECT_FALSE(HttpUtil::ParseRangeHeader("bytes", &ranges));
+  EXPECT_FALSE(HttpUtil::ParseRangeHeader("bytes=100", &ranges));
+}
+
+// Invalid Fetch single-range header values should fail parsing, including
+// malformed syntax, unsupported formats, missing digits, reverse ranges,
+// and out-of-range numeric values.
+TEST(HttpUtilTest, ParseFetchSingleRangeRejectsInvalid) {
+  static constexpr const char* kCases[] = {
+      "",
+      "byte=0-",
+      "bytes",
+      "bytes\t \t",
+      "bytes=0-5,15-",
+      "bytes=0-5, 15-",
+      "bytes=0-5,",
+      "bytes=-",
+      "bytes=x-5",
+      "bytes=5",
+      "bytes=5-x",
+      "bytes=x",
+      "5-",
+      "Bytes=0-5",
+      "bytes=-5-10",
+      // Trailing whitespace after the range is not allowed by the spec.
+      "bytes=5-10 ",
+      // Multiple ranges are not a single range.
+      "bytes=0-10,15-20",
+      // Extra '=' or '-' delimiters are rejected.
+      "bytes==0-5",
+      "bytes=0--5",
+      "bytes=0-5-",
+      "bytes=-0-5",
+  };
+  for (const char* value : kCases) {
+    SCOPED_TRACE(value);
+    // Invalid Fetch range forms must be rejected.
+    EXPECT_FALSE(
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/true)
+            .has_value());
+  }
+}
+
+// Verifies that syntactically valid but semantically invalid ranges parse
+// successfully. Callers are responsible for checking IsValid().
+TEST(HttpUtilTest, ParseFetchSingleRangeParsesSemanticInvalid) {
+  {
+    // "bytes=-0" is a zero-length suffix range -- syntactically valid, but
+    // IsValid() returns false because suffix_length must be > 0.
+    SCOPED_TRACE("bytes=-0");
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange("bytes=-0", /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_TRUE(range->IsSuffixByteRange());
+    EXPECT_EQ(0, range->suffix_length());
+    EXPECT_FALSE(range->IsValid());
+  }
+  {
+    // "bytes=10-5" has start > end -- syntactically valid, but IsValid()
+    // returns false.
+    SCOPED_TRACE("bytes=10-5");
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange("bytes=10-5",
+                                        /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_FALSE(range->IsSuffixByteRange());
+    EXPECT_EQ(10, range->first_byte_position());
+    EXPECT_EQ(5, range->last_byte_position());
+    EXPECT_FALSE(range->IsValid());
+  }
+  {
+    // Overflow saturates to int64_t max, making start > end.
+    SCOPED_TRACE("bytes=999999999999999999999-5");
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange("bytes=999999999999999999999-5",
+                                        /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_FALSE(range->IsValid());
+  }
+}
+
+// Verifies that valid bounded byte ranges ("bytes=first-last") are parsed
+// correctly, including leading-zero variants.
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsNormal) {
+  struct {
+    const char* value;
+    int64_t first;
+    int64_t last;
+  } kCases[] = {
+      {"bytes=5-10", 5, 10},
+      {"bytes=00005-00010", 5, 10},
+      {"bytes=0-0", 0, 0},
+  };
+  for (const auto& tc : kCases) {
+    SCOPED_TRACE(tc.value);
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange(tc.value, /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_FALSE(range->IsSuffixByteRange());
+    EXPECT_EQ(tc.first, range->first_byte_position());
+    EXPECT_EQ(tc.last, range->last_byte_position());
+  }
+}
+
+// Verifies that suffix byte ranges ("bytes=-N") are parsed as suffix
+// ranges, with and without allowed HTTP whitespace.
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsSuffix) {
+  static constexpr const char* kCases[] = {
+      "bytes=-5",
+      // Whitespace variant: Fetch allows HTTP tab/space around '-'.
+      "bytes=-\t 5",
+  };
+  for (const char* value : kCases) {
+    SCOPED_TRACE(value);
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_TRUE(range->IsSuffixByteRange());
+    EXPECT_EQ(5, range->suffix_length());
+  }
+}
+
+// Verifies that open-ended byte ranges ("bytes=N-") are parsed as
+// right-unbounded ranges, with and without allowed HTTP whitespace.
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsOpenEnded) {
+  static constexpr const char* kCases[] = {
+      "bytes=5-",
+      // Whitespace variants: Fetch allows HTTP tab/space around '=' and '-'.
+      "bytes= 5 - ",
+      "bytes \t =\t 5-",
+  };
+  for (const char* value : kCases) {
+    SCOPED_TRACE(value);
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_FALSE(range->IsSuffixByteRange());
+    EXPECT_EQ(5, range->first_byte_position());
+    EXPECT_FALSE(range->HasLastBytePosition());
+  }
+}
+
+// Verifies that optional HTTP tab/space around '=' and '-' is accepted
+// only when `allow_whitespace` is true, and rejected otherwise.
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsWhitespaceWhenAllowed) {
+  static constexpr const char* kCases[] = {
+      "bytes =5-10", "bytes= 5-10",    "bytes=5 -10",
+      "bytes=5- 10", "bytes=5\t-\t10",
+  };
+  for (const char* value : kCases) {
+    SCOPED_TRACE(value);
+    // Spec-allowed whitespace is accepted only when enabled.
+    std::optional<HttpByteRange> range =
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/true);
+    ASSERT_TRUE(range.has_value());
+    EXPECT_EQ(5, range->first_byte_position());
+    EXPECT_EQ(10, range->last_byte_position());
+    EXPECT_FALSE(
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/false)
+            .has_value());
+  }
+}
+
+// Verifies boundary values: a zero-start open-ended range and a
+// single-byte suffix range both parse successfully.
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsBoundaryValues) {
+  // "bytes=0-": open-ended range starting at byte 0.
+  std::optional<HttpByteRange> open_ended =
+      HttpUtil::ParseFetchSingleRange("bytes=0-", /*allow_whitespace=*/true);
+  ASSERT_TRUE(open_ended.has_value());
+  EXPECT_FALSE(open_ended->IsSuffixByteRange());
+  EXPECT_EQ(0, open_ended->first_byte_position());
+  EXPECT_FALSE(open_ended->HasLastBytePosition());
+
+  // "bytes=-1": suffix range of the last single byte.
+  std::optional<HttpByteRange> suffix =
+      HttpUtil::ParseFetchSingleRange("bytes=-1", /*allow_whitespace=*/true);
+  ASSERT_TRUE(suffix.has_value());
+  EXPECT_TRUE(suffix->IsSuffixByteRange());
+  EXPECT_EQ(1, suffix->suffix_length());
+}
+
+// Verifies that valid ranges without whitespace still parse in strict
+// mode (`allow_whitespace=false`).
+TEST(HttpUtilTest, ParseFetchSingleRangeAcceptsValidRangesInStrictMode) {
+  static constexpr const char* kCases[] = {
+      "bytes=5-10",
+      "bytes=5-",
+      "bytes=-5",
+  };
+  for (const char* value : kCases) {
+    SCOPED_TRACE(value);
+    EXPECT_TRUE(
+        HttpUtil::ParseFetchSingleRange(value, /*allow_whitespace=*/false)
+            .has_value());
+  }
+}
+
+// Verifies that overflowing range values saturate to int64_t max rather than
+// being rejected
+TEST(HttpUtilTest, ParseFetchSingleRangeSaturatesOverflow) {
+  constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+
+  // Overflowing end with a valid start: bounded range [5, max].
+  std::optional<HttpByteRange> bounded = HttpUtil::ParseFetchSingleRange(
+      "bytes=5-999999999999999999999", /*allow_whitespace=*/true);
+  ASSERT_TRUE(bounded.has_value());
+  EXPECT_FALSE(bounded->IsSuffixByteRange());
+  EXPECT_EQ(5, bounded->first_byte_position());
+  EXPECT_EQ(kMax, bounded->last_byte_position());
+
+  // Overflowing start, open-ended: right-unbounded range [max, ).
+  std::optional<HttpByteRange> open_ended = HttpUtil::ParseFetchSingleRange(
+      "bytes=999999999999999999999-", /*allow_whitespace=*/true);
+  ASSERT_TRUE(open_ended.has_value());
+  EXPECT_FALSE(open_ended->IsSuffixByteRange());
+  EXPECT_EQ(kMax, open_ended->first_byte_position());
+  EXPECT_FALSE(open_ended->HasLastBytePosition());
+
+  // Overflowing suffix: suffix range of int64_t max length.
+  std::optional<HttpByteRange> suffix = HttpUtil::ParseFetchSingleRange(
+      "bytes=-999999999999999999999", /*allow_whitespace=*/true);
+  ASSERT_TRUE(suffix.has_value());
+  EXPECT_TRUE(suffix->IsSuffixByteRange());
+  EXPECT_EQ(kMax, suffix->suffix_length());
+}
+
+// Fuzzer: ParseFetchSingleRange() must never crash on arbitrary input,
+// regardless of the allow_whitespace setting.
+namespace {
+void ParseFetchSingleRangeNeverCrashes(const std::string& range_header_value,
+                                       bool allow_whitespace) {
+  HttpUtil::ParseFetchSingleRange(range_header_value, allow_whitespace);
+}
+FUZZ_TEST(HttpUtilTest, ParseFetchSingleRangeNeverCrashes);
+}  // namespace
+
 TEST(HttpUtilTest, ParseRetryAfterHeader) {
   base::Time::Exploded now_exploded = {2014, 11, 4, 5, 22, 39, 30, 0};
   base::Time now;
@@ -1152,25 +1462,28 @@ TEST(HttpUtilTest, ParseRetryAfterHeader) {
   base::Time later;
   EXPECT_TRUE(base::Time::FromUTCExploded(later_exploded, &later));
 
-  const struct {
+  struct Tests {
     const char* retry_after_string;
     bool expected_return_value;
     base::TimeDelta expected_retry_after;
-  } tests[] = {{"", false, base::TimeDelta()},
-               {"-3", false, base::TimeDelta()},
-               {"-2", false, base::TimeDelta()},
-               {"-1", false, base::TimeDelta()},
-               {"+0", false, base::TimeDelta()},
-               {"+1", false, base::TimeDelta()},
-               {"0", true, base::Seconds(0)},
-               {"1", true, base::Seconds(1)},
-               {"2", true, base::Seconds(2)},
-               {"3", true, base::Seconds(3)},
-               {"60", true, base::Seconds(60)},
-               {"3600", true, base::Seconds(3600)},
-               {"86400", true, base::Seconds(86400)},
-               {"Thu, 1 Jan 2015 12:34:56 GMT", true, later - now},
-               {"Mon, 1 Jan 1900 12:34:56 GMT", false, base::TimeDelta()}};
+  };
+  const auto tests = std::to_array<Tests>({
+      {"", false, base::TimeDelta()},
+      {"-3", false, base::TimeDelta()},
+      {"-2", false, base::TimeDelta()},
+      {"-1", false, base::TimeDelta()},
+      {"+0", false, base::TimeDelta()},
+      {"+1", false, base::TimeDelta()},
+      {"0", true, base::Seconds(0)},
+      {"1", true, base::Seconds(1)},
+      {"2", true, base::Seconds(2)},
+      {"3", true, base::Seconds(3)},
+      {"60", true, base::Seconds(60)},
+      {"3600", true, base::Seconds(3600)},
+      {"86400", true, base::Seconds(86400)},
+      {"Thu, 1 Jan 2015 12:34:56 GMT", true, later - now},
+      {"Mon, 1 Jan 1900 12:34:56 GMT", false, base::TimeDelta()},
+  });
 
   for (size_t i = 0; i < std::size(tests); ++i) {
     base::TimeDelta retry_after;
@@ -1578,6 +1891,24 @@ TEST(HttpUtilTest, HasValidators) {
   EXPECT_TRUE(HttpUtil::HasValidators(v1_1, kEtagEmpty, kLastModifiedInvalid));
 }
 
+TEST(HttpUtilTest, HasStrongValidators) {
+  const HttpVersion v1_1 = HttpVersion(1, 1);
+  const char* const kWeakEtag = "W/\"weak\"";
+  const char* const kStrongEtag = "\"strong\"";
+  const char* const kLastModified = "Tue, 15 Nov 1994 12:45:26 GMT";
+  const char* const kDateAfter59Seconds = "Tue, 15 Nov 1994 12:46:25 GMT";
+  const char* const kDateAfter60Seconds = "Tue, 15 Nov 1994 12:46:26 GMT";
+
+  EXPECT_TRUE(HttpUtil::HasStrongValidators(v1_1, kStrongEtag, std::nullopt,
+                                            std::nullopt));
+  EXPECT_FALSE(HttpUtil::HasStrongValidators(v1_1, kWeakEtag, std::nullopt,
+                                             std::nullopt));
+  EXPECT_FALSE(HttpUtil::HasStrongValidators(v1_1, std::nullopt, kLastModified,
+                                             kDateAfter59Seconds));
+  EXPECT_TRUE(HttpUtil::HasStrongValidators(v1_1, std::nullopt, kLastModified,
+                                            kDateAfter60Seconds));
+}
+
 TEST(HttpUtilTest, IsValidHeaderValue) {
   const char* const invalid_values[] = {
       "X-Requested-With: chrome${NUL}Sec-Unsafe: injected",
@@ -1603,6 +1934,18 @@ TEST(HttpUtilTest, IsValidHeaderValue) {
   EXPECT_TRUE(HttpUtil::IsValidHeaderValue(allowed));
 }
 
+TEST(HttpUtilTest, IsTokenChar) {
+  for (int i = 0; i < 256; ++i) {
+    char c = static_cast<char>(i);
+    bool expected =
+        !(i >= 0x7F || i <= 0x20 || i == '(' || i == ')' || i == '<' ||
+          i == '>' || i == '@' || i == ',' || i == ';' || i == ':' ||
+          i == '\\' || i == '"' || i == '/' || i == '[' || i == ']' ||
+          i == '?' || i == '=' || i == '{' || i == '}');
+    EXPECT_EQ(expected, HttpUtil::IsTokenChar(c)) << "Failed for i=" << i;
+  }
+}
+
 TEST(HttpUtilTest, IsToken) {
   EXPECT_TRUE(HttpUtil::IsToken("valid"));
   EXPECT_TRUE(HttpUtil::IsToken("!"));
@@ -1619,6 +1962,17 @@ TEST(HttpUtilTest, IsToken) {
   EXPECT_FALSE(HttpUtil::IsToken("\xff"));
 }
 
+TEST(HttpUtilTest, IsParmName) {
+  EXPECT_TRUE(HttpUtil::IsParmName("filename"));
+  EXPECT_TRUE(HttpUtil::IsParmName("filename.ext"));
+
+  EXPECT_FALSE(HttpUtil::IsParmName(""));
+  EXPECT_FALSE(HttpUtil::IsParmName("file*"));
+  EXPECT_FALSE(HttpUtil::IsParmName("file'name"));
+  EXPECT_FALSE(HttpUtil::IsParmName("file%20name"));
+  EXPECT_FALSE(HttpUtil::IsParmName("file name"));
+}
+
 TEST(HttpUtilTest, IsLWS) {
   EXPECT_FALSE(HttpUtil::IsLWS('\v'));
   EXPECT_FALSE(HttpUtil::IsLWS('\0'));
@@ -1630,6 +1984,52 @@ TEST(HttpUtilTest, IsLWS) {
 
   EXPECT_TRUE(HttpUtil::IsLWS('\t'));
   EXPECT_TRUE(HttpUtil::IsLWS(' '));
+}
+
+TEST(HttpUtilTest, TrimLWS) {
+  const struct {
+    std::string_view input;
+    // Input/expected values when calling the TrimLWS() size_t overload.
+    size_t begin_offset;
+    size_t end_offset;
+    size_t expected_begin_offset;
+    size_t expected_end_offset;
+  } kTestCases[] = {
+      /*{"", 0, 0, 0, 0},
+      {" a ", 0, 3, 1, 2},
+      {"\ta\t", 0, 3, 1, 2},
+      {" a ", 1, 2, 1, 2},
+      {" a ", 1, 3, 1, 2},
+      {" a ", 0, 2, 1, 2},
+      {" a ", 0, 1, 1, 1},
+      {" a ", 2, 3, 3, 3},
+      {" \x01z\xFF ", 0, 5, 1, 4},
+      {" a b ", 0, 5, 1, 4},
+      {"\ra\n", 0, 3, 0, 3},*/
+      {" \t a \t b\t \t", 0, 11, 3, 8},
+  };
+
+  for (const auto& test : kTestCases) {
+    SCOPED_TRACE(test.input);
+
+    // Test the TrimLWS() overload that uses size_ts as inputs/outputs.
+    size_t begin_offset = test.begin_offset;
+    size_t end_offset = test.end_offset;
+    HttpUtil::TrimLWS(test.input, begin_offset, end_offset);
+    EXPECT_EQ(test.expected_begin_offset, begin_offset);
+    EXPECT_EQ(test.expected_end_offset, end_offset);
+    EXPECT_EQ(test.expected_begin_offset, begin_offset);
+    EXPECT_EQ(test.expected_end_offset, end_offset);
+
+    // Test the TrimLWS() overload that provides a string_view as the
+    // output.
+    std::string_view input = test.input.substr(
+        test.begin_offset, test.end_offset - test.begin_offset);
+    std::string_view expected = test.input.substr(
+        test.expected_begin_offset,
+        test.expected_end_offset - test.expected_begin_offset);
+    EXPECT_EQ(HttpUtil::TrimLWS(input), expected);
+  }
 }
 
 TEST(HttpUtilTest, IsControlChar) {

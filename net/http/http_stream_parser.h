@@ -12,11 +12,11 @@
 #include <string>
 #include <string_view>
 
+#include "base/byte_size.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "crypto/ec_private_key.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/net_errors.h"
@@ -37,7 +37,7 @@ class IOBuffer;
 class StreamSocket;
 class UploadDataStream;
 
-class NET_EXPORT_PRIVATE HttpStreamParser {
+class NET_EXPORT_PRIVATE HttpStreamParser final {
  public:
   // |connection_is_reused| must be |true| if |stream_socket| has previously
   // been used successfully for an HTTP/1.x request.
@@ -64,7 +64,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   HttpStreamParser(const HttpStreamParser&) = delete;
   HttpStreamParser& operator=(const HttpStreamParser&) = delete;
 
-  virtual ~HttpStreamParser();
+  ~HttpStreamParser();
 
   // These functions implement the interface described in HttpStream with
   // some additional functionality
@@ -105,9 +105,9 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   const GURL& url() { return url_; }
   const std::string& method() { return method_; }
 
-  int64_t received_bytes() const { return received_bytes_; }
+  base::ByteSize received_bytes() const { return received_bytes_; }
 
-  int64_t sent_bytes() const { return sent_bytes_; }
+  base::ByteSize sent_bytes() const { return sent_bytes_; }
 
   base::TimeTicks first_response_start_time() const {
     return first_response_start_time_;
@@ -236,7 +236,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // Offset of the first unused byte in |read_buf_|.  May be nonzero due to
   // body data in the same packet as header data but is zero when reading
   // headers.
-  int read_buf_unused_offset_ = 0;
+  size_t read_buf_unused_offset_ = 0;
 
   // The amount beyond |read_buf_unused_offset_| where the status line starts;
   // std::string::npos if not found yet.
@@ -244,10 +244,10 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   // The amount of received data.  If connection is reused then intermediate
   // value may be bigger than final.
-  int64_t received_bytes_ = 0;
+  base::ByteSize received_bytes_;
 
   // The amount of sent data.
-  int64_t sent_bytes_ = 0;
+  base::ByteSize sent_bytes_;
 
   // The parsed response headers.  Owned by the caller of SendRequest.   This
   // cannot be safely accessed after reading the final set of headers, as the
@@ -296,7 +296,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   // Where the caller wants the body data.
   scoped_refptr<IOBuffer> user_read_buf_;
-  int user_read_buf_len_ = 0;
+  size_t user_read_buf_len_ = 0;
 
   // The callback to notify a user that the handshake has been confirmed.
   CompletionOnceCallback confirm_handshake_callback_;

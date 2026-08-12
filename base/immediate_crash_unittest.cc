@@ -2,23 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "base/immediate_crash.h"
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <optional>
 
 #include "base/base_paths.h"
 #include "base/clang_profiling_buildflags.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/ranges/algorithm.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
@@ -150,8 +146,8 @@ void GetTestFunctionInstructions(std::vector<Instruction>* body) {
   const Instruction* const start = static_cast<Instruction*>(std::min(a, b));
   const Instruction* const end = static_cast<Instruction*>(std::max(a, b));
 
-  for (const Instruction& instruction : make_span(start, end))
-    body->push_back(instruction);
+  auto instructions = UNSAFE_TODO(span(start, end));
+  body->insert(body->end(), instructions.begin(), instructions.end());
 }
 
 #if defined(OFFICIAL_BUILD)
@@ -160,8 +156,9 @@ std::optional<std::vector<Instruction>> ExpectImmediateCrashInvocation(
     std::vector<Instruction> instructions) {
   auto iter = instructions.begin();
   for (const auto inst : kRequiredBody) {
-    if (iter == instructions.end())
+    if (iter == instructions.end()) {
       return std::nullopt;
+    }
     EXPECT_EQ(inst, *iter);
     iter++;
   }
@@ -172,8 +169,9 @@ std::vector<Instruction> MaybeSkipOptionalFooter(
     std::vector<Instruction> instructions) {
   auto iter = instructions.begin();
   for (const auto inst : kOptionalFooter) {
-    if (iter == instructions.end() || *iter != inst)
+    if (iter == instructions.end() || *iter != inst) {
       break;
+    }
     iter++;
   }
   return std::vector<Instruction>(iter, instructions.end());
@@ -183,8 +181,9 @@ std::vector<Instruction> MaybeSkipOptionalFooter(
 bool MatchPrefix(const std::vector<Instruction>& haystack,
                  const base::span<const Instruction>& needle) {
   for (size_t i = 0; i < needle.size(); i++) {
-    if (i >= haystack.size() || needle[i] != haystack[i])
+    if (i >= haystack.size() || needle[i] != haystack[i]) {
       return false;
+    }
   }
   return true;
 }
@@ -192,8 +191,9 @@ bool MatchPrefix(const std::vector<Instruction>& haystack,
 std::vector<Instruction> DropUntilMatch(
     std::vector<Instruction> haystack,
     const base::span<const Instruction>& needle) {
-  while (!haystack.empty() && !MatchPrefix(haystack, needle))
+  while (!haystack.empty() && !MatchPrefix(haystack, needle)) {
     haystack.erase(haystack.begin());
+  }
   return haystack;
 }
 
@@ -207,7 +207,7 @@ std::vector<Instruction> MaybeSkipCoverageHook(
   // code will falsely exit early, having not found the real expected crash
   // sequence, so this may not adequately ensure that the immediate crash
   // sequence is present. We do check when not under coverage, at least.
-  return DropUntilMatch(instructions, base::make_span(kRequiredBody));
+  return DropUntilMatch(instructions, span(kRequiredBody));
 #else
   return instructions;
 #endif  // USE_CLANG_COVERAGE || BUILDFLAG(CLANG_PROFILING)
@@ -234,13 +234,13 @@ std::vector<Instruction> MaybeSkipCoverageHook(
 TEST(ImmediateCrashTest, ExpectedOpcodeSequence) {
   std::vector<Instruction> body;
   ASSERT_NO_FATAL_FAILURE(GetTestFunctionInstructions(&body));
-  SCOPED_TRACE(HexEncode(body.data(), body.size() * sizeof(Instruction)));
+  SCOPED_TRACE(HexEncode(base::as_byte_span(body)));
 
   // In non-official builds, we std::abort instead, so the result will be
   // false - but let's still go through the motions above so we spot any
   // problems in this _test code_ in as many build permutations as possible.
 #if defined(OFFICIAL_BUILD)
-  auto it = ranges::find(body, kRet);
+  auto it = std::ranges::find(body, kRet);
   ASSERT_NE(body.end(), it) << "Failed to find return opcode";
   it++;
 

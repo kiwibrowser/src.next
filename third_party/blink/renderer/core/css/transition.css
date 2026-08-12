@@ -9,15 +9,27 @@
 
 @namespace "http://www.w3.org/1999/xhtml";
 
-html::view-transition {
-  position: fixed;
+/*
+ * Rules for the global view transition user agent style sheet defined in:
+ * https://drafts.csswg.org/css-view-transitions-2/#ua-styles
+ *
+ * Note, only rules affecting pseudo-elements are defined here. Rules
+ * for view-transition-related properties on elements (e.g. for
+ * view-transition-group and view-transition-name) are in html.css.
+ */
+
+::view-transition {
+  position: absolute;
   inset: 0;
 }
 
-html::view-transition-group(*) {
+::view-transition-group(*) {
   position: absolute;
   top: 0;
   left: 0;
+
+  animation-duration: 0.25s;
+  animation-fill-mode: both;
 }
 
 ::view-transition-image-pair(*) {
@@ -25,10 +37,37 @@ html::view-transition-group(*) {
   inset: 0;
 }
 
-::view-transition-new(*),
-::view-transition-old(*) {
+::view-transition-old(*),
+::view-transition-new(*) {
   position: absolute;
+  display: block;
   inset-block-start: 0;
   inline-size: 100%;
   block-size: auto;
+}
+
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*),
+::view-transition-group-children(*) {
+  animation-duration: inherit;
+  animation-fill-mode: inherit;
+  animation-delay: inherit;
+  animation-timing-function: inherit;
+  animation-iteration-count: inherit;
+  animation-direction: inherit;
+  animation-play-state: inherit;
+}
+
+::view-transition-group-children(*) {
+  position: absolute;
+  inset: 0;
+  border-style: solid;
+  border-color: transparent;
+}
+
+/* Missing from css-view-transitions-2/#ua-styles */
+::view-transition-group-children(*) {
+  animation-duration: inherit;
+  animation-fill-mode: inherit;
 }

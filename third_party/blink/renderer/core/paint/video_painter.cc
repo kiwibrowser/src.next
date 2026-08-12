@@ -34,6 +34,16 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
   if (!should_display_poster && !media_player)
     return;
 
+  if (paint_info.IsPrivacyPreserving()) {
+    if (should_display_poster) {
+      if (!layout_video_.ImageResource()->IsCorsSameOrigin()) {
+        return;
+      }
+    } else if (media_player->WouldTaintOrigin()) {
+      return;
+    }
+  }
+
   PhysicalRect replaced_rect = layout_video_.ReplacedContentRect();
   replaced_rect.Move(paint_offset);
   gfx::Rect snapped_replaced_rect = ToPixelSnappedRect(replaced_rect);
@@ -91,14 +101,16 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
   if (should_display_poster || !force_software_video_paint) {
     // This will display the poster image, if one is present, and otherwise
     // paint nothing.
-
     ImagePainter(layout_video_)
         .PaintIntoRect(context, replaced_rect, visual_rect);
   } else {
+    bool acquire_texture_backing =
+        layout_video_.MediaElement()->IsInCanvasSubtree();
     cc::PaintFlags video_flags = context.FillFlags();
     video_flags.setColor(SK_ColorBLACK);
     layout_video_.VideoElement()->PaintCurrentFrame(
-        context.Canvas(), snapped_replaced_rect, &video_flags);
+        context.Canvas(), snapped_replaced_rect, video_flags,
+        acquire_texture_backing);
   }
 }
 

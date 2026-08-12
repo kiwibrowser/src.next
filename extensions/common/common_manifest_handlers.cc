@@ -7,23 +7,27 @@
 #include <memory>
 
 #include "build/chromeos_buildflags.h"
-#include "components/nacl/common/buildflags.h"
 #include "extensions/common/api/bluetooth/bluetooth_manifest_handler.h"
 #include "extensions/common/api/commands/commands_handler.h"
 #include "extensions/common/api/declarative/declarative_manifest_handler.h"
 #include "extensions/common/api/declarative_net_request/dnr_manifest_handler.h"
 #include "extensions/common/api/printer_provider/usb_printer_manifest_handler.h"
 #include "extensions/common/api/sockets/sockets_manifest_handler.h"
+#include "extensions/common/api/speech/tts_engine_manifest_handler.h"
 #include "extensions/common/manifest_handler.h"
 #include "extensions/common/manifest_handler_registry.h"
 #include "extensions/common/manifest_handlers/app_display_info.h"
+#include "extensions/common/manifest_handlers/app_urls_handler.h"
 #include "extensions/common/manifest_handlers/automation.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_handlers/chrome_url_overrides_handler.h"
 #include "extensions/common/manifest_handlers/content_capabilities_handler.h"
 #include "extensions/common/manifest_handlers/content_scripts_handler.h"
 #include "extensions/common/manifest_handlers/cross_origin_isolation_info.h"
 #include "extensions/common/manifest_handlers/csp_info.h"
 #include "extensions/common/manifest_handlers/default_locale_handler.h"
+#include "extensions/common/manifest_handlers/description_info.h"
+#include "extensions/common/manifest_handlers/devtools_page_handler.h"
 #include "extensions/common/manifest_handlers/extension_action_handler.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 #include "extensions/common/manifest_handlers/file_handler_info.h"
@@ -31,35 +35,31 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/kiosk_mode_info.h"
+#include "extensions/common/manifest_handlers/manifest_url_handlers.h"
+#include "extensions/common/manifest_handlers/message_serialization_info.h"
 #include "extensions/common/manifest_handlers/mime_types_handler.h"
-#include "extensions/common/manifest_handlers/nacl_modules_handler.h"
 #include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/manifest_handlers/protocol_handler_info.h"
 #include "extensions/common/manifest_handlers/replacement_apps.h"
 #include "extensions/common/manifest_handlers/requirements_info.h"
 #include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/manifest_handlers/trial_tokens_handler.h"
+#include "extensions/common/manifest_handlers/version_name_info.h"
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 #include "extensions/common/manifest_handlers/webview_info.h"
-#include "extensions/common/manifest_url_handlers.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
-#include "extensions/common/manifest_handlers/action_handlers_handler.h"
 #include "extensions/common/manifest_handlers/input_components_handler.h"
 #endif
 
 namespace extensions {
 
-void RegisterCommonManifestHandlers() {
-  // TODO(devlin): Pass in |registry| rather than Get()ing it.
-  ManifestHandlerRegistry* registry = ManifestHandlerRegistry::Get();
-
+void RegisterCommonManifestHandlers(ManifestHandlerRegistry* registry) {
   registry->RegisterHandler(std::make_unique<AboutPageHandler>());
-#if BUILDFLAG(IS_CHROMEOS)
-  registry->RegisterHandler(std::make_unique<ActionHandlersHandler>());
-#endif
+  registry->RegisterHandler(std::make_unique<AppURLsHandler>());
   registry->RegisterHandler(std::make_unique<AutomationHandler>());
   registry->RegisterHandler(std::make_unique<AppDisplayManifestHandler>());
   registry->RegisterHandler(std::make_unique<BackgroundManifestHandler>());
@@ -73,6 +73,8 @@ void RegisterCommonManifestHandlers() {
       std::make_unique<declarative_net_request::DNRManifestHandler>());
   registry->RegisterHandler(std::make_unique<DeclarativeManifestHandler>());
   registry->RegisterHandler(std::make_unique<DefaultLocaleHandler>());
+  registry->RegisterHandler(std::make_unique<DescriptionHandler>());
+  registry->RegisterHandler(std::make_unique<DevToolsPageHandler>());
   registry->RegisterHandler(std::make_unique<ExternallyConnectableHandler>());
   registry->RegisterHandler(std::make_unique<ExtensionActionHandler>());
   registry->RegisterHandler(std::make_unique<FileHandlersParser>());
@@ -84,21 +86,23 @@ void RegisterCommonManifestHandlers() {
   registry->RegisterHandler(std::make_unique<InputComponentsHandler>());
 #endif
   registry->RegisterHandler(std::make_unique<KioskModeHandler>());
+  registry->RegisterHandler(std::make_unique<MessageSerializationHandler>());
   registry->RegisterHandler(std::make_unique<MimeTypesHandlerParser>());
-#if BUILDFLAG(ENABLE_NACL)
-  registry->RegisterHandler(std::make_unique<NaClModulesHandler>());
-#endif
   registry->RegisterHandler(std::make_unique<OAuth2ManifestHandler>());
   registry->RegisterHandler(std::make_unique<OfflineEnabledHandler>());
   registry->RegisterHandler(std::make_unique<OptionsPageHandler>());
+  registry->RegisterHandler(std::make_unique<ProtocolHandlersParser>());
   registry->RegisterHandler(std::make_unique<ReplacementAppsHandler>());
   registry->RegisterHandler(std::make_unique<RequirementsHandler>());
   registry->RegisterHandler(std::make_unique<SandboxedPageHandler>());
   registry->RegisterHandler(std::make_unique<SharedModuleHandler>());
   registry->RegisterHandler(std::make_unique<SocketsManifestHandler>());
   registry->RegisterHandler(std::make_unique<TrialTokensHandler>());
+  registry->RegisterHandler(std::make_unique<TtsEngineManifestHandler>());
   registry->RegisterHandler(std::make_unique<UpdateURLHandler>());
+  registry->RegisterHandler(std::make_unique<URLOverridesHandler>());
   registry->RegisterHandler(std::make_unique<UsbPrinterManifestHandler>());
+  registry->RegisterHandler(std::make_unique<VersionNameHandler>());
   registry->RegisterHandler(std::make_unique<WebAccessibleResourcesHandler>());
   registry->RegisterHandler(std::make_unique<WebviewHandler>());
 }

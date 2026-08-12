@@ -35,6 +35,7 @@ class CSSValue;
 class Element;
 class ExceptionState;
 class ExecutionContext;
+class CSSPropertyValueSet;
 class MutableCSSPropertyValueSet;
 class StyleSheetContents;
 
@@ -49,6 +50,8 @@ class CORE_EXPORT AbstractPropertySetCSSStyleDeclaration
   // Some subclasses only allow a subset of the properties, for example
   // CSSPositionTryDescriptors only allows inset and sizing properties.
   virtual bool IsPropertyValid(CSSPropertyID) const = 0;
+
+  const CSSPropertyValueSet& GetPropertyValueSet() const;
 
   void Trace(Visitor*) const override;
 
@@ -75,6 +78,7 @@ class CORE_EXPORT AbstractPropertySetCSSStyleDeclaration
                    const String& priority,
                    ExceptionState&) final;
   String removeProperty(const String& property_name, ExceptionState&) final;
+  void QuietlyRemoveProperty(const String& property_name) final;
   String CssFloat() const;
   void SetCSSFloat(const String&, ExceptionState&);
   String cssText() const final;

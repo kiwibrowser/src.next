@@ -72,10 +72,12 @@ CORE_EXPORT bool IsOffscreen(const Node*);
 CORE_EXPORT bool IsUnobscured(const FocusCandidate&);
 bool ScrollInDirection(Node* container, SpatialNavigationDirection);
 // Note this function might trigger UpdateStyleAndLayout.
-CORE_EXPORT bool IsScrollableNode(const Node* node);
-CORE_EXPORT bool IsScrollableAreaOrDocument(const Node*);
-CORE_EXPORT Node* ScrollableAreaOrDocumentOf(Node*);
-bool CanScrollInDirection(const Node* container, SpatialNavigationDirection);
+CORE_EXPORT bool IsScrollableNode(const Node*, SpatialNavigationDirection);
+CORE_EXPORT bool IsScrollableAreaOrDocument(const Node*,
+                                            SpatialNavigationDirection);
+CORE_EXPORT Node* ScrollableAreaOrDocumentOf(Node*, SpatialNavigationDirection);
+bool CanScrollInDirection(const Node* container,
+                          SpatialNavigationDirection direction);
 bool CanScrollInDirection(const LocalFrame*, SpatialNavigationDirection);
 
 double ComputeDistanceDataForNode(SpatialNavigationDirection,

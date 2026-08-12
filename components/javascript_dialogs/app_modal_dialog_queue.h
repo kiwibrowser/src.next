@@ -5,13 +5,11 @@
 #ifndef COMPONENTS_JAVASCRIPT_DIALOGS_APP_MODAL_DIALOG_QUEUE_H_
 #define COMPONENTS_JAVASCRIPT_DIALOGS_APP_MODAL_DIALOG_QUEUE_H_
 
+#include <memory>
+
 #include "base/containers/circular_deque.h"
 #include "base/memory/raw_ptr.h"
-
-namespace base {
-template <typename T>
-struct DefaultSingletonTraits;
-}
+#include "base/no_destructor.h"
 
 namespace javascript_dialogs {
 
@@ -22,7 +20,9 @@ class AppModalDialogController;
 // This class is a singleton.
 class AppModalDialogQueue {
  public:
-  typedef base::circular_deque<AppModalDialogController*>::iterator iterator;
+  using DialogQueue =
+      base::circular_deque<std::unique_ptr<AppModalDialogController>>;
+  using iterator = DialogQueue::iterator;
 
   // Returns the singleton instance.
   static AppModalDialogQueue* GetInstance();
@@ -35,15 +35,22 @@ class AppModalDialogQueue {
   // most recently active browser window (or whichever is currently active)
   // will be app modal, meaning it will be activated if the user tries to
   // activate any other browser windows.
-  // Note: The AppModalDialogController |dialog| must be window modal before it
+  // Note: The AppModalDialogController `dialog` must be window modal before it
   // can be added as app modal.
-  void AddDialog(AppModalDialogController* dialog);
+  void AddDialog(std::unique_ptr<AppModalDialogController> dialog);
 
   // Removes the current dialog in the queue (the one that is being shown).
   // Shows the next dialog in the queue, if any is present. This does not
   // ensure that the currently showing dialog is closed, it just makes it no
   // longer app modal.
   void ShowNextDialog();
+
+  // Cancels all pending dialogs and prevents new ones from being shown.
+  // Must be called during browser shutdown to avoid showing dialogs after
+  // profiles have been destroyed.
+  void CancelAllDialogs();
+
+  void ResetForTesting();
 
   // Activates and shows the current dialog, if the user clicks on one of the
   // windows disabled by the presence of an app modal dialog. This forces
@@ -56,7 +63,7 @@ class AppModalDialogQueue {
   // Returns true if there is currently an active app modal dialog box.
   bool HasActiveDialog() const;
 
-  AppModalDialogController* active_dialog() { return active_dialog_; }
+  AppModalDialogController* active_dialog() { return active_dialog_.get(); }
 
   // Iterators to walk the queue. The queue does not include the currently
   // active app modal dialog box.
@@ -64,31 +71,37 @@ class AppModalDialogQueue {
   iterator end() { return app_modal_dialog_queue_.end(); }
 
  private:
-  friend struct base::DefaultSingletonTraits<AppModalDialogQueue>;
+  friend class base::NoDestructor<AppModalDialogQueue>;
 
   AppModalDialogQueue();
   ~AppModalDialogQueue();
 
-  // Shows |dialog| and notifies the BrowserList that a modal dialog is showing.
-  void ShowModalDialog(AppModalDialogController* dialog);
+  // Shows `dialog` and notifies the BrowserList that a modal dialog is showing.
+  void ShowModalDialog(std::unique_ptr<AppModalDialogController> dialog);
 
   // Returns the next dialog to show. This removes entries from
   // app_modal_dialog_queue_ until one is valid or the queue is empty. This
   // returns nullptr if there are no more dialogs, or all the dialogs in the
   // queue are not valid.
-  AppModalDialogController* GetNextDialog();
+  std::unique_ptr<AppModalDialogController> GetNextDialog();
+
+  // Invalidates and clears all queued dialogs.
+  void InvalidateAndClearQueuedDialogs();
 
   // Contains all app modal dialogs which are waiting to be shown. The currently
   // active modal dialog is not included.
-  base::circular_deque<AppModalDialogController*> app_modal_dialog_queue_;
+  DialogQueue app_modal_dialog_queue_;
 
-  // The currently active app-modal dialog box. nullptr if there is no active
+  // The currently active app-modal dialog box. `nullptr` if there is no active
   // app-modal dialog box.
   raw_ptr<AppModalDialogController> active_dialog_;
 
-  // Stores if |ShowModalDialog()| is currently being called on an app-modal
+  // Stores if `ShowModalDialog()` is currently being called on an app-modal
   // dialog.
   bool showing_modal_dialog_;
+
+  // Set to true when `CancelAllDialogs()` is called during browser shutdown.
+  bool shutting_down_ = false;
 };
 
 }  // namespace javascript_dialogs

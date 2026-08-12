@@ -15,8 +15,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.robolectric.Shadows.shadowOf;
 
-import androidx.test.filters.SmallTest;
-
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -28,7 +26,8 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.Callback;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
@@ -77,6 +76,7 @@ public class TabModelUtilsUnitTest {
         when(mArchivedTab.getProfile()).thenReturn(mProfile);
         when(mIncognitoTab.getId()).thenReturn(INCOGNITO_TAB_ID);
         when(mIncognitoTab.isIncognito()).thenReturn(true);
+        when(mIncognitoTab.isOffTheRecord()).thenReturn(true);
         mTabModelSelector = spy(new MockTabModelSelector(mProfile, mIncognitoProfile, 0, 0, null));
         mArchivedTabModelSelector =
                 spy(new MockTabModelSelector(mProfile, mIncognitoProfile, 0, 0, null));
@@ -103,7 +103,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testSelectTabById() {
         assertEquals(TabList.INVALID_TAB_INDEX, mTabModel.index());
         TabModelUtils.selectTabById(mTabModelSelector, TAB_ID, TabSelectionType.FROM_USER);
@@ -111,7 +110,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testSelectTabByIdIncognito() {
         assertEquals(TabList.INVALID_TAB_INDEX, mIncognitoTabModel.index());
         TabModelUtils.selectTabById(
@@ -121,7 +119,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testSelectTabByIdNoOpInvalidTabId() {
         assertEquals(TabList.INVALID_TAB_INDEX, mTabModel.index());
         TabModelUtils.selectTabById(
@@ -130,7 +127,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testSelectTabByIdNoOpNotFound() {
         assertEquals(TabList.INVALID_TAB_INDEX, mTabModel.index());
         TabModelUtils.selectTabById(mTabModelSelector, UNUSED_TAB_ID, TabSelectionType.FROM_USER);
@@ -138,7 +134,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testRunOnTabStateInitializedCallback() {
         mTabModelSelector.markTabStateInitialized();
         TabModelUtils.runOnTabStateInitialized(mTabModelSelector, mTabModelSelectorCallback);
@@ -146,7 +141,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testRunOnTabStateInitializedObserver() {
         TabModelUtils.runOnTabStateInitialized(mTabModelSelector, mTabModelSelectorCallback);
         verify(mTabModelSelector).addObserver(mTabModelSelectorObserverCaptor.capture());
@@ -157,7 +151,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testRunOnTabStateInitializedRemoveObserverWhenDestroyed() {
         TabModelUtils.runOnTabStateInitialized(mTabModelSelector, mTabModelSelectorCallback);
         verify(mTabModelSelector).addObserver(mTabModelSelectorObserverCaptor.capture());
@@ -167,11 +160,10 @@ public class TabModelUtilsUnitTest {
         verify(mTabModelSelector).removeObserver(eq(mTabModelSelectorObserverCaptor.getValue()));
     }
 
-    private final ObservableSupplierImpl<TabModelSelector> mTabModelSelectorSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<TabModelSelector> mTabModelSelectorSupplier =
+            ObservableSuppliers.createMonotonic();
 
     @Test
-    @SmallTest
     public void testOnInitializedTabModelSelector_AlreadyInit() {
         mTabModelSelector.markTabStateInitialized();
         mTabModelSelectorSupplier.set(mTabModelSelector);
@@ -182,7 +174,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testOnInitializedTabModelSelector_LateSet() {
         mTabModelSelector.markTabStateInitialized();
         TabModelUtils.onInitializedTabModelSelector(mTabModelSelectorSupplier)
@@ -193,7 +184,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testOnInitializedTabModelSelector_LateInit() {
         TabModelUtils.onInitializedTabModelSelector(mTabModelSelectorSupplier)
                 .onAvailable(mTabModelSelectorCallback);
@@ -204,7 +194,6 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testOnInitializedTabModelSelector_BothLate() {
         mTabModelSelectorSupplier.set(mTabModelSelector);
         TabModelUtils.onInitializedTabModelSelector(mTabModelSelectorSupplier)
@@ -215,25 +204,17 @@ public class TabModelUtilsUnitTest {
     }
 
     @Test
-    @SmallTest
-    public void testGetTabGroupModelFilterByTab() {
+    public void testGetTabModelByTab() {
         assertEquals(TabList.INVALID_TAB_INDEX, mTabModel.index());
-        TabGroupModelFilter filter = TabModelUtils.getTabGroupModelFilterByTab(mTab);
-        assertEquals(
-                mTabModelSelector.getTabGroupModelFilterProvider().getCurrentTabGroupModelFilter(),
-                filter);
+        TabModel tabModel = TabModelUtils.getTabModelByTab(mTab);
+        assertEquals(mTabModelSelector.getCurrentModel(), tabModel);
     }
 
     @Test
-    @SmallTest
-    public void testGetTabGroupModelFilterByTab_Archived() {
+    public void testGetTabModelByTab_Archived() {
         ArchivedTabModelSelectorHolder.setInstanceFn((profile) -> mArchivedTabModelSelector);
         assertEquals(TabList.INVALID_TAB_INDEX, mTabModel.index());
-        TabGroupModelFilter filter = TabModelUtils.getTabGroupModelFilterByTab(mArchivedTab);
-        assertEquals(
-                mArchivedTabModelSelector
-                        .getTabGroupModelFilterProvider()
-                        .getCurrentTabGroupModelFilter(),
-                filter);
+        TabModel tabModel = TabModelUtils.getTabModelByTab(mArchivedTab);
+        assertEquals(mArchivedTabModelSelector.getCurrentModel(), tabModel);
     }
 }

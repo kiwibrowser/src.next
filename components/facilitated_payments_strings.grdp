@@ -2,19 +2,54 @@
 <grit-part>
 
 <if expr="is_android">
-  <!--Payment methods settings pages-->
-  <message name="IDS_SETTINGS_MANAGE_OTHER_FINANCIAL_ACCOUNTS_TITLE" desc="Title for the preference that allows the user to manage financial accounts other than credit cards like Pix related Bank Accounts, e-Wallets etc." formatter_data="android_java">
-    Pay with <ph name="FINANCIAL_ACCOUNT_TYPES">%1$s<ex>Pix and e-Wallets</ex></ph>
+  <message name="IDS_FACILITATED_PAYMENTS_GOOGLE_PAY" desc="Name of the Google product that stores user addresses and payment accounts. It should not be translated." formatter_data="android_java">
+    Google Pay
   </message>
-  <message name="IDS_SETTINGS_MANAGE_OTHER_FINANCIAL_ACCOUNTS_DESCRIPTION" desc="Description for the preference that allows the user to manage financial accounts other than credit cards like Pix related bank accounts, e-wallets etc." formatter_data="android_java">
-    {FINANCIAL_ACCOUNT, plural, =1 {When you make purchases in Chrome, see <ph name="FINANCIAL_ACCOUNT_TYPES">%1$s<ex>Pix</ex></ph> as an option}
-    other {When you make purchases in Chrome, see <ph name="FINANCIAL_ACCOUNT_TYPES">%1$s<ex>Pix and e-Wallets</ex></ph> as options}}
+
+  <!--Non-card payment methods settings pages-->
+  <message name="IDS_SETTINGS_MANAGE_NON_CARD_PAYMENT_METHODS_TITLE" desc="Title for the preference that allows the user to manage non-card payment methods." formatter_data="android_java">
+    Pay with non-card payment methods
   </message>
-  <!-- Pix related strings -->
-  <message name="IDS_SETTINGS_MANAGE_OTHER_FINANCIAL_ACCOUNTS_PIX" desc="Pix is an instant payment platform used in Brazil. This is the string added to the summary for the 'Manage other financial accounts' preference when user has accounts available to be used with the Pix platform." formatter_data="android_java" translateable="false">
+  <message name="IDS_SETTINGS_MANAGE_NON_CARD_PAYMENT_METHODS_DESCRIPTION" desc="Description for the preference that allows the user to manage non-card payment methods." formatter_data="android_java">
+    When you make purchases in Chrome, see non-card payment methods as an option
+  </message>
+    <message name="IDS_SETTINGS_MANAGE_NON_CARD_PAYMENT_METHODS_A2A_TITLE" desc="Title for the toggle preference when the user has payment apps that can be used to make payments via the account to account flow." formatter_data="android_java">
+    Payments apps
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_NON_CARD_PAYMENT_METHODS_A2A_DESCRIPTION" desc="Description for the toggle preference when the user has payment apps that can be used to make payments via the account to account flow." formatter_data="android_java">
+    Enable redirection to supported payment apps
+  </message>
+  <!--Ewallet and Pix payment method settings pages-->
+  <message name="IDS_SETTINGS_MANAGE_EWALLET_TITLE" desc="Title for the preference that allows the user to manage eWallet accounts when user has only eWallet accounts available to be used. 'eWallet' is a payment system that should not be translated." formatter_data="android_java">
+    Pay with eWallet
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_PIX_TITLE" desc="Title for the preference that allows the user to manage Pix accounts when user has only Pix accounts available to be used. 'eWallet' and 'Pix' are payment systems that should not be translated." formatter_data="android_java">
+    Pay with Pix
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_EWALLET_AND_PIX_TITLE" desc="Title for the preference that allows the user to manage both eWallet and Pix when user has both eWallet and Pix accounts available to be used. 'eWallet' and 'Pix' are payment systems that should not be translated." formatter_data="android_java">
+    Pay with eWallet and Pix
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_EWALLET_DESCRIPTION" desc="Description for the preference that allows the user to manage eWallet accounts. 'eWallet' is a payment system that should not be translated." formatter_data="android_java">
+    When you make purchases in Chrome, see eWallet as an option
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_PIX_DESCRIPTION" desc="Description for the preference that allows the user to manage Pix accounts. 'Pix' is a Brazilian payment system that should not be translated." formatter_data="android_java">
+    When you make purchases in Chrome, see Pix as an option
+  </message>
+  <message name="IDS_SETTINGS_MANAGE_EWALLET_AND_PIX_DESCRIPTION" desc="Description for the preference that allows the user to manage eWallet and Pix accounts. 'eWallet' and 'Pix' are payment systems that should not be translated." formatter_data="android_java">
+    When you make purchases in Chrome, see eWallet and Pix as options
+  </message>
+  <!-- Ewallet and Pix related strings -->
+  <message name="IDS_SETTINGS_MANAGE_OTHER_FINANCIAL_ACCOUNTS_EWALLET" desc="This is the string added to the summary for the 'Manage other financial accounts' preference when user has eWallets accounts available to be used." formatter_data="android_java" translateable="false">
+    eWallet
+  </message>
+  <!--TODO(crbug.com/384798199): Fix typo and make PIX related strings to generic names shared between bottom sheet and settings page. -->
+  <message name="IDS_SETTINGS_MANAGE_OTHER_FINANCIAL_ACCOUNTS_PIX" desc="Pix is an instant payment platform used in Brazil. This is the toggle preference when user has Pix accounts available to be used with the Pix platform." formatter_data="android_java" translateable="false">
     Pix
   </message>
-  <!--TODO(b/339939404): Fix typo and make PIX related strings to generic names shared between bottom sheet and settings page. -->
+  <message name="IDS_SETTINGS_EWALLET_ACCOUNT_IDENTIFER" desc="Identifier for eWallet account that can be used for the eWallet payment." formatter_data="android_java" translateable="false">
+    eWallet  •  <ph name="ACCOUNT_DISPLAY_VALUE">%1$s<ex>nikit••••@hotmail.com</ex></ph>
+  </message>
+  <!--TODO(crbug.com/384798199): Fix typo and make PIX related strings to generic names shared between bottom sheet and settings page. -->
   <message name="IDS_SETTINGS_PIX_BANK_ACCOUNT_IDENTIFER" desc="Identifier for bank account that can be used for the Pix payment platform." formatter_data="android_java" translateable="false">
     Pix  •  <ph name="BANK_ACCOUNT_TYPE">%1$s<ex>Checking</ex></ph> ••••<ph name="ACCOUNT_NUMBER_SUFFIX">%2$s<ex>1234</ex></ph>
   </message>
@@ -36,22 +71,43 @@
   <message name="IDS_BANK_ACCOUNT_TYPE_TRANSACTING" desc="A transacting account is a basic account used for regular expenses. It often has limits on the withdrawal amount. Text to describe a transacting bank account." formatter_data="android_java">
     Account
   </message>
-  <!-- Pix bottom sheet related strings -->
-  <message name="IDS_PIX_PAYMENT_METHODS_BOTTOM_SHEET_TITLE" desc="Title for the bottom sheet displaying user's PIX bank accounts linked to their GPay wallet. It is shown to prompt the user to pay directly on Chrome when a PIX payment page is detected." formatter_data="android_java">
-    Pay with Pix without switching apps
+  <!-- Facilitated payments bottom sheet related strings -->
+  <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_METHODS_BOTTOM_SHEET_DETAILED_TITLE" desc="Title for the bottom sheet displaying user's accounts linked to their GPay wallet. It is shown to prompt the user to pay directly on Chrome when it receives signal of intention to pay, and the user has eligible payment accounts. The title string contains either the payment type or the name of the payment provider." formatter_data="android_java">
+    Pay with <ph name="PAYMENT_METHOD">%1$s<ex>ChiliPay</ex></ph> without switching apps
+  </message>
+  <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_METHODS_BOTTOM_SHEET_GENERIC_TITLE" desc="Title for the bottom sheet displaying user's accounts linked to their GPay wallet. It is shown to prompt the user to pay directly on Chrome when it receives signal of intention to pay, and the user has eligible payment accounts." formatter_data="android_java">
+    Pay without switching apps
+  </message>
+  <message name="IDS_FACILITATED_PAYMENTS_NON_CARD_PAYMENT_METHODS_BOTTOM_SHEET_TITLE" desc="Title for the bottom sheet displaying user's available non-card payment methods. It is displayed when user has at least 1 supported payment app installed." formatter_data="android_java">
+    Pay instantly without QR upload
   </message>
   <message name="IDS_PIX_PAYMENT_METHODS_BOTTOM_SHEET_DESCRIPTION" desc="Explanation text for the bottom sheet displaying user's PIX bank accounts linked to their GPay wallet. It is shown to prompt the user to pay directly on Chrome when a PIX payment page is detected." formatter_data="android_java">
     Account info is encrypted and kept private
   </message>
+  <message name="IDS_EWALLET_FIRST_TIME_CHECK_PAYMENT_METHODS_BOTTOM_SHEET_DESCRIPTION" desc="Explanation text for the bottom sheet displaying user's accounts linked to their GPay wallet. It is shown to prompt the user to complete a security check for their first usage when an eWallet payment page is detected." formatter_data="android_java">
+    Complete one-time security check to pay faster
+  </message>
   <message name="IDS_PIX_PAYMENT_ADDITIONAL_INFO" desc="Additional info for the bottom sheet displaying user's PIX bank accounts linked to their GPay wallet. The bottom sheet is shown to prompt the user to pay directly on Chrome when a PIX payment page is detected. This string provides supplemental information about the user's accounts and the transaction." formatter_data="android_java">
     To turn off Pix in Chrome, go to your <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>payment settings<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+  <message name="IDS_EWALLET_PAYMENT_ADDITIONAL_INFO" desc="Additional info for the bottom sheet displaying user's eWallet accounts linked to their GPay wallet. The bottom sheet is shown to prompt the user to pay directly on Chrome when an eWallet payment page is detected. This string provides supplemental information about the user's accounts and the transaction." formatter_data="android_java">
+    Your saved auto-pay method may be used for this payment. To turn off eWallets in Chrome, go to your <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>payment settings<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+  <message name="IDS_PAYMENT_APP_PAYMENT_ADDITIONAL_INFO" desc="Additional info for the bottom sheet displaying user's supported payment apps. The bottom sheet is shown to prompt the user to pay by app redirection when an A2A payment link is detected. This string provides supplemental information about the user's accounts and the transaction." formatter_data="android_java">
+    To turn off payment app in Chrome, go to your <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>payment settings<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+  <message name="IDS_EWALLET_AND_PAYMENT_APP_PAYMENT_ADDITIONAL_INFO" desc="Additional info for the bottom sheet displaying user's eWallet accounts linked to their GPay wallet and user's supported payment apps. The bottom sheet is shown to prompt the user to pay directly on Chrome or by app redirection when a payment link is detected. This string provides supplemental information about the user's accounts and the transaction." formatter_data="android_java">
+    Your saved auto-pay method may be used for this payment. To turn off eWallets or payment app in Chrome, go to your <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>payment settings<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+  <message name="IDS_PIX_PAYMENT_PRODUCT_ICON_CONTENT_DESCRIPTION" desc="Accessibility string for the Google Pay + Pix product icon." formatter_data="android_java">
+    Google Pay, Pix
   </message>
   <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_METHODS_BOTTOM_SHEET_CONTENT_DESCRIPTION" desc="Accessibility string read when the bottom sheet showing a list of the user's payment methods is opened." formatter_data="android_java">
     Payment methods available to be selected for proceeding with the payment. Keyboard hidden.
   </message>
   <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_METHODS_BOTTOM_SHEET_FULL_HEIGHT" desc="Accessibility string read when the bottom sheet showing a list of the user's payment methods is opened at full height. The sheet will occupy the entire screen." formatter_data="android_java">
     Payment methods available to be selected for proceeding with the payment opened at full height.
-    </message>
+  </message>
   <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_METHODS_BOTTOM_SHEET_CLOSED" desc="Accessibility string read when the bottom sheet is closed." formatter_data="android_java">
     The bottom sheet is closed.
   </message>
@@ -66,6 +122,68 @@
   </message>
   <message name="IDS_FACILITATED_PAYMENTS_OK" desc="Generic OK string to be used in any Facilitated Payments UI." formatter_data="android_java">
     OK
+  </message>
+  <message name="IDS_FACILITATED_PAYMENTS_PAYMENT_APP_DESCRIPTION" desc="A message shown within a payment app item in the fop selector to indicate the click will open the app." formatter_data="android_java">
+    Open app
+  </message>
+
+  <!-- Pix account linking prompt strings -->
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_B_TITLE" desc="Title for the bottom sheet showing Pix account linking prompt (Variation B)." formatter_data="android_java">
+    Pay with Pix without switching apps
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_B_VALUE_PROP_MESSAGE_1" desc="First value prop message in the bottom sheet showing Pix account linking prompt (Variation B)." formatter_data="android_java">
+    Pay without copying and pasting Pix code. <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>See how it works<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_B_VALUE_PROP_MESSAGE_2" desc="Second value prop message in the bottom sheet showing Pix account linking prompt (Variation B)." formatter_data="android_java">
+    Google encryption protects your info
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_LINK_ACCOUNT" desc="Text for the accept button in the bottom sheet showing Pix account linking prompt for Variants B and C." formatter_data="android_java">
+    Link your account
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_DECLINE_FIRST_TWO_TIMES" desc="Text for the decline button in the bottom sheet showing Pix account linking prompt. This string is used for the first two times the prompt is shown, where we show 'Not now' instead of 'No thanks'." formatter_data="android_java">
+    Not now
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_TITLE" desc="Title for the bottom sheet showing Pix account linking prompt. It asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome." formatter_data="android_java">
+    Pay with Pix directly in Chrome next time
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_VALUE_PROP_MESSAGE_1" desc="A message in the bottom sheet showing Pix account linking prompt. The prompt asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome. The value prop messages communicate unique benefits of Pix account linking. This message informs users that they can enable Pix on Chrome by linking their Pix account to Google Wallet." formatter_data="android_java">
+    Enable Pix by linking your account quickly
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_VALUE_PROP_MESSAGE_2" desc="A message in the bottom sheet showing Pix account linking prompt. The prompt asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome. The value prop messages communicate unique benefits of Pix account linking. This message informs users that enabling Pix on Chrome allows them to pay directly on Chrome without having to use their bank app." formatter_data="android_java">
+    Pay in Chrome without using your bank app
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_VALUE_PROP_MESSAGE_3" desc="A message in the bottom sheet showing Pix account linking prompt. The prompt asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome. The value prop messages communicate unique benefits of Pix account linking. This message informs users that their personal info is protected using encryption." formatter_data="android_java">
+    Encryption protects your personal info
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_ACCEPT" desc="Text for the accept button in the bottom sheet showing Pix account linking prompt. It asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome." formatter_data="android_java">
+    Enable Pix in Wallet
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_DECLINE" desc="Text for the decline button in the bottom sheet showing Pix account linking prompt. It asks users to link their Pix accounts to Google Wallet so they can directly pay on Chrome." formatter_data="android_java">
+    No thanks
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_C_TITLE" desc="Title for the bottom sheet showing Pix account linking prompt (Variation C)." formatter_data="android_java">
+    Check out faster next time?
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_C_BODY" desc="Body text for the bottom sheet showing Pix account linking prompt (Variation C)." formatter_data="android_java">You won't need to switch apps anymore. Google encryption protects your info and will confirm that it's you before payment happens.</message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_PROMPT_SETTINGS_LINK" desc="Text for the settings link in the bottom sheet showing Pix account linking prompt." formatter_data="android_java">
+    To turn off Pix code detection, go to <ph name="BEGIN_LINK1">&lt;link1&gt;</ph>Chrome settings<ph name="END_LINK1">&lt;/link1&gt;</ph>
+  </message>
+
+  <!-- Pix account linking success screen strings -->
+  <message name="IDS_PIX_ACCOUNT_LINKING_SUCCESS_SCREEN_TITLE" desc="Title for the bottom sheet showing Pix account linking success screen." formatter_data="android_java">
+    Your Pix account is successfully linked to Google Pay
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_SUCCESS_SCREEN_VALUE_PROP_MESSAGE_1" desc="First value prop message in the Pix account linking success screen." formatter_data="android_java">
+    Pay with Pix without switching apps in Google Chrome
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_SUCCESS_SCREEN_VALUE_PROP_MESSAGE_2" desc="Second value prop message in the Pix account linking success screen." formatter_data="android_java">
+    Send Pix to friends and businesses using Wallet
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_SUCCESS_SCREEN_VALUE_PROP_MESSAGE_3" desc="Third value prop message in the Pix account linking success screen." formatter_data="android_java">
+    Enjoy all the convenience and security that you count on from Pix
+  </message>
+  <message name="IDS_PIX_ACCOUNT_LINKING_SUCCESS_SCREEN_GOT_IT" desc="Text for the primary button in the Pix account linking success screen." formatter_data="android_java">
+    Got it
   </message>
 </if>
 

@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/common/api/extensions_manifest_types.h"
@@ -24,7 +23,7 @@
 namespace extensions {
 
 namespace externally_connectable_errors {
-const char kErrorInvalidMatchPattern[] = "Invalid match pattern '*'";
+const char kErrorInvalidMatchPattern[] = "Invalid match pattern '*' (*)";
 const char kErrorInvalidId[] = "Invalid ID '*'";
 const char kErrorNothingSpecified[] =
     "'externally_connectable' specifies neither 'matches' nor 'ids'; "
@@ -64,8 +63,9 @@ bool ExternallyConnectableHandler::Parse(Extension* extension,
   std::unique_ptr<ExternallyConnectableInfo> info =
       ExternallyConnectableInfo::FromValue(*externally_connectable,
                                            &install_warnings, error);
-  if (!info)
+  if (!info) {
     return false;
+  }
 
   extension->AddInstallWarnings(std::move(install_warnings));
   extension->SetManifestData(keys::kExternallyConnectable, std::move(info));
@@ -78,9 +78,9 @@ base::span<const char* const> ExternallyConnectableHandler::Keys() const {
 }
 
 // static
-ExternallyConnectableInfo* ExternallyConnectableInfo::Get(
+const ExternallyConnectableInfo* ExternallyConnectableInfo::Get(
     const Extension* extension) {
-  return static_cast<ExternallyConnectableInfo*>(
+  return static_cast<const ExternallyConnectableInfo*>(
       extension->GetManifestData(keys::kExternallyConnectable));
 }
 
@@ -103,9 +103,11 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
       // Safe to use SCHEME_ALL here; externally_connectable gives a page ->
       // extension communication path, not the other way.
       URLPattern pattern(URLPattern::SCHEME_ALL);
-      if (pattern.Parse(*it) != URLPattern::ParseResult::kSuccess) {
+      auto parse_result = pattern.Parse(*it);
+      if (parse_result != URLPattern::ParseResult::kSuccess) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
-            externally_connectable_errors::kErrorInvalidMatchPattern, *it);
+            externally_connectable_errors::kErrorInvalidMatchPattern, *it,
+            URLPattern::GetParseResultString(parse_result));
         return nullptr;
       }
 
@@ -150,8 +152,7 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
       std::move(matches), ids, all_ids, accepts_tls_channel_id));
 }
 
-ExternallyConnectableInfo::~ExternallyConnectableInfo() {
-}
+ExternallyConnectableInfo::~ExternallyConnectableInfo() = default;
 
 ExternallyConnectableInfo::ExternallyConnectableInfo(
     URLPatternSet matches,
@@ -163,10 +164,11 @@ ExternallyConnectableInfo::ExternallyConnectableInfo(
       all_ids(all_ids),
       accepts_tls_channel_id(accepts_tls_channel_id) {}
 
-bool ExternallyConnectableInfo::IdCanConnect(const ExtensionId& id) {
-  if (all_ids)
+bool ExternallyConnectableInfo::IdCanConnect(const ExtensionId& id) const {
+  if (all_ids) {
     return true;
-  DCHECK(base::ranges::is_sorted(ids));
+  }
+  DCHECK(std::ranges::is_sorted(ids));
   return std::binary_search(ids.begin(), ids.end(), id);
 }
 

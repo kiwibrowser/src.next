@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/342213636): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "content/browser/ukm_internals_ui.h"
 
 #include <stddef.h>
@@ -37,7 +32,7 @@ void CreateAndAddUkmHTMLSource(BrowserContext* browser_context) {
   WebUIDataSource* source =
       WebUIDataSource::CreateAndAdd(browser_context, kChromeUIUkmHost);
 
-  source->AddResourcePaths(base::make_span(kUkmResources, kUkmResourcesSize));
+  source->AddResourcePaths(kUkmResources);
   source->SetDefaultResource(IDR_UKM_UKM_INTERNALS_HTML);
 }
 
@@ -57,7 +52,7 @@ class UkmMessageHandler : public WebUIMessageHandler {
   void RegisterMessages() override;
 
  private:
-  void HandleRequestUkmData(const base::Value::List& args);
+  void HandleRequestUkmData(const base::ListValue& args);
 
   raw_ptr<const ukm::UkmService> ukm_service_;
 };
@@ -67,8 +62,7 @@ UkmMessageHandler::UkmMessageHandler(const ukm::UkmService* ukm_service)
 
 UkmMessageHandler::~UkmMessageHandler() {}
 
-void UkmMessageHandler::HandleRequestUkmData(
-    const base::Value::List& args_list) {
+void UkmMessageHandler::HandleRequestUkmData(const base::ListValue& args_list) {
   AllowJavascript();
 
   // Identifies the callback, used for when resolving.
@@ -97,7 +91,7 @@ void UkmMessageHandler::RegisterMessages() {
 }  // namespace
 
 // Changes to this class should be in sync with its iOS equivalent
-// ios/chrome/browser/ui/webui/ukm_internals_ui.mm
+// ios/chrome/browser/webui/ui_bundled/ukm_internals_ui.mm
 UkmInternalsUI::UkmInternalsUI(WebUI* web_ui) : WebUIController(web_ui) {
   ukm::UkmService* ukm_service = GetContentClient()->browser()->GetUkmService();
   web_ui->AddMessageHandler(std::make_unique<UkmMessageHandler>(ukm_service));

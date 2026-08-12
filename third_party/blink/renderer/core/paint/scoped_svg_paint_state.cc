@@ -24,12 +24,62 @@
 
 #include "third_party/blink/renderer/core/paint/scoped_svg_paint_state.h"
 
+#include "base/types/optional_util.h"
 #include "third_party/blink/renderer/core/paint/clip_path_clipper.h"
 #include "third_party/blink/renderer/core/paint/svg_mask_painter.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
 namespace blink {
+
+ScopedSVGTransformState::ScopedSVGTransformState(const PaintInfo& paint_info,
+                                                 const LayoutObject& object)
+    : content_paint_info_(paint_info) {
+  DCHECK(object.IsSVGChild());
+
+  const auto* fragment = &object.FirstFragment();
+  const auto* properties = fragment->PaintProperties();
+  if (!properties) {
+    return;
+  }
+
+  // TODO(https://crbug.com/40208169): Also consider Translate, Rotate,
+  // Scale, and Offset.
+  if (const auto* transform_node = properties->Transform()) {
+    transform_property_scope_.emplace(
+        paint_info.context.GetPaintController(), *transform_node, object,
+        DisplayItem::PaintPhaseToSVGTransformType(paint_info.phase));
+    if (auto* context_paints = paint_info.GetSvgContextPaints()) {
+      transformed_context_paints_.emplace(
+          context_paints->fill, context_paints->stroke,
+          context_paints->transform *
+              AffineTransform::FromTransform(transform_node->Matrix()));
+      content_paint_info_.SetSvgContextPaints(
+          base::OptionalToPtr(transformed_context_paints_));
+    }
+  }
+}
+
+ScopedSVGPaintState::ScopedSVGPaintState(const LayoutObject& object,
+                                         const PaintInfo& paint_info,
+                                         PaintBehavior paint_behavior)
+    : ScopedSVGPaintState(object, paint_info, object, paint_behavior) {}
+
+ScopedSVGPaintState::ScopedSVGPaintState(
+    const LayoutObject& object,
+    const PaintInfo& paint_info,
+    const DisplayItemClient& display_item_client,
+    PaintBehavior paint_behavior)
+    : object_(object),
+      paint_info_(paint_info),
+      display_item_client_(display_item_client),
+      paint_behavior_(paint_behavior) {
+  if (paint_info.phase == PaintPhase::kForeground) {
+    ApplyEffects();
+  }
+}
 
 ScopedSVGPaintState::~ScopedSVGPaintState() {
   // Paint mask before clip path as mask because if both exist, the ClipPathMask
@@ -37,12 +87,15 @@ ScopedSVGPaintState::~ScopedSVGPaintState() {
   // the node hierarchy), to ensure the clip-path mask will be applied to the
   // mask to create an intersection of the masks, then the intersection will be
   // applied to the masked content.
-  if (should_paint_mask_)
-    SVGMaskPainter::Paint(paint_info_.context, object_, display_item_client_);
+  if (should_paint_mask_) {
+    SVGMaskPainter::Paint(paint_info_.context, object_, display_item_client_,
+                          paint_info_.GetPaintFlags());
+  }
 
   if (should_paint_clip_path_as_mask_image_) {
     ClipPathClipper::PaintClipPathAsMaskImage(paint_info_.context, object_,
-                                              display_item_client_);
+                                              display_item_client_,
+                                              paint_info_.GetPaintFlags());
   }
 }
 
@@ -89,12 +142,24 @@ void ScopedSVGPaintState::ApplyPaintPropertyState(
     const ObjectPaintProperties& properties) {
   auto& paint_controller = paint_info_.context.GetPaintController();
   auto state = paint_controller.CurrentPaintChunkProperties();
-  if (const auto* filter = properties.Filter()) {
+
+  const auto* filter = properties.Filter();
+  if (filter && filter->Filter() && filter->Filter()->OriginTainted() &&
+      (paint_info_.GetPaintFlags() & PaintFlag::kPrivacyPreserving)) {
+    state.SetEffect(*filter->Parent());
+    filter = nullptr;
+  } else if (filter) {
     state.SetEffect(*filter);
   } else if (const auto* effect = properties.Effect()) {
     state.SetEffect(*effect);
   }
-  if (const auto* filter_clip = properties.PixelMovingFilterClipExpander()) {
+
+  const auto* filter_clip = properties.PixelMovingFilterClipExpander();
+  if (!filter) {
+    filter_clip = nullptr;
+  }
+
+  if (filter_clip) {
     state.SetClip(*filter_clip);
   } else if (const auto* mask_clip = properties.MaskClip()) {
     state.SetClip(*mask_clip);
@@ -105,6 +170,41 @@ void ScopedSVGPaintState::ApplyPaintPropertyState(
   scoped_paint_chunk_properties_.emplace(
       paint_controller, state, display_item_client_,
       DisplayItem::PaintPhaseToSVGEffectType(paint_info_.phase));
+
+  // If SVG element has no content other than a reference filter, we still need
+  // to ensure a paint chunk is created so that the reference filter paints.
+  CHECK(paint_info_.phase == PaintPhase::kForeground);
+  if ((paint_behavior_.Has(PaintComponent::kReferenceFilter)) &&
+      RuntimeEnabledFeatures::SvgFilterPaintsForHiddenContentEnabled() &&
+      properties.Filter() && properties.Filter()->HasReferenceFilter()) {
+    paint_info_.context.GetPaintController().EnsureChunk();
+  }
+}
+
+ScopedSVGPaintState::PaintBehavior ScopedSVGPaintState::ComputePaintBehavior(
+    const LayoutObject& object,
+    const PaintInfo& paint_info,
+    bool has_content) {
+  DCHECK(object.IsSVG());
+
+  // If we have content (shapes for leaves, children for containers, etc.),
+  // paint everything.
+  if (has_content) {
+    return PaintBehavior::All();
+  }
+
+  // No content - check if we have reference filter that still needs painted. We
+  // must ensure a paint chunk is created for reference filters, even if there
+  // is no content to paint.
+  if (paint_info.phase == PaintPhase::kForeground &&
+      RuntimeEnabledFeatures::SvgFilterPaintsForHiddenContentEnabled() &&
+      !paint_info.IsRenderingClipPathAsMaskImage() &&
+      object.StyleRef().Filter().HasReferenceFilter()) {
+    return {PaintComponent::kReferenceFilter};
+  }
+
+  // No content and no reference filter - can skip painting entirely.
+  return {};
 }
 
 }  // namespace blink

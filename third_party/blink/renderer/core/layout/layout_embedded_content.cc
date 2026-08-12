@@ -35,13 +35,14 @@
 #include "third_party/blink/renderer/core/html/fenced_frame/html_fenced_frame_element.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
 #include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/embedded_content_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -95,6 +96,7 @@ EmbeddedContentView* LayoutEmbeddedContent::GetEmbeddedContentView() const {
 
 const std::optional<PhysicalSize> LayoutEmbeddedContent::FrozenFrameSize()
     const {
+  NOT_DESTROYED();
   // The `<fencedframe>` element can freeze the child frame size when navigated.
   if (const auto* fenced_frame = DynamicTo<HTMLFencedFrameElement>(GetNode()))
     return fenced_frame->FrozenFrameSize();
@@ -102,7 +104,13 @@ const std::optional<PhysicalSize> LayoutEmbeddedContent::FrozenFrameSize()
   return std::nullopt;
 }
 
+PhysicalNaturalSizingInfo LayoutEmbeddedContent::GetNaturalDimensions() const {
+  NOT_DESTROYED();
+  return PhysicalNaturalSizingInfo::None();
+}
+
 AffineTransform LayoutEmbeddedContent::EmbeddedContentTransform() const {
+  NOT_DESTROYED();
   auto frozen_size = FrozenFrameSize();
   if (!frozen_size || frozen_size->IsEmpty()) {
     const PhysicalOffset content_box_offset = PhysicalContentBoxOffset();
@@ -118,8 +126,14 @@ AffineTransform LayoutEmbeddedContent::EmbeddedContentTransform() const {
   return translate_and_scale;
 }
 
+bool LayoutEmbeddedContent::ShowsUnavailablePluginIndicator() const {
+  NOT_DESTROYED();
+  return false;
+}
+
 PhysicalOffset LayoutEmbeddedContent::EmbeddedContentFromBorderBox(
     const PhysicalOffset& offset) const {
+  NOT_DESTROYED();
   gfx::PointF point(offset);
   return PhysicalOffset::FromPointFRound(
       EmbeddedContentTransform().Inverse().MapPoint(point));
@@ -127,11 +141,13 @@ PhysicalOffset LayoutEmbeddedContent::EmbeddedContentFromBorderBox(
 
 gfx::PointF LayoutEmbeddedContent::EmbeddedContentFromBorderBox(
     const gfx::PointF& point) const {
+  NOT_DESTROYED();
   return EmbeddedContentTransform().Inverse().MapPoint(point);
 }
 
 PhysicalOffset LayoutEmbeddedContent::BorderBoxFromEmbeddedContent(
     const PhysicalOffset& offset) const {
+  NOT_DESTROYED();
   gfx::PointF point(offset);
   return PhysicalOffset::FromPointFRound(
       EmbeddedContentTransform().MapPoint(point));
@@ -139,6 +155,7 @@ PhysicalOffset LayoutEmbeddedContent::BorderBoxFromEmbeddedContent(
 
 gfx::Rect LayoutEmbeddedContent::BorderBoxFromEmbeddedContent(
     const gfx::Rect& rect) const {
+  NOT_DESTROYED();
   return EmbeddedContentTransform().MapRect(rect);
 }
 
@@ -168,6 +185,7 @@ bool LayoutEmbeddedContent::PointOverResizer(
 }
 
 void LayoutEmbeddedContent::PropagateZoomFactor(double zoom_factor) {
+  NOT_DESTROYED();
   if (GetDocument().StandardizedBrowserZoomEnabled()) {
     const auto* fenced_frame = DynamicTo<HTMLFencedFrameElement>(GetNode());
     if (!fenced_frame) {
@@ -238,8 +256,7 @@ bool LayoutEmbeddedContent::NodeAtPoint(
 
     if (VisibleToHitTestRequest(result.GetHitTestRequest()) &&
         child_layout_view) {
-      PhysicalOffset content_offset(BorderLeft() + PaddingLeft(),
-                                    BorderTop() + PaddingTop());
+      const PhysicalOffset content_offset = PhysicalContentBoxOffset();
       HitTestLocation new_hit_test_location(
           hit_test_location, -accumulated_offset - content_offset);
       HitTestRequest new_hit_test_request(
@@ -289,10 +306,12 @@ bool LayoutEmbeddedContent::NodeAtPoint(
                                             accumulated_offset, phase);
 }
 
-void LayoutEmbeddedContent::StyleDidChange(StyleDifference diff,
-                                           const ComputedStyle* old_style) {
+void LayoutEmbeddedContent::StyleDidChange(
+    StyleDifference diff,
+    const ComputedStyle* old_style,
+    const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
-  LayoutReplaced::StyleDidChange(diff, old_style);
+  LayoutReplaced::StyleDidChange(diff, old_style, style_change_context);
   const ComputedStyle& new_style = StyleRef();
 
   if (Frame* frame = GetFrameOwnerElement()->ContentFrame())
@@ -333,6 +352,7 @@ void LayoutEmbeddedContent::PaintReplaced(
   NOT_DESTROYED();
   if (ChildPaintBlockedByDisplayLock())
     return;
+  CountSvgFilterPaint();
   EmbeddedContentPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
@@ -368,9 +388,8 @@ PhysicalRect LayoutEmbeddedContent::ReplacedContentRectFrom(
     // system forwards mouse events to the child frame even when the mouse is
     // outside of the child frame. Revisit this when the input system supports
     // different |ReplacedContentRect| from |PhysicalContentBoxRect|.
-    PhysicalSize frozen_layout_size = *frozen_size;
-    content_rect =
-        ComputeReplacedContentRect(base_content_rect, &frozen_layout_size);
+    content_rect = ComputeReplacedContentRect(
+        base_content_rect, PhysicalNaturalSizingInfo::MakeFixed(*frozen_size));
   }
 
   // We don't propagate sub-pixel into sub-frame layout, in other words, the
@@ -464,6 +483,27 @@ bool LayoutEmbeddedContent::IsThrottledFrameView() const {
   if (auto* local_frame_view = DynamicTo<LocalFrameView>(ChildFrameView()))
     return local_frame_view->ShouldThrottleRendering();
   return false;
+}
+
+void LayoutEmbeddedContent::CountSvgFilterPaint() const {
+  if (!GetEmbeddedContentView()) {
+    return;
+  }
+  // This is an iteration of all (local) parents on every paint, but embedded
+  // content is rare enough that we do not expect this to be a problem.
+  const LayoutObject* target = this;
+  while (target) {
+    if (target->StyleRef().HasReferenceFilter()) {
+      UseCounter::Count(GetDocument(),
+                        GetEmbeddedContentView()->SvgFilterPaintedCounter());
+      return;
+    }
+    if (IsA<LayoutView>(*target)) {
+      target = target->GetFrame()->OwnerLayoutObject();
+    } else {
+      target = target->Parent();
+    }
+  }
 }
 
 }  // namespace blink

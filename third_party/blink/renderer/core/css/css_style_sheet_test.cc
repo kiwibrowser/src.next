@@ -19,7 +19,6 @@
 #include "third_party/blink/renderer/core/css/media_list.h"
 #include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
@@ -36,6 +35,7 @@ TEST_F(CSSStyleSheetTest,
       MakeGarbageCollected<V8UnionMediaListOrString>("screen, print"));
   init->setAlternate(true);
   init->setDisabled(true);
+  init->setBaseURL("https://example.com/custom/");
   CSSStyleSheet* sheet =
       CSSStyleSheet::Create(GetDocument(), init, exception_state);
   ASSERT_FALSE(exception_state.HadException());
@@ -47,6 +47,7 @@ TEST_F(CSSStyleSheetTest,
   EXPECT_EQ(sheet->media()->mediaText(nullptr), init->media()->GetAsString());
   EXPECT_TRUE(sheet->AlternateFromConstructor());
   EXPECT_TRUE(sheet->disabled());
+  EXPECT_EQ(sheet->BaseURL().GetString(), "https://example.com/custom/");
   EXPECT_EQ(sheet->cssRules(exception_state)->length(), 0U);
   ASSERT_FALSE(exception_state.HadException());
 }
@@ -146,6 +147,22 @@ TEST_F(CSSStyleSheetTest, AdoptedStyleSheetMediaQueryEvalChange) {
   EXPECT_EQ(
       Color::FromRGB(0, 0, 255),
       blue->GetComputedStyle()->VisitedDependentColor(GetCSSPropertyColor()));
+}
+
+TEST_F(CSSStyleSheetTest, DetachCSSOMWrappersWithNullEntries) {
+  auto* sheet = CSSStyleSheet::Create(
+      GetDocument(), CSSStyleSheetInit::Create(), ASSERT_NO_EXCEPTION);
+  sheet->replaceSync(".a { color: red; } .b { color: green; }",
+                     ASSERT_NO_EXCEPTION);
+  EXPECT_EQ(sheet->length(), 2u);
+
+  sheet->item(0);
+  // child_rule_cssom_wrappers_[0] is non-nullptr
+  // child_rule_cssom_wrappers_[1] is nullptr
+
+  // Call DetachCSSOMWrappers via replaceSync.
+  sheet->replaceSync(".c { color: blue; }", ASSERT_NO_EXCEPTION);
+  EXPECT_EQ(sheet->length(), 1u);
 }
 
 }  // namespace blink

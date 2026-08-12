@@ -21,7 +21,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -35,7 +34,7 @@ class ContainerQueryEvaluatorTest : public PageTestBase {
  public:
   void SetUp() override {
     PageTestBase::SetUp();
-    GetDocument().body()->setInnerHTML(R"HTML(
+    GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
       <div id="container-parent">
         <div id="container"></div>
       </div>
@@ -46,14 +45,14 @@ class ContainerQueryEvaluatorTest : public PageTestBase {
     return *GetDocument().getElementById(AtomicString("container"));
   }
 
-  ContainerQuery* ParseContainer(String query) {
+  const ContainerQuery* ParseContainer(String query) {
     String rule = "@container " + query + " {}";
     auto* style_rule = DynamicTo<StyleRuleContainer>(
         css_test_helpers::ParseRule(GetDocument(), rule));
     if (!style_rule) {
       return nullptr;
     }
-    return &style_rule->GetContainerQuery();
+    return style_rule->GetContainerQuerySet().SingleQuery();
   }
 
   ContainerQueryEvaluator* CreateEvaluatorForType(unsigned container_type) {
@@ -69,7 +68,7 @@ class ContainerQueryEvaluatorTest : public PageTestBase {
             double height,
             unsigned container_type,
             PhysicalAxes contained_axes) {
-    ContainerQuery* container_query = ParseContainer(query);
+    const ContainerQuery* container_query = ParseContainer(query);
     DCHECK(container_query);
     ContainerQueryEvaluator* evaluator = CreateEvaluatorForType(container_type);
     evaluator->SizeContainerChanged(
@@ -99,7 +98,7 @@ class ContainerQueryEvaluatorTest : public PageTestBase {
         PhysicalSize(LayoutUnit(100), LayoutUnit(100)),
         PhysicalAxes{kPhysicalAxesNone});
 
-    ContainerQuery* container_query = ParseContainer(query);
+    const ContainerQuery* container_query = ParseContainer(query);
     return evaluator->Eval(*container_query).value;
   }
 
@@ -223,9 +222,12 @@ TEST_F(ContainerQueryEvaluatorTest, SizeContainerChanged) {
   PhysicalSize size_100(LayoutUnit(100), LayoutUnit(100));
   PhysicalSize size_200(LayoutUnit(200), LayoutUnit(200));
 
-  ContainerQuery* container_query_50 = ParseContainer("(min-width: 50px)");
-  ContainerQuery* container_query_100 = ParseContainer("(min-width: 100px)");
-  ContainerQuery* container_query_200 = ParseContainer("(min-width: 200px)");
+  const ContainerQuery* container_query_50 =
+      ParseContainer("(min-width: 50px)");
+  const ContainerQuery* container_query_100 =
+      ParseContainer("(min-width: 100px)");
+  const ContainerQuery* container_query_200 =
+      ParseContainer("(min-width: 200px)");
   ASSERT_TRUE(container_query_50);
   ASSERT_TRUE(container_query_100);
   ASSERT_TRUE(container_query_200);
@@ -316,10 +318,10 @@ TEST_F(ContainerQueryEvaluatorTest, StyleContainerChanged) {
   EXPECT_EQ(Change::kNone,
             evaluator->SizeContainerChanged(size_100, horizontal));
 
-  ContainerQuery* foo_bar_query = ParseContainer("style(--foo: bar)");
-  ContainerQuery* size_bar_foo_query =
+  const ContainerQuery* foo_bar_query = ParseContainer("style(--foo: bar)");
+  const ContainerQuery* size_bar_foo_query =
       ParseContainer("(inline-size = 100px) and style(--bar: foo)");
-  ContainerQuery* no_match_query =
+  const ContainerQuery* no_match_query =
       ParseContainer("(inline-size > 1000px) and style(--no: match)");
   ASSERT_TRUE(foo_bar_query);
   ASSERT_TRUE(size_bar_foo_query);
@@ -374,9 +376,9 @@ TEST_F(ContainerQueryEvaluatorTest, StyleContainerChanged) {
 }
 
 TEST_F(ContainerQueryEvaluatorTest, StickyContainerChanged) {
-  ContainerQuery* container_query_left =
+  const ContainerQuery* container_query_left =
       ParseContainer("scroll-state(stuck: left)");
-  ContainerQuery* container_query_bottom =
+  const ContainerQuery* container_query_bottom =
       ParseContainer("scroll-state(stuck: bottom)");
   ASSERT_TRUE(container_query_left);
   ASSERT_TRUE(container_query_bottom);
@@ -416,9 +418,9 @@ TEST_F(ContainerQueryEvaluatorTest, StickyContainerChanged) {
 }
 
 TEST_F(ContainerQueryEvaluatorTest, SnapContainerChanged) {
-  ContainerQuery* container_query_snap_block =
+  const ContainerQuery* container_query_snap_block =
       ParseContainer("scroll-state(snapped: block)");
-  ContainerQuery* container_query_snap_inline =
+  const ContainerQuery* container_query_snap_inline =
       ParseContainer("scroll-state(snapped: inline)");
   ASSERT_TRUE(container_query_snap_block);
   ASSERT_TRUE(container_query_snap_inline);
@@ -465,12 +467,17 @@ TEST_F(ContainerQueryEvaluatorTest, SnapContainerChanged) {
 TEST_F(ContainerQueryEvaluatorTest, ClearResults) {
   PhysicalSize size_100(LayoutUnit(100), LayoutUnit(100));
 
-  ContainerQuery* container_query_px = ParseContainer("(min-width: 50px)");
-  ContainerQuery* container_query_em = ParseContainer("(min-width: 10em)");
-  ContainerQuery* container_query_vh = ParseContainer("(min-width: 10vh)");
-  ContainerQuery* container_query_cqw = ParseContainer("(min-width: 10cqw)");
-  ContainerQuery* container_query_style = ParseContainer("style(--foo: bar)");
-  ContainerQuery* container_query_size_and_style =
+  const ContainerQuery* container_query_px =
+      ParseContainer("(min-width: 50px)");
+  const ContainerQuery* container_query_em =
+      ParseContainer("(min-width: 10em)");
+  const ContainerQuery* container_query_vh =
+      ParseContainer("(min-width: 10vh)");
+  const ContainerQuery* container_query_cqw =
+      ParseContainer("(min-width: 10cqw)");
+  const ContainerQuery* container_query_style =
+      ParseContainer("style(--foo: bar)");
+  const ContainerQuery* container_query_size_and_style =
       ParseContainer("(width > 0px) and style(--foo: bar)");
   ASSERT_TRUE(container_query_px);
   ASSERT_TRUE(container_query_em);
@@ -656,8 +663,8 @@ TEST_F(ContainerQueryEvaluatorTest, DependentQueries) {
   PhysicalSize size_300(LayoutUnit(300), LayoutUnit(300));
   PhysicalSize size_400(LayoutUnit(400), LayoutUnit(400));
 
-  ContainerQuery* query_min_200px = ParseContainer("(min-width: 200px)");
-  ContainerQuery* query_max_300px = ParseContainer("(max-width: 300px)");
+  const ContainerQuery* query_min_200px = ParseContainer("(min-width: 200px)");
+  const ContainerQuery* query_max_300px = ParseContainer("(max-width: 300px)");
   ASSERT_TRUE(query_min_200px);
 
   ContainerQueryEvaluator* evaluator = CreateEvaluatorForType(type_inline_size);
@@ -838,6 +845,31 @@ TEST_F(ContainerQueryEvaluatorTest, FindContainer) {
             outer_size);
 }
 
+TEST_F(ContainerQueryEvaluatorTest, FindNamedContainer) {
+  SetBodyInnerHTML(R"HTML(
+    <div style="container-name:outer">
+      <div style="container-name:inner">
+        <div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* outer = GetDocument().body()->firstElementChild();
+  Element* inner = outer->firstElementChild();
+  Element* target = inner->firstElementChild()->firstElementChild();
+
+  EXPECT_EQ(ContainerQueryEvaluator::FindContainer(
+                target, ParseContainer("inner")->Selector(), &GetDocument()),
+            inner);
+  EXPECT_EQ(ContainerQueryEvaluator::FindContainer(
+                target, ParseContainer("outer")->Selector(), &GetDocument()),
+            outer);
+}
+
 TEST_F(ContainerQueryEvaluatorTest, FindStickyContainer) {
   SetBodyInnerHTML(R"HTML(
     <div style="container-type: scroll-state size">
@@ -929,7 +961,7 @@ TEST_F(ContainerQueryEvaluatorTest, FindSnapContainer) {
 }
 
 TEST_F(ContainerQueryEvaluatorTest, ScopedCaching) {
-  GetDocument().documentElement()->setHTMLUnsafe(R"HTML(
+  GetDocument().documentElement()->SetHTMLUnsafeWithoutTrustedTypes(R"HTML(
     <div id="host" style="container-name: n1">
       <template shadowrootmode=open>
         <div style="container-name: n1">
@@ -945,8 +977,8 @@ TEST_F(ContainerQueryEvaluatorTest, ScopedCaching) {
   ContainerSelectorCache cache;
   StyleRecalcContext context;
   MatchResult result;
-  ContainerQuery* query1 = ParseContainer("n1 style(--foo: bar)");
-  ContainerQuery* query2 = ParseContainer("n1 style(--foo: bar)");
+  const ContainerQuery* query1 = ParseContainer("n1 style(--foo: bar)");
+  const ContainerQuery* query2 = ParseContainer("n1 style(--foo: bar)");
 
   ASSERT_TRUE(query1);
   ASSERT_TRUE(query2);

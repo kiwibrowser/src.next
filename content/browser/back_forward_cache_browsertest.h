@@ -87,11 +87,16 @@ class BackForwardCacheBrowserTest
 
   void SetupFeaturesAndParameters();
 
+  // Enabled and disable only takes effect once per feature and each param can
+  // only be set once. This allows subclasses to set values and then call
+  // `SetUpCommandLine` and not have them overridden.
   void EnableFeatureAndSetParams(const base::Feature& feature,
                                  std::string param_name,
                                  std::string param_value);
-
   void DisableFeature(const base::Feature& feature);
+  // Convenience method for setting up cache-sizes.
+  void EnableCacheSize(std::optional<int> cache_size,
+                       std::optional<int> foreground_cache_size);
 
   void SetUpOnMainThread() override;
 
@@ -105,7 +110,7 @@ class BackForwardCacheBrowserTest
 
   std::string DepictFrameTree(FrameTreeNode* node);
 
-  bool HistogramContainsIntValue(base::HistogramBase::Sample sample,
+  bool HistogramContainsIntValue(base::HistogramBase::Sample32 sample,
                                  std::vector<base::Bucket> histogram_values);
 
   void EvictByJavaScript(RenderFrameHostImpl* rfh);
@@ -218,8 +223,6 @@ class BackForwardCacheBrowserTest
   // renderer for a bfcached page.
   bool fail_for_unexpected_messages_while_cached_ = true;
 };
-
-[[nodiscard]] bool WaitForDOMContentLoaded(RenderFrameHostImpl* rfh);
 
 class HighCacheSizeBackForwardCacheBrowserTest
     : public BackForwardCacheBrowserTest {

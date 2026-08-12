@@ -6,14 +6,13 @@
 
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
-#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/origin_agent_cluster_isolation_state.h"
-#include "content/browser/security/coop/coop_related_group.h"
+#include "content/browser/security/cpsp/child_process_security_policy_impl.h"
 #include "content/browser/site_info.h"
+#include "content/browser/site_instance_group.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/common/features.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_or_resource_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_features.h"
@@ -31,54 +30,47 @@ BrowsingInstance::BrowsingInstance(
     const WebExposedIsolationInfo& web_exposed_isolation_info,
     bool is_guest,
     bool is_fenced,
-    bool is_fixed_storage_partition,
-    const scoped_refptr<CoopRelatedGroup>& coop_related_group,
-    std::optional<url::Origin> common_coop_origin)
+    bool is_fixed_storage_partition)
     : isolation_context_(
           BrowsingInstanceId::FromUnsafeValue(next_browsing_instance_id_++),
-          BrowserOrResourceContext(browser_context),
+          browser_context,
           is_guest,
           is_fenced,
           OriginAgentClusterIsolationState::CreateForDefaultIsolation(
               browser_context)),
       active_contents_count_(0u),
       default_site_instance_(nullptr),
+      default_site_instance_group_(nullptr),
       web_exposed_isolation_info_(web_exposed_isolation_info),
-      coop_related_group_(coop_related_group),
-      common_coop_origin_(common_coop_origin),
       is_fixed_storage_partition_(is_fixed_storage_partition) {
   DCHECK(browser_context);
   if (is_guest) {
     CHECK(is_fixed_storage_partition);
   }
-
-  // If we get passed an empty group, build a new one. This is the common case.
-  if (!coop_related_group_) {
-    coop_related_group_ =
-        base::WrapRefCounted<CoopRelatedGroup>(new CoopRelatedGroup(
-            browser_context, is_guest, is_fenced, is_fixed_storage_partition_));
-  }
-  DCHECK(coop_related_group_);
-
-  coop_related_group_->RegisterBrowsingInstance(this);
-}
-
-BrowserContext* BrowsingInstance::GetBrowserContext() const {
-  return isolation_context_.browser_or_resource_context().ToBrowserContext();
 }
 
 bool BrowsingInstance::HasSiteInstance(const SiteInfo& site_info) {
-  return base::Contains(site_instance_map_, site_info);
+  return site_instance_map_.contains(site_info);
 }
 
 scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURL(
     const UrlInfo& url_info,
     bool allow_default_instance) {
-  scoped_refptr<SiteInstanceImpl> site_instance =
-      GetSiteInstanceForURLHelper(url_info, allow_default_instance);
+  return GetSiteInstanceForURL(url_info, /*creation_group=*/nullptr,
+                               allow_default_instance);
+}
 
-  if (site_instance)
+scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURL(
+    const UrlInfo& url_info,
+    SiteInstanceGroup* creation_group,
+    bool allow_default_instance) {
+  const SiteInfo site_info = ComputeSiteInfoForURL(url_info);
+  scoped_refptr<SiteInstanceImpl> site_instance =
+      GetSiteInstanceForURLHelper(url_info, site_info, allow_default_instance);
+
+  if (site_instance) {
     return site_instance;
+  }
 
   // No current SiteInstance for this site, so let's create one.
   scoped_refptr<SiteInstanceImpl> instance = new SiteInstanceImpl(this);
@@ -89,7 +81,17 @@ scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURL(
   // carries guest information contained within SiteInfo.
   if (SiteInstanceImpl::ShouldAssignSiteForUrlInfo(url_info) ||
       isolation_context_.is_guest()) {
-    instance->SetSite(url_info);
+    if (base::FeatureList::IsEnabled(features::kPrecomputeSiteInfo)) {
+      instance->SetSiteInfoAndOriginalUrl(site_info, url_info.url);
+    } else {
+      instance->SetSite(url_info);
+    }
+  }
+
+  // Add the new SiteInstance to `group`, if it exists.
+  if (creation_group) {
+    creation_group->AddSiteInstance(instance.get());
+    instance->SetSiteInstanceGroup(creation_group);
   }
 
   return instance;
@@ -97,46 +99,52 @@ scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURL(
 
 SiteInfo BrowsingInstance::GetSiteInfoForURL(const UrlInfo& url_info,
                                              bool allow_default_instance) {
+  const SiteInfo site_info = ComputeSiteInfoForURL(url_info);
   scoped_refptr<SiteInstanceImpl> site_instance =
-      GetSiteInstanceForURLHelper(url_info, allow_default_instance);
+      GetSiteInstanceForURLHelper(url_info, site_info, allow_default_instance);
 
-  if (site_instance)
+  if (site_instance) {
     return site_instance->GetSiteInfo();
+  }
 
-  return ComputeSiteInfoForURL(url_info);
+  return site_info;
 }
 
 scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForSiteInfo(
     const SiteInfo& site_info) {
   auto i = site_instance_map_.find(site_info);
-  if (i != site_instance_map_.end())
+  if (i != site_instance_map_.end()) {
     return i->second.get();
+  }
 
   scoped_refptr<SiteInstanceImpl> instance = new SiteInstanceImpl(this);
-  instance->SetSite(site_info);
+  instance->SetSiteInfo(site_info);
   return instance;
 }
 
 scoped_refptr<SiteInstanceImpl>
-BrowsingInstance::GetCoopRelatedSiteInstanceForURL(
+BrowsingInstance::GetMaybeGroupRelatedSiteInstanceForURL(
     const UrlInfo& url_info,
-    bool allow_default_instance) {
-  return coop_related_group_->GetCoopRelatedSiteInstanceForURL(
-      url_info, allow_default_instance);
+    SiteInstanceGroup* creation_group) {
+  CHECK(creation_group);
+  scoped_refptr<SiteInstanceImpl> instance = GetSiteInstanceForURL(
+      url_info, creation_group, /*allow_default_instance=*/false);
+  return instance;
 }
 
 scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURLHelper(
     const UrlInfo& url_info,
+    const SiteInfo& site_info,
     bool allow_default_instance) {
-  const SiteInfo site_info = ComputeSiteInfoForURL(url_info);
   auto i = site_instance_map_.find(site_info);
-  if (i != site_instance_map_.end())
+  if (i != site_instance_map_.end()) {
     return i->second.get();
+  }
 
   // Check to see if we can use the default SiteInstance for sites that don't
   // need to be isolated in their own process.
-  if (allow_default_instance &&
-      SiteInstanceImpl::CanBePlacedInDefaultSiteInstance(
+  if (!ShouldUseDefaultSiteInstanceGroup() && allow_default_instance &&
+      SiteInstanceImpl::CanBePlacedInDefaultSiteInstanceOrGroup(
           isolation_context_, url_info.url, site_info)) {
     scoped_refptr<SiteInstanceImpl> site_instance =
         default_site_instance_.get();
@@ -145,7 +153,8 @@ scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURLHelper(
 
       // Note: |default_site_instance_| will get set inside this call
       // via RegisterSiteInstance().
-      site_instance->SetSiteInfoToDefault(site_info.storage_partition_config());
+      site_instance->SetSiteInfoToDefault(
+          site_info.GetStoragePartitionConfig());
       DCHECK_EQ(default_site_instance_, site_instance.get());
     }
 
@@ -165,14 +174,15 @@ void BrowsingInstance::RegisterSiteInstance(SiteInstanceImpl* site_instance) {
   // Verify that the SiteInstance's StoragePartitionConfig matches this
   // BrowsingInstance's StoragePartitionConfig if it already has one.
   const StoragePartitionConfig& storage_partition_config =
-      site_instance->GetSiteInfo().storage_partition_config();
+      site_instance->GetSecurityPrincipal().GetStoragePartitionConfig();
   if (storage_partition_config_.has_value()) {
     // We should only use a single StoragePartition within a BrowsingInstance.
     // If we're attempting to use multiple, something has gone wrong with the
     // logic at upper layers.  Similarly, whether this StoragePartition is for
     // a guest should remain constant over a BrowsingInstance's lifetime.
     CHECK_EQ(storage_partition_config_.value(), storage_partition_config);
-    CHECK_EQ(isolation_context_.is_guest(), site_instance->IsGuest());
+    CHECK_EQ(isolation_context_.is_guest(),
+             site_instance->GetSecurityPrincipal().IsGuest());
   } else {
     storage_partition_config_ = storage_partition_config;
   }
@@ -180,6 +190,7 @@ void BrowsingInstance::RegisterSiteInstance(SiteInstanceImpl* site_instance) {
   // Explicitly prevent the default SiteInstance from being added since
   // the map is only supposed to contain instances that map to a single site.
   if (site_instance->IsDefaultSiteInstance()) {
+    DCHECK(!ShouldUseDefaultSiteInstanceGroup());
     CHECK(!default_site_instance_);
     default_site_instance_ = site_instance;
     return;
@@ -229,14 +240,13 @@ BrowsingInstance::~BrowsingInstance() {
   DCHECK(site_instance_map_.empty());
   DCHECK_EQ(0u, active_contents_count_);
   DCHECK(!default_site_instance_);
+  DCHECK(!default_site_instance_group_);
 
   // Remove any origin isolation opt-ins related to this instance.
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->RemoveOptInIsolatedOriginsForBrowsingInstance(
+  policy->RemoveAllStateForBrowsingInstance(
       isolation_context_.browsing_instance_id());
-
-  coop_related_group_->UnregisterBrowsingInstance(this);
 }
 
 SiteInfo BrowsingInstance::ComputeSiteInfoForURL(
@@ -301,9 +311,10 @@ int BrowsingInstance::EstimateOriginAgentClusterOverhead() {
   // it is difficult in practice to account for, so we don't try to.
   for (auto& entry : site_instance_map_) {
     const SiteInfo& site_info = entry.first;
-    GURL process_lock_url = site_info.process_lock_url();
-    if (!process_lock_url.SchemeIs(url::kHttpsScheme))
+    GURL process_lock_url = site_info.GetProcessLockURL();
+    if (!process_lock_url.SchemeIs(url::kHttpsScheme)) {
       continue;
+    }
 
     site_info_set.insert(site_info);
     site_info_set_no_oac.insert(
@@ -314,21 +325,13 @@ int BrowsingInstance::EstimateOriginAgentClusterOverhead() {
   return result;
 }
 
-size_t BrowsingInstance::GetCoopRelatedGroupActiveContentsCount() {
-  return coop_related_group_->active_contents_count();
-}
-
 void BrowsingInstance::IncrementActiveContentsCount() {
   active_contents_count_++;
-
-  coop_related_group_->increment_active_contents_count();
 }
 
 void BrowsingInstance::DecrementActiveContentsCount() {
   DCHECK_LT(0u, active_contents_count_);
   active_contents_count_--;
-
-  coop_related_group_->decrement_active_contents_count();
 }
 
 }  // namespace content

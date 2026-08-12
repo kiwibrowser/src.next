@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_HISTORY_CORE_BROWSER_VISIT_ANNOTATIONS_DATABASE_H_
 #define COMPONENTS_HISTORY_CORE_BROWSER_VISIT_ANNOTATIONS_DATABASE_H_
 
+#include <string_view>
 #include <vector>
 
 #include "base/time/time.h"
@@ -88,11 +89,11 @@ class VisitAnnotationsDatabase {
   // `originator_cache_guid` and `originator_cluster_id` can be the respective
   // empty states if the cluster is a local cluster or the originator device
   // does not support those fields yet.
-  int64_t ReserveNextClusterId(const std::string& originator_cache_guid,
-                               int64_t originator_cluster_id);
+  ClusterId ReserveNextClusterId(const std::string& originator_cache_guid,
+                                 ClusterId originator_cluster_id);
 
   // Adds visits to the cluster with id `cluster_id`.
-  void AddVisitsToCluster(int64_t cluster_id,
+  void AddVisitsToCluster(ClusterId cluster_id,
                           const std::vector<ClusterVisit>& visits);
 
   // Updates the triggerability attributes for each cluster in `clusters`.
@@ -101,21 +102,21 @@ class VisitAnnotationsDatabase {
 
   // Updates the cluster visit with the same visit ID as `cluster_visit` that
   // belongs to `cluster_id`.
-  void UpdateClusterVisit(int64_t cluster_id,
+  void UpdateClusterVisit(ClusterId cluster_id,
                           const history::ClusterVisit& cluster_visit);
 
   // Get a `Cluster`. Does not include the cluster's `visits` or
   // `keyword_to_data_map`.
-  Cluster GetCluster(int64_t cluster_id);
+  Cluster GetCluster(ClusterId cluster_id);
 
   // Get the most recent clusters within the constraints. The most recent visit
   // of a cluster represents the cluster's time.
-  std::vector<int64_t> GetMostRecentClusterIds(base::Time inclusive_min_time,
-                                               base::Time exclusive_max_time,
-                                               int max_clusters);
+  std::vector<ClusterId> GetMostRecentClusterIds(base::Time inclusive_min_time,
+                                                 base::Time exclusive_max_time,
+                                                 int max_clusters);
 
   // Get `VisitID`s in a cluster.
-  std::vector<VisitID> GetVisitIdsInCluster(int64_t cluster_id);
+  std::vector<VisitID> GetVisitIdsInCluster(ClusterId cluster_id);
 
   // Get a `ClusterVisit`.
   ClusterVisit GetClusterVisit(VisitID visit_id);
@@ -126,28 +127,24 @@ class VisitAnnotationsDatabase {
 
   // Return the ID of the cluster containing `visit_id`. Returns 0 if `visit_id`
   // is not in a cluster.`
-  int64_t GetClusterIdContainingVisit(VisitID visit_id);
+  ClusterId GetClusterIdContainingVisit(VisitID visit_id);
 
   // Return the ID of the cluster that has `originator_cache_guid` and
   // `originator_cluster_id`. Returns 0 if a cluster does not have those
   // details.
-  int64_t GetClusterIdForSyncedDetails(const std::string& originator_cache_guid,
-                                       int64_t originator_cluster_id);
+  ClusterId GetClusterIdForSyncedDetails(
+      const std::string& originator_cache_guid,
+      ClusterId originator_cluster_id);
 
   // Return the keyword data associated with `cluster_id`.
   base::flat_map<std::u16string, ClusterKeywordData> GetClusterKeywords(
-      int64_t cluster_id);
+      ClusterId cluster_id);
 
   // Sets scores of cluster visits to 0 to hide them from the webUI.
   void HideVisits(const std::vector<VisitID>& visit_ids);
 
   // Delete `Cluster`s from the table.
-  void DeleteClusters(const std::vector<int64_t>& cluster_ids);
-
-  // Update the interaction state of cluster visits.
-  void UpdateVisitsInteractionState(
-      const std::vector<VisitID>& visit_ids,
-      ClusterVisit::InteractionState interaction_state);
+  void DeleteClusters(const std::vector<ClusterId>& cluster_ids);
 
   // Converts categories to something that can be stored in the database eg:
   // "mid1:score1,mid2:score2". As the serialized format is already being
@@ -159,7 +156,7 @@ class VisitAnnotationsDatabase {
   // the serialized format is already being synced, the implementation of these
   // functions should not be changed.
   static std::vector<VisitContentModelAnnotations::Category>
-  GetCategoriesFromStringColumn(const std::string& column_value);
+  GetCategoriesFromStringColumn(std::string_view column_value);
 
   // Serializes a vector of strings into a string separated by null character
   // that can be stored in the db. As the serialized format is already being
@@ -171,7 +168,7 @@ class VisitAnnotationsDatabase {
   // of strings. As the serialized format is already being synced, the
   // implementation of these functions should not be changed.
   static std::vector<std::string> DeserializeFromStringColumn(
-      const std::string& column_value);
+      std::string_view column_value);
 
  protected:
   // Returns the database for the functions in this interface.

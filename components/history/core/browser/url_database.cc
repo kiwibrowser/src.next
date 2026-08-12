@@ -55,7 +55,7 @@ URLDatabase::~URLDatabase() = default;
 bool URLDatabase::FillURLRow(sql::Statement& s, URLRow* i) {
   DCHECK(i);
 
-  GURL url(s.ColumnString(1));
+  GURL url(s.ColumnStringView(1));
   if (!url.is_valid()) {
     return false;
   }
@@ -214,7 +214,7 @@ bool URLDatabase::URLTableContainsAutoincrement() {
   if (!statement.Step())
     return false;
 
-  std::string urls_schema = statement.ColumnString(0);
+  std::string_view urls_schema = statement.ColumnStringView(0);
   // We check if the whole schema contains "AUTOINCREMENT", since
   // "AUTOINCREMENT" only can be used for "INTEGER PRIMARY KEY", so we assume no
   // other columns could contain "AUTOINCREMENT".
@@ -434,8 +434,8 @@ URLRows URLDatabase::GetTextMatchesWithAlgorithm(
     GURL gurl(url);
     if (gurl.is_valid()) {
       // Decode punycode to match IDN.
-      std::u16string ascii = base::ASCIIToUTF16(gurl.host());
-      std::u16string utf = url_formatter::IDNToUnicode(gurl.host());
+      std::u16string ascii = base::ASCIIToUTF16(gurl.GetHost());
+      std::u16string utf = url_formatter::IDNToUnicode(gurl.GetHost());
       if (ascii != utf)
         query_parser::QueryParser::ExtractQueryWords(utf, &query_words);
     }
@@ -522,8 +522,7 @@ bool URLDatabase::SetKeywordSearchTermsForURL(URLID url_id,
   statement.BindInt64(0, keyword_id);
   statement.BindInt64(1, url_id);
   statement.BindString16(2, term);
-  statement.BindString16(
-      3, base::i18n::ToLower(base::CollapseWhitespace(term, false)));
+  statement.BindString16(3, NormalizeTerm(term));
   return statement.Run();
 }
 
@@ -535,8 +534,7 @@ bool URLDatabase::GetAggregateURLDataForKeywordSearchTerm(
       "SELECT SUM(u.visit_count), SUM(u.typed_count), MAX(u.last_visit_time) "
       "FROM keyword_search_terms kst JOIN urls u ON kst.url_id = u.id "
       "WHERE kst.normalized_term=? GROUP BY kst.normalized_term"));
-  statement.BindString16(
-      0, base::i18n::ToLower(base::CollapseWhitespace(term, false)));
+  statement.BindString16(0, NormalizeTerm(term));
 
   if (!statement.Step()) {
     return false;

@@ -23,13 +23,12 @@ CSSFontFeatureValuesRule::~CSSFontFeatureValuesRule() = default;
 void CSSFontFeatureValuesRule::setFontFamily(const String& font_family) {
   CSSStyleSheet::RuleMutationScope mutation_scope(this);
 
-  Vector<String> families;
-  font_family.Split(",", families);
+  Vector<StringView> families = StringView(font_family).SplitSkippingEmpty(',');
 
   Vector<AtomicString> filtered_families;
-
-  for (auto family : families) {
-    String stripped = family.StripWhiteSpace();
+  filtered_families.ReserveInitialCapacity(families.size());
+  for (const auto& family : families) {
+    StringView stripped = family.StripWhiteSpace();
     if (!stripped.empty()) {
       filtered_families.push_back(AtomicString(stripped));
     }
@@ -43,33 +42,51 @@ String CSSFontFeatureValuesRule::fontFamily() {
 }
 
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::annotation() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_,
-      font_feature_values_rule_->GetAnnotation());
+  if (!annotation_) {
+    annotation_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_,
+        font_feature_values_rule_->GetAnnotation());
+  }
+  return annotation_.Get();
 }
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::ornaments() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_,
-      font_feature_values_rule_->GetOrnaments());
+  if (!ornaments_) {
+    ornaments_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_,
+        font_feature_values_rule_->GetOrnaments());
+  }
+  return ornaments_.Get();
 }
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::stylistic() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_,
-      font_feature_values_rule_->GetStylistic());
+  if (!stylistic_) {
+    stylistic_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_,
+        font_feature_values_rule_->GetStylistic());
+  }
+  return stylistic_.Get();
 }
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::swash() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_, font_feature_values_rule_->GetSwash());
+  if (!swash_) {
+    swash_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_, font_feature_values_rule_->GetSwash());
+  }
+  return swash_.Get();
 }
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::characterVariant() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_,
-      font_feature_values_rule_->GetCharacterVariant());
+  if (!character_variant_) {
+    character_variant_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_,
+        font_feature_values_rule_->GetCharacterVariant());
+  }
+  return character_variant_.Get();
 }
 CSSFontFeatureValuesMap* CSSFontFeatureValuesRule::styleset() {
-  return MakeGarbageCollected<CSSFontFeatureValuesMap>(
-      this, font_feature_values_rule_,
-      font_feature_values_rule_->GetStyleset());
+  if (!styleset_) {
+    styleset_ = MakeGarbageCollected<CSSFontFeatureValuesMap>(
+        this, font_feature_values_rule_,
+        font_feature_values_rule_->GetStyleset());
+  }
+  return styleset_.Get();
 }
 
 String CSSFontFeatureValuesRule::cssText() const {
@@ -116,11 +133,47 @@ String CSSFontFeatureValuesRule::cssText() const {
 void CSSFontFeatureValuesRule::Reattach(StyleRuleBase* rule) {
   DCHECK(rule);
   font_feature_values_rule_ = To<StyleRuleFontFeatureValues>(rule);
+  if (annotation_) {
+    annotation_->Reattach(font_feature_values_rule_.Get(),
+                          font_feature_values_rule_->GetAnnotation());
+  }
+  if (ornaments_) {
+    ornaments_->Reattach(font_feature_values_rule_.Get(),
+                         font_feature_values_rule_->GetOrnaments());
+  }
+  if (stylistic_) {
+    stylistic_->Reattach(font_feature_values_rule_.Get(),
+                         font_feature_values_rule_->GetStylistic());
+  }
+  if (swash_) {
+    swash_->Reattach(font_feature_values_rule_.Get(),
+                     font_feature_values_rule_->GetSwash());
+  }
+  if (character_variant_) {
+    character_variant_->Reattach(
+        font_feature_values_rule_.Get(),
+        font_feature_values_rule_->GetCharacterVariant());
+  }
+  if (styleset_) {
+    styleset_->Reattach(font_feature_values_rule_.Get(),
+                        font_feature_values_rule_->GetStyleset());
+  }
 }
 
 void CSSFontFeatureValuesRule::Trace(blink::Visitor* visitor) const {
   visitor->Trace(font_feature_values_rule_);
+  visitor->Trace(annotation_);
+  visitor->Trace(ornaments_);
+  visitor->Trace(stylistic_);
+  visitor->Trace(swash_);
+  visitor->Trace(character_variant_);
+  visitor->Trace(styleset_);
   CSSRule::Trace(visitor);
+}
+
+const StyleRuleFontFeatureValues*
+CSSFontFeatureValuesRule::FontFeatureValues() {
+  return font_feature_values_rule_.Get();
 }
 
 }  // namespace blink

@@ -5,14 +5,17 @@
 #include "chrome/browser/extensions/cws_info_service_factory.h"
 
 #include "base/no_destructor.h"
-#include "chrome/browser/extensions/cws_info_service.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
+#include "extensions/browser/cws_info_service.h"
 #include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry_factory.h"
+#include "extensions/browser/pref_names.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -33,15 +36,15 @@ CWSInfoServiceFactory::CWSInfoServiceFactory()
           "CWSInfoService",
           ProfileSelections::Builder()
               .WithRegular(ProfileSelection::kRedirectedToOriginal)
-              // TODO(crbug.com/40257657): Check if this service is needed in
-              // Guest mode.
+              // TODO(crbug.com/40257657): Audit whether these should be
+              // redirected or should have their own instance.
               .WithGuest(ProfileSelection::kRedirectedToOriginal)
               // TODO(crbug.com/41488885): Check if this service is needed for
               // Ash Internals.
               .WithAshInternals(ProfileSelection::kRedirectedToOriginal)
               .Build()) {
-  DependsOn(extensions::ExtensionPrefsFactory::GetInstance());
-  DependsOn(extensions::ExtensionRegistryFactory::GetInstance());
+  DependsOn(ExtensionPrefsFactory::GetInstance());
+  DependsOn(ExtensionRegistryFactory::GetInstance());
 }
 
 std::unique_ptr<KeyedService>
@@ -60,8 +63,9 @@ bool CWSInfoServiceFactory::ServiceIsNULLWhileTesting() const {
 
 void CWSInfoServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterTimePref(prefs::kCWSInfoTimestamp, base::Time());
-  registry->RegisterTimePref(prefs::kCWSInfoFetchErrorTimestamp, base::Time());
+  registry->RegisterTimePref(pref_names::kCWSInfoTimestamp, base::Time());
+  registry->RegisterTimePref(pref_names::kCWSInfoFetchErrorTimestamp,
+                             base::Time());
 }
 
 }  // namespace extensions

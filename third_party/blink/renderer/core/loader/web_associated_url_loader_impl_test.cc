@@ -28,11 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include <memory>
 
 #include "build/build_config.h"
@@ -83,8 +78,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
         full_url, file_path, response);
   }
 
-  KURL RegisterMockedUrl(const std::string& url_root,
-                         const WTF::String& filename) {
+  KURL RegisterMockedUrl(const std::string& url_root, const String& filename) {
     WebURLResponse response;
     response.SetMimeType("text/html");
     KURL url = ToKURL(url_root + filename.Utf8());
@@ -103,8 +97,8 @@ class WebAssociatedURLLoaderTest : public testing::Test,
         "visible_iframe.html",
         "zero_sized_iframe.html",
     };
-    for (size_t i = 0; i < std::size(iframe_support_files); ++i) {
-      RegisterMockedUrl(url_root, iframe_support_files[i]);
+    for (const auto*& iframe_support_file : iframe_support_files) {
+      RegisterMockedUrl(url_root, iframe_support_file);
     }
 
     frame_test_helpers::LoadFrame(MainFrame(), url.GetString().Utf8().c_str());
@@ -169,7 +163,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     WebURLRequest request(ToKURL("http://www.test.com/success.html"));
     request.SetMode(network::mojom::RequestMode::kSameOrigin);
     request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
-    request.SetHttpMethod(WebString::FromUTF8(unsafe_method));
+    request.SetHttpMethod(WebString::FromUtf8(unsafe_method));
     WebAssociatedURLLoaderOptions options;
     options.untrusted_http = true;
     CheckFails(request, options);
@@ -183,12 +177,12 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     WebURLRequest request(ToKURL("http://www.test.com/success.html"));
     request.SetMode(network::mojom::RequestMode::kSameOrigin);
     request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
-    if (EqualIgnoringASCIICase(WebString::FromUTF8(header_field), "referer")) {
-      request.SetReferrerString(WebString::FromUTF8(header_value));
+    if (EqualIgnoringAsciiCase(WebString::FromUtf8(header_field), "referer")) {
+      request.SetReferrerString(WebString::FromUtf8(header_value));
       request.SetReferrerPolicy(network::mojom::ReferrerPolicy::kDefault);
     } else {
-      request.SetHttpHeaderField(WebString::FromUTF8(header_field),
-                                 WebString::FromUTF8(header_value));
+      request.SetHttpHeaderField(WebString::FromUtf8(header_field),
+                                 WebString::FromUtf8(header_value));
     }
 
     WebAssociatedURLLoaderOptions options;
@@ -223,7 +217,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     request.SetMode(network::mojom::RequestMode::kCors);
     request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
 
-    WebString header_name_string(WebString::FromUTF8(header_name));
+    WebString header_name_string(WebString::FromUtf8(header_name));
     expected_response_ = WebURLResponse();
     expected_response_.SetMimeType("text/html");
     expected_response_.SetHttpStatusCode(200);
@@ -538,7 +532,7 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginHeaderAllowResponseHeaders) {
   request.SetMode(network::mojom::RequestMode::kCors);
   request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
 
-  WebString header_name_string(WebString::FromUTF8("non-safelisted"));
+  WebString header_name_string(WebString("non-safelisted"));
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);

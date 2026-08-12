@@ -26,8 +26,7 @@
 #include "third_party/blink/renderer/core/loader/document_load_timing.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "base/time/default_clock.h"
-#include "base/time/default_tick_clock.h"
+#include "services/network/public/mojom/timing_allow_origin.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -41,24 +40,13 @@ DocumentLoadTiming::DocumentLoadTiming(DocumentLoader& document_loader)
     : user_timing_mark_fully_loaded_(std::nullopt),
       user_timing_mark_fully_visible_(std::nullopt),
       user_timing_mark_interactive_(std::nullopt),
-      clock_(base::DefaultClock::GetInstance()),
-      tick_clock_(base::DefaultTickClock::GetInstance()),
       document_loader_(document_loader),
-      redirect_count_(0),
-      has_cross_origin_redirect_(false),
-      can_request_from_previous_document_(false) {}
+      document_load_timing_values_(
+          MakeGarbageCollected<DocumentLoadTimingValues>()) {}
 
 void DocumentLoadTiming::Trace(Visitor* visitor) const {
   visitor->Trace(document_loader_);
-}
-
-void DocumentLoadTiming::SetTickClockForTesting(
-    const base::TickClock* tick_clock) {
-  tick_clock_ = tick_clock;
-}
-
-void DocumentLoadTiming::SetClockForTesting(const base::Clock* clock) {
-  clock_ = clock;
+  visitor->Trace(document_load_timing_values_);
 }
 
 // TODO(csharrison): Remove the null checking logic in a later patch.
@@ -74,10 +62,10 @@ void DocumentLoadTiming::NotifyDocumentTimingChanged() {
 void DocumentLoadTiming::EnsureReferenceTimesSet() {
   if (reference_wall_time_.is_zero()) {
     reference_wall_time_ =
-        base::Seconds(clock_->Now().InSecondsFSinceUnixEpoch());
+        base::Seconds(base::Time::Now().InSecondsFSinceUnixEpoch());
   }
   if (reference_monotonic_time_.is_null())
-    reference_monotonic_time_ = tick_clock_->NowTicks();
+    reference_monotonic_time_ = base::TimeTicks::Now();
 }
 
 base::TimeDelta DocumentLoadTiming::MonotonicTimeToZeroBasedDocumentTime(
@@ -129,10 +117,9 @@ void DocumentLoadTiming::WriteNavigationStartDataIntoTracedValue(
   dict.Add("documentLoaderURL", document_loader_
                                     ? document_loader_->Url().GetString()
                                     : g_empty_string);
-  dict.Add("isLoadingMainFrame",
-           GetFrame() ? GetFrame()->IsMainFrame() : false);
+  dict.Add("isLoadingMainFrame", GetFrame() && GetFrame()->IsMainFrame());
   dict.Add("isOutermostMainFrame",
-           GetFrame() ? GetFrame()->IsOutermostMainFrame() : false);
+           GetFrame() && GetFrame()->IsOutermostMainFrame());
   dict.Add("navigationId", IdentifiersFactory::LoaderId(document_loader_));
 }
 
@@ -196,7 +183,7 @@ void DocumentLoadTiming::NotifyCustomUserTimingMarkAdded(
 
 void DocumentLoadTiming::AddRedirect(const KURL& redirecting_url,
                                      const KURL& redirected_url) {
-  redirect_count_++;
+  document_load_timing_values_->redirect_count++;
 
   // Note: we update load timings for redirects in WebDocumentLoaderImpl::
   // UpdateNavigation, hence updating no timings here.
@@ -205,28 +192,37 @@ void DocumentLoadTiming::AddRedirect(const KURL& redirecting_url,
   // timing information.
   scoped_refptr<const SecurityOrigin> redirected_security_origin =
       SecurityOrigin::Create(redirected_url);
-  has_cross_origin_redirect_ |=
+  document_load_timing_values_->has_cross_origin_redirect |=
       !redirected_security_origin->CanRequest(redirecting_url);
 }
 
+// https://fetch.spec.whatwg.org/#append-to-a-requests-navigation-timing-allow-check-list
+void DocumentLoadTiming::AppendToNavigationTimingAllowCheckList(
+    network::mojom::blink::TimingAllowOriginPtr tao) {
+  // `tao` is this redirect response's parsed `Timing-Allow-Origin` value, or
+  // null when the response had no such header (treated as an empty list).
+  document_load_timing_values_->navigation_timing_allow_check_list.push_back(
+      std::move(tao));
+}
+
 void DocumentLoadTiming::SetRedirectStart(base::TimeTicks redirect_start) {
-  redirect_start_ = redirect_start;
+  document_load_timing_values_->redirect_start = redirect_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectStart",
-                                   redirect_start_, "frame",
+                                   redirect_start, "frame",
                                    GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetRedirectEnd(base::TimeTicks redirect_end) {
-  redirect_end_ = redirect_end;
+  document_load_timing_values_->redirect_end = redirect_end;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectEnd",
-                                   redirect_end_, "frame",
+                                   redirect_end, "frame",
                                    GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetUnloadEventStart(base::TimeTicks start_time) {
-  unload_event_start_ = start_time;
+  document_load_timing_values_->unload_event_start = start_time;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "unloadEventStart",
                                    start_time, "frame",
                                    GetFrameIdForTracing(GetFrame()));
@@ -234,7 +230,7 @@ void DocumentLoadTiming::SetUnloadEventStart(base::TimeTicks start_time) {
 }
 
 void DocumentLoadTiming::SetUnloadEventEnd(base::TimeTicks end_time) {
-  unload_event_end_ = end_time;
+  document_load_timing_values_->unload_event_end = end_time;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "unloadEventEnd",
                                    end_time, "frame",
                                    GetFrameIdForTracing(GetFrame()));
@@ -242,51 +238,52 @@ void DocumentLoadTiming::SetUnloadEventEnd(base::TimeTicks end_time) {
 }
 
 void DocumentLoadTiming::MarkFetchStart() {
-  SetFetchStart(tick_clock_->NowTicks());
+  SetFetchStart(base::TimeTicks::Now());
 }
 
 void DocumentLoadTiming::SetFetchStart(base::TimeTicks fetch_start) {
-  fetch_start_ = fetch_start;
+  document_load_timing_values_->fetch_start = fetch_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "fetchStart",
-                                   fetch_start_, "frame",
+                                   fetch_start, "frame",
                                    GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetResponseEnd(base::TimeTicks response_end) {
-  response_end_ = response_end;
+  document_load_timing_values_->response_end = response_end;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "responseEnd",
-                                   response_end_, "frame",
+                                   response_end, "frame",
                                    GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::MarkLoadEventStart() {
-  load_event_start_ = tick_clock_->NowTicks();
-  TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "loadEventStart",
-                                   load_event_start_, "frame",
-                                   GetFrameIdForTracing(GetFrame()));
+  document_load_timing_values_->load_event_start = base::TimeTicks::Now();
+  TRACE_EVENT_MARK_WITH_TIMESTAMP1(
+      "blink.user_timing", "loadEventStart",
+      document_load_timing_values_->load_event_start, "frame",
+      GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::MarkLoadEventEnd() {
-  load_event_end_ = tick_clock_->NowTicks();
+  document_load_timing_values_->load_event_end = base::TimeTicks::Now();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "loadEventEnd",
-                                   load_event_end_, "frame",
-                                   GetFrameIdForTracing(GetFrame()));
+                                   document_load_timing_values_->load_event_end,
+                                   "frame", GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::MarkRedirectEnd() {
-  redirect_end_ = tick_clock_->NowTicks();
+  document_load_timing_values_->redirect_end = base::TimeTicks::Now();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectEnd",
-                                   redirect_end_, "frame",
-                                   GetFrameIdForTracing(GetFrame()));
+                                   document_load_timing_values_->redirect_end,
+                                   "frame", GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::MarkCommitNavigationEnd() {
-  commit_navigation_end_ = tick_clock_->NowTicks();
+  commit_navigation_end_ = base::TimeTicks::Now();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "commitNavigationEnd",
                                    commit_navigation_end_, "frame",
                                    GetFrameIdForTracing(GetFrame()));
@@ -294,22 +291,22 @@ void DocumentLoadTiming::MarkCommitNavigationEnd() {
 }
 
 void DocumentLoadTiming::SetActivationStart(base::TimeTicks activation_start) {
-  activation_start_ = activation_start;
+  document_load_timing_values_->activation_start = activation_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "activationStart",
-                                   activation_start_, "frame",
+                                   activation_start, "frame",
                                    GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetCriticalCHRestart(
     base::TimeTicks critical_ch_restart) {
-  critical_ch_restart_ = critical_ch_restart;
+  document_load_timing_values_->critical_ch_restart = critical_ch_restart;
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetRandomizedConfidence(
     const std::optional<RandomizedConfidenceValue>& value) {
-  randomized_confidence_ = value;
+  document_load_timing_values_->randomized_confidence = value;
   NotifyDocumentTimingChanged();
 }
 

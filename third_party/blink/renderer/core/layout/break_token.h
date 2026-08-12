@@ -41,13 +41,6 @@ class CORE_EXPORT BreakToken : public GarbageCollected<BreakToken> {
   bool IsBlockType() const { return Type() == kBlockBreakToken; }
   bool IsInlineType() const { return Type() == kInlineBreakToken; }
 
-  // Returns the node associated with this break token. A break token cannot be
-  // used with any other node.
-  LayoutInputNode InputNode() const {
-    return LayoutInputNode::Create(
-        box_.Get(), static_cast<LayoutInputNode::LayoutInputNodeType>(type_));
-  }
-
   // Return true if this break token is for a node that's being resumed in a
   // parallel flow.
   bool IsInParallelFlow() const;
@@ -62,11 +55,8 @@ class CORE_EXPORT BreakToken : public GarbageCollected<BreakToken> {
 
  protected:
   BreakToken(BreakTokenType type, LayoutInputNode node, unsigned flags = 0)
-      : box_(node.GetLayoutBox()),
-        type_(type),
-#if DCHECK_IS_ON()
+      : type_(type),
         is_repeated_actual_break_(false),
-#endif
         flags_(flags),
         is_break_before_(false),
         is_forced_break_(false),
@@ -78,25 +68,19 @@ class CORE_EXPORT BreakToken : public GarbageCollected<BreakToken> {
   }
 
  private:
-  // Because |LayoutInputNode| has a pointer and 1 bit flag, and it's fast to
-  // re-construct, keep |LayoutBox| to save the memory consumed by alignment.
-  Member<LayoutBox> box_;
-
   unsigned type_ : 1;
 
  protected:
-#if DCHECK_IS_ON()
   // If true, this is a break token for an actual break in a cloned fragment. In
   // such cases, only a few of the members here have been set up correctly, and
   // the rest should therefore not be accessed. Such break tokens are never used
   // in layout, only by pre-paint / paint.
   unsigned is_repeated_actual_break_ : 1;
-#endif
 
   // The following bitfields are only to be used by InlineBreakToken (it's
   // defined here to save memory, since that class has no bitfields).
 
-  const unsigned flags_ : 6;  // InlineBreakTokenFlags
+  const unsigned flags_ : 7;  // InlineBreakTokenFlags
 
   // The following bitfields are only to be used by BlockBreakToken (it's
   // defined here to save memory, since that class has no bitfields).

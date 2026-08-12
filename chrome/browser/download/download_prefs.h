@@ -175,6 +175,11 @@ class DownloadPrefs {
   bool should_open_pdf_in_system_reader_;
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS)
+  class DriveHandler;
+  std::unique_ptr<DriveHandler> drive_handler_;
+#endif
+
   // If this is true, SanitizeDownloadTargetPath will always return the passed
   // path verbatim.
   bool skip_sanitize_download_target_path_for_testing_ = false;

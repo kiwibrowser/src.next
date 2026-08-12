@@ -6,23 +6,26 @@ package org.chromium.content.browser;
 
 import android.content.res.Configuration;
 
-import org.chromium.base.ActivityState;
 import org.chromium.base.ObserverList;
 import org.chromium.base.UserData;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
-import org.chromium.content.browser.webcontents.WebContentsImpl.UserDataFactory;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContents.UserDataFactory;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayAndroid.DisplayAndroidObserver;
 
 /** Manages {@link WindowEventObserver} instances used for WebContents. */
+@NullMarked
 public final class WindowEventObserverManager implements DisplayAndroidObserver, UserData {
     private final ObserverList<WindowEventObserver> mWindowEventObservers = new ObserverList<>();
 
-    private WindowAndroid mWindowAndroid;
-    private ViewEventSinkImpl mViewEventSink;
+    private @Nullable WindowAndroid mWindowAndroid;
+    private final ViewEventSinkImpl mViewEventSink;
     private boolean mAttachedToWindow;
+    private @Nullable DisplayAndroid mObservedDisplay;
 
     // The cache of device's current orientation and DIP scale factor.
     private int mRotation;
@@ -34,9 +37,14 @@ public final class WindowEventObserverManager implements DisplayAndroidObserver,
     }
 
     public static WindowEventObserverManager from(WebContents webContents) {
-        return ((WebContentsImpl) webContents)
-                .getOrSetUserData(
-                        WindowEventObserverManager.class, UserDataFactoryLazyHolder.INSTANCE);
+        WindowEventObserverManager ret = maybeFrom(webContents);
+        assert ret != null;
+        return ret;
+    }
+
+    public static @Nullable WindowEventObserverManager maybeFrom(WebContents webContents) {
+        return webContents.getOrSetUserData(
+                WindowEventObserverManager.class, UserDataFactoryLazyHolder.INSTANCE);
     }
 
     private WindowEventObserverManager(WebContents webContents) {
@@ -96,7 +104,7 @@ public final class WindowEventObserverManager implements DisplayAndroidObserver,
      * Called when {@link WindowAndroid} for WebContents is updated.
      * @param windowAndroid A new WindowAndroid object.
      */
-    public void onWindowAndroidChanged(WindowAndroid windowAndroid) {
+    public void onWindowAndroidChanged(@Nullable WindowAndroid windowAndroid) {
         if (windowAndroid == mWindowAndroid) return;
         removeUiObservers();
 
@@ -109,6 +117,9 @@ public final class WindowEventObserverManager implements DisplayAndroidObserver,
     }
 
     public void onConfigurationChanged(Configuration newConfig) {
+        // Configuration change (e.g. folding/unfolding) can change the display instance
+        // associated with the window. Update the observer if needed.
+        addDisplayAndroidObserverIfNeeded();
         for (WindowEventObserver observer : mWindowEventObservers) {
             observer.onConfigurationChanged(newConfig);
         }
@@ -123,19 +134,25 @@ public final class WindowEventObserverManager implements DisplayAndroidObserver,
     private void addDisplayAndroidObserverIfNeeded() {
         if (!mAttachedToWindow || mWindowAndroid == null) return;
         DisplayAndroid display = mWindowAndroid.getDisplay();
-        display.addObserver(this);
-        onRotationChanged(display.getRotation());
-        onDIPScaleChanged(display.getDipScale());
+        if (display == mObservedDisplay) return;
+
+        if (mObservedDisplay != null) {
+            mObservedDisplay.removeObserver(this);
+        }
+        mObservedDisplay = display;
+        mObservedDisplay.addObserver(this);
+        onRotationChanged(mObservedDisplay.getRotation());
+        onDIPScaleChanged(mObservedDisplay.getDipScale());
     }
 
     private void addActivityStateObserver() {
         if (!mAttachedToWindow || mWindowAndroid == null) return;
         mWindowAndroid.addActivityStateObserver(mViewEventSink);
-        // Sets the state of ViewEventSink right if activity is already in resumed state.
+        // Sets the state of ViewEventSink right if activity is already in top-resumed state.
         // Can happen when the front tab gets moved down in the stack while Chrome
         // is in background. See https://crbug.com/852336.
-        if (mWindowAndroid.getActivityState() == ActivityState.RESUMED) {
-            mViewEventSink.onActivityResumed();
+        if (mWindowAndroid.isTopResumedActivity()) {
+            mViewEventSink.onActivityTopResumedChanged(true);
         }
     }
 
@@ -150,8 +167,9 @@ public final class WindowEventObserverManager implements DisplayAndroidObserver,
     }
 
     private void removeDisplayAndroidObserver() {
-        if (mWindowAndroid == null) return;
-        mWindowAndroid.getDisplay().removeObserver(this);
+        if (mObservedDisplay == null) return;
+        mObservedDisplay.removeObserver(this);
+        mObservedDisplay = null;
     }
 
     private void removeActivityStateObserver() {

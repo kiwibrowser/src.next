@@ -10,8 +10,10 @@
 #include <optional>
 
 #include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/common/child_process_id.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/mojom/context_type.mojom-forward.h"
@@ -56,7 +58,7 @@ class Extension;
 // 1. This class contains the processes for hosted apps as well as extensions
 //    and packaged apps. Just because a process is present here *does not* mean
 //    it is an "extension process" (e.g., for UI purposes). It may contain only
-//    hosted apps. See crbug.com/102533.
+//    hosted apps. See crbug.com/40107820.
 //
 // 2. An extension can show up in multiple processes. That is why there is no
 //    GetExtensionProcess() method here. There are multiple such cases:
@@ -87,24 +89,35 @@ class ProcessMap : public KeyedService {
 
   void Shutdown() override;
 
-  // Returns the instance for |browser_context|. An instance is shared between
+  // Returns the instance for `browser_context`. An instance is shared between
   // an incognito and a regular context.
   static ProcessMap* Get(content::BrowserContext* browser_context);
 
   size_t size() const { return items_.size(); }
 
-  bool Insert(const ExtensionId& extension_id, int process_id);
+  bool Insert(const ExtensionId& extension_id,
+              content::ChildProcessId process_id);
 
-  int Remove(int process_id);
+  int Remove(content::ChildProcessId process_id);
 
-  bool Contains(const ExtensionId& extension_id, int process_id) const;
+  bool Contains(const ExtensionId& extension_id,
+                content::ChildProcessId process_id) const;
+  bool Contains(content::ChildProcessId process_id) const;
+
+  // TODO(crbug.com/379869738) Remove this override.
   bool Contains(int process_id) const;
+
+  // Returns true if an extension with the given `extension_id` has any
+  // associated tracked process.
+  bool ExtensionHasProcess(const ExtensionId& extension_id) const;
 
   // Returns a pointer to an enabled extension running in `process_id` or
   // nullptr.
-  const Extension* GetEnabledExtensionByProcessID(int process_id) const;
+  const Extension* GetEnabledExtensionByProcessID(
+      content::ChildProcessId process_id) const;
 
-  std::optional<ExtensionId> GetExtensionIdForProcess(int process_id) const;
+  std::optional<ExtensionId> GetExtensionIdForProcess(
+      content::ChildProcessId process_id) const;
 
   // Returns true if the given `process_id` is considered a privileged context
   // for the given `extension`. That is, if it would *probably* correspond to a
@@ -119,7 +132,8 @@ class ProcessMap : public KeyedService {
   // boundary between an extension's offscreen document and other frames, and
   // extension sandboxed frames behave slightly differently than sandboxed pages
   // on the web.
-  bool IsPrivilegedExtensionProcess(const Extension& extension, int process_id);
+  bool IsPrivilegedExtensionProcess(const Extension& extension,
+                                    content::ChildProcessId process_id);
 
   // Returns true if the given `context_type` - associated with the given
   // `extension`, if provided - is valid for the given `process`.
@@ -154,22 +168,22 @@ class ProcessMap : public KeyedService {
                                  const content::RenderProcessHost& process,
                                  mojom::ContextType context_type);
 
-  // Gets the most likely context type for the process with ID |process_id|
-  // which hosts Extension |extension|, if any (may be nullptr). Context types
+  // Gets the most likely context type for the process with ID `process_id`
+  // which hosts Extension `extension`, if any (may be nullptr). Context types
   // are renderer (JavaScript) concepts but the browser can do a decent job in
   // guessing what the process hosts.
   //
-  // For Context types with no |extension| e.g. untrusted WebUIs, we use |url|
-  // which should correspond to the URL where the API is running.|url| could be
+  // For Context types with no `extension` e.g. untrusted WebUIs, we use `url`
+  // which should correspond to the URL where the API is running.`url` could be
   // the frame's URL, the Content Script's URL, or the URL where a Content
-  // Script is running. So |url| should only be used when there is no
-  // |extension|. |url| may be also be nullptr when running in Service Workers.
-  // Currently, the |url| provided by event_router.cc is passed from the
+  // Script is running. So `url` should only be used when there is no
+  // `extension`. `url` may be also be nullptr when running in Service Workers.
+  // Currently, the `url` provided by event_router.cc is passed from the
   // renderer process and therefore can't be fully trusted.
-  // TODO(ortuno): Change call sites to only pass in a URL when |extension| is
+  // TODO(ortuno): Change call sites to only pass in a URL when `extension` is
   // nullptr and only use a URL retrieved from the browser process.
   //
-  // |extension| is the funky part - unfortunately we need to trust the
+  // `extension` is the funky part - unfortunately we need to trust the
   // caller of this method to be correct that indeed the context does feature
   // an extension. This matters for iframes, where an extension could be
   // hosted in another extension's process (privilege level needs to be
@@ -183,8 +197,6 @@ class ProcessMap : public KeyedService {
   //
   // Anyhow, the expected behaviour is:
   //   - For hosted app processes, this will be `kPrivilegedWebPage`.
-  //   - For processes of platform apps running on lock screen, this will be
-  //     `kLockscreenExtension`.
   //   - For other extension processes, this will be `kPrivilegedExtension`.
   //   - For WebUI processes, this will be `kWebUi`.
   //   - For chrome-untrusted:// URLs, this will be a `kUntrustedWebUi`.
@@ -197,21 +209,11 @@ class ProcessMap : public KeyedService {
   //   - For anything else, `kWebPage`.
   virtual mojom::ContextType GetMostLikelyContextType(
       const Extension* extension,
-      int process_id,
+      content::ChildProcessId process_id,
       const GURL* url) const;
 
-  void set_is_lock_screen_context(bool is_lock_screen_context) {
-    is_lock_screen_context_ = is_lock_screen_context;
-  }
-
  private:
-  using ProcessId = int;
-
-  base::flat_map<ProcessId, ExtensionId> items_;
-
-  // Whether the process map belongs to the browser context used on Chrome OS
-  // lock screen.
-  bool is_lock_screen_context_ = false;
+  base::flat_map<content::ChildProcessId, ExtensionId> items_;
 
   raw_ptr<content::BrowserContext> browser_context_;
 };

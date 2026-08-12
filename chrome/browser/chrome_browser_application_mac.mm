@@ -23,8 +23,15 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/native_event_processor_mac.h"
 #include "content/public/browser/native_event_processor_observer_mac.h"
+#include "content/public/browser/scoped_accessibility_mode.h"
 #include "content/public/common/content_features.h"
+#include "ui/accessibility/ax_mode.h"
 #include "ui/base/cocoa/accessibility_focus_overrider.h"
+
+// When enabled, causes sendEvent: to manually forward KeyUp events that have
+// the command modifier to the application's key window instead of to |super|.
+// Used as a killswitch if this has unintended consequences.
+BASE_FEATURE(kForwardCmdKeyUpEventsToWindow, base::FEATURE_ENABLED_BY_DEFAULT);
 
 namespace chrome_browser_application_mac {
 
@@ -37,28 +44,12 @@ void RegisterBrowserCrApp() {
   CHECK([NSApp isKindOfClass:[BrowserCrApplication class]]);
 }
 
-void InitializeHeadlessMode() {
-  // In headless mode the browser window exists but is always hidden, so there
-  // is no point in showing dock icon and menu bar.
-  NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
-}
-
 void Terminate() {
   [NSApp terminate:nil];
 }
 
 void CancelTerminate() {
   [NSApp cancelTerminate:nil];
-}
-
-// A convenience function that activates `mode` if not already active in
-// `state`.
-void AddAccessibilityModeFlagsIfAbsent(
-    content::BrowserAccessibilityState* state,
-    ui::AXMode mode) {
-  if (!state->GetAccessibilityMode().has_mode(mode.flags())) {
-    state->AddAccessibilityModeFlags(mode);
-  }
 }
 
 }  // namespace chrome_browser_application_mac
@@ -68,7 +59,7 @@ namespace {
 // Calling -[NSEvent description] is rather slow to build up the event
 // description. The description is stored in a crash key to aid debugging, so
 // this helper function constructs a shorter, but still useful, description.
-// See <https://crbug.com/770405>.
+// See <https://crbug.com/40542574>.
 std::string DescriptionForNSEvent(NSEvent* event) {
   std::string desc = base::StringPrintf(
       "NSEvent type=%ld modifierFlags=0x%lx locationInWindow=(%g,%g)",
@@ -78,7 +69,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
     case NSEventTypeKeyDown:
     case NSEventTypeKeyUp: {
       // Some NSEvents return a string with NUL in event.characters, see
-      // <https://crbug.com/826908>. To make matters worse, in rare cases,
+      // <https://crbug.com/41379586>. To make matters worse, in rare cases,
       // NSEvent.characters or NSEvent.charactersIgnoringModifiers can throw an
       // NSException complaining that "TSMProcessRawKeyCode failed". Since we're
       // trying to gather a crash key here, if that exception happens, just
@@ -144,7 +135,10 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 @implementation BrowserCrApplication {
   base::ObserverList<content::NativeEventProcessorObserver>::Unchecked
       _observers;
-  BOOL _handlingSendEvent;
+  std::unique_ptr<content::ScopedAccessibilityMode>
+      _scoped_accessibility_mode_voiceover;
+  std::unique_ptr<content::ScopedAccessibilityMode>
+      _scoped_accessibility_mode_general;
 }
 
 + (void)initialize {
@@ -154,6 +148,14 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   InstallObjcExceptionPreprocessor();
 
   cocoa_l10n_util::ApplyForcedRTL();
+}
+
+- (void)orderFrontCharacterPalette:sender {
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:@"ChromeWillOrderFrontCharacterPalette"
+                    object:nil];
+
+  [super orderFrontCharacterPalette:sender];
 }
 
 // Initialize NSApplication using the custom subclass.  Check whether NSApp
@@ -200,8 +202,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   // BrowserAccessibilityStateImplMac. The context is the browser's
   // global accessibility object, which we must check to ensure we're acting
   // on a notification we set up (vs. NSApplication, say).
-  if (_sonomaAccessibilityRefinementsAreActive &&
-      [keyPath isEqualToString:@"voiceOverEnabled"] &&
+  if ([keyPath isEqualToString:@"voiceOverEnabled"] &&
       context == content::BrowserAccessibilityState::GetInstance()) {
     NSNumber* newValueNumber = [change objectForKey:NSKeyValueChangeNewKey];
 
@@ -318,97 +319,21 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 // NSApplication event loop, so final post- MessageLoop::Run() work is done
 // before exiting.
 - (void)terminate:(id)sender {
-  [AppController.sharedController tryToTerminateApplication:self];
+  [AppController.sharedController tryToTerminateApplication];
   // Return, don't exit. The application is responsible for exiting on its own.
 }
 
 - (void)cancelTerminate:(id)sender {
-  [AppController.sharedController stopTryingToTerminateApplication:self];
+  [AppController.sharedController stopTryingToTerminateApplication];
 }
 
-- (NSEvent*)nextEventMatchingMask:(NSEventMask)mask
-                        untilDate:(NSDate*)expiration
-                           inMode:(NSString*)mode
-                          dequeue:(BOOL)dequeue {
-  __block NSEvent* event = nil;
-  base::apple::CallWithEHFrame(^{
-    event = [super nextEventMatchingMask:mask
-                               untilDate:expiration
-                                  inMode:mode
-                                 dequeue:dequeue];
-  });
-  return event;
-}
-
-- (BOOL)sendAction:(SEL)anAction to:(id)aTarget from:(id)sender {
-  // The Dock menu contains an automagic section where you can select
-  // amongst open windows.  If a window is closed via JavaScript while
-  // the menu is up, the menu item for that window continues to exist.
-  // When a window is selected this method is called with the
-  // now-freed window as |aTarget|.  Short-circuit the call if
-  // |aTarget| is not a valid window.
-  if (anAction == @selector(_selectWindow:)) {
-    // Not using -[NSArray containsObject:] because |aTarget| may be a
-    // freed object.
-    BOOL found = NO;
-    for (NSWindow* window in [self windows]) {
-      if (window == aTarget) {
-        found = YES;
-        break;
-      }
-    }
-    if (!found) {
-      return NO;
-    }
-  }
-
-  // When a Cocoa control is wired to a freed object, we get crashers
-  // in the call to |super| with no useful information in the
-  // backtrace.  Attempt to add some useful information.
-
-  // If the action is something generic like -commandDispatch:, then
-  // the tag is essential.
-  NSInteger tag = 0;
-  if ([sender isKindOfClass:[NSControl class]]) {
-    tag = [sender tag];
-    if (tag == 0 || tag == -1) {
-      tag = [sender selectedTag];
-    }
-  } else if ([sender isKindOfClass:[NSMenuItem class]]) {
-    tag = [sender tag];
-  }
-
-  NSString* actionString = NSStringFromSelector(anAction);
-  std::string value = base::StringPrintf("%s tag %ld sending %s to %p",
-      [[sender className] UTF8String],
-      static_cast<long>(tag),
-      [actionString UTF8String],
-      aTarget);
-
-  static crash_reporter::CrashKeyString<256> sendActionKey("sendaction");
-  crash_reporter::ScopedCrashKeyString scopedKey(&sendActionKey, value);
-
-  __block BOOL rv;
-  base::apple::CallWithEHFrame(^{
-    rv = [super sendAction:anAction to:aTarget from:sender];
-  });
-  return rv;
-}
-
-- (BOOL)isHandlingSendEvent {
-  return _handlingSendEvent;
-}
-
-- (void)setHandlingSendEvent:(BOOL)handlingSendEvent {
-  _handlingSendEvent = handlingSendEvent;
-}
 
 - (void)sendEvent:(NSEvent*)event {
   TRACE_EVENT0("toplevel", "BrowserCrApplication::sendEvent");
 
-  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/1039833.
-  TRACE_EVENT_INSTANT1("toplevel", "KeyWindow", TRACE_EVENT_SCOPE_THREAD,
-                       "KeyWin", [[NSApp keyWindow] windowNumber]);
+  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/40113768.
+  TRACE_EVENT_INSTANT("toplevel", "KeyWindow", "KeyWin",
+                      [[NSApp keyWindow] windowNumber]);
 
   static crash_reporter::CrashKeyString<256> nseventKey("nsevent");
   crash_reporter::ScopedCrashKeyString scopedKey(&nseventKey,
@@ -431,11 +356,25 @@ std::string DescriptionForNSEvent(NSEvent* event) {
     base::mac::ScopedSendingEvent sendingEventScoper;
     content::ScopedNotifyNativeEventProcessorObserver scopedObserverNotifier(
         &self->_observers, event);
-    // Mac Eisu and Kana keydown events are by default swallowed by sendEvent
-    // and sent directly to IME, which prevents ui keydown events from firing.
-    // These events need to be sent to [NSApp keyWindow] for handling.
+
+    BOOL sendEventToKeyWindow = NO;
     if (event.type == NSEventTypeKeyDown &&
         (event.keyCode == kVK_JIS_Eisu || event.keyCode == kVK_JIS_Kana)) {
+      // Mac Eisu and Kana keydown events are by default swallowed by sendEvent
+      // and sent directly to IME, which prevents ui keydown events from firing.
+      // These events need to be sent to [NSApp keyWindow] for handling.
+      sendEventToKeyWindow = YES;
+    } else if (event.type == NSEventTypeKeyUp &&
+               event.modifierFlags & NSEventModifierFlagCommand &&
+               base::FeatureList::IsEnabled(kForwardCmdKeyUpEventsToWindow)) {
+      // The base NSApplication implementation of sendEvent: swallows keyUp
+      // events if the command modifier is present. We work around this by
+      // forwarding them to [NSApp keyWindow] to ensure all keyUp events are
+      // reported and handled (crbug.com/407598429, crbug.com/438807261).
+      sendEventToKeyWindow = YES;
+    }
+
+    if (sendEventToKeyWindow) {
       [NSApp.keyWindow sendEvent:event];
     } else {
       [super sendEvent:event];
@@ -446,13 +385,16 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 // Accessibility Support
 
 - (void)enableScreenReaderCompleteMode:(BOOL)enable {
-  content::BrowserAccessibilityState* accessibility_state =
-      content::BrowserAccessibilityState::GetInstance();
-
   if (enable) {
-    accessibility_state->OnScreenReaderDetected();
+    if (!_scoped_accessibility_mode_voiceover) {
+      _scoped_accessibility_mode_voiceover =
+          content::BrowserAccessibilityState::GetInstance()
+              ->CreateScopedModeForProcess(ui::kAXModeComplete |
+                                           ui::AXMode::kFromPlatform |
+                                           ui::AXMode::kScreenReader);
+    }
   } else {
-    accessibility_state->OnScreenReaderStopped();
+    _scoped_accessibility_mode_voiceover.reset();
   }
 }
 
@@ -524,22 +466,10 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 
 - (void)accessibilitySetValue:(id)value forAttribute:(NSString*)attribute {
   // This is an undocumented attribute that's set when VoiceOver is turned
-  // on/off.
+  // on/off. We track VoiceOver state changes using KVO, but monitor this
+  // attribute in case other ATs use it to request accessibility activation.
   if ([attribute isEqualToString:@"AXEnhancedUserInterface"]) {
-    if (_sonomaAccessibilityRefinementsAreActive) {
-      // We no longer rely on this signal for VoiceOver state changes, but we
-      // pay attention to it in case other applications use it to request
-      // accessibility activation.
-      [self enableScreenReaderCompleteModeAfterDelay:[value boolValue]];
-    } else {
-      content::BrowserAccessibilityState* accessibility_state =
-          content::BrowserAccessibilityState::GetInstance();
-      if ([value boolValue]) {
-        accessibility_state->OnScreenReaderDetected();
-      } else {
-        accessibility_state->OnScreenReaderStopped();
-      }
-    }
+    [self enableScreenReaderCompleteModeAfterDelay:[value boolValue]];
   }
   return [super accessibilitySetValue:value forAttribute:attribute];
 }
@@ -555,19 +485,15 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   // recommends turning on a11y when an AT accesses the 'accessibilityRole'
   // property. This function is accessed frequently, so we only change the
   // accessibility state when accessibility is already disabled.
-  content::BrowserAccessibilityState* accessibility_state =
-      content::BrowserAccessibilityState::GetInstance();
-
-  if (_sonomaAccessibilityRefinementsAreActive) {
-    if (!_voiceOverEnabled) {
-      chrome_browser_application_mac::AddAccessibilityModeFlagsIfAbsent(
-          accessibility_state, ui::AXMode::kNativeAPIs);
-    }
-  } else {
-    if (!accessibility_state->GetAccessibilityMode().has_mode(
-            ui::kAXModeBasic.flags())) {
-      accessibility_state->AddAccessibilityModeFlags(ui::kAXModeBasic);
-    }
+  if (!_scoped_accessibility_mode_general &&
+      !_scoped_accessibility_mode_voiceover) {
+    ui::AXMode target_mode = _sonomaAccessibilityRefinementsAreActive
+                                 ? ui::AXMode::kNativeAPIs
+                                 : ui::kAXModeBasic;
+    _scoped_accessibility_mode_general =
+        content::BrowserAccessibilityState::GetInstance()
+            ->CreateScopedModeForProcess(target_mode |
+                                         ui::AXMode::kFromPlatform);
   }
 
   return [super accessibilityRole];

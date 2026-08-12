@@ -7,6 +7,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/layout/constraint_space.h"
+#include "third_party/blink/renderer/core/layout/gap/gap_geometry.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
@@ -20,11 +21,8 @@ class BreakToken;
 class LayoutBlockFlow;
 class PhysicalBoxFragment;
 
-// Base class for all LayoutNG Algorithms unit test classes.
-typedef bool TestParamLayoutNG;
-class BaseLayoutAlgorithmTest
-    : public testing::WithParamInterface<TestParamLayoutNG>,
-      public RenderingTest {
+// Base class for all Layout Algorithms unit test classes.
+class BaseLayoutAlgorithmTest : public RenderingTest {
  protected:
   void SetUp() override;
 
@@ -43,6 +41,14 @@ class BaseLayoutAlgorithmTest
   const PhysicalBoxFragment* GetBoxFragmentByElementId(const char*);
 
   static const PhysicalBoxFragment* CurrentFragmentFor(const LayoutBlockFlow*);
+
+  // The following are for the optimized version of GapDecorations. Once the
+  // optimized version is implemented, we can remove all the other unused
+  // methods from the old version (crbug.com/436140061).
+  static void VerifyMainGaps(const Vector<MainGap>& expected_gaps,
+                             const Vector<MainGap>& gaps);
+  static void VerifyCrossGaps(const Vector<CrossGap>& expected_gaps,
+                              const Vector<CrossGap>& gaps);
 };
 
 class FragmentChildIterator {

@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/system/sys_info.h"
+#include "base/task/execution_fence.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_command_line.h"
@@ -64,13 +65,11 @@ TEST_F(BrowserMainLoopTest, CreateThreadsInSingleProcess) {
 
   BrowserMainLoop browser_main_loop(
       std::move(main_function_params),
-      std::make_unique<base::ThreadPoolInstance::ScopedExecutionFence>());
+      std::make_unique<base::ScopedThreadPoolExecutionFence>());
   browser_main_loop.Init();
   browser_main_loop.CreateMainMessageLoop();
   browser_main_loop.CreateThreads();
-  EXPECT_GE(base::ThreadPoolInstance::Get()
-                ->GetMaxConcurrentNonBlockedTasksWithTraitsDeprecated(
-                    {base::TaskPriority::USER_VISIBLE}),
+  EXPECT_GE(base::ThreadPoolInstance::Get()->GetMaxConcurrentForegroundTasks(),
             static_cast<size_t>(base::SysInfo::NumberOfProcessors() - 1));
   browser_main_loop.ShutdownThreadsAndCleanUp();
   BrowserTaskExecutor::ResetForTesting();
@@ -86,7 +85,7 @@ TEST_F(BrowserMainLoopTest,
 
   BrowserMainLoop browser_main_loop(
       std::move(main_function_params),
-      std::make_unique<base::ThreadPoolInstance::ScopedExecutionFence>());
+      std::make_unique<base::ScopedThreadPoolExecutionFence>());
   browser_main_loop.Init();
   browser_main_loop.CreateMainMessageLoop();
 

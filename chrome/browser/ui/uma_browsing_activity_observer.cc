@@ -15,15 +15,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tabs/tab_group.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
+#include "components/keep_alive_registry/keep_alive_registry.h"
+#include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/tab_groups/tab_group_visual_data.h"
+#include "components/tabs/public/tab_group.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -41,7 +42,8 @@ UMABrowsingActivityObserver* g_uma_browsing_activity_observer_instance =
 void UMABrowsingActivityObserver::Init() {
   DCHECK(!g_uma_browsing_activity_observer_instance);
   // Must be created before any Browsers are.
-  DCHECK_EQ(0U, chrome::GetTotalBrowserCount());
+  DCHECK(!KeepAliveRegistry::GetInstance()->IsOriginRegistered(
+      KeepAliveOrigin::BROWSER));
   g_uma_browsing_activity_observer_instance = new UMABrowsingActivityObserver;
 }
 
@@ -78,8 +80,9 @@ void UMABrowsingActivityObserver::OnAppTerminating() const {
 void UMABrowsingActivityObserver::LogTimeBeforeUpdate() const {
   const base::Time upgrade_detected_time =
       UpgradeDetector::GetInstance()->upgrade_detected_time();
-  if (upgrade_detected_time.is_null())
+  if (upgrade_detected_time.is_null()) {
     return;
+  }
   const base::TimeDelta time_since_upgrade =
       base::Time::Now() - upgrade_detected_time;
   constexpr int kMaxDays = 30;
@@ -97,44 +100,46 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
   int customized_tab_group_count = 0;
   int pinned_tab_count = 0;
 
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    // Record how many tabs each window has open.
-    UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountPerWindow",
-                                browser->tab_strip_model()->count(), 1, 200,
-                                50);
-    TabStripModel* const tab_strip_model = browser->tab_strip_model();
-    tab_count += tab_strip_model->count();
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [&](BrowserWindowInterface* browser) {
+        TabStripModel* const tab_strip_model = browser->GetTabStripModel();
 
-    for (int i = 0; i < tab_strip_model->count(); ++i) {
-      if (tab_strip_model->IsTabPinned(i)) {
-        pinned_tab_count++;
-      }
-    }
+        // Record how many tabs each window has open.
+        UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountPerWindow",
+                                    tab_strip_model->count(), 1, 200, 50);
+        tab_count += tab_strip_model->count();
 
-    if (tab_strip_model->group_model()) {
-      const std::vector<tab_groups::TabGroupId>& groups =
-          tab_strip_model->group_model()->ListTabGroups();
-      tab_group_count += groups.size();
-      for (const tab_groups::TabGroupId& group_id : groups) {
-        const TabGroup* const tab_group =
-            tab_strip_model->group_model()->GetTabGroup(group_id);
-        if (tab_group->IsCustomized() ||
-            !tab_group->visual_data()->title().empty()) {
-          ++customized_tab_group_count;
+        for (const tabs::TabInterface* tab : *tab_strip_model) {
+          if (tab->IsPinned()) {
+            pinned_tab_count++;
+          }
         }
-        if (tab_group->visual_data()->is_collapsed()) {
-          ++collapsed_tab_group_count;
-        }
-      }
-    }
 
-    if (browser->window()->IsActive()) {
-      // Record how many tabs the active window has open.
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountActiveWindow",
-                                  browser->tab_strip_model()->count(), 1, 200,
-                                  50);
-    }
-  }
+        if (tab_strip_model->group_model()) {
+          const std::vector<tab_groups::TabGroupId>& groups =
+              tab_strip_model->group_model()->ListTabGroups();
+          tab_group_count += groups.size();
+          for (const tab_groups::TabGroupId& group_id : groups) {
+            const TabGroup* const tab_group =
+                tab_strip_model->group_model()->GetTabGroup(group_id);
+            if (tab_group->IsCustomized() ||
+                !tab_group->visual_data()->title().empty()) {
+              ++customized_tab_group_count;
+            }
+            if (tab_group->visual_data()->is_collapsed()) {
+              ++collapsed_tab_group_count;
+            }
+          }
+        }
+
+        if (browser->IsActive()) {
+          // Record how many tabs the active window has open.
+          UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountActiveWindow",
+                                      tab_strip_model->count(), 1, 200, 50);
+        }
+
+        return true;
+      });
 
   // Record how many tabs total are open (across all windows).
   UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.TabCountPerLoad", tab_count, 1, 200, 50);
@@ -147,9 +152,10 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
 
   // Record how many tabs are in the current group. Records 0 if the active tab
   // is not in a group.
-  const Browser* current_browser = BrowserList::GetInstance()->GetLastActive();
+  BrowserWindowInterface* const current_browser =
+      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
   if (current_browser) {
-    TabStripModel* const tab_strip_model = current_browser->tab_strip_model();
+    TabStripModel* const tab_strip_model = current_browser->GetTabStripModel();
     if (tab_strip_model->group_model()) {
       const std::optional<tab_groups::TabGroupId> active_group =
           tab_strip_model->GetTabGroupForTab(tab_strip_model->active_index());
@@ -183,8 +189,8 @@ UMABrowsingActivityObserver::TabHelper::~TabHelper() = default;
 void UMABrowsingActivityObserver::TabHelper::NavigationEntryCommitted(
     const content::LoadCommittedDetails& load_details) {
   // This is null in unit tests. Crash reports suggest it's possible for it to
-  // be null in production. See https://crbug.com/1510023 and
-  // https://crbug.com/1523758
+  // be null in production. See https://crbug.com/41482621 and
+  // https://crbug.com/41496706
   if (!g_uma_browsing_activity_observer_instance) {
     return;
   }

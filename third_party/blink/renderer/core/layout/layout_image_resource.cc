@@ -30,10 +30,10 @@
 
 #include "third_party/blink/public/resources/grit/blink_image_resources.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
-#include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/layout/layout_image.h"
+#include "third_party/blink/renderer/core/layout/natural_sizing_info.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
+#include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
 #include "ui/base/resource/resource_scale_factor.h"
 
 namespace blink {
@@ -108,19 +108,30 @@ ResourcePriority LayoutImageResource::ComputeResourcePriority() const {
   return layout_object_->ComputeResourcePriority();
 }
 
-void LayoutImageResource::ResetAnimation() {
+void LayoutImageResource::ResetAnimation(ImageLoader::ResetTimeline timeline) {
   DCHECK(layout_object_);
 
-  if (!cached_image_)
+  if (!cached_image_) {
     return;
+  }
 
-  cached_image_->GetImage()->ResetAnimation();
+  Image* image = cached_image_->GetImage();
+  if (auto* bitmap_image = DynamicTo<BitmapImage>(image);
+      bitmap_image && timeline == ImageLoader::ResetTimeline::kSharedOnly) {
+    bitmap_image->ResetAnimationSharedTimelineOnly();
+  } else {
+    image->ResetAnimation();
+  }
 
   layout_object_->SetShouldDoFullPaintInvalidation();
 }
 
-bool LayoutImageResource::HasIntrinsicSize() const {
-  return !cached_image_ || cached_image_->GetImage()->HasIntrinsicSize();
+void LayoutImageResource::InvalidatePaint() {
+  DCHECK(layout_object_);
+  if (!cached_image_) {
+    return;
+  }
+  layout_object_->SetShouldDoFullPaintInvalidation();
 }
 
 RespectImageOrientationEnum LayoutImageResource::ImageOrientation() const {
@@ -131,53 +142,31 @@ RespectImageOrientationEnum LayoutImageResource::ImageOrientation() const {
       layout_object_->StyleRef().ImageOrientation());
 }
 
-IntrinsicSizingInfo LayoutImageResource::GetNaturalDimensions(
+NaturalSizingInfo LayoutImageResource::GetNaturalDimensions(
     float multiplier) const {
   if (!cached_image_ || !cached_image_->IsSizeAvailable() ||
       !cached_image_->HasImage()) {
-    return IntrinsicSizingInfo::None();
+    return NaturalSizingInfo::None();
   }
-  IntrinsicSizingInfo sizing_info;
+  NaturalSizingInfo sizing_info;
   Image& image = *cached_image_->GetImage();
   if (auto* svg_image = DynamicTo<SVGImage>(image)) {
     const SVGImageViewInfo* view_info = SVGImageForContainer::CreateViewInfo(
         *svg_image, layout_object_->GetNode());
-    if (!SVGImageForContainer::GetNaturalDimensions(*svg_image, view_info,
-                                                    sizing_info)) {
-      sizing_info = IntrinsicSizingInfo::None();
-    }
+    sizing_info =
+        SVGImageForContainer::GetNaturalDimensions(*svg_image, view_info)
+            .value_or(NaturalSizingInfo::None());
   } else {
-    sizing_info.size = gfx::SizeF(image.Size(ImageOrientation()));
-    sizing_info.aspect_ratio = sizing_info.size;
+    sizing_info = NaturalSizingInfo::MakeFixed(
+        gfx::SizeF(image.Size(ImageOrientation())));
   }
-  if (multiplier != 1 && HasIntrinsicSize()) {
+  if (multiplier != 1 && image.HasIntrinsicSize()) {
     sizing_info.size = ApplyClampedZoom(sizing_info.size, multiplier);
   }
   if (auto* layout_image = DynamicTo<LayoutImage>(*layout_object_)) {
     sizing_info.size.Scale(layout_image->ImageDevicePixelRatio());
   }
   return sizing_info;
-}
-
-gfx::SizeF LayoutImageResource::ImageSize(float multiplier) const {
-  if (!cached_image_)
-    return gfx::SizeF();
-  gfx::SizeF size(cached_image_->IntrinsicSize(
-      layout_object_->StyleRef().ImageOrientation()));
-  if (multiplier != 1 && HasIntrinsicSize()) {
-    size = ApplyClampedZoom(size, multiplier);
-  }
-  if (auto* layout_image = DynamicTo<LayoutImage>(*layout_object_)) {
-    size.Scale(layout_image->ImageDevicePixelRatio());
-  }
-  return size;
-}
-
-gfx::SizeF LayoutImageResource::ConcreteObjectSize(
-    float multiplier,
-    const gfx::SizeF& default_object_size) const {
-  IntrinsicSizingInfo sizing_info = GetNaturalDimensions(multiplier);
-  return blink::ConcreteObjectSize(sizing_info, default_object_size);
 }
 
 Image* LayoutImageResource::BrokenImage(double device_pixel_ratio) {
@@ -206,6 +195,10 @@ void LayoutImageResource::UseBrokenImage() {
       ImageResourceContent::CreateLoaded(BrokenImage(DevicePixelRatio()));
   broken_image->SetIsBroken();
   SetImageResource(broken_image);
+}
+
+bool LayoutImageResource::IsCorsSameOrigin() const {
+  return !cached_image_ || cached_image_->IsCorsSameOrigin();
 }
 
 scoped_refptr<Image> LayoutImageResource::GetImage(

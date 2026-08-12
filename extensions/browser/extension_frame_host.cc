@@ -6,11 +6,18 @@
 
 #include <string>
 
+#include "base/check.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/trace_event/typed_macros.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/browser/bad_message.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/message_service_api.h"
 #include "extensions/browser/process_manager.h"
@@ -30,15 +37,52 @@ using perfetto::protos::pbzero::ChromeTrackEvent;
 
 namespace extensions {
 
-ExtensionFrameHost::ExtensionFrameHost(content::WebContents* web_contents)
-    : web_contents_(web_contents), receivers_(web_contents, this) {}
+namespace {
 
-ExtensionFrameHost::~ExtensionFrameHost() = default;
+// Generates a unique activity extra_data string for IPC keepalives originating
+// from a specific frame. This string is passed to `ProcessManager` to ensure
+// that keepalive decrements can only be applied against exact matching
+// increments from this frame.
+std::string GetFrameScopedIpcActivityData(
+    const content::GlobalRenderFrameHostId& frame_id) {
+  return base::StrCat({Activity::kIPC, ":",
+                       base::NumberToString(frame_id.child_id.GetUnsafeValue()),
+                       ":", base::NumberToString(frame_id.frame_routing_id)});
+}
+
+const Extension* GetExtension(ProcessManager* process_manager,
+                              content::RenderFrameHost& frame) {
+  ExtensionHost* extension_host =
+      process_manager->GetBackgroundHostForRenderFrameHost(&frame);
+  if (!extension_host) {
+    return nullptr;
+  }
+  return extension_host->extension();
+}
+
+}  // namespace
+
+ExtensionFrameHost::ExtensionFrameHost(content::WebContents* web_contents)
+    : web_contents_(web_contents),
+      receivers_(web_contents, this),
+      browser_context_(web_contents->GetBrowserContext()) {}
+
+ExtensionFrameHost::~ExtensionFrameHost() {
+  for (const auto& [frame_id, data] : frame_ipc_keepalives_) {
+    ReleaseIpcKeepaliveData(data);
+  }
+  frame_ipc_keepalives_.clear();
+}
 
 void ExtensionFrameHost::BindLocalFrameHost(
     mojo::PendingAssociatedReceiver<mojom::LocalFrameHost> receiver,
     content::RenderFrameHost* render_frame_host) {
   receivers_.Bind(render_frame_host, std::move(receiver));
+}
+
+void ExtensionFrameHost::RenderFrameDeleted(
+    content::RenderFrameHost* render_frame_host) {
+  ReleaseIpcKeepaliveForFrame(render_frame_host->GetGlobalId());
 }
 
 void ExtensionFrameHost::RequestScriptInjectionPermission(
@@ -57,11 +101,10 @@ void ExtensionFrameHost::GetAppInstallState(
 
 void ExtensionFrameHost::Request(mojom::RequestParamsPtr params,
                                  RequestCallback callback) {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
   ExtensionWebContentsObserver::GetForWebContents(web_contents_)
       ->dispatcher()
-      ->Dispatch(std::move(params), *render_frame_host, std::move(callback));
+      ->Dispatch(std::move(params), render_frame_host, std::move(callback));
 }
 
 void ExtensionFrameHost::ResponseAck(const base::Uuid& request_uuid) {
@@ -85,46 +128,97 @@ void ExtensionFrameHost::ContentScriptsExecuting(
     const GURL& frame_url) {}
 
 void ExtensionFrameHost::IncrementLazyKeepaliveCount() {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
   auto* process_manager =
-      ProcessManager::Get(render_frame_host->GetBrowserContext());
+      ProcessManager::Get(render_frame_host.GetBrowserContext());
   const Extension* extension = GetExtension(process_manager, render_frame_host);
   if (!extension) {
     bad_message::ReceivedBadMessage(
-        render_frame_host->GetProcess(),
+        render_frame_host.GetProcess(),
         bad_message::EFH_NO_BACKGROUND_HOST_FOR_FRAME);
     return;
   }
-  process_manager->IncrementLazyKeepaliveCount(
-      extension, Activity::LIFECYCLE_MANAGEMENT, Activity::kIPC);
+
+  const content::GlobalRenderFrameHostId frame_id =
+      render_frame_host.GetGlobalId();
+  auto it = frame_ipc_keepalives_.find(frame_id);
+  if (it == frame_ipc_keepalives_.end()) {
+    // First keepalive increment for this frame: register tracking data and
+    // forward single increment to `ProcessManager` tagged with this frame's ID.
+    auto [inserted_it, inserted] = frame_ipc_keepalives_.insert(
+        {frame_id,
+         FrameIpcKeepaliveData{extension->id(),
+                               GetFrameScopedIpcActivityData(frame_id), 0}});
+    CHECK(inserted);
+    it = inserted_it;
+
+    process_manager->IncrementLazyKeepaliveCount(
+        extension, Activity::LIFECYCLE_MANAGEMENT, it->second.activity_data);
+  }
+  // Track active IPC counts locally. Repetitive increments from the renderer
+  // are handled here rather than spamming `ProcessManager`.
+  ++it->second.count;
 }
 
 void ExtensionFrameHost::DecrementLazyKeepaliveCount() {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
   auto* process_manager =
-      ProcessManager::Get(render_frame_host->GetBrowserContext());
+      ProcessManager::Get(render_frame_host.GetBrowserContext());
   const Extension* extension = GetExtension(process_manager, render_frame_host);
   if (!extension) {
     bad_message::ReceivedBadMessage(
-        render_frame_host->GetProcess(),
+        render_frame_host.GetProcess(),
         bad_message::EFH_NO_BACKGROUND_HOST_FOR_FRAME);
     return;
   }
-  process_manager->DecrementLazyKeepaliveCount(
-      extension, Activity::LIFECYCLE_MANAGEMENT, Activity::kIPC);
+
+  const content::GlobalRenderFrameHostId frame_id =
+      render_frame_host.GetGlobalId();
+  auto it = frame_ipc_keepalives_.find(frame_id);
+  // Silently ignore unbalanced decrements. The renderer-side bindings layer
+  // is not robust enough to guarantee perfectly balanced increment/decrement
+  // pairs, so an unmatched decrement is not by itself proof of a compromised
+  // renderer. Dropping the IPC on the floor still prevents counter underflow.
+  // See https://crbug.com/513156160.
+  if (it == frame_ipc_keepalives_.end() || it->second.count <= 0) {
+    return;
+  }
+
+  --it->second.count;
+  if (it->second.count == 0) {
+    std::string activity_data = std::move(it->second.activity_data);
+    frame_ipc_keepalives_.erase(it);
+
+    process_manager->DecrementLazyKeepaliveCount(
+        extension, Activity::LIFECYCLE_MANAGEMENT, activity_data);
+  }
 }
 
-const Extension* ExtensionFrameHost::GetExtension(
-    ProcessManager* process_manager,
-    content::RenderFrameHost* frame) {
-  ExtensionHost* extension_host =
-      process_manager->GetBackgroundHostForRenderFrameHost(frame);
-  if (!extension_host) {
-    return nullptr;
+
+void ExtensionFrameHost::ReleaseIpcKeepaliveData(
+    const FrameIpcKeepaliveData& data) {
+  auto* registry = ExtensionRegistry::Get(browser_context_);
+  const Extension* extension =
+      registry->enabled_extensions().GetByID(data.extension_id);
+  if (!extension) {
+    return;
   }
-  return extension_host->extension();
+  auto* process_manager = ProcessManager::Get(browser_context_);
+  process_manager->DecrementLazyKeepaliveCount(
+      extension, Activity::LIFECYCLE_MANAGEMENT, data.activity_data);
+}
+
+void ExtensionFrameHost::ReleaseIpcKeepaliveForFrame(
+    const content::GlobalRenderFrameHostId& frame_id) {
+  auto it = frame_ipc_keepalives_.find(frame_id);
+  if (it == frame_ipc_keepalives_.end()) {
+    return;
+  }
+
+  // The frame is being deleted or destroyed while it still has active IPC
+  // keepalives. Balance the keepalive count in `ProcessManager` before erasing.
+  ReleaseIpcKeepaliveData(it->second);
+  frame_ipc_keepalives_.erase(it);
 }
 
 void ExtensionFrameHost::AppWindowReady() {
@@ -150,14 +244,13 @@ void ExtensionFrameHost::OpenChannelToExtension(
     mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
     mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
         port_host) {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
-  auto* process = render_frame_host->GetProcess();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
+  auto* process = render_frame_host.GetProcess();
   TRACE_EVENT("extensions", "ExtensionFrameHost::OpenChannelToExtension",
               ChromeTrackEvent::kRenderProcessHost, *process);
 
   MessageServiceApi::GetMessageService()->OpenChannelToExtension(
-      render_frame_host->GetBrowserContext(), render_frame_host, port_id, *info,
+      render_frame_host.GetBrowserContext(), &render_frame_host, port_id, *info,
       channel_type, channel_name, std::move(port), std::move(port_host));
 }
 
@@ -167,14 +260,13 @@ void ExtensionFrameHost::OpenChannelToNativeApp(
     mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
     mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
         port_host) {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
-  auto* process = render_frame_host->GetProcess();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
+  auto* process = render_frame_host.GetProcess();
   TRACE_EVENT("extensions", "ExtensionFrameHost::OnOpenChannelToNativeApp",
               ChromeTrackEvent::kRenderProcessHost, *process);
 
   MessageServiceApi::GetMessageService()->OpenChannelToNativeApp(
-      render_frame_host->GetBrowserContext(), render_frame_host, port_id,
+      render_frame_host.GetBrowserContext(), &render_frame_host, port_id,
       native_app_name, std::move(port), std::move(port_host));
 }
 
@@ -188,14 +280,13 @@ void ExtensionFrameHost::OpenChannelToTab(
     mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
     mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
         port_host) {
-  content::RenderFrameHost* render_frame_host =
-      receivers_.GetCurrentTargetFrame();
-  auto* process = render_frame_host->GetProcess();
+  content::RenderFrameHost& render_frame_host = receivers_.CurrentTargetFrame();
+  auto* process = render_frame_host.GetProcess();
   TRACE_EVENT("extensions", "ExtensionFrameHost::OpenChannelToTab",
               ChromeTrackEvent::kRenderProcessHost, *process);
 
   MessageServiceApi::GetMessageService()->OpenChannelToTab(
-      render_frame_host->GetBrowserContext(), render_frame_host, port_id,
+      render_frame_host.GetBrowserContext(), &render_frame_host, port_id,
       tab_id, frame_id, document_id ? *document_id : std::string(),
       channel_type, channel_name, std::move(port), std::move(port_host));
 }

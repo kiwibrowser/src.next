@@ -9,47 +9,33 @@ import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewConfiguration;
 
-import androidx.annotation.VisibleForTesting;
-
 import org.chromium.base.Callback;
 import org.chromium.base.ResettersForTesting;
-import org.chromium.base.supplier.Supplier;
+import org.chromium.base.supplier.NullableObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
+import org.chromium.chrome.browser.ui.actions.ActionProperties;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.modelutil.PropertyModel;
+
+import java.util.function.Supplier;
 
 /** A UI coordinator the app menu. */
+@NullMarked
 class AppMenuCoordinatorImpl implements AppMenuCoordinator {
-    private static Boolean sHasPermanentMenuKeyForTesting;
-
-    /** Factory which creates the AppMenuHandlerImpl. */
-    @VisibleForTesting
-    interface AppMenuHandlerFactory {
-        /**
-         * @param delegate Delegate used to check the desired AppMenu properties on show.
-         * @param appMenuDelegate The AppMenuDelegate to handle menu item selection.
-         * @param activityLifecycleDispatcher The {@link ActivityLifecycleDispatcher} for the
-         *         containing activity.
-         * @param menuResourceId Resource Id that should be used as the source for the menu items.
-         *            It is assumed to have back_menu_id, forward_menu_id, bookmark_this_page_id.
-         * @param decorView The decor {@link View}, e.g. from Window#getDecorView(), for the
-         *         containing activity.
-         * @return AppMenuHandlerImpl for the given activity and menu resource id.
-         */
-        AppMenuHandlerImpl get(
-                AppMenuPropertiesDelegate delegate,
-                AppMenuDelegate appMenuDelegate,
-                int menuResourceId,
-                View decorView,
-                ActivityLifecycleDispatcher activityLifecycleDispatcher);
-    }
+    private static @Nullable Boolean sHasPermanentMenuKeyForTesting;
 
     private final Context mContext;
+    private @Nullable NullableObservableSupplier<PropertyModel> mActionModelSupplier;
+    private final Callback<@Nullable PropertyModel> mActionModelCallback =
+            this::onActionModelChanged;
     private final MenuButtonDelegate mButtonDelegate;
     private final AppMenuDelegate mAppMenuDelegate;
 
-    private AppMenuPropertiesDelegate mAppMenuPropertiesDelegate;
-    private AppMenuHandlerImpl mAppMenuHandler;
+    private final AppMenuPropertiesDelegate mAppMenuPropertiesDelegate;
+    private final AppMenuHandlerImpl mAppMenuHandler;
 
     /**
      * Construct a new AppMenuCoordinatorImpl.
@@ -66,6 +52,7 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
      * @param appRect Supplier of the app area in Window that the menu should fit in.
      * @param windowAndroid The window that will be used to fetch KeyboardVisibilityDelegate
      * @param browserControlsStateProvider a provider that can provide the state of the toolbar
+     * @param submenuHeaderMenuId The menu ID to use for the submenu header in the app menu.
      */
     public AppMenuCoordinatorImpl(
             Context context,
@@ -76,7 +63,8 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
             View hardwareButtonAnchorView,
             Supplier<Rect> appRect,
             WindowAndroid windowAndroid,
-            BrowserControlsStateProvider browserControlsStateProvider) {
+            BrowserControlsStateProvider browserControlsStateProvider,
+            int submenuHeaderMenuId) {
         mContext = context;
         mButtonDelegate = buttonDelegate;
         mAppMenuDelegate = appMenuDelegate;
@@ -92,7 +80,8 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
                         hardwareButtonAnchorView,
                         appRect,
                         windowAndroid,
-                        browserControlsStateProvider);
+                        browserControlsStateProvider,
+                        submenuHeaderMenuId);
     }
 
     @Override
@@ -101,18 +90,28 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
         if (mAppMenuHandler != null) mAppMenuHandler.destroy();
 
         mAppMenuPropertiesDelegate.destroy();
+
+        if (mActionModelSupplier != null) {
+            mActionModelSupplier.removeObserver(mActionModelCallback);
+        }
     }
 
     @Override
     public void showAppMenuForKeyboardEvent() {
         if (mAppMenuHandler == null || !mAppMenuHandler.shouldShowAppMenu()) return;
 
+        showAppMenuInternal(mButtonDelegate.getMenuButtonView(), false);
+    }
+
+    private void showAppMenuInternal(@Nullable View specificAnchorView, boolean startDragging) {
+        if (mAppMenuHandler == null || !mAppMenuHandler.shouldShowAppMenu()) return;
+
         boolean hasPermanentMenuKey =
                 sHasPermanentMenuKeyForTesting != null
                         ? sHasPermanentMenuKeyForTesting.booleanValue()
                         : ViewConfiguration.get(mContext).hasPermanentMenuKey();
-        mAppMenuHandler.showAppMenu(
-                hasPermanentMenuKey ? null : mButtonDelegate.getMenuButtonView(), false);
+
+        mAppMenuHandler.showAppMenu(hasPermanentMenuKey ? null : specificAnchorView, startDragging);
     }
 
     @Override
@@ -135,6 +134,23 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
         mAppMenuHandler.unregisterAppMenuBlocker(blocker);
     }
 
+    @Override
+    public void setActionModelSupplier(NullableObservableSupplier<PropertyModel> supplier) {
+        mActionModelSupplier = supplier;
+        mActionModelSupplier.addSyncObserverAndCallIfNonNull(mActionModelCallback);
+    }
+
+    private void onActionModelChanged(@Nullable PropertyModel model) {
+        if (model == null) return;
+        model.set(
+                ActionProperties.ON_PRESS_CALLBACK,
+                view -> {
+                    showAppMenuInternal(view, false);
+                });
+        // TODO(crbug.com/508649103): Add support for long press in bottom-aligned app menu from
+        // action registry.
+    }
+
     // Testing methods
 
     AppMenuHandlerImpl getAppMenuHandlerImplForTesting() {
@@ -143,14 +159,16 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
 
     /**
      * @param hasPermanentMenuKey Overrides {@link ViewConfiguration#hasPermanentMenuKey()} for
-     *         testing. Pass null to reset.
+     *     testing. Pass null to reset.
      */
     static void setHasPermanentMenuKeyForTesting(Boolean hasPermanentMenuKey) {
         sHasPermanentMenuKeyForTesting = hasPermanentMenuKey;
         ResettersForTesting.register(() -> sHasPermanentMenuKeyForTesting = null);
     }
 
-    /** @param reporter A means of reporting an exception without crashing. */
+    /**
+     * @param reporter A means of reporting an exception without crashing.
+     */
     static void setExceptionReporter(Callback<Throwable> reporter) {
         AppMenuHandlerImpl.setExceptionReporter(reporter);
     }

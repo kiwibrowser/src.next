@@ -83,16 +83,19 @@
 // Note that our definition of HTML payload is much stricter than IE's
 // definition and roughly the same as Firefox's definition.
 
-#include <stdint.h>
-#include <string>
-
 #include "net/base/mime_sniffer.h"
+
+#include <stdint.h>
+
+#include <string>
+#include <string_view>
 
 #include "base/check_op.h"
 #include "base/containers/span.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "net/http/http_response_headers.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -404,7 +407,7 @@ static bool SniffForOfficeDocs(std::string_view content,
     return false;
 
   OfficeDocType type = DOC_TYPE_NONE;
-  std::string_view url_path = url.path_piece();
+  std::string_view url_path = url.path();
   for (const auto& office_extension : kOfficeExtensionTypes) {
     if (base::EndsWith(url_path, office_extension.extension,
                        base::CompareCase::INSENSITIVE_ASCII)) {
@@ -645,7 +648,7 @@ static bool SniffCRX(std::string_view content,
       MAGIC_NUMBER("application/x-chrome-extension", "Cr24\x03\x00\x00\x00")};
 
   // Only consider files that have the extension ".crx".
-  if (!url.path_piece().ends_with(".crx")) {
+  if (!url.path().ends_with(".crx")) {
     return false;
   }
 
@@ -653,14 +656,28 @@ static bool SniffCRX(std::string_view content,
   return CheckForMagicNumbers(content, kCRXMagicNumbers, result);
 }
 
-bool ShouldSniffMimeType(const GURL& url, std::string_view mime_type) {
+bool ShouldSniffMimeType(const GURL& url,
+                         const HttpResponseHeaders* http_response_headers,
+                         std::string_view mime_type) {
   bool sniffable_scheme = url.is_empty() || url.SchemeIsHTTPOrHTTPS() ||
 #if BUILDFLAG(IS_ANDROID)
                           url.SchemeIs("content") ||
 #endif
                           url.SchemeIsFile() || url.SchemeIsFileSystem();
-  if (!sniffable_scheme)
+  if (!sniffable_scheme) {
     return false;
+  }
+
+  // If the "x-content-type-options" header is "nosniff", do not sniff. Only the
+  // first matching header is checked, per the fetch spec.
+  if (http_response_headers) {
+    std::optional<std::string_view> header =
+        http_response_headers->EnumerateHeader(/*iter=*/nullptr,
+                                               "x-content-type-options");
+    if (header && base::EqualsCaseInsensitiveASCII(*header, "nosniff")) {
+      return false;
+    }
+  }
 
   static const char* const kSniffableTypes[] = {
     // Many web servers are misconfigured to send text/plain for many

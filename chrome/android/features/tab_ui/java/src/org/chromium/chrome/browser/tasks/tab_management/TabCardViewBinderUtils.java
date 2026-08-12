@@ -4,18 +4,20 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import android.content.Context;
 import android.content.res.Resources;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.tab_ui.R;
+import org.chromium.components.browser_ui.util.TextResolver;
 
-/** Shared utils for {@code Tab<Type>ViewBinder} such as List, Grid, Strip, etc. * */
+/** Shared utils for {@code Tab<Type>ViewBinder} such as List, Grid, Strip, etc. */
+@NullMarked
 class TabCardViewBinderUtils {
     /**
      * Returns the checkmark level for selection mode.
@@ -23,7 +25,7 @@ class TabCardViewBinderUtils {
      * @param res The resources object.
      * @param isSelected Whether the item is selected.
      */
-    static int getCheckmarkLevel(@NonNull Resources res, boolean isSelected) {
+    static int getCheckmarkLevel(Resources res, boolean isSelected) {
         return isSelected
                 ? res.getInteger(R.integer.list_item_level_selected)
                 : res.getInteger(R.integer.list_item_level_default);
@@ -34,7 +36,7 @@ class TabCardViewBinderUtils {
      *
      * @param containerView The container view to update.
      */
-    static void detachTabGroupColorView(@NonNull FrameLayout containerView) {
+    static void detachTabGroupColorView(FrameLayout containerView) {
         updateTabGroupColorView(containerView, /* viewProvider= */ null);
     }
 
@@ -47,7 +49,7 @@ class TabCardViewBinderUtils {
      *     detach all views from the container.
      */
     static void updateTabGroupColorView(
-            @NonNull FrameLayout containerView, @Nullable TabGroupColorViewProvider viewProvider) {
+            FrameLayout containerView, @Nullable TabGroupColorViewProvider viewProvider) {
         if (viewProvider == null) {
             containerView.setVisibility(View.GONE);
             containerView.removeAllViews();
@@ -74,6 +76,21 @@ class TabCardViewBinderUtils {
             layoutParams.gravity = Gravity.CENTER;
             containerView.addView(colorView, layoutParams);
         }
+    }
+
+    /**
+     * Checks that the text resolver is not null (unless the property is being unbound) in order to
+     * resolve the description string when requested by the respective view binders. If the text
+     * resolve is null return null.
+     *
+     * @param resolver The text resolver used for description string resolution.
+     * @param context The current context.
+     * @return The resolved content description string to be used in view binder updates.
+     */
+    static @Nullable CharSequence resolveNullSafe(
+            @Nullable TextResolver resolver, Context context) {
+        if (resolver == null) return null;
+        return resolver.resolve(context);
     }
 
     private TabCardViewBinderUtils() {}

@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_EXTENSIONS_DEVICE_PERMISSIONS_DIALOG_CONTROLLER_H_
 
 #include "base/containers/flat_map.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "components/permissions/chooser_controller.h"
-#include "extensions/browser/api/device_permissions_prompt.h"
+#include "extensions/browser/api/usb_device_permissions_prompt.h"
 
 namespace content {
 class RenderFrameHost;
@@ -16,11 +16,11 @@ class RenderFrameHost;
 
 class DevicePermissionsDialogController
     : public permissions::ChooserController,
-      public extensions::DevicePermissionsPrompt::Prompt::Observer {
+      public extensions::UsbDevicePermissionsPrompt::Prompt::Observer {
  public:
   DevicePermissionsDialogController(
       content::RenderFrameHost* owner,
-      scoped_refptr<extensions::DevicePermissionsPrompt::Prompt> prompt);
+      scoped_refptr<extensions::UsbDevicePermissionsPrompt::Prompt> prompt);
 
   DevicePermissionsDialogController(const DevicePermissionsDialogController&) =
       delete;
@@ -43,14 +43,14 @@ class DevicePermissionsDialogController
   void Close() override;
   void OpenHelpCenterUrl() const override;
 
-  // extensions::DevicePermissionsPrompt::Prompt::Observer:
+  // extensions::UsbDevicePermissionsPrompt::Prompt::Observer:
   void OnDevicesInitialized() override;
   void OnDeviceAdded(size_t index, const std::u16string& device_name) override;
   void OnDeviceRemoved(size_t index,
                        const std::u16string& device_name) override;
 
  private:
-  scoped_refptr<extensions::DevicePermissionsPrompt::Prompt> prompt_;
+  scoped_refptr<extensions::UsbDevicePermissionsPrompt::Prompt> prompt_;
   // Maps from device name to number of devices.
   base::flat_map<std::u16string, int> device_name_map_;
 };

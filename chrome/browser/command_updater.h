@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_COMMAND_UPDATER_H_
 #define CHROME_BROWSER_COMMAND_UPDATER_H_
 
+#include <vector>
+
 #include "base/time/time.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -25,7 +27,7 @@ class CommandObserver;
 //
 class CommandUpdater {
  public:
-  virtual ~CommandUpdater() {}
+  virtual ~CommandUpdater() = default;
 
   // Returns true if the specified command ID is supported.
   virtual bool SupportsCommand(int id) const = 0;
@@ -38,18 +40,23 @@ class CommandUpdater {
   // disposition.
   // Returns true if the command was executed (i.e. it is supported and is
   // enabled).
-  virtual bool ExecuteCommand(
-      int id,
-      base::TimeTicks time_stamp = base::TimeTicks::Now()) = 0;
+  virtual bool ExecuteCommand(int id, base::TimeTicks time_stamp) = 0;
+  bool ExecuteCommand(int id) {
+    return ExecuteCommand(id, base::TimeTicks::Now());
+  }
 
   // Performs the action associated with this command ID using the given
   // disposition.
   // Returns true if the command was executed (i.e. it is supported and is
   // enabled).
-  virtual bool ExecuteCommandWithDisposition(
-      int id,
-      WindowOpenDisposition disposition,
-      base::TimeTicks time_stamp = base::TimeTicks::Now()) = 0;
+  virtual bool ExecuteCommandWithDisposition(int id,
+                                             WindowOpenDisposition disposition,
+                                             base::TimeTicks time_stamp) = 0;
+  bool ExecuteCommandWithDisposition(int id,
+                                     WindowOpenDisposition disposition) {
+    return ExecuteCommandWithDisposition(id, disposition,
+                                         base::TimeTicks::Now());
+  }
 
   // Adds an observer to the state of a particular command. If the command does
   // not exist, it is created, initialized to false.
@@ -68,6 +75,12 @@ class CommandUpdater {
   // Returns true if the update succeeded (it's possible that the browser is in
   // "locked-down" state where we prevent changes to the command state).
   virtual bool UpdateCommandEnabled(int id, bool state) = 0;
+
+  // Disables all commands.
+  virtual void DisableAllCommands() = 0;
+
+  // Returns all registered command IDs.
+  virtual std::vector<int> GetAllIds() const = 0;
 };
 
 #endif  // CHROME_BROWSER_COMMAND_UPDATER_H_

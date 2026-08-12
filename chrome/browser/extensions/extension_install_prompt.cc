@@ -20,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/extension_install_ui.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/strings/grit/components_strings.h"
@@ -29,6 +30,8 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/image_loader.h"
+#include "extensions/browser/ui_util.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_resource.h"
@@ -44,6 +47,8 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 using extensions::Extension;
 using extensions::Manifest;
@@ -87,13 +92,12 @@ ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
   DCHECK_NE(type_, NUM_PROMPT_TYPES);
 }
 
-ExtensionInstallPrompt::Prompt::~Prompt() {
-}
+ExtensionInstallPrompt::Prompt::~Prompt() = default;
 
 void ExtensionInstallPrompt::Prompt::AddPermissionSet(
     const PermissionSet& permissions) {
   Manifest::Type type =
-      extension_ ? extension_->GetType() : Manifest::TYPE_UNKNOWN;
+      extension_ ? extension_->GetType() : Manifest::Type::kUnknown;
   prompt_permissions_.LoadFromPermissionSet(&permissions, type);
   if (!permissions.effective_hosts().is_empty()) {
     is_requesting_host_permissions_ = true;
@@ -120,6 +124,12 @@ void ExtensionInstallPrompt::Prompt::SetWebstoreData(
   has_webstore_data_ = true;
 }
 
+void ExtensionInstallPrompt::Prompt::SetInitialExtensionsProviderName(
+    std::u16string initial_extensions_provider_name) {
+  initial_extensions_provider_name_ =
+      std::move(initial_extensions_provider_name);
+}
+
 std::u16string ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
   int id = -1;
   switch (type_) {
@@ -133,12 +143,19 @@ std::u16string ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
       id = IDS_EXTENSION_PERMISSIONS_PROMPT_TITLE;
       break;
     case EXTERNAL_INSTALL_PROMPT:
-      if (extension_->is_app())
+      if (extension_->is_app()) {
         id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_TITLE_APP;
-      else if (extension_->is_theme())
+      } else if (extension_->is_theme()) {
         id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_TITLE_THEME;
-      else
+      } else if (!initial_extensions_provider_name_.empty()) {
+        return l10n_util::GetStringFUTF16(
+            IDS_EXTENSION_EXTERNAL_INITIAL_INSTALL_PROMPT_TITLE_EXTENSION,
+            initial_extensions_provider_name_,
+            extensions::ui_util::GetFixupExtensionNameForUIDisplay(
+                extension_->name()));
+      } else {
         id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_TITLE_EXTENSION;
+      }
       break;
     case REMOTE_INSTALL_PROMPT:
       id = IDS_EXTENSION_REMOTE_INSTALL_PROMPT_TITLE;
@@ -152,14 +169,17 @@ std::u16string ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
     case EXTENSION_PENDING_REQUEST_PROMPT:
       id = IDS_EXTENSION_PENDING_REQUEST_PROMPT_TITLE;
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_EXTENSION_PARENT_APPROVAL_PROMPT_TITLE;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
   }
 
   return l10n_util::GetStringFUTF16(
-      id,
-      extensions::util::GetFixupExtensionNameForUIDisplay(extension_->name()));
+      id, extensions::ui_util::GetFixupExtensionNameForUIDisplay(
+              extension_->name()));
 }
 
 int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
@@ -218,6 +238,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
     case EXTENSION_PENDING_REQUEST_PROMPT:
       // Pending request prompt doesn't have accept button.
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_PARENT_PERMISSION_PROMPT_APPROVE_BUTTON;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
@@ -244,6 +267,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetAbortButtonLabel() const {
       break;
     case EXTENSION_PENDING_REQUEST_PROMPT:
       id = IDS_CLOSE;
+      break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_PARENT_PERMISSION_PROMPT_CANCEL_BUTTON;
       break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
@@ -272,6 +298,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetPermissionsHeading() const {
     case REPAIR_PROMPT:
       id = IDS_EXTENSION_PROMPT_CAN_ACCESS;
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_EXTENSION_PROMPT_REQUESTS_PERMISSIONS;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
@@ -279,33 +308,48 @@ std::u16string ExtensionInstallPrompt::Prompt::GetPermissionsHeading() const {
   return l10n_util::GetStringUTF16(id);
 }
 
-void ExtensionInstallPrompt::Prompt::AppendRatingStars(
-    StarAppender appender, void* data) const {
-  CHECK(appender);
+std::vector<const gfx::ImageSkia*>
+ExtensionInstallPrompt::Prompt::GetRatingStars() const {
   CHECK(AllowWebstoreData(type_));
-  int rating_integer = floor(average_rating_);
-  double rating_fractional = average_rating_ - rating_integer;
+
+  // The star display logic replicates the one used by the webstore (from
+  // components.ratingutils.setFractionalYellowStars).
+  int full_stars = floor(average_rating_);
+  double rating_fractional = average_rating_ - full_stars;
 
   if (rating_fractional > 0.66) {
-    rating_integer++;
+    // Show one more full star (e.g. 3.67 stars is shown as 4 full stars)
+    full_stars += 1;
   }
 
   if (rating_fractional < 0.33 || rating_fractional > 0.66) {
+    // Do not show a half star.
+    // E.g.:
+    //   - 3.32 stars is shown as 3 full stars
+    //   - 3.33 stars is shown as 3.5 full stars
+    //   - 3.66 stars is shown as 3.5 full stars
+    //   - 3.67 stars is shown as 4 full stars
     rating_fractional = 0;
   }
 
+  std::vector<const gfx::ImageSkia*> star_images;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  int i;
-  for (i = 0; i < rating_integer; i++) {
-    appender(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_ON), data);
-  }
-  if (rating_fractional) {
-    appender(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_HALF_LEFT), data);
+
+  int i = 0;
+  while (i < full_stars) {
+    star_images.push_back(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_ON));
     i++;
   }
-  for (; i < kMaxExtensionRating; i++) {
-    appender(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_OFF), data);
+  if (rating_fractional) {
+    star_images.push_back(
+        rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_HALF_LEFT));
+    i++;
   }
+  while (i < kMaxExtensionRating) {
+    star_images.push_back(rb.GetImageSkiaNamed(IDR_EXTENSIONS_RATING_STAR_OFF));
+    i++;
+  }
+  return star_images;
 }
 
 std::u16string ExtensionInstallPrompt::Prompt::GetRatingCount() const {
@@ -328,16 +372,15 @@ size_t ExtensionInstallPrompt::Prompt::GetPermissionCount() const {
   return prompt_permissions_.permissions.size();
 }
 
+extensions::InstallPromptPermissions
+ExtensionInstallPrompt::Prompt::GetPermissions() const {
+  return prompt_permissions_;
+}
+
 std::u16string ExtensionInstallPrompt::Prompt::GetPermission(
     size_t index) const {
   CHECK_LT(index, prompt_permissions_.permissions.size());
   return prompt_permissions_.permissions[index];
-}
-
-std::u16string ExtensionInstallPrompt::Prompt::GetPermissionsDetails(
-    size_t index) const {
-  CHECK_LT(index, prompt_permissions_.details.size());
-  return prompt_permissions_.details[index];
 }
 
 void ExtensionInstallPrompt::Prompt::AddObserver(Observer* observer) {
@@ -399,13 +442,13 @@ ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(
 // static
 scoped_refptr<Extension>
 ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     int flags,
     const std::string& id,
     const std::string& localized_name,
     const std::string& localized_description,
-    std::string* error) {
-  std::optional<base::Value::Dict> localized_manifest;
+    std::u16string* error) {
+  std::optional<base::DictValue> localized_manifest;
   if (!localized_name.empty() || !localized_description.empty()) {
     localized_manifest = manifest.Clone();
     if (!localized_name.empty()) {
@@ -427,7 +470,7 @@ ExtensionInstallPrompt::ExtensionInstallPrompt(content::WebContents* contents)
                    ? Profile::FromBrowserContext(contents->GetBrowserContext())
                    : nullptr),
       extension_(nullptr),
-      install_ui_(std::make_unique<ExtensionInstallUI>(profile_)),
+      install_ui_(ExtensionInstallUI::Create(profile_)),
       show_params_(new ExtensionInstallPromptShowParams(contents)),
       did_call_show_dialog_(false) {}
 
@@ -435,13 +478,12 @@ ExtensionInstallPrompt::ExtensionInstallPrompt(Profile* profile,
                                                gfx::NativeWindow native_window)
     : profile_(profile),
       extension_(nullptr),
-      install_ui_(std::make_unique<ExtensionInstallUI>(profile_)),
+      install_ui_(ExtensionInstallUI::Create(profile_)),
       show_params_(
           new ExtensionInstallPromptShowParams(profile, native_window)),
       did_call_show_dialog_(false) {}
 
-ExtensionInstallPrompt::~ExtensionInstallPrompt() {
-}
+ExtensionInstallPrompt::~ExtensionInstallPrompt() = default;
 
 void ExtensionInstallPrompt::ShowDialog(
     DoneCallback done_callback,
@@ -504,6 +546,31 @@ void ExtensionInstallPrompt::OnInstallSuccess(
 void ExtensionInstallPrompt::OnInstallFailure(
     const extensions::CrxInstallError& error) {
   install_ui_->OnInstallFailure(error);
+}
+
+void ExtensionInstallPrompt::SetUseAppInstalledBubble(bool use_bubble) {
+  install_ui_->SetUseAppInstalledBubble(use_bubble);
+}
+
+void ExtensionInstallPrompt::SetSkipPostInstallUI(bool skip_ui) {
+  install_ui_->SetSkipPostInstallUI(skip_ui);
+}
+
+void ExtensionInstallPrompt::ConfirmInstall(
+    DoneCallback install_callback,
+    const extensions::Extension* extension) {
+  ShowDialog(std::move(install_callback), extension, nullptr,
+             GetDefaultShowDialogCallback());
+}
+
+void ExtensionInstallPrompt::ConfirmReEnable(
+    DoneCallback install_callback,
+    const extensions::Extension* extension,
+    content::BrowserContext* browser_context) {
+  PromptType type =
+      GetReEnablePromptTypeForExtension(browser_context, extension);
+  ShowDialog(std::move(install_callback), extension, nullptr,
+             std::make_unique<Prompt>(type), GetDefaultShowDialogCallback());
 }
 
 std::unique_ptr<ExtensionInstallPrompt::Prompt>
@@ -621,6 +688,12 @@ bool ExtensionInstallPrompt::AutoConfirmPromptIfEnabled() {
                          DoneCallbackPayload(
                              result, extensions::ScopedTestDialogAutoConfirm::
                                          GetJustification())));
+#if BUILDFLAG(IS_ANDROID)
+      // Since the Android tests for supervised user extension installation does
+      // not directly create the ExtensionInstallPrompt, this is needed to
+      // ensure the observers are notified when we auto confirm the prompt.
+      prompt_->OnDialogAccepted();
+#endif  // BUILDFLAG(IS_ANDROID)
       return true;
     }
     case extensions::ScopedTestDialogAutoConfirm::CANCEL: {
@@ -629,6 +702,12 @@ bool ExtensionInstallPrompt::AutoConfirmPromptIfEnabled() {
           base::BindOnce(std::move(done_callback_),
                          DoneCallbackPayload(
                              ExtensionInstallPrompt::Result::USER_CANCELED)));
+#if BUILDFLAG(IS_ANDROID)
+      // Since the Android tests for supervised user extension installation does
+      // not directly create the ExtensionInstallPrompt, this is needed to
+      // ensure the observers are notified when we auto confirm the prompt.
+      prompt_->OnDialogCanceled();
+#endif  // BUILDFLAG(IS_ANDROID)
       return true;
     }
   }

@@ -4,8 +4,11 @@
 
 package org.chromium.chrome.browser.omnibox;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.content.Context;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
@@ -17,24 +20,25 @@ import android.view.inputmethod.InputConnection;
 import android.widget.EditText;
 
 import androidx.annotation.CallSuper;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.components.browser_ui.widget.text.VerticallyFixedEditText;
+import org.chromium.build.annotations.EnsuresNonNull;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.components.omnibox.OmniboxFeatures;
+import org.chromium.ui.accessibility.AccessibilityState;
 import org.chromium.ui.text.EmptyTextWatcher;
-
-import java.util.Optional;
+import org.chromium.ui.widget.EditTextWithLeading;
 
 /** An {@link EditText} that shows autocomplete text at the end. */
-public class AutocompleteEditText extends VerticallyFixedEditText
+@NullMarked
+public class AutocompleteEditText extends EditTextWithLeading
         implements AutocompleteEditTextModelBase.Delegate {
     private static final String TAG = "AutocompleteEdit";
+    private static final boolean DEBUG = OmniboxFeatures.sDiagInputConnection.getValue();
 
-    private static final boolean DEBUG = false;
-
-    private AutocompleteEditTextModelBase mModel;
+    private @Nullable AutocompleteEditTextModelBase mModel;
     private boolean mIgnoreTextChangesForAutocomplete = true;
     private boolean mLastEditWasPaste;
     private boolean mOnSanitizing;
@@ -82,7 +86,7 @@ public class AutocompleteEditText extends VerticallyFixedEditText
                 });
     }
 
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    @VisibleForTesting
     public String sanitizeTextForPaste(String s) {
         return mNativeInitialized ? OmniboxViewUtil.sanitizeTextForPaste(s) : s;
     }
@@ -92,14 +96,16 @@ public class AutocompleteEditText extends VerticallyFixedEditText
         mNativeInitialized = true;
     }
 
+    @EnsuresNonNull("mModel")
     private void ensureModel() {
         if (mModel != null) return;
 
         mModel = new SpannableAutocompleteEditTextModel(this, getContext());
         mModel.setIgnoreTextChangeFromAutocomplete(true);
         mModel.onFocusChanged(hasFocus());
-        mModel.onSetText(getText());
-        mModel.onTextChanged(getText(), 0, 0, getText().length());
+        Editable text = assumeNonNull(getText());
+        mModel.onSetText(text);
+        mModel.onTextChanged(text, 0, 0, text.length());
         mModel.onSelectionChanged(getSelectionStart(), getSelectionEnd());
         if (mLastEditWasPaste) mModel.onPaste();
         mModel.setIgnoreTextChangeFromAutocomplete(false);
@@ -121,7 +127,16 @@ public class AutocompleteEditText extends VerticallyFixedEditText
      * @return The user text without the autocomplete text.
      */
     public String getTextWithoutAutocomplete() {
-        if (mModel == null) return "";
+        // Return the current Text value when the content is requested before the InputConnection is
+        // created. This may happen when the user triggers ACTION_WEB_SEARCH, calling up the Omnibox
+        // for the selected text.
+        // When the InputConnection is empty we're guaranteed that there's no autocompletion
+        // available.
+        if (mModel == null) {
+            CharSequence result = getText();
+            if (TextUtils.isEmpty(result)) return "";
+            return result.toString();
+        }
         return mModel.getTextWithoutAutocomplete();
     }
 
@@ -129,7 +144,16 @@ public class AutocompleteEditText extends VerticallyFixedEditText
      * @return Text that includes autocomplete.
      */
     public String getTextWithAutocomplete() {
-        if (mModel == null) return "";
+        // Return the current Text value when the content is requested before the InputConnection is
+        // created. This may happen when the user triggers ACTION_WEB_SEARCH, calling up the Omnibox
+        // for the selected text.
+        // When the InputConnection is empty we're guaranteed that there's no autocompletion
+        // available.
+        if (mModel == null) {
+            CharSequence result = getText();
+            if (TextUtils.isEmpty(result)) return "";
+            return result.toString();
+        }
         return mModel.getTextWithAutocomplete();
     }
 
@@ -138,8 +162,8 @@ public class AutocompleteEditText extends VerticallyFixedEditText
      *     match.
      */
     @VisibleForTesting
-    public Optional<String> getAdditionalText() {
-        if (mModel == null) return Optional.empty();
+    public @Nullable String getAdditionalText() {
+        if (mModel == null) return null;
         return mModel.getAdditionalText();
     }
 
@@ -212,15 +236,18 @@ public class AutocompleteEditText extends VerticallyFixedEditText
      * @param inlineAutocompleteText The suggested autocompletion for the user's text.
      * @param additionalText This string is displayed adjacent to the omnibox if this match is the
      *     default. Will usually be URL when autocompleting a title, and empty otherwise.
+     * @param siteSearchLabel The site search label to be shown.
      */
     public void setAutocompleteText(
-            @NonNull CharSequence userText,
+            CharSequence userText,
             @Nullable CharSequence inlineAutocompleteText,
-            Optional<String> additionalText) {
+            @Nullable String additionalText,
+            @Nullable String siteSearchLabel) {
         boolean emptyAutocomplete = TextUtils.isEmpty(inlineAutocompleteText);
         if (!emptyAutocomplete) mDisableTextScrollingFromAutocomplete = true;
         if (mModel != null) {
-            mModel.setAutocompleteText(userText, inlineAutocompleteText, additionalText);
+            mModel.setAutocompleteText(
+                    userText, inlineAutocompleteText, additionalText, siteSearchLabel);
         }
     }
 
@@ -266,6 +293,13 @@ public class AutocompleteEditText extends VerticallyFixedEditText
     }
 
     @Override
+    public void sendAccessibilityEvent(AccessibilityEvent event) {
+        if (AccessibilityState.isTouchExplorationEnabled()) {
+            sendAccessibilityEventUnchecked(event);
+        }
+    }
+
+    @Override
     public void onPopulateAccessibilityEvent(AccessibilityEvent event) {
         super.onPopulateAccessibilityEvent(event);
         if (DEBUG) Log.i(TAG, "onPopulateAccessibilityEvent: " + event);
@@ -279,13 +313,13 @@ public class AutocompleteEditText extends VerticallyFixedEditText
     }
 
     @VisibleForTesting
-    public InputConnection getInputConnection() {
+    public @Nullable InputConnection getInputConnection() {
         if (mModel == null) return null;
         return mModel.getInputConnection();
     }
 
     @Override
-    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+    public @Nullable InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         InputConnection target = super.onCreateInputConnection(outAttrs);
         // Initially, target is null until View gets the focus.
         if (target == null && mModel == null) {
@@ -315,7 +349,7 @@ public class AutocompleteEditText extends VerticallyFixedEditText
     }
 
     @Override
-    public void setOnKeyListener(OnKeyListener listener) {
+    public void setOnKeyListener(@Nullable OnKeyListener listener) {
         super.setOnKeyListener(listener);
         mOnKeyListener = listener;
     }
@@ -355,5 +389,28 @@ public class AutocompleteEditText extends VerticallyFixedEditText
                 Settings.Secure.getString(
                         getContext().getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
         return defaultIme == null ? "" : defaultIme;
+    }
+
+    @Override
+    public void setInputIsMultilineEligible(boolean isMultilineEligible) {}
+
+    /* package */ void setModelForTesting(AutocompleteEditTextModelBase model) {
+        mModel = model;
+    }
+
+    /* package */ @Nullable AutocompleteEditTextModelBase getModelForTesting() {
+        return mModel;
+    }
+
+    @Override
+    public void setSiteSearchChip(@Nullable String keyword) {
+        SiteSearchChipDrawable drawable = null;
+        if (keyword != null) {
+            // TODO(crbug.com/459590224): convert keyword to templateUrl.FullName() or equivalent.
+            drawable = new SiteSearchChipDrawable(getContext(), keyword);
+            drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+        }
+        Drawable[] drawables = getCompoundDrawablesRelative();
+        setCompoundDrawablesRelative(drawable, drawables[1], drawables[2], drawables[3]);
     }
 }

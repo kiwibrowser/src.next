@@ -15,6 +15,7 @@
 namespace blink {
 
 const int kCompositorNamespaceBitCount = 5;
+const int kCompositorReservedBitCount = cc::kElementIdReservedBitCount;
 
 // The functions in this header requires cc::ElementId::InternalValue to be
 // uint64_t.
@@ -37,7 +38,7 @@ enum class CompositorElementIdNamespace {
   kVerticalScrollbar,
   kHorizontalScrollbar,
   kScrollCorner,
-  kViewTransitionSubframeRoot,
+  kViewTransitionScopeRoot,
   kViewTransitionElement,
   kElementCapture,
   kDOMNodeId,
@@ -52,9 +53,7 @@ static_assert(CompositorElementIdNamespace::kMax <
               CompositorElementIdNamespace::kMaxRepresentable);
 
 using CompositorElementId = cc::ElementId;
-using ScrollbarId = uint64_t;
 using UniqueObjectId = uint64_t;
-using SyntheticEffectId = uint64_t;
 
 // Call this to get a globally unique object id for a newly allocated object.
 UniqueObjectId PLATFORM_EXPORT NewUniqueObjectId();
@@ -84,28 +83,24 @@ CompositorElementIdNamespace PLATFORM_EXPORT
 // Maps a CompositorElementId in the kDOMNodeId namespace back to a DOMNodeId.
 DOMNodeId PLATFORM_EXPORT DOMNodeIdFromCompositorElementId(CompositorElementId);
 
-}  // namespace blink
-
-namespace WTF {
-
 template <>
-struct PLATFORM_EXPORT HashTraits<blink::CompositorElementId>
-    : GenericHashTraits<blink::CompositorElementId> {
-  static unsigned GetHash(const blink::CompositorElementId& key) {
+struct PLATFORM_EXPORT HashTraits<CompositorElementId>
+    : GenericHashTraits<CompositorElementId> {
+  static unsigned GetHash(const CompositorElementId& key) {
     // We define a new hash here rather than using `cc::ElementIdHash` since the
     // latter produces a `size_t` rather than the `unsigned` needed for
-    // `WTF::GenericHashTraits<T>::GetHash(const T&)`.
+    // `GenericHashTraits<T>::GetHash(const T&)`.
     return HashInt(key.GetInternalValue());
   }
   static constexpr bool kEmptyValueIsZero = true;
-  static constexpr blink::CompositorElementId EmptyValue() {
-    return blink::CompositorElementId();
+  static constexpr CompositorElementId EmptyValue() {
+    return CompositorElementId();
   }
-  static constexpr blink::CompositorElementId DeletedValue() {
+  static constexpr CompositorElementId DeletedValue() {
     return cc::ElementId::DeletedValue();
   }
 };
 
-}  // namespace WTF
+}  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COMPOSITOR_ELEMENT_ID_H_

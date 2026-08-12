@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/extension_service_user_test_base.h"
+
 #include <memory>
 #include <utility>
 
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/extension_service_user_test_base.h"
 #include "content/public/test/browser_task_environment.h"
+#include "extensions/buildflags/buildflags.h"
+#include "google_apis/gaia/gaia_id.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
@@ -16,6 +19,8 @@
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_names.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -30,8 +35,8 @@ void ExtensionServiceUserTestBase::SetUp() {
   ExtensionServiceTestBase::SetUp();
   scoped_user_manager_ = std::make_unique<user_manager::ScopedUserManager>(
       std::make_unique<ash::FakeChromeUserManager>());
-  account_id_ =
-      AccountId::FromUserEmailGaiaId("test-user@testdomain.com", "1234567890");
+  account_id_ = AccountId::FromUserEmailGaiaId("test-user@testdomain.com",
+                                               GaiaId("1234567890"));
 }
 
 void ExtensionServiceUserTestBase::TearDown() {

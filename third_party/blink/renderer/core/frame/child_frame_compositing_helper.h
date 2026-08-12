@@ -30,12 +30,9 @@ class CORE_EXPORT ChildFrameCompositingHelper : public cc::ContentLayerClient {
       delete;
   ~ChildFrameCompositingHelper() override;
 
-  enum class CaptureSequenceNumberChanged { kYes, kNo };
   enum class AllowPaintHolding { kYes, kNo };
-  void SetSurfaceId(
-      const viz::SurfaceId& surface_id,
-      CaptureSequenceNumberChanged capture_sequence_number_changed,
-      AllowPaintHolding allow_paint_holding);
+  void SetSurfaceId(const viz::SurfaceId& surface_id,
+                    AllowPaintHolding allow_paint_holding);
   void UpdateVisibility(bool visible);
   void ChildFrameGone(float device_scale_factor);
 

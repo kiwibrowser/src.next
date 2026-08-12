@@ -49,9 +49,8 @@ class CommandUpdaterImpl : public CommandUpdater {
   void RemoveCommandObserver(int id, CommandObserver* observer) override;
   void RemoveCommandObserver(CommandObserver* observer) override;
   bool UpdateCommandEnabled(int id, bool state) override;
-
-  void DisableAllCommands();
-  std::vector<int> GetAllIds();
+  void DisableAllCommands() override;
+  std::vector<int> GetAllIds() const override;
 
  private:
   // A piece of data about a command - whether or not it is enabled, and a list

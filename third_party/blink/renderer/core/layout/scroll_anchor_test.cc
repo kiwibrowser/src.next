@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -50,7 +51,8 @@ class ScrollAnchorTest : public SimTest {
   void Update() { Compositor().BeginFrame(); }
 
   void SetBodyInnerHTML(const String& body_content) {
-    GetDocument().body()->setInnerHTML(body_content, ASSERT_NO_EXCEPTION);
+    GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(body_content,
+                                                          ASSERT_NO_EXCEPTION);
     Update();
   }
 
@@ -527,6 +529,154 @@ TEST_F(ScrollAnchorTest, SerializeAnchorSimple) {
   ValidateSerializedAnchor("#block2", LogicalOffset(0, -50));
 }
 
+TEST_F(ScrollAnchorTest, SerializeAnchorWithVariousLineHeights) {
+  ScopedScrollAnchorSerializationUseParentForTextNodeForTest
+      scroll_anchor_serialization(true);
+  SetBodyInnerHTML(R"HTML(
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+        }
+        body { height: 2000px; }
+        p, div {
+          font-size: 20px;
+          width: 180px;
+        }
+        #line-height-normal {
+          height: 100px;
+          width: 200px;
+        }
+        #line-height-90 {
+          line-height: 90%;
+          height: 50px;
+        }
+        #line-height-200 {
+          line-height: 200%;
+          height: 100px;
+        }
+        #line-height-150 {
+          line-height: 150%;
+          height: 100px;
+        }
+        #line-span-200 {
+          line-height: 200%;
+        }
+      </style>
+      <p id="line-height-normal">
+        line-height-normal
+        line-height-normal
+      </p>
+      <p id="line-height-90">
+        line-height-90
+        line-height-90
+      </p>
+      <p id="line-height-200">
+        line-height-200
+        line-height-200
+      </p>
+      <!-- for text node's parent layout_object is anonymous.  -->
+      <div id="line-height-150">
+        line-height-150
+        <div>line-height-150</div>
+      </div>
+      <!-- for text node's parent layout_object is layout_inline.  -->
+      <p id="line-span-200">
+        <span>line-span-200</span>
+        <span>line-span-200</span>
+      </p>")HTML");
+
+  // scroll to (0, 10)
+  ScrollLayoutViewport(ScrollOffset(0, 10));
+  ValidateSerializedAnchor("#line-height-normal", LogicalOffset(0, -10));
+  // expect the anchor object to be the text node inside the paragraph
+  ScrollAnchor scroll_anchor = GetScrollAnchor(LayoutViewport());
+  EXPECT_TRUE(scroll_anchor.AnchorObject()->IsText());
+
+  // scroll to (0, 110)
+  ScrollLayoutViewport(ScrollOffset(0, 100));
+  ValidateSerializedAnchor("#line-height-90", LogicalOffset(0, -10));
+  // expect the anchor object to be the text node inside the paragraph
+  scroll_anchor = GetScrollAnchor(LayoutViewport());
+  EXPECT_TRUE(scroll_anchor.AnchorObject()->IsText());
+
+  // scroll to (0, 170)
+  ScrollLayoutViewport(ScrollOffset(0, 60));
+  ValidateSerializedAnchor("#line-height-200", LogicalOffset(0, -20));
+  // expect the anchor object to be the text node inside the paragraph
+  scroll_anchor = GetScrollAnchor(LayoutViewport());
+  EXPECT_TRUE(scroll_anchor.AnchorObject()->IsText());
+
+  // scroll to (0, 270)
+  ScrollLayoutViewport(ScrollOffset(0, 100));
+  ValidateSerializedAnchor("#line-height-150", LogicalOffset(0, -20));
+  // expect the anchor object to be the text node inside the div
+  scroll_anchor = GetScrollAnchor(LayoutViewport());
+  EXPECT_TRUE(scroll_anchor.AnchorObject()->IsText());
+
+  // scroll to (0, 370)
+  ScrollLayoutViewport(ScrollOffset(0, 100));
+  int scroll_y = 370;
+  // Because the PhysicalLinesBoundingBox of a span's LayoutObject is
+  // affected by the content, font, and line-height, its PhysicalRect offset is
+  // not always (0, 0). To simplify the calculation, we verify that the
+  // restored scroll position is correct.
+  scroll_anchor = GetScrollAnchor(LayoutViewport());
+  SerializedAnchor serialized_anchor = scroll_anchor.GetSerializedAnchor();
+  EXPECT_EQ(serialized_anchor.selector, "#line-span-200>:nth-child(1)");
+  // expect the anchor object to be the text node inside the paragraph
+  EXPECT_TRUE(scroll_anchor.AnchorObject()->IsText());
+
+  // scroll to (0, 0)
+  ScrollLayoutViewport(ScrollOffset(0, -scroll_y));
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().y(), 0);
+
+  // then restore the anchor
+  EXPECT_TRUE(
+      GetScrollAnchor(LayoutViewport()).RestoreAnchor(serialized_anchor));
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().y(), scroll_y);
+}
+
+TEST_F(ScrollAnchorTest, SerializeAnchorForSvgText) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        height: 2000px;
+      }
+      #svg {
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <svg id="svg" width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+      <text id="svg-text" x="0" y="20" font-size="20" fill="blue">
+        Hello
+      </text>
+    </svg>
+  )HTML");
+
+  int scroll_y = 15;
+  // scroll to (0, 15)
+  ScrollLayoutViewport(ScrollOffset(0, scroll_y));
+  ScrollAnchor scroll_anchor = GetScrollAnchor(LayoutViewport());
+  SerializedAnchor serialized_anchor = scroll_anchor.GetSerializedAnchor();
+
+  EXPECT_EQ(serialized_anchor.selector, "#svg-text");
+
+  // scroll to (0, 0)
+  ScrollLayoutViewport(ScrollOffset(0, -scroll_y));
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().y(), 0);
+
+  // then restore the anchor
+  EXPECT_TRUE(
+      GetScrollAnchor(LayoutViewport()).RestoreAnchor(serialized_anchor));
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().y(), scroll_y);
+}
+
 TEST_F(ScrollAnchorTest, SerializeAnchorUsesTagname) {
   SetBodyInnerHTML(R"HTML(
       <style>
@@ -808,7 +958,7 @@ TEST_F(ScrollAnchorTest, SerializeAnchorFailsForShadowDOMElement) {
       <div></div>)HTML");
   auto* host = GetDocument().getElementById(AtomicString("host"));
   auto& shadow_root = host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
-  shadow_root.setInnerHTML(R"HTML(
+  shadow_root.SetInnerHTMLWithoutTrustedTypes(R"HTML(
       <style>
         div { height: 100px; }
       </style>
@@ -1005,7 +1155,8 @@ TEST_F(ScrollAnchorTest, ClampAdjustsAnchorAnimation) {
     <div class="content" id=four></div>
   )HTML");
   LayoutViewport()->SetScrollOffset(ScrollOffset(0, 2000),
-                                    mojom::blink::ScrollType::kUser);
+                                    mojom::blink::ScrollType::kUser,
+                                    cc::ScrollSourceType::kStationaryScroll);
   Update();
   GetDocument()
       .getElementById(AtomicString("hidden"))
@@ -1090,7 +1241,8 @@ class ScrollAnchorFindInPageTest : public testing::Test {
   }
 
   void SetHtmlInnerHTML(const char* content) {
-    GetDocument().documentElement()->setInnerHTML(String::FromUTF8(content));
+    GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(
+        String::FromUtf8(content));
     UpdateAllLifecyclePhasesForTest();
   }
 
@@ -1148,7 +1300,8 @@ TEST_F(ScrollAnchorFindInPageTest, FindInPageResultPrioritized) {
   )HTML");
 
   LayoutViewport()->SetScrollOffset(ScrollOffset(0, 150),
-                                    mojom::blink::ScrollType::kUser);
+                                    mojom::blink::ScrollType::kUser,
+                                    cc::ScrollSourceType::kStationaryScroll);
 
   const String search_text = "findme";
   ScrollAnchorTestFindInPageClient client;
@@ -1196,7 +1349,8 @@ TEST_F(ScrollAnchorFindInPageTest, FocusPrioritizedOverFindInPage) {
   )HTML");
 
   LayoutViewport()->SetScrollOffset(ScrollOffset(0, 150),
-                                    mojom::blink::ScrollType::kUser);
+                                    mojom::blink::ScrollType::kUser,
+                                    cc::ScrollSourceType::kStationaryScroll);
 
   const String search_text = "findme";
   ScrollAnchorTestFindInPageClient client;
@@ -1258,7 +1412,8 @@ TEST_F(ScrollAnchorFindInPageTest, FocusedUnderStickyIsSkipped) {
   )HTML");
 
   LayoutViewport()->SetScrollOffset(ScrollOffset(0, 150),
-                                    mojom::blink::ScrollType::kUser);
+                                    mojom::blink::ScrollType::kUser,
+                                    cc::ScrollSourceType::kStationaryScroll);
 
   GetDocument().getElementById(AtomicString("target"))->Focus();
 
@@ -1302,7 +1457,7 @@ TEST_F(ScrollAnchorPageTest, SvgRelativeBoundsCrashAfterClearLayoutResults) {
   Document& doc = GetDocument();
   doc.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
-  doc.getElementById(AtomicString("target"))->scrollIntoView();
+  doc.getElementById(AtomicString("target"))->scrollIntoViewForTesting();
   doc.getElementById(AtomicString("scrollbarSummoner"))
       ->setAttribute(html_names::kStyleAttr,
                      AtomicString("display:block; contain:size; height:0"));
@@ -1311,6 +1466,14 @@ TEST_F(ScrollAnchorPageTest, SvgRelativeBoundsCrashAfterClearLayoutResults) {
   // called, then ScrollAnchor::NotifyBeforeLayout() for <foreignObject> was
   // called. It accessed the geometry of the first <div>.
   doc.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+  // Pass if no crashes.
+}
+
+// Verifies that SuppressScrollAnchorScope doesn't crash when constructed with
+// a nullptr ScrollableArea.
+// https://crbug.com/471610993
+TEST_F(ScrollAnchorTest, SuppressScrollAnchorScopeWithNullScroller) {
+  SuppressScrollAnchorScope scope(nullptr);
   // Pass if no crashes.
 }
 }

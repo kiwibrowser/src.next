@@ -2,21 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <string>
-
 #include "chrome/browser/signin/force_signin_verifier.h"
+
+#include <string>
 
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "components/signin/public/base/consent_level.h"
@@ -25,7 +24,7 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
-#include "components/signin/public/identity_manager/scope_set.h"
+#include "components/sync/base/features.h"
 #include "content/public/browser/network_service_instance.h"
 #include "google_apis/gaia/gaia_constants.h"
 
@@ -42,8 +41,10 @@ const net::BackoffEntry::Policy kForceSigninVerifierBackoffPolicy = {
 };
 
 signin::ConsentLevel GetProfileConsentLevelToVerify(Profile* profile) {
-  // TODO(crbug.com/40280466): Condition to remove when we decide to
-  // align requirements for Managed vs Consumer accounts.
+  if (syncer::IsReplaceSyncPromosWithSignInPromosEnabled()) {
+    return signin::ConsentLevel::kSignin;
+  }
+
   return enterprise_util::UserAcceptedAccountManagement(profile)
              ? signin::ConsentLevel::kSignin
              : signin::ConsentLevel::kSync;
@@ -108,7 +109,7 @@ void ForceSigninVerifier::OnAccessTokenFetchComplete(
 }
 
 void ForceSigninVerifier::OnConnectionChanged(
-    network::mojom::ConnectionType type) {
+    net::NetworkChangeNotifier::ConnectionType type) {
   // Try again immediately once the network is back and cancel any pending
   // request.
   backoff_entry_.Reset();
@@ -127,7 +128,7 @@ void ForceSigninVerifier::Cancel() {
 }
 
 void ForceSigninVerifier::SendRequest() {
-  auto type = network::mojom::ConnectionType::CONNECTION_NONE;
+  auto type = net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE;
   if (content::GetNetworkConnectionTracker()->GetConnectionType(
           &type,
           base::BindOnce(&ForceSigninVerifier::SendRequestIfNetworkAvailable,
@@ -137,22 +138,21 @@ void ForceSigninVerifier::SendRequest() {
 }
 
 void ForceSigninVerifier::SendRequestIfNetworkAvailable(
-    network::mojom::ConnectionType network_type) {
+    net::NetworkChangeNotifier::ConnectionType network_type) {
   if (!identity_manager_ || !identity_manager_->AreRefreshTokensLoaded()) {
     request_waiting_for_refresh_tokens_ = true;
     return;
   }
 
-  if (network_type == network::mojom::ConnectionType::CONNECTION_NONE ||
+  if (network_type ==
+          net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE ||
       !ShouldSendRequest()) {
     return;
   }
 
-  signin::ScopeSet oauth2_scopes;
-  oauth2_scopes.insert(GaiaConstants::kChromeSyncOAuth2Scope);
   access_token_fetcher_ =
       std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
-          "force_signin_verifier", identity_manager_, oauth2_scopes,
+          signin::OAuthConsumerId::kForceSigninVerifier, identity_manager_,
           base::BindOnce(&ForceSigninVerifier::OnAccessTokenFetchComplete,
                          weak_factory_.GetWeakPtr()),
           signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate,

@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_ukm_aggregator.h"
 
 #include "base/metrics/statistics_recorder.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/test_mock_time_task_runner.h"
@@ -19,7 +20,8 @@
 #include "third_party/blink/renderer/core/testing/intersection_observer_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
+#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
@@ -66,7 +68,10 @@ class LocalFrameUkmAggregatorTest : public testing::Test {
   }
 
   std::string GetMetricName(int index) {
-    std::string name = LocalFrameUkmAggregator::metrics_data()[index].name;
+    std::string name =
+        LocalFrameUkmAggregator::metrics_data()[base::checked_cast<size_t>(
+                                                    index)]
+            .name;
 
     // If `name` is an UMA metric of the form Blink.[MetricName].UpdateTime, the
     // following code extracts out [MetricName] for building up the UKM metric.
@@ -673,6 +678,10 @@ TEST_F(LocalFrameUkmAggregatorTest, IntersectionObserverSamplePeriod) {
 
 class LocalFrameUkmAggregatorSimTest : public SimTest {
  protected:
+  explicit LocalFrameUkmAggregatorSimTest(
+      base::test::TaskEnvironment::TimeSource time_source =
+          base::test::TaskEnvironment::TimeSource::SYSTEM_TIME)
+      : SimTest(time_source) {}
   LocalFrameUkmAggregator& local_root_aggregator() {
     return *LocalFrameRoot().GetFrame()->View()->GetUkmAggregator();
   }
@@ -865,7 +874,7 @@ TEST_F(LocalFrameUkmAggregatorSimTest, PrePostFCPMetricsWithChildFrameFCP) {
           GetDocument().getElementById(AtomicString("frame")))
           ->contentDocument();
   Element* target = subframe_document->getElementById(AtomicString("target"));
-  target->setInnerHTML("test1");
+  target->SetInnerHTMLWithoutTrustedTypes("test1");
 
   // Do a frame that reaches FCP.
   Compositor().BeginFrame();
@@ -874,7 +883,7 @@ TEST_F(LocalFrameUkmAggregatorSimTest, PrePostFCPMetricsWithChildFrameFCP) {
   histogram_tester.ExpectTotalCount("Blink.MainFrame.UpdateTime.PostFCP", 0);
 
   // Make a change to the subframe that causes another frame.
-  target->setInnerHTML("test2");
+  target->SetInnerHTMLWithoutTrustedTypes("test2");
 
   // Do a post-FCP frame.
   Compositor().BeginFrame();
@@ -905,8 +914,8 @@ TEST_F(LocalFrameUkmAggregatorSimTest, VisualUpdateDelay) {
   Compositor().ResetLastFrameTime();
 
   // This is the code path for a normal invalidation from blink
-  WebView().MainFrameViewWidget()->RequestAnimationAfterDelay(
-      base::TimeDelta());
+  WebView().MainFrameViewWidget()->RequestAnimationAfterDelay(base::TimeDelta(),
+                                                              /*urgent=*/false);
 
   base::PlatformThread::Sleep(base::Microseconds(3000));
 
@@ -914,8 +923,8 @@ TEST_F(LocalFrameUkmAggregatorSimTest, VisualUpdateDelay) {
   Compositor().BeginFrame();
   histogram_tester.ExpectTotalCount("Blink.VisualUpdateDelay.UpdateTime.PreFCP",
                                     1);
-  base::HistogramBase::Sample delay =
-      base::saturated_cast<base::HistogramBase::Sample>(
+  base::HistogramBase::Sample32 delay =
+      base::saturated_cast<base::HistogramBase::Sample32>(
           (Compositor().LastFrameTime() -
            local_root_aggregator().LastFrameRequestTimeForTest())
               .InMicroseconds());
@@ -1040,6 +1049,10 @@ class LocalFrameUkmAggregatorSyncScrollTest
     return ::testing::get<2>(config);
   }
 
+  LocalFrameUkmAggregatorSyncScrollTest()
+      : LocalFrameUkmAggregatorSimTest(
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
+
   bool ShouldTriggerSyncScrollHeuristic() const {
     // We would only attempt to synchronize scrolling if we had a scroll handler
     // and, provided this is the case, we look for both mutating a property and
@@ -1121,8 +1134,7 @@ class LocalFrameUkmAggregatorSyncScrollTest
     NOTREACHED();
   }
 
-  ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
-      platform_;
+  ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
 };
 
 TEST_P(LocalFrameUkmAggregatorSyncScrollTest, SyncScrollHeuristicRAFSetTop) {
@@ -1162,7 +1174,7 @@ TEST_P(LocalFrameUkmAggregatorSyncScrollTest, SyncScrollHeuristicRAFSetTop) {
   main_resource.Complete(html.c_str());
 
   // Wait until the script has had time to run.
-  platform_->RunForPeriodSeconds(5.);
+  task_environment().FastForwardBy(base::Seconds(5.));
   base::RunLoop().RunUntilIdle();
 
   // Do a pre-FCP frame.
@@ -1188,7 +1200,7 @@ TEST_P(LocalFrameUkmAggregatorSyncScrollTest, SyncScrollHeuristicRAFSetTop) {
 
   // Cause FCP on the next frame.
   Element* target = GetDocument().getElementById(AtomicString("card"));
-  target->setInnerHTML("hello world");
+  target->SetInnerHTMLWithoutTrustedTypes("hello world");
 
   Compositor().BeginFrame();
 

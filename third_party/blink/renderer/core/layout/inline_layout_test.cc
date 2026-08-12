@@ -19,8 +19,8 @@ namespace blink {
 class InlineLayoutTest : public SimTest {
  public:
   ConstraintSpace ConstraintSpaceForElement(LayoutBlockFlow* block_flow) {
-    ConstraintSpaceBuilder builder(block_flow->Style()->GetWritingMode(),
-                                   block_flow->Style()->GetWritingDirection(),
+    ConstraintSpaceBuilder builder(block_flow->StyleRef().GetWritingMode(),
+                                   block_flow->StyleRef().GetWritingDirection(),
                                    /* is_new_fc */ false);
     builder.SetAvailableSize(LogicalSize(LayoutUnit(), LayoutUnit()));
     builder.SetPercentageResolutionSize(
@@ -79,7 +79,7 @@ TEST_F(InlineLayoutTest, BlockWithTextAndAtomicInline) {
 
   StringBuilder expected_text;
   expected_text.Append("Hello ");
-  expected_text.Append(kObjectReplacementCharacter);
+  expected_text.Append(uchar::kObjectReplacementCharacter);
   expected_text.Append('.');
   auto first_child = To<InlineNode>(node.FirstChild());
   EXPECT_EQ(expected_text.ToString(),

@@ -26,7 +26,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOM_TOKEN_LIST_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -41,7 +41,7 @@ class Element;
 class ExceptionState;
 
 class CORE_EXPORT DOMTokenList : public ScriptWrappable,
-                                 public ElementRareDataField {
+                                 public NodeRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -65,7 +65,6 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable,
   bool supports(const AtomicString&, ExceptionState&);
   AtomicString value() const;
   void setValue(const AtomicString&);
-  AtomicString toString() const { return value(); }
 
   // This function should be called when the associated attribute value was
   // updated.

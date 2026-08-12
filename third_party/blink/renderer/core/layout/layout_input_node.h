@@ -13,7 +13,6 @@
 #include "third_party/blink/renderer/core/layout/geometry/axis.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/layout_box_utils.h"
 #include "third_party/blink/renderer/core/layout/list/layout_outside_list_marker.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
@@ -21,6 +20,7 @@
 
 namespace blink {
 
+class BlockNode;
 class ComputedStyle;
 class Document;
 class LayoutObject;
@@ -87,10 +87,7 @@ class CORE_EXPORT LayoutInputNode {
   bool IsFlexItem() const { return IsBlock() && box_->IsFlexItem(); }
   bool IsFlexibleBox() const { return IsBlock() && box_->IsFlexibleBox(); }
   bool IsGrid() const { return IsBlock() && box_->IsLayoutGrid(); }
-  bool IsMasonry() const { return IsBlock() && box_->IsLayoutMasonry(); }
-  bool ShouldBeConsideredAsReplaced() const {
-    return box_->ShouldBeConsideredAsReplaced();
-  }
+  bool IsGridLanes() const { return IsBlock() && box_->IsLayoutGridLanes(); }
   bool IsListItem() const { return IsBlock() && box_->IsLayoutListItem(); }
   // Returns the list marker if |this.IsListItem()| with an outside list marker.
   // Otherwise |nullptr|.
@@ -109,6 +106,9 @@ class CORE_EXPORT LayoutInputNode {
   bool IsInitialLetterBox() const { return box_->IsInitialLetterBox(); }
   bool IsMedia() const { return box_->IsMedia(); }
   bool IsCanvas() const { return box_->IsCanvas(); }
+  bool IsImageReplacement() const { return box_->IsLayoutImageReplacement(); }
+
+  bool IsSemiReplaced() const { return IsBlock() && box_->IsSemiReplaced(); }
 
   // Return true if this is the legend child of a fieldset that gets special
   // treatment (i.e. placed over the block-start border).
@@ -154,7 +154,7 @@ class CORE_EXPORT LayoutInputNode {
   bool IsMathML() const { return box_->IsMathML(); }
 
   bool IsAnonymous() const { return box_->IsAnonymous(); }
-  bool IsAnonymousBlock() const { return box_->IsAnonymousBlock(); }
+  bool IsAnonymousBlockFlow() const { return box_->IsAnonymousBlockFlow(); }
 
   // If the node is a quirky container for margin collapsing, see:
   // https://html.spec.whatwg.org/C/#margin-collapsing-quirks
@@ -195,18 +195,6 @@ class CORE_EXPORT LayoutInputNode {
     return IsBlock() && box_->CreatesNewFormattingContext();
   }
 
-  // Returns true if this node should pass its percentage resolution block-size
-  // to its children. Typically only quirks-mode, auto block-size, block nodes.
-  bool UseParentPercentageResolutionBlockSizeForChildren() const {
-    auto* layout_block = DynamicTo<LayoutBlock>(box_.Get());
-    if (IsBlock() && layout_block) {
-      return LayoutBoxUtils::SkipContainingBlockForPercentHeightCalculation(
-          layout_block);
-    }
-
-    return false;
-  }
-
   // Returns intrinsic sizing information for replaced elements.
   // ComputeReplacedSize can use it to compute actual replaced size.
   // Corresponds to Legacy's LayoutReplaced::IntrinsicSizingInfo.
@@ -233,6 +221,7 @@ class CORE_EXPORT LayoutInputNode {
   LayoutBox* GetLayoutBox() const { return box_.Get(); }
 
   const ComputedStyle& Style() const { return box_->StyleRef(); }
+  const ComputedStyle& FirstLineStyle() const;
 
   bool ShouldApplySizeContainment() const {
     return box_->ShouldApplySizeContainment();
@@ -274,8 +263,9 @@ class CORE_EXPORT LayoutInputNode {
   LayoutUnit DefaultIntrinsicContentInlineSize() const {
     return box_->DefaultIntrinsicContentInlineSize();
   }
-  LayoutUnit DefaultIntrinsicContentBlockSize() const {
-    return box_->DefaultIntrinsicContentBlockSize();
+  LayoutUnit DefaultIntrinsicContentBlockSize(
+      bool children_have_geometry) const {
+    return box_->DefaultIntrinsicContentBlockSize(children_have_geometry);
   }
 
   bool ChildLayoutBlockedByDisplayLock() const {
@@ -301,10 +291,6 @@ class CORE_EXPORT LayoutInputNode {
 
   bool operator==(const LayoutInputNode& other) const {
     return box_ == other.box_ && type_ == other.type_;
-  }
-
-  bool operator!=(const LayoutInputNode& other) const {
-    return !(*this == other);
   }
 
 #if DCHECK_IS_ON()

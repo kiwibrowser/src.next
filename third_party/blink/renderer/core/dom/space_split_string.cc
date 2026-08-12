@@ -21,6 +21,7 @@
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
+#include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
@@ -79,8 +80,7 @@ ALWAYS_INLINE void SpaceSplitString::Data::CreateVector(
 }
 
 void SpaceSplitString::Data::CreateVector(const AtomicString& string) {
-  WTF::VisitCharacters(string,
-                       [&](auto chars) { CreateVector(string, chars); });
+  VisitCharacters(string, [&](auto chars) { CreateVector(string, chars); });
 }
 
 bool SpaceSplitString::Data::ContainsAll(Data& other) {
@@ -160,24 +160,21 @@ AtomicString SpaceSplitString::SerializeToString() const {
   if (size == 1)
     return (*data_)[0];
   StringBuilder builder;
-  builder.Append((*data_)[0]);
-  for (wtf_size_t i = 1; i < size; ++i) {
-    builder.Append(' ');
-    builder.Append((*data_)[i]);
-  }
+  builder.AppendRange(*data_, " ");
   return builder.ToAtomicString();
 }
 
 // static
 SpaceSplitString::DataMap& SpaceSplitString::SharedDataMap() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<Persistent<DataMap>>,
+  using DataMapHolder = DisallowNewWrapper<DataMap>;
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<Persistent<DataMapHolder>>,
                                   static_map_holder, {});
-  Persistent<DataMap>& map = *static_map_holder;
+  Persistent<DataMapHolder>& map = *static_map_holder;
   if (!map) [[unlikely]] {
-    map = MakeGarbageCollected<DataMap>();
+    map = MakeGarbageCollected<DataMapHolder>();
     LEAK_SANITIZER_IGNORE_OBJECT(&map);
   }
-  return *map;
+  return map->Value();
 }
 
 void SpaceSplitString::Set(const AtomicString& input_string) {

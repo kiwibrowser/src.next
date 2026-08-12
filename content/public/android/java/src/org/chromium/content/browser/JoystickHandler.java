@@ -4,18 +4,21 @@
 
 package org.chromium.content.browser;
 
+import static org.chromium.build.NullUtil.assertNonNull;
+
 import android.view.InputDevice;
 import android.view.MotionEvent;
 
 import org.chromium.base.UserData;
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.content.browser.input.ImeAdapterImpl;
-import org.chromium.content.browser.webcontents.WebContentsImpl;
-import org.chromium.content.browser.webcontents.WebContentsImpl.UserDataFactory;
 import org.chromium.content_public.browser.ImeEventObserver;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContents.UserDataFactory;
 import org.chromium.ui.base.EventForwarder;
 
 /** Bridges content and joystick device event conversion and forwarding. */
+@NullMarked
 public class JoystickHandler implements ImeEventObserver, UserData {
     private final EventForwarder mEventForwarder;
 
@@ -27,17 +30,25 @@ public class JoystickHandler implements ImeEventObserver, UserData {
     }
 
     public static JoystickHandler fromWebContents(WebContents webContents) {
-        return ((WebContentsImpl) webContents)
-                .getOrSetUserData(JoystickHandler.class, UserDataFactoryLazyHolder.INSTANCE);
+        JoystickHandler ret =
+                webContents.getOrSetUserData(
+                        JoystickHandler.class, UserDataFactoryLazyHolder.INSTANCE);
+        assert ret != null;
+        return ret;
     }
 
     /**
      * Creates JoystickHandler instance.
+     *
      * @param webContents WebContents instance with which this JoystickHandler is associated.
      */
     private JoystickHandler(WebContents webContents) {
         mEventForwarder = webContents.getEventForwarder();
-        ImeAdapterImpl.fromWebContents(webContents).addEventObserver(this);
+
+        ImeAdapterImpl adapter = assertNonNull(ImeAdapterImpl.fromWebContents(webContents));
+
+        // Gracefully handle a null adapter in non-debug builds.
+        if (adapter != null) adapter.addEventObserver(this);
     }
 
     public void setScrollEnabled(boolean enabled) {
@@ -62,7 +73,7 @@ public class JoystickHandler implements ImeEventObserver, UserData {
         float velocityX = getVelocityFromJoystickAxis(event, MotionEvent.AXIS_X);
         float velocityY = getVelocityFromJoystickAxis(event, MotionEvent.AXIS_Y);
         if (velocityX == 0.f && velocityY == 0.f) return false;
-        mEventForwarder.startFling(event.getEventTime(), velocityX, velocityY, true, true);
+        mEventForwarder.startFling(event.getEventTime(), velocityX, velocityY, true, true, false);
         return true;
     }
 

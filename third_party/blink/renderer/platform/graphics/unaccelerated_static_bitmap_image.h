@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_UNACCELERATED_STATIC_BITMAP_IMAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_UNACCELERATED_STATIC_BITMAP_IMAGE_H_
 
-#include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 
@@ -21,12 +21,13 @@ class PLATFORM_EXPORT UnacceleratedStaticBitmapImage final
   // The ImageOrientation should be derived from the source of the image data.
   static scoped_refptr<UnacceleratedStaticBitmapImage> Create(
       sk_sp<SkImage>,
-      ImageOrientation orientation = ImageOrientationEnum::kDefault);
+      ImageOrientation orientation = ImageOrientationEnum::kDefault,
+      const gfx::HDRMetadata& hdr_metadata = {});
   static scoped_refptr<UnacceleratedStaticBitmapImage> Create(
       PaintImage,
       ImageOrientation orientation = ImageOrientationEnum::kDefault);
 
-  bool CurrentFrameKnownToBeOpaque() override;
+  bool IsOpaque() override;
 
   void Draw(cc::PaintCanvas*,
             const cc::PaintFlags&,
@@ -38,13 +39,29 @@ class PLATFORM_EXPORT UnacceleratedStaticBitmapImage final
 
   void Transfer() final;
 
-  bool CopyToResourceProvider(CanvasResourceProvider* resource_provider,
-                              const gfx::Rect& copy_rect) override;
+  SkImageInfo GetSkImageInfo() const;
+  gfx::Size GetSize() const override {
+    return gfx::Size(GetSkImageInfo().width(), GetSkImageInfo().height());
+  }
+  SkAlphaType GetAlphaType() const override {
+    return GetSkImageInfo().alphaType();
+  }
+  gfx::ColorSpace GetColorSpace() const override {
+    return SkColorSpaceToGfxColorSpace(GetSkImageInfo().refColorSpace());
+  }
+  viz::SharedImageFormat GetSharedImageFormat() const override {
+    return viz::SkColorTypeToSinglePlaneSharedImageFormat(
+        GetSkImageInfo().colorType());
+  }
 
-  SkImageInfo GetSkImageInfo() const override;
+  const gfx::HDRMetadata& GetHdrMetadata() const override {
+    return paint_image_.GetHDRMetadata();
+  }
 
  private:
-  UnacceleratedStaticBitmapImage(sk_sp<SkImage>, ImageOrientation);
+  UnacceleratedStaticBitmapImage(sk_sp<SkImage>,
+                                 ImageOrientation,
+                                 const gfx::HDRMetadata&);
   UnacceleratedStaticBitmapImage(PaintImage, ImageOrientation);
 
   PaintImage paint_image_;

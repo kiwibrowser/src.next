@@ -13,7 +13,7 @@ export function getHtml(this: ExtensionsSidebarElement) {
     attr-for-selected="data-path" .selected="${this.selectedPath_}">
   <!-- Values for "data-path" attribute must match the "Page" enum. -->
   <a role="menuitem" class="cr-nav-menu-item" id="sectionsExtensions" href="/"
-      @click="${this.onLinkClick_}" data-path="items-list">
+      @click="${this.onLinkClick_}" data-path="itemsList">
     <cr-icon icon="extensions-icons:my_extensions"></cr-icon>
     $i18n{sidebarExtensions}
     <cr-ripple></cr-ripple>
@@ -33,6 +33,14 @@ export function getHtml(this: ExtensionsSidebarElement) {
     <cr-ripple></cr-ripple>
   </a>
 </cr-menu-selector>
+<div class="separator" ?hidden="${!this.inDevMode}"></div>
+      ${this.inDevMode ? html`
+        <div class="cr-nav-menu-item" id="moreExtensions">
+          <span id="promo-message-text" class="cr-secondary-text"
+            .innerHTML="${this.computeDocsPromoText_()}">
+          </span>
+        </div>
+        `: ''}
 <div class="separator"></div>
 <div class="cr-nav-menu-item" id="moreExtensions">
   <cr-icon id="web-store-icon" icon="extensions-icons:web_store">

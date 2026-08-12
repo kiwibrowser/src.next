@@ -7,9 +7,8 @@ package org.chromium.chrome.browser.tasks.tab_management;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
+import static org.chromium.chrome.browser.tasks.tab_management.TabSwitcherPaneDrawableProperties.SHOW_NOTIFICATION_DOT;
 import static org.chromium.chrome.browser.tasks.tab_management.TabSwitcherPaneDrawableProperties.TAB_COUNT;
-
-import androidx.test.filters.SmallTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -20,7 +19,7 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.toolbar.TabSwitcherDrawable;
+import org.chromium.chrome.browser.ui.android.bars_common.TabSwitcherDrawable;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
@@ -41,10 +40,11 @@ public class TabSwitcherPaneDrawableViewBinderUnitTest {
     }
 
     @Test
-    @SmallTest
     public void testBindAllProperties() {
         int tabCount = 5;
         mModel.set(TAB_COUNT, tabCount);
+        mModel.set(SHOW_NOTIFICATION_DOT, true);
         verify(mDrawable).updateForTabCount(eq(tabCount), eq(false));
+        verify(mDrawable).setNotificationIconStatus(eq(true));
     }
 }

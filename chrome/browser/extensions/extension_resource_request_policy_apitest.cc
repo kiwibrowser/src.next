@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -314,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "web_accessible/accessible_link_resource.html"));
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), accessible_linked_resource, 1);
-  GURL accessible_url = extension->GetResourceURL("/test.png");
+  GURL accessible_url = extension->GetResourceURL("test.png");
   EXPECT_EQ(accessible_url, content::EvalJs(web_contents, "document.URL"));
   EXPECT_EQ(content::PAGE_TYPE_NORMAL,
             controller.GetLastCommittedEntry()->GetPageType());
@@ -412,7 +411,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
   //
   // TODO(alexmos): Make this check stricter, as extensions are now fully
   // isolated. The failure mode is that the request is canceled and we stay on
-  // public.html (see https://crbug.com/656752).
+  // public.html (see https://crbug.com/40085725).
   EXPECT_NE("Private",
             EvalJs(ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0),
                    "document.body.innerText"));
@@ -527,7 +526,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       non_web_accessible_url, "remote-frame", non_web_accessible_url);
 }
 
-// This is a regression test for https://crbug.com/442579.
+// This is a regression test for https://crbug.com/40081020.
 IN_PROC_BROWSER_TEST_F(
     ExtensionResourceRequestPolicyTest,
     WebNavigationToNonWebAccessibleResource_FormTargetingNewWindow) {
@@ -543,7 +542,7 @@ IN_PROC_BROWSER_TEST_F(
 
   // Inject and submit a form that will navigate a new window to a
   // non-web-accessible-resource.  This replicates the repro steps
-  // from https://crbug.com/442579 (although a simpler repro might
+  // from https://crbug.com/40081020 (although a simpler repro might
   // exist - window.open(non-war-url, '_blank')).
   content::WebContentsAddedObserver new_window_observer;
   content::WebContents* old_window =
@@ -675,7 +674,7 @@ IN_PROC_BROWSER_TEST_F(
 
 // Tests that a page can't use history.back() on another page to navigate to a
 // non-web accessible resource of an extension.
-// Regression test for https://crbug.com/1043965.
+// Regression test for https://crbug.com/40051315.
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
                        WebNavigationToNonWebAccessibleResource_ViaHistoryBack) {
   const Extension* extension = LoadExtension(
@@ -762,7 +761,7 @@ IN_PROC_BROWSER_TEST_F(
       inaccessible_resource, "local-frame", url_blocked_by_renderer);
 }
 
-// Regression test for crbug.com/649869. Ensures that on navigation to an
+// Regression test for crbug.com/40486262. Ensures that on navigation to an
 // invalid extension resource (or more generally for navigations blocked by the
 // browser with net::ERR_BLOCKED_BY_CLIENT), the error page doesn't incorrectly
 // attribute extensions as the cause of the blocked request.
@@ -785,10 +784,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
   expected_error = "This page has been blocked by Chromium";
 #endif
 
-  EXPECT_TRUE(base::Contains(body, expected_error));
-  EXPECT_FALSE(
-      base::Contains(body, "This page has been blocked by an extension"));
-  EXPECT_FALSE(base::Contains(body, "Try disabling your extensions."));
+  EXPECT_TRUE(body.contains(expected_error));
+  EXPECT_FALSE(body.contains("This page has been blocked by an extension"));
+  EXPECT_FALSE(body.contains("Try disabling your extensions."));
 }
 
 }  // namespace extensions

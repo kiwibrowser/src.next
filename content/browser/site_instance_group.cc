@@ -4,6 +4,7 @@
 
 #include "content/browser/site_instance_group.h"
 
+#include "base/auto_reset.h"
 #include "base/observer_list.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/site_instance_impl.h"
@@ -41,6 +42,10 @@ base::SafeRef<SiteInstanceGroup> SiteInstanceGroup::GetSafeRef() {
   return weak_ptr_factory_.GetSafeRef();
 }
 
+base::WeakPtr<SiteInstanceGroup> SiteInstanceGroup::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 base::WeakPtr<SiteInstanceGroup>
 SiteInstanceGroup::GetWeakPtrToAllowDangling() {
   return weak_ptr_factory_.GetWeakPtr();
@@ -74,9 +79,9 @@ void SiteInstanceGroup::IncrementActiveFrameCount() {
 void SiteInstanceGroup::DecrementActiveFrameCount() {
   if (--active_frame_count_ == 0) {
     base::AutoReset<bool> scope(&is_notifying_observers_, true);
-    for (auto& observer : observers_) {
-      observer.ActiveFrameCountIsZero(this);
-    }
+    // Allow reentrancy because this can be called within RenderProcessExited.
+    observers_.NotifyAllowReentrancy(
+        &SiteInstanceGroup::Observer::ActiveFrameCountIsZero, this);
   }
 }
 
@@ -105,13 +110,8 @@ bool SiteInstanceGroup::IsRelatedSiteInstanceGroup(SiteInstanceGroup* group) {
   return browsing_instance_id() == group->browsing_instance_id();
 }
 
-bool SiteInstanceGroup::IsCoopRelatedSiteInstanceGroup(
-    SiteInstanceGroup* group) {
-  return coop_related_group_token() == group->coop_related_group_token();
-}
-
 void SiteInstanceGroup::RenderProcessHostDestroyed(RenderProcessHost* host) {
-  DCHECK_EQ(process_->GetID(), host->GetID());
+  DCHECK_EQ(process_->GetDeprecatedID(), host->GetDeprecatedID());
   process_->RemoveObserver(this);
 
   // Remove references to `this` from all SiteInstances in this group. That will
@@ -130,8 +130,9 @@ void SiteInstanceGroup::RenderProcessExited(
   // iteration.
   scoped_refptr<SiteInstanceGroup> self_refcount = base::WrapRefCounted(this);
   base::AutoReset<bool> scope(&is_notifying_observers_, true);
-  for (auto& observer : observers_)
-    observer.RenderProcessGone(this, info);
+  // Allow reentrancy because this can be called within RenderProcessExited.
+  observers_.NotifyAllowReentrancy(
+      &SiteInstanceGroup::Observer::RenderProcessGone, this, info);
 }
 
 const StoragePartitionConfig& SiteInstanceGroup::GetStoragePartitionConfig()
@@ -148,9 +149,7 @@ SiteInstanceGroup* SiteInstanceGroup::CreateForTesting(
                            WebExposedIsolationInfo::CreateNonIsolated(),
                            /*is_guest=*/false,
                            /*is_fenced=*/false,
-                           /*is_fixed_storage_partition=*/false,
-                           /*coop_related_group=*/nullptr,
-                           /*common_coop_origin=*/std::nullopt),
+                           /*is_fixed_storage_partition=*/false),
       process);
 }
 

@@ -5,7 +5,6 @@
 #include "extensions/browser/extension_host_test_helper.h"
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "extensions/browser/extension_host.h"
 
@@ -86,7 +85,7 @@ ExtensionHost* ExtensionHostTestHelper::WaitFor(HostEvent event) {
   waiting_for_ = event;
   run_loop.Run();
 
-  DCHECK(base::Contains(observed_events_, event));
+  DCHECK(observed_events_.contains(event));
   // Note: This can still be null here if the corresponding ExtensionHost was
   // destroyed.  This is always true when waiting for
   // OnExtensionHostDestroyed(), but can also happen if the ExtensionHost is
@@ -100,20 +99,25 @@ void ExtensionHostTestHelper::EventSeen(ExtensionHost* host, HostEvent event) {
   // ExtensionHostRegistry is shared between on- and off-the-record profiles,
   // so the `host`'s browser context may not be the same as the one associated
   // with this object in the case of split mode extensions.
-  if (host->browser_context() != browser_context_)
+  if (host->browser_context() != browser_context_) {
     return;
-  if (!extension_id_.empty() && host->extension_id() != extension_id_)
+  }
+  if (!extension_id_.empty() && host->extension_id() != extension_id_) {
     return;
-  if (restrict_to_type_ && host->extension_host_type() != restrict_to_type_)
+  }
+  if (restrict_to_type_ && host->extension_host_type() != restrict_to_type_) {
     return;
-  if (restrict_to_host_ && host != restrict_to_host_)
+  }
+  if (restrict_to_host_ && host != restrict_to_host_) {
     return;
+  }
 
   if (event == HostEvent::kDestroyed) {
     // Clean up all old pointers to the ExtensionHost on its destruction.
     for (auto& kv : observed_events_) {
-      if (kv.second == host)
+      if (kv.second == host) {
         kv.second = nullptr;
+      }
     }
 
     // Ensure we don't put a new pointer for the host into the map.

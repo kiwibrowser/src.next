@@ -6,22 +6,35 @@
 
 #include <stdint.h>
 
+#include <array>
 #include <memory>
 
 #include "base/files/scoped_temp_dir.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "components/history/core/test/history_service_test_util.h"
+#include "components/ntp_tiles/constants.h"
 #include "components/ntp_tiles/pref_names.h"
+#include "components/search/ntp_features.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "extensions/buildflags/buildflags.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using Link = ntp_tiles::CustomLinksManager::Link;
 using sync_preferences::TestingPrefServiceSyncable;
 
 namespace ntp_tiles {
+
+void PrintTo(const CustomLinksManager::Link& link, std::ostream* os) {
+  *os << "{url: " << link.url.spec()
+      << ", title: " << base::UTF16ToUTF8(link.title)
+      << ", is_most_visited: " << (link.is_most_visited ? "true" : "false")
+      << "}";
+}
 
 namespace {
 
@@ -30,22 +43,25 @@ struct TestCaseItem {
   const char16_t* title;
 };
 
-const TestCaseItem kTestCase1[] = {{"http://foo1.com/", u"Foo1"}};
-const TestCaseItem kTestCase2[] = {
+const auto kTestCase1 =
+    std::to_array<TestCaseItem>({{"http://foo1.com/", u"Foo1"}});
+constexpr auto kTestCase2 = std::to_array<TestCaseItem>({
     {"http://foo1.com/", u"Foo1"},
     {"http://foo2.com/", u"Foo2"},
-};
-const TestCaseItem kTestCase3[] = {
+});
+constexpr auto kTestCase3 = std::to_array<TestCaseItem>({
     {"http://foo1.com/", u"Foo1"},
     {"http://foo2.com/", u"Foo2"},
     {"http://foo3.com/", u"Foo3"},
-};
+});
 const TestCaseItem kTestCaseMax[] = {
     {"http://foo1.com/", u"Foo1"}, {"http://foo2.com/", u"Foo2"},
     {"http://foo3.com/", u"Foo3"}, {"http://foo4.com/", u"Foo4"},
     {"http://foo5.com/", u"Foo5"}, {"http://foo6.com/", u"Foo6"},
     {"http://foo7.com/", u"Foo7"}, {"http://foo8.com/", u"Foo8"},
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     {"http://foo9.com/", u"Foo9"}, {"http://foo10.com/", u"Foo10"},
+#endif
 };
 
 const char kTestTitle[] = "Test";
@@ -58,11 +74,11 @@ const char kTestGmailURL[] =
     "chrome-extension://pjkljhegncpnkpknbcohdijeoejaedia/index.html";
 #endif
 
-base::Value::List FillTestList(const char* url,
-                               const char* title,
-                               const bool is_most_visited) {
-  base::Value::List new_link_list;
-  base::Value::Dict new_link;
+base::ListValue FillTestList(const char* url,
+                             const char* title,
+                             const bool is_most_visited) {
+  base::ListValue new_link_list;
+  base::DictValue new_link;
   new_link.Set("url", url);
   new_link.Set("title", title);
   new_link.Set("isMostVisited", is_most_visited);
@@ -100,7 +116,7 @@ class CustomLinksManagerImplTest : public testing::Test {
   CustomLinksManagerImplTest() {
     CustomLinksManagerImpl::RegisterProfilePrefs(prefs_.registry());
     auto defaults =
-        base::Value::List().Append("pjkljhegncpnkpknbcohdijeoejaedia");
+        base::ListValue().Append("pjkljhegncpnkpknbcohdijeoejaedia");
     prefs_.registry()->RegisterListPref(
         webapps::kWebAppsMigratedPreinstalledApps, std::move(defaults));
   }
@@ -114,7 +130,8 @@ class CustomLinksManagerImplTest : public testing::Test {
     history_service_ = history::CreateHistoryService(scoped_temp_dir_.GetPath(),
                                                      /*create_db=*/false);
     custom_links_ = std::make_unique<CustomLinksManagerImpl>(
-        &prefs_, history_service_.get());
+        CustomLinksManagerImpl::Options{
+            .prefs = &prefs_, .history_service = history_service_.get()});
   }
 
  protected:
@@ -178,6 +195,20 @@ TEST_F(CustomLinksManagerImplTest, AddLink) {
   EXPECT_EQ(expected_links, custom_links_->GetLinks());
 }
 
+TEST_F(CustomLinksManagerImplTest, AddLinkTo) {
+  // Initialize.
+  std::vector<Link> initial_links = FillTestLinks(kTestCase1);
+  ASSERT_TRUE(custom_links_->Initialize(FillTestTiles(kTestCase1)));
+  ASSERT_EQ(initial_links, custom_links_->GetLinks());
+
+  // Add link in front.
+  std::vector<Link> expected_links = initial_links;
+  expected_links.insert(expected_links.begin(),
+                        Link{GURL(kTestUrl), kTestTitle16, false});
+  EXPECT_TRUE(custom_links_->AddLinkTo(GURL(kTestUrl), kTestTitle16, 0U));
+  EXPECT_EQ(expected_links, custom_links_->GetLinks());
+}
+
 TEST_F(CustomLinksManagerImplTest, AddLinkWhenAtMaxLinks) {
   // Initialize.
   std::vector<Link> initial_links = FillTestLinks(kTestCaseMax);
@@ -187,6 +218,83 @@ TEST_F(CustomLinksManagerImplTest, AddLinkWhenAtMaxLinks) {
   // Try to add link. This should fail and not modify the list.
   EXPECT_FALSE(custom_links_->AddLink(GURL(kTestUrl), kTestTitle16));
   EXPECT_EQ(initial_links, custom_links_->GetLinks());
+}
+
+TEST_F(CustomLinksManagerImplTest, AddLinkUpTo20WhenRedesignFlagEnabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(ntp_features::kNtpShortcutsRedesign);
+
+  // Recreate custom_links_ to pick up the enabled feature flag in its
+  // constructor.
+  custom_links_ =
+      std::make_unique<CustomLinksManagerImpl>(CustomLinksManagerImpl::Options{
+          .prefs = &prefs_, .history_service = history_service_.get()});
+
+  ASSERT_TRUE(custom_links_->Initialize(FillTestTiles(kTestCaseMax)));
+
+  // With the redesign flag enabled, we should be able to add up to 20 custom
+  // links since GetMaxShortcutsInExpandedState defaults to 20.
+  size_t current_size = custom_links_->GetLinks().size();
+  for (size_t i = current_size; i < 20; ++i) {
+    std::string url = "http://test.com/" + base::NumberToString(i);
+    EXPECT_TRUE(custom_links_->AddLink(GURL(url), u"Test"));
+  }
+
+  // Reached 20 links limit. Adding the 21st link should fail.
+  EXPECT_FALSE(custom_links_->AddLink(GURL(kTestUrl), kTestTitle16));
+  EXPECT_EQ(20u, custom_links_->GetLinks().size());
+}
+
+// Existing tests check the default 8-link mobile cap. This dedicated test
+// verifies the 10-link limit injected via Options on WebUI NTP (AL) builds.
+TEST_F(CustomLinksManagerImplTest, AddLinkUpToConfiguredMaxLinks) {
+  custom_links_ = std::make_unique<CustomLinksManagerImpl>(
+      CustomLinksManagerImpl::Options{.prefs = &prefs_,
+                                      .history_service = history_service_.get(),
+                                      .max_links = 10});
+
+  ASSERT_TRUE(custom_links_->Initialize(FillTestTiles(kTestCase1)));
+  EXPECT_EQ(10u, custom_links_->GetMaxLinks());
+
+  size_t current_size = custom_links_->GetLinks().size();
+  for (size_t i = current_size; i < 10; ++i) {
+    std::string url = "http://test.com/" + base::NumberToString(i);
+    EXPECT_TRUE(custom_links_->AddLink(GURL(url), u"Test"));
+  }
+
+  // Reached 10 links limit. Adding the 11th link should fail.
+  EXPECT_FALSE(custom_links_->AddLink(GURL(kTestUrl), kTestTitle16));
+  EXPECT_EQ(10u, custom_links_->GetLinks().size());
+}
+
+TEST_F(CustomLinksManagerImplTest,
+       ShouldNotTruncateOverflowLinksWhenExperimentDisabled) {
+  // Fallback limit is 10 links.
+  // Directly fill the preference store with 15 links as if the user came from
+  // the experiment.
+  base::ListValue links_list;
+  for (int i = 0; i < 15; ++i) {
+    std::string url = "http://foo" + base::NumberToString(i) + ".com/";
+    std::string title = "Foo" + base::NumberToString(i);
+
+    base::DictValue link;
+    link.Set("url", url);
+    link.Set("title", title);
+    link.Set("isMostVisited", false);
+    links_list.Append(std::move(link));
+  }
+
+  prefs_.SetUserPref(prefs::kCustomLinksInitialized, base::Value(true));
+  prefs_.SetUserPref(prefs::kCustomLinksList,
+                     base::Value(std::move(links_list)));
+
+  // Recreate CustomLinksManagerImpl without experiment enabled.
+  custom_links_ =
+      std::make_unique<CustomLinksManagerImpl>(CustomLinksManagerImpl::Options{
+          .prefs = &prefs_, .history_service = history_service_.get()});
+
+  // It should NOT truncate the links to 10, and instead preserve all 15!
+  EXPECT_EQ(15u, custom_links_->GetLinks().size());
 }
 
 TEST_F(CustomLinksManagerImplTest, AddDuplicateLink) {
@@ -333,7 +441,8 @@ TEST_F(CustomLinksManagerImplTest, MigratedDefaultAppDeletedSingle) {
   ASSERT_TRUE(custom_links_->Initialize(initial_tiles));
   // Create new instance of CustomLinksManagerImpl to trigger the logic.
   std::unique_ptr<CustomLinksManagerImpl> custom_links_test_ =
-      std::make_unique<CustomLinksManagerImpl>(&prefs_, history_service_.get());
+      std::make_unique<CustomLinksManagerImpl>(CustomLinksManagerImpl::Options{
+          .prefs = &prefs_, .history_service = history_service_.get()});
   // Should be empty as NTP Default App is Removed.
   ASSERT_TRUE(custom_links_test_->GetLinks().empty());
 }
@@ -346,7 +455,8 @@ TEST_F(CustomLinksManagerImplTest, DeletedMigratedDefaultAppMultiLink) {
   ASSERT_TRUE(custom_links_->Initialize(initial_tiles));
   // Create new instance of CustomLinksManagerImpl to trigger the logic.
   std::unique_ptr<CustomLinksManagerImpl> custom_links_test_ =
-      std::make_unique<CustomLinksManagerImpl>(&prefs_, history_service_.get());
+      std::make_unique<CustomLinksManagerImpl>(CustomLinksManagerImpl::Options{
+          .prefs = &prefs_, .history_service = history_service_.get()});
   // Verify that Gmail does not exist in the custom links.
   ASSERT_EQ(std::vector<Link>(
                 {Link{GURL(kTestCase2[0].url), kTestCase2[0].title, true},
@@ -526,7 +636,8 @@ TEST_F(CustomLinksManagerImplTest, ShouldDeleteOnHistoryDeletionAfterShutdown) {
   // Simulate shutdown by recreating CustomLinksManagerImpl.
   custom_links_.reset();
   custom_links_ =
-      std::make_unique<CustomLinksManagerImpl>(&prefs_, history_service_.get());
+      std::make_unique<CustomLinksManagerImpl>(CustomLinksManagerImpl::Options{
+          .prefs = &prefs_, .history_service = history_service_.get()});
 
   // Set up Most Visited callback.
   base::MockCallback<base::RepeatingClosure> callback;
@@ -732,7 +843,7 @@ TEST_F(CustomLinksManagerImplTest, UninitializeListAfterRemoteChange) {
   // Modify the preference. This should notify and uninitialize custom links.
   EXPECT_CALL(callback, Run()).Times(2);
   prefs_.SetUserPref(prefs::kCustomLinksInitialized, base::Value(false));
-  prefs_.SetUserPref(prefs::kCustomLinksList, base::Value(base::Value::List()));
+  prefs_.SetUserPref(prefs::kCustomLinksList, base::Value(base::ListValue()));
   EXPECT_FALSE(custom_links_->IsInitialized());
   EXPECT_EQ(std::vector<Link>(), custom_links_->GetLinks());
 }
@@ -751,12 +862,41 @@ TEST_F(CustomLinksManagerImplTest, ClearThenUninitializeListAfterRemoteChange) {
   // the initialized preference. This should notify and uninitialize custom
   // links.
   EXPECT_CALL(callback, Run()).Times(2);
-  prefs_.SetUserPref(prefs::kCustomLinksList, base::Value(base::Value::List()));
+  prefs_.SetUserPref(prefs::kCustomLinksList, base::Value(base::ListValue()));
   EXPECT_TRUE(custom_links_->IsInitialized());
   EXPECT_EQ(std::vector<Link>(), custom_links_->GetLinks());
   prefs_.SetUserPref(prefs::kCustomLinksInitialized, base::Value(false));
   EXPECT_FALSE(custom_links_->IsInitialized());
   EXPECT_EQ(std::vector<Link>(), custom_links_->GetLinks());
+}
+
+TEST_F(CustomLinksManagerImplTest, CustomMaxLinksLimit) {
+  // Instantiate with a custom limit of 3.
+  auto custom_links_limit_3 = std::make_unique<CustomLinksManagerImpl>(
+      CustomLinksManagerImpl::Options{.prefs = &prefs_,
+                                      .history_service = history_service_.get(),
+                                      .max_links = 3});
+
+  ASSERT_TRUE(
+      custom_links_limit_3->Initialize(FillTestTiles(kTestCase1)));  // 1 link
+  EXPECT_EQ(3u, custom_links_limit_3->GetMaxLinks());
+
+  // Add 2nd link.
+  EXPECT_TRUE(custom_links_limit_3->AddLink(GURL("http://foo2.com/"), u"Foo2"));
+  // Add 3rd link.
+  EXPECT_TRUE(custom_links_limit_3->AddLink(GURL("http://foo3.com/"), u"Foo3"));
+
+  // Reached limit of 3. Adding a 4th link should fail.
+  EXPECT_FALSE(
+      custom_links_limit_3->AddLink(GURL("http://foo4.com/"), u"Foo4"));
+
+  std::vector<CustomLinksManager::Link> expected;
+  for (size_t i = 0; i < kTestCase3.size(); ++i) {
+    expected.emplace_back(GURL(kTestCase3[i].url), kTestCase3[i].title,
+                          /*is_most_visited=*/i == 0);
+  }
+  EXPECT_THAT(custom_links_limit_3->GetLinks(),
+              testing::ElementsAreArray(expected));
 }
 
 }  // namespace ntp_tiles

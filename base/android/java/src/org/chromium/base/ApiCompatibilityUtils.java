@@ -19,13 +19,14 @@ import android.graphics.drawable.Drawable;
 import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.StrictMode;
-import android.os.UserManager;
 import android.provider.MediaStore;
 import android.view.Display;
 import android.view.View;
 
-import androidx.annotation.NonNull;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -40,6 +41,7 @@ import java.util.List;
  * Do not inline because we use many new APIs, and if they are inlined, they could cause dex
  * validation errors on low Android versions.
  */
+@NullMarked
 public class ApiCompatibilityUtils {
     private static final String TAG = "ApiCompatUtil";
 
@@ -72,23 +74,17 @@ public class ApiCompatibilityUtils {
             // For Android Oreo+, Resources.getDrawable(id, null) delegates to
             // Resources.getDrawableForDensity(id, 0, null), but before that the two functions are
             // independent. This check can be removed after Oreo becomes the minimum supported API.
+            Drawable ret;
             if (density == 0) {
-                return res.getDrawable(id, null);
+                ret = res.getDrawable(id, null);
+            } else {
+                ret = res.getDrawableForDensity(id, density, null);
             }
-            return res.getDrawableForDensity(id, density, null);
+            assert ret != null : "Drawable " + id;
+            return ret;
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
-    }
-
-    /**
-     * @return Whether the device is running in demo mode.
-     */
-    public static boolean isDemoUser() {
-        UserManager userManager =
-                (UserManager)
-                        ContextUtils.getApplicationContext().getSystemService(Context.USER_SERVICE);
-        return userManager.isDemoUser();
     }
 
     /**
@@ -114,7 +110,6 @@ public class ApiCompatibilityUtils {
      * @return A list of display ids. Empty if there is none or version is less than Q, or
      *     windowAndroid does not contain an activity.
      */
-    @NonNull
     public static List<Integer> getTargetableDisplayIds(Activity activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             List<Integer> displayList = new ArrayList<>();
@@ -140,17 +135,23 @@ public class ApiCompatibilityUtils {
     }
 
     /**
-     * Sets the mode {@link ActivityOptions#MODE_BACKGROUND_ACTIVITY_START_ALLOWED} to the given
-     * {@link ActivityOptions}. The options can be used to send {@link PendingIntent} passed to
-     * Chrome from a backgrounded app.
+     * Sets the mode {@link ActivityOptions#MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS} to the
+     * given {@link ActivityOptions}. The options can be used to send {@link PendingIntent} passed
+     * to Chrome from a backgrounded app.
      *
      * @param options {@ActivityOptions} to set the required mode to.
      */
-    public static void setActivityOptionsBackgroundActivityStartMode(
-            @NonNull ActivityOptions options) {
+    public static void setActivityOptionsBackgroundActivityStartAllowAlways(
+            ActivityOptions options) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return;
-        options.setPendingIntentBackgroundActivityStartMode(
-                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            options.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+        } else {
+            options.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS);
+        }
     }
 
     /**
@@ -160,7 +161,7 @@ public class ApiCompatibilityUtils {
      * @param options {@ActivityOptions} to set the required mode to.
      */
     public static void setCreatorActivityOptionsBackgroundActivityStartMode(
-            @NonNull ActivityOptions options) {
+            ActivityOptions options) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return;
         options.setPendingIntentCreatorBackgroundActivityStartMode(
                 ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
@@ -218,5 +219,51 @@ public class ApiCompatibilityUtils {
             return ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr, uri));
         }
         return MediaStore.Images.Media.getBitmap(cr, uri);
+    }
+
+    /**
+     * Calls {@link android.app.ActivityManager#moveTaskToFront(int, int)} and catches {@link
+     * NullPointerException}s. See crbug.com/471434499 for more context.
+     *
+     * @param context Context to get an ActivityManager instance from.
+     * @param taskId Task ID passed to a {@link android.app.ActivityManager#moveTaskToFront(int,
+     *     int)} method call.
+     * @param flags Flags passed to a {@link android.app.ActivityManager#moveTaskToFront(int, int)}
+     *     method call.
+     */
+    public static void moveTaskToFront(Context context, int taskId, int flags) {
+        moveTaskToFront(context, taskId, flags, null);
+    }
+
+    /**
+     * Calls {@link android.app.ActivityManager#moveTaskToFront(int, int, android.os.Bundle)} and
+     * catches {@link NullPointerException}s. See crbug.com/471434499 for more context.
+     *
+     * @param context Context to get an ActivityManager instance from.
+     * @param taskId Task ID passed to a {@link android.app.ActivityManager#moveTaskToFront(int,
+     *     int, android.os.Bundle)} method call.
+     * @param flags Flags passed to a {@link android.app.ActivityManager#moveTaskToFront(int, int,
+     *     android.os.Bundle)} method call.
+     * @param bOptions ActivityOptions Bundle passed to a {@link
+     *     android.app.ActivityManager#moveTaskToFront(int, int, android.os.Bundle)} method call.
+     */
+    @SuppressWarnings("NoMoveTaskToFront")
+    public static void moveTaskToFront(
+            Context context, int taskId, int flags, @Nullable Bundle bOptions) {
+        final ActivityManager am =
+                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (am == null) {
+            Log.w(TAG, "Context#getSystemService returned null ActivityManager");
+            return;
+        }
+        try {
+            if (bOptions == null) {
+                am.moveTaskToFront(taskId, flags);
+            } else {
+                am.moveTaskToFront(taskId, flags, bOptions);
+            }
+        } catch (NullPointerException e) {
+            Log.w(TAG, "Caught expected NPE from Android API, see crbug.com/471434499", e);
+        }
     }
 }
